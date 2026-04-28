@@ -146,7 +146,7 @@ function getCurrentLocation() {
       () => resolve(null),
       {
         enableHighAccuracy: true,
-        timeout: 10000,
+        timeout: 3000,
         maximumAge: 0,
       }
     );
@@ -187,6 +187,14 @@ export default function EmployeeClockApp() {
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authUser, setAuthUser] = useState(null);
+  const [authRole, setAuthRole] = useState(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
 
   const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) || employees[0];
   const selectedProject = adminProjects.find((project) => project.id === projectId) || adminProjects[0];
@@ -326,10 +334,117 @@ export default function EmployeeClockApp() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+const loadSession = async () => {
+  try {
+    console.log("Checking session...");
+
+    const { data, error } = await supabase.auth.getSession();
+
+    if (error) {
+      console.log("Session error:", error);
+    }
+
+    const user = data?.session?.user || null;
+
+    console.log("User:", user);
+
+    setAuthUser(user);
+
+    if (user) {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) {
+        console.log("Profile error:", profileError);
+      }
+
+      setAuthRole(profile?.role || "employee");
+    }
+
+  } catch (err) {
+    console.log("CRITICAL AUTH ERROR:", err);
+  } finally {
+    console.log("Auth finished");
+    setAuthLoading(false); // 🔥 ALWAYS RUN
+  }
+};
+    loadSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const user = session?.user || null;
+      setAuthUser(user);
+
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+        setAuthRole(profile?.role || "employee");
+      } else {
+        setAuthRole(null);
+        setCurrentShift(null);
+      }
+
+      setAuthLoading(false);
+    });
+
     return () => {
-      if (watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(watchId);
+      isMounted = false;
+      listener?.subscription?.unsubscribe();
     };
-  }, [watchId]);
+  }, []);
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setLoginLoading(true);
+    setLoginError("");
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail.trim(),
+      password: loginPassword,
+    });
+
+    if (error) {
+      setLoginError(error.message);
+      setLoginLoading(false);
+      return;
+    }
+
+    const user = data?.user || null;
+    setAuthUser(user);
+
+    if (user) {
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (profileError) {
+        setLoginError(profileError.message);
+        setLoginLoading(false);
+        return;
+      }
+
+      setAuthRole(profile?.role || "employee");
+    }
+
+    setLoginLoading(false);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setAuthUser(null);
+    setAuthRole(null);
+    setCurrentShift(null);
+    setIsMenuOpen(false);
+  };
 
   const liveSeconds = useMemo(() => {
     if (!visibleCurrentShift) return 0;
@@ -401,58 +516,66 @@ export default function EmployeeClockApp() {
     setWatchId(id);
   };
 
-  const handleClockIn = async () => {
-    setLocationStatus("Getting clock-in location...");
-    const clockInLocation = await getCurrentLocation();
-    const clockInTime = new Date().toISOString();
+const handleClockIn = async () => {
+  setLocationStatus("Clocking in...");
 
-    const newShift = {
-      employeeId: selectedEmployee.id,
-      employee: selectedEmployee.name,
-      hourlyRate: selectedEmployee.hourlyRate,
-      project: selectedProject.name,
-      projectId: selectedProject.id,
-      costCenter,
-      date: clockInTime,
-      clockIn: clockInTime,
-      clockInLocation,
-      breakStart: null,
-      breakEnd: null,
-      status: "Active",
-      photosTaken: 0,
-      lastPhotoAt: null,
-      projectFolder: getProjectFolderName(selectedProject.name),
-      liveLocation: clockInLocation,
-      locationTrail: clockInLocation ? [clockInLocation] : [],
-    };
+  const clockInLocation = null;
+  const clockInTime = new Date().toISOString();
 
-    const { data, error } = await supabase
-      .from("timesheets")
-      .insert([
-        {
-          employee_name: selectedEmployee.name,
-          project_name: selectedProject.name,
-          hourly_rate: selectedEmployee.hourlyRate,
-          cost_centre: costCenter,
-          clock_in: clockInTime,
-          status: "Active",
-          clock_in_latitude: clockInLocation?.latitude || null,
-          clock_in_longitude: clockInLocation?.longitude || null,
-        },
-      ])
-      .select();
-
-    if (error) {
-      console.log("Supabase clock-in error:", error);
-      alert("Clock-in was not saved to database. Check console.");
-      return;
-    }
-
-    setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
-    setLocationStatus(clockInLocation ? "Clock-in saved. Live GPS started." : "Clock-in saved. Location not available.");
-    startLiveLocationTracking();
+  const newShift = {
+    employeeId: selectedEmployee.id,
+    employee: selectedEmployee.name,
+    hourlyRate: selectedEmployee.hourlyRate,
+    project: selectedProject.name,
+    projectId: selectedProject.id,
+    costCenter,
+    date: clockInTime,
+    clockIn: clockInTime,
+    clockInLocation,
+    breakStart: null,
+    breakEnd: null,
+    status: "Active",
+    photosTaken: 0,
+    lastPhotoAt: null,
+    projectFolder: getProjectFolderName(selectedProject.name),
+    liveLocation: null,
+    locationTrail: [],
   };
 
+  setCurrentShift(newShift);
+  setLocationStatus("Clock-in saved locally.");
+
+  if (!authUser) {
+    alert("User not logged in");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("timesheets")
+    .insert([
+      {
+        user_id: authUser.id,
+        employee_name: selectedEmployee.name,
+        project_name: selectedProject.name,
+        hourly_rate: selectedEmployee.hourlyRate,
+        cost_centre: costCenter,
+        clock_in: clockInTime,
+        status: "Active",
+        clock_in_latitude: null,
+        clock_in_longitude: null,
+      },
+    ])
+    .select();
+
+  if (error) {
+    console.log("Supabase clock-in error:", error);
+    alert("Clock-in saved locally, but database save failed.");
+    return;
+  }
+
+  setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
+  setLocationStatus("Clock-in saved.");
+};
   const handleChangeTask = () => {
     if (!visibleCurrentShift) return;
     setIsChangingTask(true);
@@ -480,13 +603,34 @@ export default function EmployeeClockApp() {
     if (!visibleCurrentShift.breakEnd) setCurrentShift({ ...visibleCurrentShift, breakEnd: new Date().toISOString() });
   };
 
-  const handlePhotoCapture = (event) => {
+  const handlePhotoCapture = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !visibleCurrentShift) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
       const folderName = getProjectFolderName(visibleCurrentShift.project);
+      const fileExt = file.name.split(".").pop() || "jpg";
+      const fileName = `${folderName}/${Date.now()}.${fileExt}`;
+
+      setPhotoStatus("Uploading photo...");
+
+      const { error } = await supabase.storage
+        .from("project-photos")
+        .upload(fileName, file, {
+          cacheControl: "3600",
+          upsert: false,
+        });
+
+      if (error) {
+        console.log("Photo upload error:", error);
+        setPhotoStatus("Photo upload failed");
+        return;
+      }
+
+      const { data } = supabase.storage
+        .from("project-photos")
+        .getPublicUrl(fileName);
+
       const photo = {
         id: Date.now(),
         project: visibleCurrentShift.project,
@@ -496,17 +640,33 @@ export default function EmployeeClockApp() {
         employeeId: visibleCurrentShift.employeeId,
         capturedAt: new Date().toISOString(),
         location: visibleCurrentShift.liveLocation || visibleCurrentShift.clockInLocation || null,
-        dataUrl: reader.result,
+        imageUrl: data.publicUrl,
         type: "photo",
       };
 
-      setProjectPhotos((previous) => ({ ...previous, [folderName]: [photo, ...(previous[folderName] || [])] }));
+      setProjectPhotos((previous) => ({
+        ...previous,
+        [folderName]: [photo, ...(previous[folderName] || [])],
+      }));
+
       setPhotoNotificationCount((count) => count + 1);
-      setCurrentShift((previousShift) => previousShift ? { ...previousShift, photosTaken: (previousShift.photosTaken || 0) + 1, lastPhotoAt: photo.capturedAt } : previousShift);
-      setPhotoStatus("Photo saved to project folder");
+
+      setCurrentShift((previousShift) =>
+        previousShift
+          ? {
+              ...previousShift,
+              photosTaken: (previousShift.photosTaken || 0) + 1,
+              lastPhotoAt: photo.capturedAt,
+            }
+          : previousShift
+      );
+
+      setPhotoStatus("Photo uploaded");
       event.target.value = "";
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.log("Photo error:", err);
+      setPhotoStatus("Photo failed");
+    }
   };
 
   const handleReceiptCapture = (event) => {
@@ -548,8 +708,8 @@ export default function EmployeeClockApp() {
     if (!visibleCurrentShift) return;
 
     if (!visibleCurrentShift.photosTaken || visibleCurrentShift.photosTaken < 1) {
-      const shouldContinue = window.confirm("No project photos were taken today. Please take final pictures before clocking out. Do you still want to clock out without photos?");
-      if (!shouldContinue) return;
+      alert("Please take at least one final project picture before clocking out.");
+      return;
     }
 
     if (watchId !== null && navigator.geolocation) {
@@ -697,6 +857,78 @@ export default function EmployeeClockApp() {
     </div>
   );
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
+        <div className="text-center">
+          <div className="text-4xl mb-3">⏱️</div>
+          <p className="text-sm text-slate-300">Loading Clock App...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+          <div className="bg-white border-b p-5">
+            <div className="flex items-center gap-3">
+              <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
+                <p className="text-sm text-slate-600">Ottawa Renovation Pro LTD</p>
+              </div>
+            </div>
+          </div>
+
+          <form onSubmit={handleLogin} className="p-5 space-y-4">
+            <div>
+              <h2 className="text-xl font-bold">Login</h2>
+              <p className="text-sm text-slate-500 mt-1">Enter your employee email and password.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email</label>
+              <input
+                type="email"
+                className="w-full rounded-2xl border bg-white p-3 text-sm"
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+                placeholder="employee@email.com"
+                autoComplete="email"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Password</label>
+              <input
+                type="password"
+                className="w-full rounded-2xl border bg-white p-3 text-sm"
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                placeholder="Password"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+
+            {loginError && (
+              <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+                {loginError}
+              </div>
+            )}
+
+            <Button type="submit" className="w-full rounded-2xl h-14 text-base font-bold" disabled={loginLoading}>
+              {loginLoading ? "Logging in..." : "Login"}
+            </Button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-neutral-950 flex justify-center text-slate-900">
       <div className="w-full max-w-sm h-screen bg-slate-50 shadow-2xl relative overflow-hidden flex flex-col">
@@ -708,6 +940,7 @@ export default function EmployeeClockApp() {
                 <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
                 <p className="text-sm text-slate-600 mt-1">{formatDate(new Date())}</p>
                 <p className="text-xs text-slate-500 mt-1">Logged in as {selectedEmployee.name} • {selectedEmployee.role}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Account: {authUser.email} • {authRole || "employee"}</p>
               </div>
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
             </div>
@@ -777,11 +1010,8 @@ export default function EmployeeClockApp() {
                   <p className="text-sm text-slate-700">{visibleCurrentShift.employee}</p>
                   <p className="text-xs text-slate-600">{visibleCurrentShift.project} • {visibleCurrentShift.costCenter}</p>
                   <p className="text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
-                  <p className="text-xs text-slate-500">Clock-in GPS: {formatLocation(visibleCurrentShift.clockInLocation)}</p>
-                  <p className="text-xs text-slate-500">Live GPS: {formatLocation(visibleCurrentShift.liveLocation)}</p>
                   <p className="text-xs text-slate-500">Project Folder: {visibleCurrentShift.projectFolder}</p>
                   <p className="text-xs text-slate-500">Photos Today: {visibleCurrentShift.photosTaken || 0}</p>
-                  {visibleCurrentShift.liveLocation && <button className="mt-1 text-xs underline text-blue-700" onClick={() => openMap(visibleCurrentShift.liveLocation)}>Open live location in map</button>}
                 </div>
 
                 <div className="text-center py-1">
@@ -806,14 +1036,16 @@ export default function EmployeeClockApp() {
                   </div>
                 ) : (
                   <div className="space-y-2">
-                    <label className="block w-full rounded-2xl h-12 bg-slate-900 text-white text-center leading-[3rem] font-semibold cursor-pointer">
-                      📷 Take Project Photo
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCapture} />
-                    </label>
-                    <label className="block w-full rounded-2xl h-12 bg-green-700 text-white text-center leading-[3rem] font-semibold cursor-pointer">
-                      🧾 Capture Receipt
-                      <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
-                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block w-full rounded-2xl h-10 bg-slate-900 text-white text-center leading-10 text-sm font-semibold cursor-pointer">
+                        📷 Photo
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCapture} />
+                      </label>
+                      <label className="block w-full rounded-2xl h-10 bg-green-700 text-white text-center leading-10 text-sm font-semibold cursor-pointer">
+                        🧾 Receipt
+                        <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
+                      </label>
+                    </div>
                     {photoStatus && <p className="text-xs text-slate-500 text-center">{photoStatus}</p>}
                     <div className="grid grid-cols-2 gap-3">
                       <Button className="w-full rounded-2xl h-12" onClick={handleChangeTask}>🔄 Change Task</Button>
@@ -882,7 +1114,7 @@ export default function EmployeeClockApp() {
                       <div className="grid grid-cols-2 gap-2">
                         {(projectPhotos[folder] || []).map((photo) => (
                           <div key={photo.id} className="rounded-xl overflow-hidden border bg-slate-50">
-                            <img src={photo.dataUrl} alt="Project" className="w-full h-28 object-cover" />
+                            <img src={photo.imageUrl || photo.dataUrl} alt="Project" className="w-full h-28 object-cover" />
                             <div className="p-2 text-[10px] text-slate-600">
                               <p className="font-semibold">{photo.employee}</p>
                               <p>{photo.costCenter}</p>
@@ -908,14 +1140,19 @@ export default function EmployeeClockApp() {
                   {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
                 <div className="rounded-2xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Receipt Total</p><p className="text-2xl font-bold">{formatMoney(receiptTotal)}</p></div>
-                {receiptFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No receipts captured yet.</p>}
+                {receiptFolders.length === 0 && (
+                  <p className="text-sm text-slate-500 text-center py-8">No receipts captured yet.</p>
+                )}
                 <div className="space-y-4">
                   {visibleReceiptFolders.map((folder) => {
                     const folderReceipts = projectReceipts[folder] || [];
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
                       <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
-                        <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{folderReceipts.length} receipts</p></div><p className="font-bold">{formatMoney(folderTotal)}</p></div>
+                        <div className="flex items-center justify-between gap-3">
+                          <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{folderReceipts.length} receipts</p></div>
+                          <p className="font-bold">{formatMoney(folderTotal)}</p>
+                        </div>
                         <div className="space-y-3">
                           {folderReceipts.map((receipt) => (
                             <div key={receipt.id} className="rounded-xl border bg-slate-50 overflow-hidden">
@@ -937,61 +1174,20 @@ export default function EmployeeClockApp() {
               </CardContent>
             </Card>
           )}
-
-          {activeTab === "quotations" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm"><CardContent className="p-5 space-y-3"><h2 className="font-bold text-lg">Quotations</h2><p className="text-sm text-slate-500">Quotation access will be connected later for supervisors/admin only.</p></CardContent></Card>
-          )}
-
-          {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5 space-y-4">
-                <div><h2 className="font-bold text-lg">Admin Reports</h2><p className="text-xs text-slate-500">Filter by time range</p></div>
-                {currentShift && (
-                  <div className="rounded-2xl border bg-blue-50 p-4">
-                    <div className="flex justify-between gap-3">
-                      <div><p className="font-semibold">Live Employee Location</p><p className="text-xs text-slate-600">{currentShift.employee}</p><p className="text-xs text-slate-500">{currentShift.project} • {currentShift.costCenter}</p><p className="text-xs text-slate-500">GPS: {formatLocation(currentShift.liveLocation)}</p></div>
-                      <Button className="rounded-xl h-10 text-xs" onClick={() => openMap(currentShift.liveLocation)}>Map</Button>
-                    </div>
-                  </div>
-                )}
-                <select className="w-full rounded-2xl border p-3 text-sm" value={reportRange} onChange={(e) => setReportRange(e.target.value)}>
-                  <option value="today">Today</option><option value="weekly">Last 7 Days</option><option value="monthly">This Month</option><option value="yearly">This Year</option><option value="custom">Custom</option>
-                </select>
-                <select className="w-full rounded-2xl border p-3 text-sm" value={reportType} onChange={(e) => setReportType(e.target.value)}>
-                  <option value="employee">Employee Report</option><option value="project">Project Wise Report</option>
-                </select>
-                {reportType === "employee" && (
-                  <select className="w-full rounded-2xl border p-3 text-sm" value={reportEmployeeId} onChange={(e) => setReportEmployeeId(e.target.value)}>
-                    <option value="all">All Employees</option>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-                  </select>
-                )}
-                {reportType === "project" && (
-                  <select className="w-full rounded-2xl border p-3 text-sm" value={reportProjectId} onChange={(e) => setReportProjectId(e.target.value)}>
-                    <option value="all">All Projects</option>{adminProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                  </select>
-                )}
-                {reportRange === "custom" && <div className="grid grid-cols-2 gap-2"><input type="date" className="border rounded-xl p-2" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} /><input type="date" className="border rounded-xl p-2" value={customTo} onChange={(e) => setCustomTo(e.target.value)} /></div>}
-                <div className="grid grid-cols-2 gap-3"><div className="rounded-2xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Total Hours</p><p className="text-xl font-bold">{formatDuration(reportTotalMinutes)}</p></div><div className="rounded-2xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Total Cost</p><p className="text-xl font-bold">{formatMoney(reportTotalCost)}</p></div></div>
-                <div className="rounded-2xl border bg-white overflow-hidden">
-                  {reportType === "employee" ? (
-                    <div><div className="grid grid-cols-4 gap-1 bg-slate-100 p-2 text-[11px] font-bold text-slate-600"><div>Date</div><div>Project</div><div>Cost Center</div><div>Cost</div></div>{employeeReportRows.map((row) => <div key={row.id} className="grid grid-cols-4 gap-1 border-t p-2 text-[11px]"><div className="font-medium"><div>{row.date.day}</div><div className="text-[10px] text-slate-500">{row.date.fullDate}</div></div><div>{row.project}</div><div>{row.costCenter}</div><div className="font-semibold">{formatMoney(row.cost)}</div></div>)}</div>
-                  ) : (
-                    <div><div className="grid grid-cols-4 gap-1 bg-slate-100 p-2 text-[11px] font-bold text-slate-600"><div>Date</div><div>Cost Center</div><div>Hours</div><div>Cost</div></div>{projectReportRows.map((row) => <div key={row.key} className="grid grid-cols-4 gap-1 border-t p-2 text-[11px]"><div className="font-medium"><div>{row.date.day}</div><div className="text-[10px] text-slate-500">{row.date.fullDate}</div></div><div>{row.costCenter}</div><div>{formatDuration(row.minutes)}</div><div className="font-semibold">{formatMoney(row.cost)}</div></div>)}</div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
         </div>
 
         {isMenuOpen && (
           <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setIsMenuOpen(false)}>
             <div className="h-full w-72 bg-white shadow-2xl p-4 space-y-4" onClick={(event) => event.stopPropagation()}>
-              <div className="flex items-center justify-between"><div><h2 className="font-bold text-lg">Menu</h2><p className="text-xs text-slate-500">{selectedEmployee.name} • {selectedEmployee.role}</p></div><button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button></div>
+              <div className="flex items-center justify-between">
+                <div><h2 className="font-bold text-lg">Menu</h2><p className="text-xs text-slate-500">{selectedEmployee.name} • {selectedEmployee.role}</p></div>
+                <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
+              </div>
               <div className="space-y-2">
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
                 <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
+                <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-semibold" onClick={handleLogout}>🚪 Logout</button>
                 {isAdmin && <><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("quotations")}>📝 Quotations</button><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("reports")}>📊 Reports</button></>}
               </div>
             </div>
