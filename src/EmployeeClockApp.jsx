@@ -1824,8 +1824,8 @@ const handlePhotoCapture = async (event) => {
       return (
         <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
           <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-3 sm:space-y-4 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]">
-              <div className="rounded-3xl bg-white border shadow-sm p-3 sm:p-4">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
+              <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
                 <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
                 <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
               </div>
@@ -2027,29 +2027,29 @@ const handlePhotoCapture = async (event) => {
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-3 sm:space-y-4 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]">
-          <div className="rounded-3xl bg-white border shadow-sm p-3 sm:p-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
+          <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
             <div className="flex items-start justify-between gap-2 sm:gap-3">
-              <button onClick={() => setIsMenuOpen(true)} className="h-11 w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-xl">☰</button>
-              <div className="flex-1">
-                <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
-                <p className="text-sm text-slate-600 mt-1">{formatDate(new Date())}</p>
-                <p className="text-xs text-slate-500 mt-1">Logged in as: {employeeDisplayName || authUser.email}</p>
-                <p className="text-xs text-slate-500 mt-0.5">Company: {userCompany?.name || "—"}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
+              <button onClick={() => setIsMenuOpen(true)} className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">☰</button>
+              <div className="flex-1 min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">Clock App</h1>
+                <p className="text-xs sm:text-sm text-slate-600 mt-0.5">{formatDate(new Date())}</p>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Logged in as: {employeeDisplayName || authUser.email}</p>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Company: {userCompany?.name || "—"}</p>
+                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
               </div>
-              <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
+              <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl shrink-0">⏱️</div>
             </div>
           </div>
 
           {activeTab === "clock" && !isInstalled && (
             <Card className="rounded-3xl border-blue-100 bg-blue-50 shadow-sm">
-              <CardContent className="p-4 space-y-3">
+              <CardContent className="p-3 space-y-2">
                 <div>
-                  <h2 className="font-bold">Install on Phone</h2>
-                  <p className="text-sm text-slate-600">Add this PWA to the home screen and use it like an app.</p>
+                  <h2 className="font-bold text-sm sm:text-base">Install on Phone</h2>
+                  <p className="text-xs text-slate-600 leading-snug">Add this PWA to the home screen and use it like an app.</p>
                 </div>
-                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-12">📲 Install App</Button>
+                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-11 text-sm">📲 Install App</Button>
                 {!deferredPrompt && (
                   <p className="text-xs text-slate-500">
                     iPhone: Open in Safari → Tap Share → Add to Home Screen<br />
@@ -2062,12 +2062,12 @@ const handlePhotoCapture = async (event) => {
 
           {activeTab === "clock" && !visibleCurrentShift && (
             <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-3 sm:p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">👷</div>
-                  <div>
-                    <h2 className="font-bold text-base sm:text-lg">Start Shift</h2>
-                    <p className="text-xs text-slate-500">Choose project and cost centre</p>
+              <CardContent className="p-2.5 sm:p-4 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-sm sm:text-lg leading-tight">Start Shift</h2>
+                    <p className="text-[11px] sm:text-xs text-slate-500 leading-snug">Choose project and cost centre</p>
                   </div>
                 </div>
 
@@ -2086,17 +2086,17 @@ const handlePhotoCapture = async (event) => {
                 )}
 
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
-                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-3 space-y-2.5">
+                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
                     <div>
                       <p className="font-semibold">Add Project</p>
                       <p className="text-xs text-slate-500">Add a project and cost centres (comma-separated).</p>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Project name</label>
+                    <div className="space-y-1">
+                      <label className="text-xs sm:text-sm font-medium">Project name</label>
                       <input
                         type="text"
-                        className="w-full rounded-2xl border bg-white p-3 text-sm"
+                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10"
                         value={newProjectName}
                         onChange={(e) => setNewProjectName(e.target.value)}
                         placeholder="Example: Basement Renovation"
@@ -2104,11 +2104,11 @@ const handlePhotoCapture = async (event) => {
                       />
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">Cost centres</label>
+                    <div className="space-y-1">
+                      <label className="text-xs sm:text-sm font-medium">Cost centres</label>
                       <input
                         type="text"
-                        className="w-full rounded-2xl border bg-white p-3 text-sm"
+                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10"
                         value={newProjectCostCentres}
                         onChange={(e) => setNewProjectCostCentres(e.target.value)}
                         placeholder="Framing, Drywall, Painting"
@@ -2121,27 +2121,27 @@ const handlePhotoCapture = async (event) => {
                       </div>
                     )}
 
-                    <Button type="submit" className="w-full rounded-2xl h-12 text-sm font-bold" disabled={addProjectLoading}>
+                    <Button type="submit" className="w-full rounded-2xl h-11 text-sm font-bold" disabled={addProjectLoading}>
                       {addProjectLoading ? "Adding..." : "Add Project"}
                     </Button>
                   </form>
                 )}
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Project / Job Site</label>
-                  <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
+                <div className="space-y-1">
+                  <label className="text-xs sm:text-sm font-medium">Project / Job Site</label>
+                  <select className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight" value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
                     {effectiveProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Cost Centre</label>
-                  <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={costCenter} onChange={(event) => setCostCenter(event.target.value)}>
+                <div className="space-y-1">
+                  <label className="text-xs sm:text-sm font-medium">Cost Centre</label>
+                  <select className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight" value={costCenter} onChange={(event) => setCostCenter(event.target.value)}>
                     {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((center) => <option key={center} value={center}>{center}</option>)}
                   </select>
                 </div>
 
-                <Button className="w-full rounded-2xl h-14 sm:h-16 text-base sm:text-lg font-bold" onClick={handleClockIn}>✅ Clock In</Button>
+                <Button className="w-full rounded-2xl h-12 sm:h-14 text-sm sm:text-base font-bold" onClick={handleClockIn}>✅ Clock In</Button>
                 {locationStatus && <p className="text-xs text-slate-500 text-center">{locationStatus}</p>}
               </CardContent>
             </Card>
@@ -2149,44 +2149,44 @@ const handlePhotoCapture = async (event) => {
 
           {activeTab === "clock" && visibleCurrentShift && (
             <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50">
-              <CardContent className="p-3 flex flex-col gap-3">
-                <div>
-                  <h2 className="font-bold text-lg">Active Shift</h2>
-                  <p className="text-sm text-slate-700">{visibleCurrentShift.employee}</p>
-                  <p className="text-xs text-slate-600">{visibleCurrentShift.project} • {visibleCurrentShift.costCenter}</p>
-                  <p className="text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
-                  <p className="text-xs text-slate-500">Project Folder: {visibleCurrentShift.projectFolder}</p>
-                  <p className="text-xs text-slate-500">Photos Today: {visibleCurrentShift.photosTaken || 0}</p>
+              <CardContent className="p-2.5 flex flex-col gap-2">
+                <div className="space-y-0.5">
+                  <h2 className="font-bold text-sm sm:text-lg leading-tight">Active Shift</h2>
+                  <p className="text-xs sm:text-sm text-slate-700 leading-snug">{visibleCurrentShift.employee}</p>
+                  <p className="text-[11px] sm:text-xs text-slate-600 leading-snug">{visibleCurrentShift.project} • {visibleCurrentShift.costCenter}</p>
+                  <p className="text-[11px] sm:text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
+                  <p className="text-[11px] sm:text-xs text-slate-500">Folder: {visibleCurrentShift.projectFolder}</p>
+                  <p className="text-[11px] sm:text-xs text-slate-500">Photos: {visibleCurrentShift.photosTaken || 0}</p>
                 </div>
 
-                <div className="text-center py-1">
-                  <p className="text-xs text-slate-500">Live Timer</p>
-                  <p className="text-6xl font-black tabular-nums leading-none mt-1">{formatTimer(liveSeconds)}</p>
-                  <p className="text-xl font-bold mt-1 text-green-700">{formatMoney(liveEarnings)}</p>
-                  <p className="text-[11px] text-slate-500">Money earned</p>
+                <div className="text-center py-0">
+                  <p className="text-[10px] sm:text-xs text-slate-500">Live Timer</p>
+                  <p className="text-5xl sm:text-6xl font-black tabular-nums leading-none mt-0.5">{formatTimer(liveSeconds)}</p>
+                  <p className="text-lg sm:text-xl font-bold mt-0.5 text-green-700">{formatMoney(liveEarnings)}</p>
+                  <p className="text-[10px] sm:text-[11px] text-slate-500">Money earned</p>
                 </div>
 
                 {isChangingTask ? (
-                  <div className="space-y-2">
-                    <select className="w-full rounded-2xl border p-2" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
+                  <div className="space-y-1.5">
+                    <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
                       {effectiveProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
-                    <select className="w-full rounded-2xl border p-2" value={costCenter} onChange={(e) => setCostCenter(e.target.value)}>
+                    <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={costCenter} onChange={(e) => setCostCenter(e.target.value)}>
                       {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button className="h-10 rounded-xl" onClick={applyTaskChange}>Save</Button>
-                      <Button className="h-10 rounded-xl" onClick={() => setIsChangingTask(false)}>Cancel</Button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Button className="h-9 rounded-xl text-sm" onClick={applyTaskChange}>Save</Button>
+                      <Button className="h-9 rounded-xl text-sm" onClick={() => setIsChangingTask(false)}>Cancel</Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block w-full rounded-2xl h-10 bg-slate-900 text-white text-center leading-10 text-sm font-semibold cursor-pointer">
+                  <div className="space-y-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <label className="block w-full rounded-2xl h-9 bg-slate-900 text-white text-center leading-9 text-xs sm:text-sm font-semibold cursor-pointer">
                         📷 Photo
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCapture} />
                       </label>
-                      <label className="block w-full rounded-2xl h-10 bg-green-700 text-white text-center leading-10 text-sm font-semibold cursor-pointer">
+                      <label className="block w-full rounded-2xl h-9 bg-green-700 text-white text-center leading-9 text-xs sm:text-sm font-semibold cursor-pointer">
                         🧾 Receipt
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
                       </label>
@@ -2204,11 +2204,11 @@ const handlePhotoCapture = async (event) => {
 {uploadProgress !== null && (
   <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
 )}
-                    <div className="grid grid-cols-2 gap-3">
-                      <Button className="w-full rounded-2xl h-12" onClick={handleChangeTask}>🔄 Change Task</Button>
-                      <Button className="w-full rounded-2xl h-12 text-base" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <Button className="w-full rounded-2xl h-11 text-sm" onClick={handleChangeTask}>🔄 Change Task</Button>
+                      <Button className="w-full rounded-2xl h-11 text-sm" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
-                    <Button className="w-full rounded-2xl h-12 text-base font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
+                    <Button className="w-full rounded-2xl h-11 text-sm font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
                   </div>
                 )}
               </CardContent>
@@ -2357,11 +2357,11 @@ const handlePhotoCapture = async (event) => {
         )}
 
         <div
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-2 z-50 shadow-lg pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]"
+          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => setActiveTab("clock")} className={`rounded-2xl p-3 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
-            <button onClick={() => setActiveTab("timesheet")} className={`rounded-2xl p-3 text-sm font-semibold ${activeTab === "timesheet" ? "bg-slate-900 text-white" : "text-slate-500"}`}>📄 Timesheet</button>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
+            <button onClick={() => setActiveTab("timesheet")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "timesheet" ? "bg-slate-900 text-white" : "text-slate-500"}`}>📄 Timesheet</button>
           </div>
         </div>
       </div>
