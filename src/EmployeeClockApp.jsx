@@ -577,36 +577,40 @@ async function createCompanyNotifications(supabase, params) {
     return;
   }
   if (!recipients.length) {
-    console.warn("[NOTIFY] no recipients; skip insert");
+    console.warn("[NOTIFY] no recipients; skip");
     return;
   }
 
-  const rows = recipients.map((recipient_user_id) => ({
-    company_id: companyId,
-    recipient_user_id,
-    actor_user_id: actorUserId,
-    type: String(type || ""),
-    title: String(title || ""),
-    message: String(message || ""),
-    read_at: null,
-    project_id: projectId != null && projectId !== "" ? String(projectId) : null,
-    project_name: projectName != null ? String(projectName) : null,
-    cost_centre: costCentre != null ? String(costCentre) : null,
-    related_timesheet_id: relatedTimesheetId != null && relatedTimesheetId !== "" ? relatedTimesheetId : null,
-    related_folder: relatedFolder != null ? String(relatedFolder) : null,
-    item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
-  }));
+  const pRelatedTimesheetId =
+    relatedTimesheetId != null && relatedTimesheetId !== "" ? String(relatedTimesheetId) : null;
+  const pItemCount = itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null;
 
-  console.log("[NOTIFY] insert payload", rows);
-  try {
-    const { data, error } = await supabase.from("notifications").insert(rows).select("id");
-    if (error) {
-      console.error("[NOTIFY] insert error", error);
-      return;
+  for (const recipient_user_id of recipients) {
+    const rpcPayload = {
+      p_company_id: companyId,
+      p_recipient_user_id: recipient_user_id,
+      p_actor_user_id: actorUserId,
+      p_type: String(type || ""),
+      p_title: String(title || ""),
+      p_message: String(message || ""),
+      p_project_id: projectId != null && projectId !== "" ? String(projectId) : null,
+      p_project_name: projectName != null ? String(projectName) : null,
+      p_cost_centre: costCentre != null ? String(costCentre) : null,
+      p_related_timesheet_id: pRelatedTimesheetId,
+      p_related_folder: relatedFolder != null ? String(relatedFolder) : null,
+      p_item_count: pItemCount,
+    };
+    console.log("[NOTIFY] rpc payload", rpcPayload);
+    try {
+      const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
+      if (error) {
+        console.error("[NOTIFY] rpc error", error);
+        continue;
+      }
+      console.log("[NOTIFY] rpc success", data);
+    } catch (e) {
+      console.error("[NOTIFY] rpc exception", e);
     }
-    console.log("[NOTIFY] insert success", data?.length ?? 0, data);
-  } catch (e) {
-    console.error("[NOTIFY] insert exception", e);
   }
 }
 
