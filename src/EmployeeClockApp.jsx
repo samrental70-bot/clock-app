@@ -675,11 +675,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const [inAppNotifications, setInAppNotifications] = useState([]);
-  const [inAppNotifLoading, setInAppNotifLoading] = useState(false);
   const [inAppNotifError, setInAppNotifError] = useState("");
   const [inAppNotifUnread, setInAppNotifUnread] = useState(0);
   const [markingNotifId, setMarkingNotifId] = useState(null);
   const [markingAllNotifs, setMarkingAllNotifs] = useState(false);
+  const [liveToast, setLiveToast] = useState(null);
+  const notifPollBootstrappedRef = useRef(false);
+  const notifLastUnreadIdsRef = useRef(new Set());
 
   const photoNotifyBatchRef = useRef({
     timer: null,
@@ -967,56 +969,75 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return resolveTimesheetEmployeeSecondary(visibleCurrentShift, t);
   }, [visibleCurrentShift, profileFullName, authUser, teamProfileFullNameByUserId]);
 
-  const refreshInAppNotifUnread = useCallback(async () => {
-    if (!isAdmin || !authUser?.id) {
-      setInAppNotifUnread(0);
-      return;
+  const pollInAppNotifications = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id) return;
+    try {
+      const uid = authUser.id;
+      const [listRes, countRes] = await Promise.all([
+        supabase
+          .from("notifications")
+          .select("*")
+          .eq("recipient_user_id", uid)
+          .order("created_at", { ascending: false })
+          .limit(30),
+        supabase
+          .from("notifications")
+          .select("*", { count: "exact", head: true })
+          .eq("recipient_user_id", uid)
+          .is("read_at", null),
+      ]);
+      if (listRes.error) throw listRes.error;
+      const rows = listRes.data || [];
+      setInAppNotifications(rows);
+      if (!countRes.error) setInAppNotifUnread(countRes.count ?? 0);
+      setInAppNotifError("");
+
+      if (isAdmin) {
+        const unreadIds = new Set(
+          rows.filter((n) => n.read_at == null && n.is_read !== true).map((n) => String(n.id))
+        );
+        if (!notifPollBootstrappedRef.current) {
+          notifPollBootstrappedRef.current = true;
+          notifLastUnreadIdsRef.current = unreadIds;
+        } else {
+          for (const id of unreadIds) {
+            if (!notifLastUnreadIdsRef.current.has(id)) {
+              const row = rows.find((r) => String(r.id) === id);
+              if (row) setLiveToast({ id: row.id, title: row.title, message: row.message });
+              break;
+            }
+          }
+          notifLastUnreadIdsRef.current = unreadIds;
+        }
+      }
+    } catch (e) {
+      console.warn("[NOTIFY] poll failed", e);
+      setInAppNotifError(getErrorMessage(e));
     }
-    const { count, error } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("recipient_user_id", authUser.id)
-      .is("read_at", null);
-    if (!error) setInAppNotifUnread(count ?? 0);
-  }, [isAdmin, authUser?.id]);
+  }, [authUser?.id, userCompany?.id, isAdmin]);
 
   useEffect(() => {
-    if (!isAdmin || !authUser?.id) return;
-    void refreshInAppNotifUnread();
-  }, [isAdmin, authUser?.id, refreshInAppNotifUnread]);
+    if (!authUser?.id || !userCompany?.id) {
+      setInAppNotifUnread(0);
+      setInAppNotifications([]);
+      setLiveToast(null);
+      notifPollBootstrappedRef.current = false;
+      notifLastUnreadIdsRef.current = new Set();
+      return;
+    }
+    void pollInAppNotifications();
+    const interval = setInterval(() => void pollInAppNotifications(), 15000);
+    return () => clearInterval(interval);
+  }, [authUser?.id, userCompany?.id, pollInAppNotifications]);
 
   useEffect(() => {
     if (!isAdmin && activeTab === "notifications") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (activeTab !== "notifications" || !isAdmin || !authUser?.id) return;
-    let cancelled = false;
-    setInAppNotifLoading(true);
-    setInAppNotifError("");
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("recipient_user_id", authUser.id)
-          .order("created_at", { ascending: false })
-          .limit(50);
-        if (error) throw error;
-        if (!cancelled) {
-          setInAppNotifications(data || []);
-          await refreshInAppNotifUnread();
-        }
-      } catch (err) {
-        if (!cancelled) setInAppNotifError(getErrorMessage(err));
-      } finally {
-        if (!cancelled) setInAppNotifLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, isAdmin, authUser?.id, refreshInAppNotifUnread]);
+    notifPollBootstrappedRef.current = false;
+    notifLastUnreadIdsRef.current = new Set();
+  }, [authUser?.id, userCompany?.id]);
 
   const schedulePhotoNotificationAfterUpload = useCallback(() => {
     const uid = authUser?.id;
@@ -2563,15 +2584,18 @@ const handlePhotoCapture = async (event) => {
     if (!isAdmin || !authUser?.id || !n?.id) return;
     setMarkingNotifId(String(n.id));
     try {
+      const ts = new Date().toISOString();
       const { error } = await supabase
         .from("notifications")
-        .update({ read_at: new Date().toISOString() })
+        .update({ read_at: ts, is_read: true })
         .eq("id", n.id)
         .eq("recipient_user_id", authUser.id);
       if (error) throw error;
-      const ts = new Date().toISOString();
-      setInAppNotifications((prev) => prev.map((x) => (String(x.id) === String(n.id) ? { ...x, read_at: ts } : x)));
-      await refreshInAppNotifUnread();
+      setInAppNotifications((prev) =>
+        prev.map((x) => (String(x.id) === String(n.id) ? { ...x, read_at: ts, is_read: true } : x))
+      );
+      setLiveToast((t) => (t && String(t.id) === String(n.id) ? null : t));
+      await pollInAppNotifications();
     } catch (err) {
       alert(getErrorMessage(err));
     } finally {
@@ -2583,15 +2607,16 @@ const handlePhotoCapture = async (event) => {
     if (!isAdmin || !authUser?.id) return;
     setMarkingAllNotifs(true);
     try {
+      const ts = new Date().toISOString();
       const { error } = await supabase
         .from("notifications")
-        .update({ read_at: new Date().toISOString() })
+        .update({ read_at: ts, is_read: true })
         .eq("recipient_user_id", authUser.id)
         .is("read_at", null);
       if (error) throw error;
-      const ts = new Date().toISOString();
-      setInAppNotifications((prev) => prev.map((x) => (x.read_at ? x : { ...x, read_at: ts })));
-      await refreshInAppNotifUnread();
+      setInAppNotifications((prev) => prev.map((x) => (x.read_at ? x : { ...x, read_at: ts, is_read: true })));
+      setLiveToast(null);
+      await pollInAppNotifications();
     } catch (err) {
       alert(getErrorMessage(err));
     } finally {
@@ -3695,18 +3720,15 @@ const handlePhotoCapture = async (event) => {
                     {markingAllNotifs ? "…" : "Mark all read"}
                   </Button>
                 </div>
-                {inAppNotifLoading && (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading notifications…</div>
-                )}
                 {inAppNotifError && (
                   <div className="rounded-xl bg-amber-50 border border-amber-100 p-2 text-xs text-amber-900">{inAppNotifError}</div>
                 )}
-                {!inAppNotifLoading && !inAppNotifError && inAppNotifications.length === 0 && (
+                {!inAppNotifError && inAppNotifications.length === 0 && (
                   <p className="text-xs text-slate-500 text-center py-4">No notifications yet.</p>
                 )}
                 <div className="space-y-2">
                   {inAppNotifications.map((n) => {
-                    const unread = !n.read_at;
+                    const unread = n.read_at == null && n.is_read !== true;
                     const ts = n.created_at
                       ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} · ${formatTime(n.created_at, companyTimeZone)}`
                       : "—";
@@ -3937,6 +3959,28 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
         </div>
+
+        {liveToast && isAdmin && (
+          <div
+            role="status"
+            className="pointer-events-auto absolute left-2 right-2 z-[55] rounded-2xl border border-slate-200 bg-white shadow-lg p-3"
+            style={{ bottom: "calc(4.25rem + env(safe-area-inset-bottom, 0px))" }}
+          >
+            <div className="flex justify-between gap-2 items-start">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900 leading-snug">{liveToast.title}</p>
+                <p className="text-xs text-slate-600 mt-0.5 leading-snug break-words">{liveToast.message}</p>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-slate-600 underline px-1"
+                onClick={() => setLiveToast(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         {isMenuOpen && (
           <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setIsMenuOpen(false)}>
