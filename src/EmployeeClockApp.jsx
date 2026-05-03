@@ -158,6 +158,37 @@ function openMap(location) {
   window.open(`https://www.google.com/maps?q=${location.latitude},${location.longitude}`, "_blank");
 }
 
+
+
+function getErrorMessage(error) {
+  if (!error) return "Unknown error";
+
+  if (typeof error === "string") return error;
+
+  if (error.message) return error.message;
+
+  try {
+    return JSON.stringify(error, null, 2);
+  } catch {
+    return String(error);
+  }
+}
+
+function showErrorPopup(title, error) {
+  const message = getErrorMessage(error);
+  console.error(title, error);
+  alert(`${title}\n\n${message}`);
+}
+
+function withTimeout(promise, ms = 10000, message = "Operation timed out") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(message)), ms)
+    ),
+  ]);
+}
+
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(1);
@@ -182,6 +213,7 @@ export default function EmployeeClockApp() {
   const [customTo, setCustomTo] = useState("");
   const [locationStatus, setLocationStatus] = useState("");
   const [photoStatus, setPhotoStatus] = useState("");
+const [uploadProgress, setUploadProgress] = useState(null);
   const [watchId, setWatchId] = useState(null);
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
@@ -603,18 +635,112 @@ const handleClockIn = async () => {
     if (!visibleCurrentShift.breakEnd) setCurrentShift({ ...visibleCurrentShift, breakEnd: new Date().toISOString() });
   };
 
+
+const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+
+    reader.onload = (event) => {
+      img.src = event.target.result;
+    };
+
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(maxWidth / img.width, 1);
+
+      canvas.width = img.width * scale;
+      canvas.height = img.height * scale;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Image compression failed"));
+            return;
+          }
+
+          const compressedFile = new File(
+            [blob],
+            file.name.replace(/\.[^/.]+$/, ".jpg"),
+            { type: "image/jpeg" }
+          );
+
+          resolve(compressedFile);
+        },
+        "image/jpeg",
+        quality
+      );
+    };
+
+    img.onerror = reject;
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
 const handlePhotoCapture = async (event) => {
   const file = event.target.files?.[0];
   if (!file || !visibleCurrentShift || !authUser) return;
 
   const folderName = getProjectFolderName(visibleCurrentShift.project);
 
-  setPhotoStatus("Saving photo...");
+  try {
+    setPhotoStatus("Compressing photo...");
+    setUploadProgress(10);
 
-  const reader = new FileReader();
+    const compressedFile = await compressImage(file, 700, 0.45);
 
-  reader.onload = async () => {
-    const localPhoto = {
+    console.log("Original size:", file.size);
+    console.log("Compressed size:", compressedFile.size);
+
+    setPhotoStatus(`Uploading small photo... ${Math.round(compressedFile.size / 1024)} KB`);
+    setUploadProgress(30);
+
+    const filePath = `${folderName}/${authUser.id}-${Date.now()}.jpg`;
+
+    const uploadPromise = supabase.storage
+      .from("project-photos")
+      .upload(filePath, compressedFile, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: "image/jpeg",
+      });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Cloud upload timed out after 60 seconds")), 60000)
+    );
+
+    let progressTimer = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev === null) return 30;
+        if (prev >= 95) return 95;
+        return prev + 5;
+      });
+    }, 2000);
+
+    const result = await Promise.race([uploadPromise, timeoutPromise]);
+
+    clearInterval(progressTimer);
+
+    if (result.error) {
+      console.log("Cloud upload error:", result.error);
+      showErrorPopup("Cloud upload failed", result.error);
+      setPhotoStatus("Cloud upload failed.");
+      setUploadProgress(null);
+      event.target.value = "";
+      return;
+    }
+
+    const { data } = supabase.storage
+      .from("project-photos")
+      .getPublicUrl(filePath);
+
+    const photoUrl = data?.publicUrl || "";
+
+    const photo = {
       id: Date.now(),
       project: visibleCurrentShift.project,
       folderName,
@@ -623,14 +749,14 @@ const handlePhotoCapture = async (event) => {
       employeeId: visibleCurrentShift.employeeId,
       capturedAt: new Date().toISOString(),
       location: null,
-      dataUrl: reader.result,
-      imageUrl: "",
+      dataUrl: "",
+      imageUrl: photoUrl,
       type: "photo",
     };
 
     setProjectPhotos((previous) => ({
       ...previous,
-      [folderName]: [localPhoto, ...(previous[folderName] || [])],
+      [folderName]: [photo, ...(previous[folderName] || [])],
     }));
 
     setPhotoNotificationCount((count) => count + 1);
@@ -640,53 +766,27 @@ const handlePhotoCapture = async (event) => {
         ? {
             ...previousShift,
             photosTaken: (previousShift.photosTaken || 0) + 1,
-            lastPhotoAt: localPhoto.capturedAt,
+            lastPhotoAt: photo.capturedAt,
           }
         : previousShift
     );
 
-    setPhotoStatus("Photo saved. Uploading to cloud...");
+    setUploadProgress(100);
+    setPhotoStatus("Photo uploaded ✅");
 
-    try {
-      const fileExt = file.name.split(".").pop() || "jpg";
-      const filePath = `${folderName}/${authUser.id}-${Date.now()}.${fileExt}`;
-
-const uploadPromise = supabase.storage
-  .from("project-photos")
-  .upload(filePath, file, {
-    cacheControl: "3600",
-    upsert: true,
-    contentType: file.type,
-  });
-
-const timeoutPromise = new Promise((_, reject) =>
-  setTimeout(() => reject(new Error("Cloud upload timed out")), 8000)
-);
-
-const { error } = await Promise.race([uploadPromise, timeoutPromise]);
-
-      if (error) {
-        console.log("Cloud upload error:", error);
-        setPhotoStatus("Photo saved locally. Cloud upload failed.");
-        return;
-      }
-
-      setPhotoStatus("Photo saved + uploaded ✅");
-    } catch (err) {
-      console.log("Cloud upload failed:", err);
-      setPhotoStatus("Photo saved locally. Cloud upload failed.");
-    }
+    setTimeout(() => {
+      setUploadProgress(null);
+    }, 1500);
 
     event.target.value = "";
-  };
-
-  reader.onerror = () => {
-    setPhotoStatus("Photo failed.");
-  };
-
-  reader.readAsDataURL(file);
+  } catch (err) {
+    console.log("Photo upload failed:", err);
+    showErrorPopup("Photo upload failed", err);
+    setPhotoStatus("Photo upload failed.");
+    setUploadProgress(null);
+    event.target.value = "";
+  }
 };
-
   const handleReceiptCapture = (event) => {
     const file = event.target.files?.[0];
     if (!file || !visibleCurrentShift) return;
@@ -1065,10 +1165,59 @@ const { error } = await Promise.race([uploadPromise, timeoutPromise]);
                       </label>
                     </div>
                     {photoStatus && <p className="text-xs text-slate-500 text-center">{photoStatus}</p>}
+{uploadProgress !== null && (
+  <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+    <div
+      className="bg-green-600 h-3 rounded-full transition-all"
+      style={{ width: `${uploadProgress}%` }}
+    />
+  </div>
+)}
+
+{uploadProgress !== null && (
+  <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
+)}
                     <div className="grid grid-cols-2 gap-3">
                       <Button className="w-full rounded-2xl h-12" onClick={handleChangeTask}>🔄 Change Task</Button>
                       <Button className="w-full rounded-2xl h-12 text-base" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
+<Button
+  className="w-full rounded-2xl h-10 text-sm"
+  onClick={async () => {
+    try {
+      setPhotoStatus("Testing cloud upload...");
+
+      const testFile = new Blob(["hello"], { type: "text/plain" });
+      const filePath = `test/test-${Date.now()}.txt`;
+
+      const result = await withTimeout(
+        supabase.storage
+          .from("project-photos")
+          .upload(filePath, testFile, {
+            cacheControl: "3600",
+            upsert: false,
+            contentType: "text/plain",
+          }),
+        10000,
+        "Supabase test upload timed out after 10 seconds"
+      );
+
+      if (result.error) {
+        showErrorPopup("Test upload failed", result.error);
+        setPhotoStatus("Test upload failed.");
+        return;
+      }
+
+      alert("Test upload worked ✅");
+      setPhotoStatus("Test upload worked ✅");
+    } catch (err) {
+      showErrorPopup("Test upload error", err);
+      setPhotoStatus("Test upload failed.");
+    }
+  }}
+>
+  🧪 Test Cloud Upload
+</Button>
                     <Button className="w-full rounded-2xl h-12 text-base font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
                   </div>
                 )}
