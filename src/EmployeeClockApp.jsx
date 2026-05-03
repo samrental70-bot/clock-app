@@ -101,6 +101,82 @@ function calendarDateKeyInTimeZone(dateOrString, timeZone) {
   }).format(d);
 }
 
+/** Wall clock in `timeZone` as YYYY-MM-DD and HH:mm (24h) for edit inputs. */
+function wallClockPartsInTimeZone(instant, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const d = instant instanceof Date ? instant : parseStoredInstant(instant);
+  if (Number.isNaN(d.getTime())) return { dateStr: "", timeStr: "" };
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = Object.fromEntries(
+    fmt.formatToParts(d).filter((p) => p.type !== "literal").map((p) => [p.type, p.value])
+  );
+  return {
+    dateStr: `${parts.year}-${parts.month}-${parts.day}`,
+    timeStr: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+/** Wall date YYYY-MM-DD + time HH:mm in `timeZone` → UTC ISO string. */
+function wallDateTimeToUtcIso(dateStr, timeStr, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  if (!dateStr || !timeStr) return null;
+  const timeNorm = timeStr.length === 5 ? `${timeStr}:00` : timeStr;
+  const [H, Mi, SeRaw] = timeNorm.split(":").map((v) => Number(v));
+  const Se = Number.isNaN(SeRaw) ? 0 : SeRaw;
+  const [y, mo, d] = dateStr.split("-").map((v) => Number(v));
+  if (!y || !mo || !d || Number.isNaN(H) || Number.isNaN(Mi)) return null;
+
+  let t = Date.UTC(y, mo - 1, d, H, Mi, Se, 0);
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  for (let i = 0; i < 48; i += 1) {
+    const parts = Object.fromEntries(
+      fmt.formatToParts(new Date(t)).filter((p) => p.type !== "literal").map((p) => [p.type, p.value])
+    );
+    const gotY = Number(parts.year);
+    const gotM = Number(parts.month);
+    const gotD = Number(parts.day);
+    const gotH = Number(parts.hour);
+    const gotMin = Number(parts.minute);
+    const gotSec = Number(parts.second || 0);
+    if (gotY === y && gotM === mo && gotD === d && gotH === H && gotMin === Mi && gotSec === Se) {
+      return new Date(t).toISOString();
+    }
+    const want = Date.UTC(y, mo - 1, d, H, Mi, Se, 0);
+    const cur = Date.UTC(gotY, gotM - 1, gotD, gotH, gotMin, gotSec, 0);
+    t += want - cur;
+  }
+  return new Date(t).toISOString();
+}
+
+function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone) {
+  if (!visibleCurrentShift) return false;
+  const liveRowId = visibleCurrentShift.supabaseTimesheetId;
+  const recordRowId = record.supabaseTimesheetId ?? record.id;
+  const matchesLiveShift =
+    liveRowId != null && recordRowId != null && String(liveRowId) === String(recordRowId);
+  const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+  const clockInKey = calendarDateKeyInTimeZone(record.clockIn, companyTimeZone);
+  return Boolean(matchesLiveShift && todayKey === clockInKey && todayKey !== "");
+}
+
 const COMPANY_TIME_ZONE_OPTIONS = [
   "America/Toronto",
   "America/Vancouver",
@@ -296,8 +372,14 @@ export default function EmployeeClockApp() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState(null);
-  const [editClockIn, setEditClockIn] = useState("");
-  const [editClockOut, setEditClockOut] = useState("");
+  const [editClockInDate, setEditClockInDate] = useState("");
+  const [editClockInTime, setEditClockInTime] = useState("");
+  const [editClockOutDate, setEditClockOutDate] = useState("");
+  const [editClockOutTime, setEditClockOutTime] = useState("");
+  const [editProjectId, setEditProjectId] = useState("");
+  const [editCostCenter, setEditCostCenter] = useState("");
+  const [editTimesheetSaving, setEditTimesheetSaving] = useState(false);
+  const [deletingTimesheetId, setDeletingTimesheetId] = useState(null);
   const [isChangingTask, setIsChangingTask] = useState(false);
   const [reportRange, setReportRange] = useState("today");
   const [reportType, setReportType] = useState("employee");
@@ -448,6 +530,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const visibleCurrentShift = currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
     ? currentShift
     : null;
+
+  const canEditTimesheetRecord = (record) => {
+    const st = normalizeStatus(record.status);
+    const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
+    if (isLiveOpen && st === "active" && !record.clockOut) return false;
+    if (isAdmin) return true;
+    const uid = record.userId || record.employeeId;
+    if (String(uid) !== String(authUser?.id)) return false;
+    if (st === "submitted") return true;
+    if (st === "active") return !isLiveOpen || Boolean(record.clockOut);
+    return false;
+  };
 
   const filterRecordsByRange = () => {
     const nowDate = new Date();
@@ -1677,37 +1771,137 @@ const handlePhotoCapture = async (event) => {
     void fetchTimesheetsFromSupabase();
   };
 
+  const costCentresForEditProject = (pid) =>
+    effectiveCostCentresByProjectId[String(pid)] ||
+    effectiveCostCentresByProjectId[Number(pid)] ||
+    [];
+
   const startEditRecord = (record) => {
+    if (!canEditTimesheetRecord(record)) return;
+    const inParts = wallClockPartsInTimeZone(record.clockIn, companyTimeZone);
     setEditingRecordId(record.id);
-    setEditClockIn(new Date(record.clockIn).toTimeString().slice(0, 5));
-    setEditClockOut(record.clockOut ? new Date(record.clockOut).toTimeString().slice(0, 5) : "");
+    setEditClockInDate(inParts.dateStr);
+    setEditClockInTime(inParts.timeStr.slice(0, 5));
+    if (record.clockOut) {
+      const outParts = wallClockPartsInTimeZone(record.clockOut, companyTimeZone);
+      setEditClockOutDate(outParts.dateStr);
+      setEditClockOutTime(outParts.timeStr.slice(0, 5));
+    } else {
+      setEditClockOutDate(inParts.dateStr);
+      setEditClockOutTime("");
+    }
+    const pidStr = record.projectId != null ? String(record.projectId) : "";
+    const matchProj = effectiveProjects.find((p) => String(p.id) === pidStr);
+    const resolvedPid = matchProj ? String(matchProj.id) : String(effectiveProjects[0]?.id ?? "");
+    setEditProjectId(resolvedPid);
+    const centres = costCentresForEditProject(resolvedPid);
+    const cc =
+      record.costCenter && centres.includes(record.costCenter) ? record.costCenter : (centres[0] || record.costCenter || "");
+    setEditCostCenter(cc);
   };
 
-  const saveEditedRecord = (record) => {
-    if (!editClockIn || !editClockOut) return;
-    const baseDate = new Date(record.clockIn).toISOString().slice(0, 10);
-    const newClockIn = new Date(`${baseDate}T${editClockIn}:00`).toISOString();
-    const newClockOut = new Date(`${baseDate}T${editClockOut}:00`).toISOString();
+  const saveEditedRecord = async (record) => {
+    if (!canEditTimesheetRecord(record)) return;
+    const rowId = record.supabaseTimesheetId ?? record.id;
+    if (rowId == null) {
+      alert("Missing timesheet id. Cannot save.");
+      return;
+    }
+    if (!editClockInDate || !editClockInTime) {
+      alert("Clock in date and time are required.");
+      return;
+    }
+    if (!editClockOutDate || !editClockOutTime) {
+      alert("Clock out date and time are required.");
+      return;
+    }
+    const clockInIso = wallDateTimeToUtcIso(editClockInDate, editClockInTime, companyTimeZone);
+    const clockOutIso = wallDateTimeToUtcIso(editClockOutDate, editClockOutTime, companyTimeZone);
+    if (!clockInIso || !clockOutIso) {
+      alert("Invalid date or time.");
+      return;
+    }
+    if (new Date(clockOutIso).getTime() <= new Date(clockInIso).getTime()) {
+      alert("Clock out must be after clock in.");
+      return;
+    }
+    const proj = effectiveProjects.find((p) => String(p.id) === String(editProjectId));
+    if (!proj) {
+      alert("Please select a project.");
+      return;
+    }
+    const centres = costCentresForEditProject(proj.id);
+    if (centres.length > 0 && (!editCostCenter || !centres.includes(editCostCenter))) {
+      alert("Pick a cost centre for this project.");
+      return;
+    }
 
-    setRecords(records.map((item) => item.id === record.id ? {
-      ...item,
-      originalClockIn: item.originalClockIn || item.clockIn,
-      originalClockOut: item.originalClockOut || item.clockOut,
-      clockIn: newClockIn,
-      clockOut: newClockOut,
-      edited: true,
-      status: "Admin Approval Required",
-    } : item));
+    const updatedRecord = {
+      ...record,
+      clockIn: clockInIso,
+      clockOut: clockOutIso,
+      status: "Submitted",
+      projectId: proj.id,
+      project: proj.name,
+      projectFolder: getProjectFolderName(proj.name),
+      costCenter: editCostCenter || "",
+    };
+    const labourCost = getLabourCost(updatedRecord);
 
-    setEditingRecordId(null);
-    setEditClockIn("");
-    setEditClockOut("");
+    setEditTimesheetSaving(true);
+    try {
+      const { error } = await supabase
+        .from("timesheets")
+        .update({
+          clock_in: clockInIso,
+          clock_out: clockOutIso,
+          status: "Submitted",
+          project_id: proj.id,
+          project_name: proj.name,
+          cost_centre: editCostCenter || "",
+          labour_cost: labourCost,
+        })
+        .eq("id", rowId);
+      if (error) throw error;
+      cancelEditRecord();
+      await fetchTimesheetsFromSupabase();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setEditTimesheetSaving(false);
+    }
   };
 
   const cancelEditRecord = () => {
     setEditingRecordId(null);
-    setEditClockIn("");
-    setEditClockOut("");
+    setEditClockInDate("");
+    setEditClockInTime("");
+    setEditClockOutDate("");
+    setEditClockOutTime("");
+    setEditProjectId("");
+    setEditCostCenter("");
+  };
+
+  const handleDeleteTimesheetRecord = async (record) => {
+    if (!isAdmin) return;
+    const rowId = record.supabaseTimesheetId ?? record.id;
+    if (rowId == null) return;
+    if (!window.confirm("Delete this timesheet row permanently?")) return;
+    setDeletingTimesheetId(String(rowId));
+    try {
+      const { error } = await supabase.from("timesheets").delete().eq("id", rowId);
+      if (error) throw error;
+      setRecords((prev) => prev.filter((r) => String(r.supabaseTimesheetId ?? r.id) !== String(rowId)));
+      const myLiveId = visibleCurrentShift?.supabaseTimesheetId;
+      if (myLiveId != null && String(myLiveId) === String(rowId)) {
+        setCurrentShift(null);
+      }
+      await fetchTimesheetsFromSupabase();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setDeletingTimesheetId(null);
+    }
   };
 
   const getFolderShareLink = (folderName) => `${window.location.origin}/photos/${folderName}`;
@@ -1802,13 +1996,8 @@ const handlePhotoCapture = async (event) => {
     const statusBadgeClass =
       st === "admin approval required" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700";
 
-    const liveRowId = visibleCurrentShift?.supabaseTimesheetId;
     const recordRowId = record.supabaseTimesheetId ?? record.id;
-    const matchesLiveShift =
-      liveRowId != null && recordRowId != null && String(liveRowId) === String(recordRowId);
-    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
-    const clockInKey = calendarDateKeyInTimeZone(record.clockIn, companyTimeZone);
-    const isLiveOpen = matchesLiveShift && todayKey === clockInKey && todayKey !== "";
+    const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
 
     let outText = "—";
     let outClass = "font-semibold text-slate-900";
@@ -1836,6 +2025,9 @@ const handlePhotoCapture = async (event) => {
     }
 
     const busyClose = closingShiftId != null && String(recordRowId) === closingShiftId;
+    const busyDelete = deletingTimesheetId != null && String(recordRowId) === deletingTimesheetId;
+    const editCentres =
+      editingRecordId === record.id ? costCentresForEditProject(editProjectId) : [];
 
     return (
     <div key={record.id} className="rounded-2xl border bg-white p-4">
@@ -1857,21 +2049,103 @@ const handlePhotoCapture = async (event) => {
       </div>
 
       {editingRecordId === record.id ? (
-        <div className="mt-3 border-t pt-3 space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-xs text-slate-500">Edit In</label>
-              <input type="time" className="w-full rounded-xl border p-2 text-sm" value={editClockIn} onChange={(event) => setEditClockIn(event.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Edit Out</label>
-              <input type="time" className="w-full rounded-xl border p-2 text-sm" value={editClockOut} onChange={(event) => setEditClockOut(event.target.value)} />
+        <div className="mt-3 border-t pt-2 space-y-2">
+          <p className="text-[10px] text-slate-500 leading-tight">Edit in {companyTimeZone}</p>
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500">Clock in</label>
+            <div className="flex gap-1">
+              <input
+                type="date"
+                className="min-w-0 flex-1 rounded-lg border px-1 py-1 text-[11px]"
+                value={editClockInDate}
+                onChange={(e) => setEditClockInDate(e.target.value)}
+              />
+              <input
+                type="time"
+                className="w-[6.25rem] shrink-0 rounded-lg border px-1 py-1 text-[11px]"
+                value={editClockInTime}
+                onChange={(e) => setEditClockInTime(e.target.value)}
+              />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button className="rounded-xl h-10 text-xs" onClick={() => saveEditedRecord(record)}>Send for Approval</Button>
-            <Button className="rounded-xl h-10 text-xs" onClick={cancelEditRecord}>Cancel</Button>
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500">Clock out</label>
+            <div className="flex gap-1">
+              <input
+                type="date"
+                className="min-w-0 flex-1 rounded-lg border px-1 py-1 text-[11px]"
+                value={editClockOutDate}
+                onChange={(e) => setEditClockOutDate(e.target.value)}
+              />
+              <input
+                type="time"
+                className="w-[6.25rem] shrink-0 rounded-lg border px-1 py-1 text-[11px]"
+                value={editClockOutTime}
+                onChange={(e) => setEditClockOutTime(e.target.value)}
+              />
+            </div>
           </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500">Project</label>
+            <select
+              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+              value={editProjectId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setEditProjectId(v);
+                const c = effectiveCostCentresByProjectId[v] || effectiveCostCentresByProjectId[Number(v)] || [];
+                setEditCostCenter(c[0] || "");
+              }}
+            >
+              {effectiveProjects.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-slate-500">Cost centre</label>
+            <select
+              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+              value={editCostCenter}
+              onChange={(e) => setEditCostCenter(e.target.value)}
+              disabled={editCentres.length === 0}
+            >
+              {editCentres.length === 0 ? (
+                <option value="">—</option>
+              ) : (
+                editCentres.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-1.5 pt-1">
+            <Button
+              type="button"
+              className="rounded-lg h-9 text-[11px] font-semibold"
+              disabled={editTimesheetSaving}
+              onClick={() => void saveEditedRecord(record)}
+            >
+              {editTimesheetSaving ? "Saving…" : "Save"}
+            </Button>
+            <Button type="button" className="rounded-lg h-9 text-[11px]" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
+              Cancel
+            </Button>
+          </div>
+          {isAdmin && (
+            <Button
+              type="button"
+              className="w-full rounded-lg h-9 text-[11px] bg-red-50 text-red-700 border border-red-100 font-semibold"
+              disabled={editTimesheetSaving || busyDelete}
+              onClick={() => void handleDeleteTimesheetRecord(record)}
+            >
+              {busyDelete ? "Deleting…" : "Delete row"}
+            </Button>
+          )}
         </div>
       ) : (
         <>
@@ -1896,8 +2170,29 @@ const handlePhotoCapture = async (event) => {
             </Button>
           )}
           {record.edited && <p className="mt-2 text-xs text-red-600">Time edited by employee — waiting for admin approval.</p>}
-          {allowEdit && st !== "active" && (
-            <Button className="w-full rounded-xl h-10 text-xs mt-3" onClick={() => startEditRecord(record)}>✏️ Edit Time</Button>
+          {((allowEdit && canEditTimesheetRecord(record)) || isAdmin) && (
+            <div className="mt-2 grid grid-cols-2 gap-1.5">
+              {allowEdit && canEditTimesheetRecord(record) && (
+                <Button
+                  type="button"
+                  className="rounded-xl h-9 text-[11px] col-span-2 sm:col-span-1"
+                  disabled={busyDelete}
+                  onClick={() => startEditRecord(record)}
+                >
+                  ✏️ Edit
+                </Button>
+              )}
+              {isAdmin && (
+                <Button
+                  type="button"
+                  className="rounded-xl h-9 text-[11px] bg-red-50 text-red-700 border border-red-100 font-semibold col-span-2 sm:col-span-1"
+                  disabled={busyDelete || busyClose}
+                  onClick={() => void handleDeleteTimesheetRecord(record)}
+                >
+                  {busyDelete ? "…" : "Delete"}
+                </Button>
+              )}
+            </div>
           )}
         </>
       )}
