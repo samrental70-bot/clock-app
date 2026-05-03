@@ -498,6 +498,139 @@ function withTimeout(promise, ms = 10000, message = "Operation timed out") {
   ]);
 }
 
+/**
+ * Notification recipients by actor role (company_members in same company; actor always excluded).
+ * - employee → all owner + supervisor user_ids
+ * - supervisor → owner user_ids only
+ * - owner → none (no notifications for own actions)
+ */
+async function getNotificationRecipients(supabase, companyId, actorUserId, actorRole) {
+  const ar = normalizeMemberRole(actorRole);
+  console.log("[NOTIFY] actor role", ar, "actorUserId", actorUserId, "companyId", companyId);
+  if (!companyId || !actorUserId) return [];
+  if (ar === "owner") {
+    console.log("[NOTIFY] recipients (owner actor) → []");
+    return [];
+  }
+  const { data, error } = await supabase.from("company_members").select("user_id, role").eq("company_id", companyId);
+  if (error) {
+    console.warn("[NOTIFY] company_members fetch error", error);
+    return [];
+  }
+  if (!data?.length) {
+    console.warn("[NOTIFY] company_members empty for company", companyId);
+    return [];
+  }
+  const filtered = data.filter((row) => {
+    const rr = normalizeMemberRole(row.role);
+    if (ar === "employee") return rr === "owner" || rr === "supervisor";
+    if (ar === "supervisor") return rr === "owner";
+    return false;
+  });
+  const ids = [...new Set(filtered.map((row) => row.user_id).filter(Boolean).map(String))].filter(
+    (id) => id !== String(actorUserId)
+  );
+  console.log("[NOTIFY] recipients", ids);
+  return ids;
+}
+
+function clockInTitleForActorRole(actorRole) {
+  return normalizeMemberRole(actorRole) === "supervisor" ? "Supervisor clocked in" : "Employee clocked in";
+}
+
+function clockOutTitleForActorRole(actorRole) {
+  return normalizeMemberRole(actorRole) === "supervisor" ? "Supervisor clocked out" : "Employee clocked out";
+}
+
+/** Insert one in-app row per recipient. Failures are logged only — never throws. */
+async function createCompanyNotifications(supabase, params) {
+  const {
+    companyId,
+    actorUserId,
+    actorRole,
+    type,
+    title,
+    message,
+    projectId,
+    projectName,
+    costCentre,
+    relatedTimesheetId,
+    relatedFolder,
+    itemCount,
+  } = params;
+  console.log("[NOTIFY] createCompanyNotifications start", {
+    type,
+    title,
+    actorRole: normalizeMemberRole(actorRole),
+    actorUserId,
+    companyId,
+  });
+  if (!companyId || !actorUserId) {
+    console.warn("[NOTIFY] missing companyId or actorUserId; skip");
+    return;
+  }
+  let recipients;
+  try {
+    recipients = await getNotificationRecipients(supabase, companyId, actorUserId, actorRole);
+  } catch (e) {
+    console.error("[NOTIFY] getNotificationRecipients exception", e);
+    return;
+  }
+  if (!recipients.length) {
+    console.warn("[NOTIFY] no recipients; skip insert");
+    return;
+  }
+
+  const rows = recipients.map((recipient_user_id) => ({
+    company_id: companyId,
+    recipient_user_id,
+    actor_user_id: actorUserId,
+    type: String(type || ""),
+    title: String(title || ""),
+    message: String(message || ""),
+    read_at: null,
+    project_id: projectId != null && projectId !== "" ? String(projectId) : null,
+    project_name: projectName != null ? String(projectName) : null,
+    cost_centre: costCentre != null ? String(costCentre) : null,
+    related_timesheet_id: relatedTimesheetId != null && relatedTimesheetId !== "" ? relatedTimesheetId : null,
+    related_folder: relatedFolder != null ? String(relatedFolder) : null,
+    item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
+  }));
+
+  console.log("[NOTIFY] insert payload", rows);
+  try {
+    const { data, error } = await supabase.from("notifications").insert(rows).select("id");
+    if (error) {
+      console.error("[NOTIFY] insert error", error);
+      return;
+    }
+    console.log("[NOTIFY] insert success", data?.length ?? 0, data);
+  } catch (e) {
+    console.error("[NOTIFY] insert exception", e);
+  }
+}
+
+async function sendPhotoBatchNotifications(supabase, payload, count) {
+  if (!payload?.companyId || !payload?.actorUserId || !count) return;
+  const c = count;
+  const photoWord = c === 1 ? "photo" : "photos";
+  const name = payload.actorName || "Someone";
+  await createCompanyNotifications(supabase, {
+    companyId: payload.companyId,
+    actorUserId: payload.actorUserId,
+    actorRole: payload.actorRole,
+    type: "photos_uploaded",
+    title: "Photos uploaded",
+    message: `${name} uploaded ${c} ${photoWord} for ${payload.projectName} - ${payload.costCentre}`,
+    projectId: payload.projectId,
+    projectName: payload.projectName,
+    costCentre: payload.costCentre,
+    relatedTimesheetId: payload.relatedTimesheetId,
+    relatedFolder: payload.relatedFolder,
+    itemCount: c,
+  });
+}
+
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
   const [projectId, setProjectId] = useState(adminProjects[0].id);
@@ -536,6 +669,20 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  const [inAppNotifications, setInAppNotifications] = useState([]);
+  const [inAppNotifLoading, setInAppNotifLoading] = useState(false);
+  const [inAppNotifError, setInAppNotifError] = useState("");
+  const [inAppNotifUnread, setInAppNotifUnread] = useState(0);
+  const [markingNotifId, setMarkingNotifId] = useState(null);
+  const [markingAllNotifs, setMarkingAllNotifs] = useState(false);
+
+  const photoNotifyBatchRef = useRef({
+    timer: null,
+    count: 0,
+    key: "",
+    payload: null,
+  });
 
   const [initialLoading, setInitialLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
@@ -815,6 +962,104 @@ const [uploadProgress, setUploadProgress] = useState(null);
     });
     return resolveTimesheetEmployeeSecondary(visibleCurrentShift, t);
   }, [visibleCurrentShift, profileFullName, authUser, teamProfileFullNameByUserId]);
+
+  const refreshInAppNotifUnread = useCallback(async () => {
+    if (!isAdmin || !authUser?.id) {
+      setInAppNotifUnread(0);
+      return;
+    }
+    const { count, error } = await supabase
+      .from("notifications")
+      .select("*", { count: "exact", head: true })
+      .eq("recipient_user_id", authUser.id)
+      .is("read_at", null);
+    if (!error) setInAppNotifUnread(count ?? 0);
+  }, [isAdmin, authUser?.id]);
+
+  useEffect(() => {
+    if (!isAdmin || !authUser?.id) return;
+    void refreshInAppNotifUnread();
+  }, [isAdmin, authUser?.id, refreshInAppNotifUnread]);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === "notifications") setActiveTab("clock");
+  }, [isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "notifications" || !isAdmin || !authUser?.id) return;
+    let cancelled = false;
+    setInAppNotifLoading(true);
+    setInAppNotifError("");
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("notifications")
+          .select("*")
+          .eq("recipient_user_id", authUser.id)
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (error) throw error;
+        if (!cancelled) {
+          setInAppNotifications(data || []);
+          await refreshInAppNotifUnread();
+        }
+      } catch (err) {
+        if (!cancelled) setInAppNotifError(getErrorMessage(err));
+      } finally {
+        if (!cancelled) setInAppNotifLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, authUser?.id, refreshInAppNotifUnread]);
+
+  const schedulePhotoNotificationAfterUpload = useCallback(() => {
+    const uid = authUser?.id;
+    const cid = userCompany?.id;
+    const vs = visibleCurrentShift;
+    if (!uid || !cid || !vs) return;
+    const actorName = (profileFullName || "").trim() || authUser?.email || "Someone";
+    const batchKey = `${cid}|${uid}|${String(vs.projectId ?? "")}|${vs.project}|${vs.costCenter}`;
+    const payload = {
+      companyId: cid,
+      actorUserId: uid,
+      actorRole: userCompanyRole,
+      actorName,
+      projectId: vs.projectId,
+      projectName: vs.project,
+      costCentre: vs.costCenter,
+      relatedTimesheetId: vs.supabaseTimesheetId ?? null,
+      relatedFolder: vs.projectFolder || getProjectFolderName(vs.project),
+    };
+    const r = photoNotifyBatchRef.current;
+    if (r.timer && r.key && r.key !== batchKey && r.count > 0 && r.payload) {
+      clearTimeout(r.timer);
+      r.timer = null;
+      const prevC = r.count;
+      const prevP = r.payload;
+      r.count = 0;
+      r.payload = null;
+      r.key = "";
+      void sendPhotoBatchNotifications(supabase, prevP, prevC);
+    }
+    if (r.key !== batchKey) {
+      r.key = batchKey;
+      r.count = 0;
+    }
+    r.payload = payload;
+    r.count += 1;
+    if (r.timer) clearTimeout(r.timer);
+    r.timer = setTimeout(() => {
+      const c = r.count;
+      const p = r.payload;
+      r.count = 0;
+      r.payload = null;
+      r.key = "";
+      r.timer = null;
+      if (p && c > 0) void sendPhotoBatchNotifications(supabase, p, c);
+    }, 45000);
+  }, [authUser, userCompany, userCompanyRole, visibleCurrentShift, profileFullName]);
 
   const canEditTimesheetRecord = (record) => {
     const st = normalizeStatus(record.status);
@@ -1809,6 +2054,21 @@ const handleClockIn = async () => {
 
       setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
       setLocationStatus("Clock-in saved.");
+      const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
+      void createCompanyNotifications(supabase, {
+        companyId: userCompany?.id,
+        actorUserId: authUser.id,
+        actorRole: userCompanyRole,
+        type: "clock_in",
+        title: clockInTitleForActorRole(userCompanyRole),
+        message: `${actorLabel} clocked in at ${selectedProject.name} - ${costCenter}`,
+        projectId: selectedProject.id,
+        projectName: selectedProject.name,
+        costCentre: costCenter,
+        relatedTimesheetId: legacyData?.[0]?.id ?? null,
+        relatedFolder: getProjectFolderName(selectedProject.name),
+        itemCount: null,
+      });
       return;
     }
 
@@ -1819,6 +2079,21 @@ const handleClockIn = async () => {
 
   setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
   setLocationStatus("Clock-in saved.");
+  const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
+  void createCompanyNotifications(supabase, {
+    companyId: userCompany?.id,
+    actorUserId: authUser.id,
+    actorRole: userCompanyRole,
+    type: "clock_in",
+    title: clockInTitleForActorRole(userCompanyRole),
+    message: `${actorLabelMain} clocked in at ${selectedProject.name} - ${costCenter}`,
+    projectId: selectedProject.id,
+    projectName: selectedProject.name,
+    costCentre: costCenter,
+    relatedTimesheetId: data?.[0]?.id ?? null,
+    relatedFolder: getProjectFolderName(selectedProject.name),
+    itemCount: null,
+  });
 };
   const handleChangeTask = () => {
     if (!visibleCurrentShift) return;
@@ -1985,6 +2260,7 @@ const handlePhotoCapture = async (event) => {
 
     setUploadProgress(100);
     setPhotoStatus("Photo uploaded ✅");
+    void schedulePhotoNotificationAfterUpload();
 
     setTimeout(() => {
       setUploadProgress(null);
@@ -2029,6 +2305,23 @@ const handlePhotoCapture = async (event) => {
 
       setProjectReceipts((previous) => ({ ...previous, [folderName]: [receipt, ...(previous[folderName] || [])] }));
       setPhotoStatus(`Receipt saved: ${formatMoney(receipt.amount)}`);
+      if (authUser?.id && userCompany?.id) {
+        const actorLabel = (profileFullName || "").trim() || authUser.email || "Someone";
+        void createCompanyNotifications(supabase, {
+          companyId: userCompany.id,
+          actorUserId: authUser.id,
+          actorRole: userCompanyRole,
+          type: "receipt_uploaded",
+          title: "Receipt uploaded",
+          message: `${actorLabel} uploaded a receipt for ${visibleCurrentShift.project} - ${visibleCurrentShift.costCenter}`,
+          projectId: visibleCurrentShift.projectId,
+          projectName: visibleCurrentShift.project,
+          costCentre: visibleCurrentShift.costCenter,
+          relatedTimesheetId: visibleCurrentShift.supabaseTimesheetId ?? null,
+          relatedFolder: folderName,
+          itemCount: null,
+        });
+      }
       event.target.value = "";
     };
     reader.readAsDataURL(file);
@@ -2072,7 +2365,25 @@ const handlePhotoCapture = async (event) => {
         })
         .eq("id", visibleCurrentShift.supabaseTimesheetId);
 
-      if (error) console.log("Supabase clock-out error:", error);
+      if (error) {
+        console.log("Supabase clock-out error:", error);
+      } else if (authUser?.id && userCompany?.id) {
+        const actorLabel = (profileFullName || "").trim() || authUser?.email || "Someone";
+        void createCompanyNotifications(supabase, {
+          companyId: userCompany.id,
+          actorUserId: authUser.id,
+          actorRole: userCompanyRole,
+          type: "clock_out",
+          title: clockOutTitleForActorRole(userCompanyRole),
+          message: `${actorLabel} clocked out from ${visibleCurrentShift.project} - ${visibleCurrentShift.costCenter}`,
+          projectId: visibleCurrentShift.projectId,
+          projectName: visibleCurrentShift.project,
+          costCentre: visibleCurrentShift.costCenter,
+          relatedTimesheetId: visibleCurrentShift.supabaseTimesheetId,
+          relatedFolder: visibleCurrentShift.projectFolder || getProjectFolderName(visibleCurrentShift.project),
+          itemCount: null,
+        });
+      }
     }
 
     setCurrentShift(null);
@@ -2244,6 +2555,46 @@ const handlePhotoCapture = async (event) => {
     setIsMenuOpen(false);
   };
 
+  const handleMarkNotificationRead = async (n) => {
+    if (!isAdmin || !authUser?.id || !n?.id) return;
+    setMarkingNotifId(String(n.id));
+    try {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("id", n.id)
+        .eq("recipient_user_id", authUser.id);
+      if (error) throw error;
+      const ts = new Date().toISOString();
+      setInAppNotifications((prev) => prev.map((x) => (String(x.id) === String(n.id) ? { ...x, read_at: ts } : x)));
+      await refreshInAppNotifUnread();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setMarkingNotifId(null);
+    }
+  };
+
+  const handleMarkAllNotificationsRead = async () => {
+    if (!isAdmin || !authUser?.id) return;
+    setMarkingAllNotifs(true);
+    try {
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: new Date().toISOString() })
+        .eq("recipient_user_id", authUser.id)
+        .is("read_at", null);
+      if (error) throw error;
+      const ts = new Date().toISOString();
+      setInAppNotifications((prev) => prev.map((x) => (x.read_at ? x : { ...x, read_at: ts })));
+      await refreshInAppNotifUnread();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setMarkingAllNotifs(false);
+    }
+  };
+
   const handleCopyTeamJoinCode = async () => {
     const code = userCompany?.code;
     if (!code) return;
@@ -2338,6 +2689,26 @@ const handlePhotoCapture = async (event) => {
       const myLiveId = visibleCurrentShift?.supabaseTimesheetId;
       if (myLiveId != null && String(myLiveId) === String(rowId)) {
         setCurrentShift(null);
+      }
+      if (authUser?.id && userCompany?.id) {
+        const empLabel =
+          pickGoodFreeformEmployeeName(record) ||
+          (record.employeeEmail && String(record.employeeEmail).trim()) ||
+          shortUserLabel(record.userId || record.employeeId);
+        void createCompanyNotifications(supabase, {
+          companyId: userCompany.id,
+          actorUserId: authUser.id,
+          actorRole: userCompanyRole,
+          type: "clock_out",
+          title: clockOutTitleForActorRole(userCompanyRole),
+          message: `${empLabel} clocked out from ${record.project} - ${record.costCenter}`,
+          projectId: record.projectId,
+          projectName: record.project,
+          costCentre: record.costCenter,
+          relatedTimesheetId: rowId,
+          relatedFolder: record.projectFolder || getProjectFolderName(record.project || ""),
+          itemCount: null,
+        });
       }
       await fetchTimesheetsFromSupabase();
     } catch (err) {
@@ -2971,7 +3342,24 @@ const handlePhotoCapture = async (event) => {
                 <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
                 <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
               </div>
-              <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl shrink-0">⏱️</div>
+              <div className="flex flex-col items-end gap-1 shrink-0">
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("notifications")}
+                    className="relative h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-lg"
+                    aria-label="Notifications"
+                  >
+                    🔔
+                    {inAppNotifUnread > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                        {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
+                      </span>
+                    )}
+                  </button>
+                )}
+                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl">⏱️</div>
+              </div>
             </div>
           </div>
 
@@ -3286,6 +3674,64 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "notifications" && isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex justify-between gap-2 items-start">
+                  <div>
+                    <h2 className="font-bold text-lg">Notifications</h2>
+                    <p className="text-xs text-slate-500">{inAppNotifUnread} unread</p>
+                  </div>
+                  <Button
+                    type="button"
+                    className="rounded-xl h-9 px-3 text-xs font-semibold shrink-0"
+                    disabled={markingAllNotifs || inAppNotifUnread === 0}
+                    onClick={() => void handleMarkAllNotificationsRead()}
+                  >
+                    {markingAllNotifs ? "…" : "Mark all read"}
+                  </Button>
+                </div>
+                {inAppNotifLoading && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading notifications…</div>
+                )}
+                {inAppNotifError && (
+                  <div className="rounded-xl bg-amber-50 border border-amber-100 p-2 text-xs text-amber-900">{inAppNotifError}</div>
+                )}
+                {!inAppNotifLoading && !inAppNotifError && inAppNotifications.length === 0 && (
+                  <p className="text-xs text-slate-500 text-center py-4">No notifications yet.</p>
+                )}
+                <div className="space-y-2">
+                  {inAppNotifications.map((n) => {
+                    const unread = !n.read_at;
+                    const ts = n.created_at
+                      ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} · ${formatTime(n.created_at, companyTimeZone)}`
+                      : "—";
+                    return (
+                      <div
+                        key={n.id}
+                        className={`rounded-xl border p-2.5 space-y-1 ${unread ? "border-slate-300 bg-white" : "border-slate-100 bg-slate-50"}`}
+                      >
+                        <p className={`text-sm leading-snug ${unread ? "font-semibold text-slate-900" : "font-medium text-slate-600"}`}>{n.title}</p>
+                        <p className="text-xs text-slate-600 leading-snug">{n.message}</p>
+                        <p className="text-[10px] text-slate-400">{ts}</p>
+                        {unread && (
+                          <Button
+                            type="button"
+                            className="rounded-lg h-8 text-[11px] px-2 mt-0.5"
+                            disabled={markingNotifId === String(n.id)}
+                            onClick={() => void handleMarkNotificationRead(n)}
+                          >
+                            {markingNotifId === String(n.id) ? "…" : "Mark as read"}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "team" && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
@@ -3502,6 +3948,20 @@ const handlePhotoCapture = async (event) => {
               </div>
               <div className="space-y-2">
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                    onClick={() => openMenuTab("notifications")}
+                  >
+                    🔔 Notifications
+                    {inAppNotifUnread > 0 && (
+                      <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">
+                        {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
