@@ -70,6 +70,75 @@ const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
+const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
+
+function looksLikeEmail(value) {
+  const s = String(value || "").trim();
+  if (!s.includes("@")) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+/.test(s);
+}
+
+/** True if value looks like a UUID, raw hex id, or shortened user-id label (not a human display name). */
+function looksLikeUuidOrIdLike(value) {
+  const s = String(value || "").trim();
+  if (!s) return false;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+  if (/^[0-9a-f]{32}$/i.test(s)) return true;
+  if (/^[0-9a-f]{6}…[0-9a-f]{4}$/i.test(s)) return true;
+  return false;
+}
+
+function pickGoodFreeformEmployeeName(record) {
+  for (const raw of [record.employee, record.employeeName]) {
+    const s = String(raw || "").trim();
+    if (!s) continue;
+    if (looksLikeEmail(s)) continue;
+    if (looksLikeUuidOrIdLike(s)) continue;
+    return s;
+  }
+  return "";
+}
+
+function shortUserLabel(userId) {
+  if (userId == null || userId === "") return "—";
+  const s = String(userId);
+  if (s.length <= 12) return s;
+  return `${s.slice(0, 6)}…${s.slice(-4)}`;
+}
+
+function resolveTimesheetEmployeeTitle(record, { profileFullName, authUser, teamProfileFullNameByUserId = {} }) {
+  const uid = record.userId || record.employeeId;
+  const good = pickGoodFreeformEmployeeName(record);
+  if (good) return good;
+
+  const fromRecordProfile = (record.profileDisplayName || "").trim();
+  if (fromRecordProfile) return fromRecordProfile;
+
+  const fromTeam = teamProfileFullNameByUserId[uid];
+  if (fromTeam && String(fromTeam).trim()) return String(fromTeam).trim();
+
+  if (authUser?.id != null && String(uid) === String(authUser.id)) {
+    const pf = (profileFullName || "").trim();
+    if (pf && !looksLikeEmail(pf) && !looksLikeUuidOrIdLike(pf)) return pf;
+  }
+
+  const mail =
+    (record.employeeEmail || "").trim() ||
+    (record.profileEmailForRow || "").trim();
+  if (mail) return mail;
+
+  return shortUserLabel(uid) || "Employee";
+}
+
+function resolveTimesheetEmployeeSecondary(record, title) {
+  const mail =
+    (record.employeeEmail || "").trim() ||
+    (record.profileEmailForRow || "").trim();
+  if (!mail || !looksLikeEmail(mail)) return null;
+  if (mail === title) return null;
+  return mail;
+}
+
 /** Parse Supabase/Postgres timestamps into a correct instant for Intl formatting. */
 function parseStoredInstant(value) {
   if (value == null || value === "") return new Date(NaN);
@@ -263,11 +332,13 @@ function getProjectFolderName(projectName) {
 /** Map Supabase `timesheets` row → UI record shape used by Timesheet tab / reports */
 function mapTimesheetRowFromSupabase(row) {
   const projectName = row.project_name || "";
+  const empName = row.employee_name || "";
   return {
     id: row.id,
     supabaseTimesheetId: row.id,
     userId: row.user_id,
-    employee: row.employee_name || "",
+    employee: empName,
+    employeeName: empName,
     employeeEmail: row.employee_email ?? null,
     companyId: row.company_id ?? null,
     companyName: row.company_name ?? null,
@@ -292,7 +363,29 @@ function mapTimesheetRowFromSupabase(row) {
             capturedAt: row.clock_out,
           }
         : null,
+    profileDisplayName: "",
+    profileEmailForRow: "",
   };
+}
+
+/** Load profile full_name/email for timesheet rows (by user_id). */
+async function fetchProfilesByTimesheetUserIds(supabase, userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (ids.length === 0) return {};
+  let { data: profs, error: pErr } = await supabase.from("profiles").select("id, full_name, email").in("id", ids);
+  if (pErr) {
+    const retry = await supabase.from("profiles").select("id, full_name").in("id", ids);
+    if (retry.error) return {};
+    profs = retry.data || [];
+  }
+  const map = {};
+  (profs || []).forEach((p) => {
+    map[p.id] = {
+      full_name: (p.full_name && String(p.full_name).trim()) || "",
+      email: (p.email && String(p.email).trim()) || "",
+    };
+  });
+  return map;
 }
 
 function getCurrentLocation() {
@@ -444,6 +537,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState("");
   const [teamCopyOk, setTeamCopyOk] = useState(false);
+  const [teamRoleFeedback, setTeamRoleFeedback] = useState({ type: "", text: "" });
+  const [teamRoleSavingId, setTeamRoleSavingId] = useState(null);
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -454,6 +549,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     let cancelled = false;
     setTeamLoading(true);
     setTeamError("");
+    setTeamRoleFeedback({ type: "", text: "" });
     (async () => {
       try {
         const { data: members, error: mErr } = await supabase
@@ -478,18 +574,19 @@ const [uploadProgress, setUploadProgress] = useState(null);
         }
         const rows = list.map((m) => {
           const p = profilesMap[m.user_id] || {};
-          const profileEmail = (p.email && String(p.email).trim()) || "";
-          const email =
-            profileEmail ||
-            (String(m.user_id) === String(authUser.id) ? authUser.email || "" : "") ||
-            "";
+          const profileFull = (p.full_name && String(p.full_name).trim()) || "";
+          const profileEmailRaw = (p.email && String(p.email).trim()) || "";
+          const emailLine = profileEmailRaw || "Email not available";
+          const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
           return {
             memberRowId: m.id,
             userId: m.user_id,
             role: (m.role || "employee").trim(),
             joinedAt: m.created_at ?? null,
-            fullName: (p.full_name && String(p.full_name).trim()) || "",
-            emailDisplay: email || "—",
+            fullName: profileFull,
+            profileEmailRaw,
+            displayName: displayName || shortUserLabel(m.user_id),
+            emailLine,
           };
         });
         if (!cancelled) setTeamRows(rows);
@@ -505,7 +602,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userCompany?.id, authUser?.id, authUser?.email]);
+  }, [activeTab, userCompany?.id, authUser?.id]);
+
+  const teamProfileFullNameByUserId = useMemo(() => {
+    const m = {};
+    teamRows.forEach((r) => {
+      const fn = (r.fullName && String(r.fullName).trim()) || "";
+      if (r.userId != null && fn) m[r.userId] = fn;
+    });
+    return m;
+  }, [teamRows]);
 
   const fetchTimesheetsFromSupabase = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -527,7 +633,17 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (error) throw error;
 
       const mapped = (data || []).map(mapTimesheetRowFromSupabase);
-      setRecords(mapped);
+      const uids = mapped.map((r) => r.userId).filter(Boolean);
+      const pmap = await fetchProfilesByTimesheetUserIds(supabase, uids);
+      const enriched = mapped.map((rec) => {
+        const pr = pmap[rec.userId] || {};
+        return {
+          ...rec,
+          profileDisplayName: pr.full_name || "",
+          profileEmailForRow: pr.email || "",
+        };
+      });
+      setRecords(enriched);
     } catch (err) {
       const msg = getErrorMessage(err);
       setTimesheetsError(msg);
@@ -594,6 +710,28 @@ const [uploadProgress, setUploadProgress] = useState(null);
     ? currentShift
     : null;
 
+  const activeShiftTitle = useMemo(
+    () =>
+      visibleCurrentShift
+        ? resolveTimesheetEmployeeTitle(visibleCurrentShift, {
+            profileFullName,
+            authUser,
+            teamProfileFullNameByUserId,
+          })
+        : "",
+    [visibleCurrentShift, profileFullName, authUser, teamProfileFullNameByUserId]
+  );
+
+  const activeShiftEmailSecondary = useMemo(() => {
+    if (!visibleCurrentShift) return null;
+    const t = resolveTimesheetEmployeeTitle(visibleCurrentShift, {
+      profileFullName,
+      authUser,
+      teamProfileFullNameByUserId,
+    });
+    return resolveTimesheetEmployeeSecondary(visibleCurrentShift, t);
+  }, [visibleCurrentShift, profileFullName, authUser, teamProfileFullNameByUserId]);
+
   const canEditTimesheetRecord = (record) => {
     const st = normalizeStatus(record.status);
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
@@ -640,7 +778,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const employeeReportRows = reportScopedRecords.map((record) => ({
     id: record.id,
     date: formatDateParts(record.clockIn, companyTimeZone),
-    employee: record.employee,
+    employee: resolveTimesheetEmployeeTitle(record, {
+      profileFullName,
+      authUser,
+      teamProfileFullNameByUserId,
+    }),
     project: record.project,
     costCenter: record.costCenter,
     cost: getLabourCost(record),
@@ -823,6 +965,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (!user) return;
       const payload = { id: user.id };
       if (fullName) payload.full_name = fullName;
+      if (user.email) payload.email = user.email;
       // Leave role as-is if it already exists; default to employee for new users.
       payload.role = "employee";
       const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
@@ -901,7 +1044,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const { data: profile, error: profileError } = await withTimeout(
           supabase
             .from("profiles")
-            .select("role, full_name")
+            .select("role, full_name, email")
             .eq("id", user.id)
             .single(),
           12000,
@@ -909,6 +1052,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
         );
 
         if (profileError) throw profileError;
+
+        if (user.email && !(profile?.email && String(profile.email).trim())) {
+          const { error: patchErr } = await supabase.from("profiles").update({ email: user.email }).eq("id", user.id);
+          if (patchErr) console.warn("Profile email patch:", patchErr);
+        }
 
         setAuthRole(profile?.role || "employee");
         setProfileFullName(profile?.full_name || "");
@@ -1072,11 +1220,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("role, full_name")
+          .select("role, full_name, email")
           .eq("id", user.id)
           .single();
 
         if (profileError) throw profileError;
+
+        if (user.email && !(profile?.email && String(profile.email).trim())) {
+          const { error: patchErr } = await supabase.from("profiles").update({ email: user.email }).eq("id", user.id);
+          if (patchErr) console.warn("Profile email patch on login:", patchErr);
+        }
 
         setAuthRole(profile?.role || "employee");
         setProfileFullName(profile?.full_name || "");
@@ -1166,6 +1319,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           {
             id: user.id,
             full_name: fullName || null,
+            email: email || null,
             role: "employee",
           },
           { onConflict: "id" }
@@ -1304,7 +1458,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
       }
 
       await supabase.from("profiles").upsert(
-        { id: authUser.id, role: "employee" },
+        {
+          id: authUser.id,
+          email: authUser.email || null,
+          full_name: (profileFullName || "").trim() || null,
+          role: "employee",
+        },
         { onConflict: "id" }
       );
       setAuthRole("employee");
@@ -1483,11 +1642,15 @@ const handleClockIn = async () => {
 
   const clockInLocation = null;
   const clockInTime = new Date().toISOString();
+  const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
 
   const newShift = {
     userId: authUser?.id || null,
-    employee: employeeDisplayName || authUser?.email || "Employee",
+    employee: clockInEmployeeName || authUser?.email || "Employee",
+    employeeName: clockInEmployeeName || authUser?.email || "",
     employeeEmail: authUser?.email || null,
+    profileDisplayName: (profileFullName || "").trim(),
+    profileEmailForRow: (authUser?.email || "").trim(),
     companyId: userCompany?.id || null,
     companyName: userCompany?.name || null,
     hourlyRate: 0,
@@ -1520,7 +1683,7 @@ const handleClockIn = async () => {
     .insert([{
       user_id: authUser.id,
       employee_email: authUser.email || null,
-      employee_name: employeeDisplayName || authUser.email || null,
+      employee_name: clockInEmployeeName,
       company_id: userCompany?.id || null,
       company_name: userCompany?.name || null,
       project_id: selectedProject.id,
@@ -1543,7 +1706,7 @@ const handleClockIn = async () => {
         .from("timesheets")
         .insert([{
           user_id: authUser.id,
-          employee_name: employeeDisplayName || authUser.email || null,
+          employee_name: clockInEmployeeName,
           project_name: selectedProject.name,
           hourly_rate: 0,
           cost_centre: costCenter,
@@ -2009,6 +2172,40 @@ const handlePhotoCapture = async (event) => {
     }
   };
 
+  const handleTeamMemberRoleChange = async (row, newRole) => {
+    if (!isAdmin || !userCompany?.id) return;
+    if (newRole !== "employee" && newRole !== "supervisor") return;
+    if (normalizeMemberRole(row.role) === "owner") return;
+    if (normalizeMemberRole(newRole) === normalizeMemberRole(row.role)) return;
+    if (!window.confirm("Change this member role?")) return;
+    setTeamRoleFeedback({ type: "", text: "" });
+    setTeamRoleSavingId(String(row.memberRowId));
+    try {
+      const { error: mErr } = await supabase
+        .from("company_members")
+        .update({ role: newRole })
+        .eq("id", row.memberRowId)
+        .eq("company_id", userCompany.id)
+        .eq("user_id", row.userId);
+      if (mErr) throw mErr;
+      const profileRole = newRole === "supervisor" ? "supervisor" : "employee";
+      const { error: pErr } = await supabase.from("profiles").update({ role: profileRole }).eq("id", row.userId);
+      if (pErr) throw pErr;
+      if (String(row.userId) === String(authUser?.id)) {
+        setUserCompanyRole(newRole);
+        setAuthRole(profileRole);
+      }
+      setTeamRows((prev) =>
+        prev.map((r) => (r.memberRowId === row.memberRowId ? { ...r, role: newRole } : r))
+      );
+      setTeamRoleFeedback({ type: "success", text: "Role updated." });
+    } catch (err) {
+      setTeamRoleFeedback({ type: "error", text: getErrorMessage(err) });
+    } finally {
+      setTeamRoleSavingId(null);
+    }
+  };
+
   const handleSaveCompanyTimeZone = async (event) => {
     event.preventDefault();
     if (!isAdmin || !userCompany?.id) return;
@@ -2110,11 +2307,21 @@ const handlePhotoCapture = async (event) => {
     const editCentres =
       editingRecordId === record.id ? costCentresForEditProject(editProjectId) : [];
 
+    const timesheetTitle = resolveTimesheetEmployeeTitle(record, {
+      profileFullName,
+      authUser,
+      teamProfileFullNameByUserId,
+    });
+    const timesheetEmailSecondary = resolveTimesheetEmployeeSecondary(record, timesheetTitle);
+
     return (
     <div key={record.id} className="rounded-2xl border bg-white p-4">
       <div className="flex justify-between gap-3">
         <div>
-          <p className="font-semibold">{record.employee}</p>
+          <p className="font-semibold">{timesheetTitle}</p>
+          {timesheetEmailSecondary && (
+            <p className="text-[11px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
+          )}
           <p className="text-xs text-slate-600">{record.project}</p>
           <p className="text-xs text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
         </div>
@@ -2794,7 +3001,10 @@ const handlePhotoCapture = async (event) => {
               <CardContent className="p-2.5 flex flex-col gap-2">
                 <div className="space-y-0.5">
                   <h2 className="font-bold text-sm sm:text-lg leading-tight">Active Shift</h2>
-                  <p className="text-xs sm:text-sm text-slate-700 leading-snug">{visibleCurrentShift.employee}</p>
+                  <p className="text-xs sm:text-sm text-slate-700 leading-snug">{activeShiftTitle}</p>
+                  {activeShiftEmailSecondary && (
+                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-snug break-all">{activeShiftEmailSecondary}</p>
+                  )}
                   <p className="text-[11px] sm:text-xs text-slate-600 leading-snug">{visibleCurrentShift.project} • {visibleCurrentShift.costCenter}</p>
                   <p className="text-[11px] sm:text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
                   <p className="text-[11px] sm:text-xs text-slate-500">Folder: {visibleCurrentShift.projectFolder}</p>
@@ -2884,7 +3094,10 @@ const handlePhotoCapture = async (event) => {
                     <div className="rounded-2xl border bg-blue-50 p-4">
                       <div className="flex justify-between gap-3">
                         <div>
-                          <p className="font-semibold">{visibleCurrentShift.employee}</p>
+                          <p className="font-semibold">{activeShiftTitle}</p>
+                          {activeShiftEmailSecondary && (
+                            <p className="text-[11px] text-slate-500 break-all">{activeShiftEmailSecondary}</p>
+                          )}
                           <p className="text-xs text-slate-600">{visibleCurrentShift.project}</p>
                           <p className="text-xs text-slate-500">Cost Centre: {visibleCurrentShift.costCenter}</p>
                           <p className="text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
@@ -3020,22 +3233,52 @@ const handlePhotoCapture = async (event) => {
                 {teamError && (
                   <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">{teamError}</div>
                 )}
+                {teamRoleFeedback.text && (
+                  <div
+                    className={`rounded-2xl border p-3 text-xs ${
+                      teamRoleFeedback.type === "success"
+                        ? "bg-green-50 border-green-100 text-green-800"
+                        : "bg-red-50 border-red-100 text-red-700"
+                    }`}
+                  >
+                    {teamRoleFeedback.text}
+                  </div>
+                )}
                 <div className="space-y-2">
                   {(isAdmin ? teamRows : teamRows.filter((r) => String(r.userId) === String(authUser?.id))).map((row) => {
                     const joinedLabel =
                       row.joinedAt != null && row.joinedAt !== ""
                         ? formatDate(parseStoredInstant(row.joinedAt), companyTimeZone)
                         : "—";
+                    const rowRoleNorm = normalizeMemberRole(row.role);
+                    const isOwnerMember = rowRoleNorm === "owner";
+                    const showRoleSelect = isAdmin && !isOwnerMember;
                     return (
-                      <div key={row.memberRowId} className="rounded-2xl border bg-white p-3 space-y-1">
+                      <div key={row.memberRowId} className="rounded-2xl border bg-white p-3 space-y-1.5">
                         <div className="flex justify-between gap-2 items-start">
-                          <p className="font-semibold text-sm leading-snug">{row.fullName || "—"}</p>
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize">
-                            {row.role}
-                          </span>
+                          <p className="font-semibold text-sm leading-snug">{row.displayName}</p>
+                          {!showRoleSelect && (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize">
+                              {row.role}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-[11px] text-slate-600 break-all">Email: {row.emailDisplay}</p>
+                        <p className="text-[11px] text-slate-600 break-all">Email: {row.emailLine}</p>
                         <p className="text-[11px] text-slate-500">Joined: {joinedLabel}</p>
+                        {showRoleSelect && (
+                          <div className="pt-1 border-t border-slate-100 space-y-1">
+                            <label className="text-[10px] text-slate-500">Role</label>
+                            <select
+                              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+                              value={rowRoleNorm === "supervisor" ? "supervisor" : "employee"}
+                              disabled={teamRoleSavingId === String(row.memberRowId)}
+                              onChange={(e) => void handleTeamMemberRoleChange(row, e.target.value)}
+                            >
+                              <option value="employee">employee</option>
+                              <option value="supervisor">supervisor</option>
+                            </select>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
