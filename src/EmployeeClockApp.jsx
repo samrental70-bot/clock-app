@@ -1822,10 +1822,10 @@ const handlePhotoCapture = async (event) => {
     // Inline (non-blocking) loader: do not take over the whole app once opened.
     if (hasOpenedAppRef.current) {
       return (
-        <div className="min-h-screen bg-neutral-950 flex justify-center text-slate-900">
-          <div className="w-full max-w-sm h-screen bg-slate-50 shadow-2xl relative overflow-hidden flex flex-col">
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-28">
-              <div className="rounded-3xl bg-white border shadow-sm p-4">
+        <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
+          <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-3 sm:space-y-4 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]">
+              <div className="rounded-3xl bg-white border shadow-sm p-3 sm:p-4">
                 <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
                 <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
               </div>
@@ -2025,11 +2025,11 @@ const handlePhotoCapture = async (event) => {
   if (!hasOpenedAppRef.current) hasOpenedAppRef.current = true;
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex justify-center text-slate-900">
-      <div className="w-full max-w-sm h-screen bg-slate-50 shadow-2xl relative overflow-hidden flex flex-col">
-        <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-28">
-          <div className="rounded-3xl bg-white border shadow-sm p-4">
-            <div className="flex items-start justify-between gap-3">
+    <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
+      <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-3 sm:space-y-4 pb-[calc(5.75rem+env(safe-area-inset-bottom,0px))]">
+          <div className="rounded-3xl bg-white border shadow-sm p-3 sm:p-4">
+            <div className="flex items-start justify-between gap-2 sm:gap-3">
               <button onClick={() => setIsMenuOpen(true)} className="h-11 w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-xl">☰</button>
               <div className="flex-1">
                 <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
@@ -2062,17 +2062,17 @@ const handlePhotoCapture = async (event) => {
 
           {activeTab === "clock" && !visibleCurrentShift && (
             <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5 space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="h-11 w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-xl">👷</div>
+              <CardContent className="p-3 sm:p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">👷</div>
                   <div>
-                    <h2 className="font-bold text-lg">Start Shift</h2>
+                    <h2 className="font-bold text-base sm:text-lg">Start Shift</h2>
                     <p className="text-xs text-slate-500">Choose project and cost centre</p>
                   </div>
                 </div>
 
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
-                  <div className="rounded-2xl border bg-white p-4 space-y-2">
+                  <div className="rounded-2xl border bg-white p-3 space-y-1.5">
                     <p className="font-semibold">No projects yet</p>
                     <p className="text-xs text-slate-500">Ask your supervisor to add a project, or create one now if you're an owner/supervisor.</p>
                   </div>
@@ -2086,7 +2086,7 @@ const handlePhotoCapture = async (event) => {
                 )}
 
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
-                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-4 space-y-3">
+                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-3 space-y-2.5">
                     <div>
                       <p className="font-semibold">Add Project</p>
                       <p className="text-xs text-slate-500">Add a project and cost centres (comma-separated).</p>
@@ -2127,21 +2127,21 @@ const handlePhotoCapture = async (event) => {
                   </form>
                 )}
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium">Project / Job Site</label>
                   <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
                     {effectiveProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <label className="text-sm font-medium">Cost Centre</label>
                   <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={costCenter} onChange={(event) => setCostCenter(event.target.value)}>
                     {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((center) => <option key={center} value={center}>{center}</option>)}
                   </select>
                 </div>
 
-                <Button className="w-full rounded-2xl h-16 text-lg font-bold" onClick={handleClockIn}>✅ Clock In</Button>
+                <Button className="w-full rounded-2xl h-14 sm:h-16 text-base sm:text-lg font-bold" onClick={handleClockIn}>✅ Clock In</Button>
                 {locationStatus && <p className="text-xs text-slate-500 text-center">{locationStatus}</p>}
               </CardContent>
             </Card>
@@ -2356,7 +2356,9 @@ const handlePhotoCapture = async (event) => {
           </div>
         )}
 
-        <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 py-2 z-50 shadow-lg">
+        <div
+          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-2 z-50 shadow-lg pb-[calc(0.5rem+env(safe-area-inset-bottom,0px))]"
+        >
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl p-3 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
             <button onClick={() => setActiveTab("timesheet")} className={`rounded-2xl p-3 text-sm font-semibold ${activeTab === "timesheet" ? "bg-slate-900 text-white" : "text-slate-500"}`}>📄 Timesheet</button>

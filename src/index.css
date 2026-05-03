@@ -1,1 +1,15 @@
 @import "tailwindcss";
+
+/* PWA / mobile: keep the app inside the viewport; scroll only inside #root children */
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+#root {
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
