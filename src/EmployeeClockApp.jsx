@@ -246,6 +246,54 @@ function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZon
   return Boolean(matchesLiveShift && todayKey === clockInKey && todayKey !== "");
 }
 
+/** One row per member per day for Team attendance (prefer open active, then submitted missing out, then latest completed). */
+function pickRepresentativeTeamDayTimesheet(rowsForUser) {
+  if (!rowsForUser?.length) return null;
+  const byInDesc = [...rowsForUser].sort(
+    (a, b) => parseStoredInstant(b.clockIn).getTime() - parseStoredInstant(a.clockIn).getTime()
+  );
+  const activeOpen = byInDesc.filter((r) => normalizeStatus(r.status) === "active" && !r.clockOut);
+  if (activeOpen.length) return activeOpen[0];
+  const submittedNoOut = byInDesc.filter((r) => normalizeStatus(r.status) === "submitted" && !r.clockOut);
+  if (submittedNoOut.length) return submittedNoOut[0];
+  const withOut = byInDesc.filter((r) => r.clockOut);
+  if (withOut.length) {
+    withOut.sort(
+      (a, b) => parseStoredInstant(b.clockOut).getTime() - parseStoredInstant(a.clockOut).getTime()
+    );
+    return withOut[0];
+  }
+  return byInDesc[0];
+}
+
+function teamAttendanceStatusForRecord(record, ctx) {
+  const { selectedDateKey, companyTimeZone, now, authUser, visibleCurrentShift } = ctx;
+  if (!record) return { label: "Not clocked in", code: "none" };
+  const st = normalizeStatus(record.status);
+  const hasOut = Boolean(record.clockOut);
+  const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+
+  if (st === "active" && !hasOut) {
+    if (selectedDateKey < todayKey) {
+      return { label: "Missing clock-out", code: "missing_out" };
+    }
+    if (authUser?.id && String(record.userId) === String(authUser.id)) {
+      if (visibleCurrentShift && isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone)) {
+        return { label: "Clocked in", code: "clocked_in" };
+      }
+      return { label: "Missing clock-out", code: "missing_out" };
+    }
+    return { label: "Clocked in", code: "clocked_in" };
+  }
+  if (hasOut) {
+    return { label: "Clocked out", code: "clocked_out" };
+  }
+  if (st === "submitted" && !hasOut) {
+    return { label: "Missing clock-out", code: "missing_out" };
+  }
+  return { label: "Missing clock-out", code: "missing_out" };
+}
+
 const COMPANY_TIME_ZONE_OPTIONS = [
   "America/Toronto",
   "America/Vancouver",
@@ -534,6 +582,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
 
   const [teamRows, setTeamRows] = useState([]);
+  const [teamDaySheets, setTeamDaySheets] = useState([]);
+  const [teamViewDate, setTeamViewDate] = useState("");
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState("");
   const [teamCopyOk, setTeamCopyOk] = useState(false);
@@ -545,7 +595,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [userCompany?.id, userCompany?.time_zone]);
 
   useEffect(() => {
-    if (activeTab !== "team" || !userCompany?.id || !authUser?.id) return;
+    if (!userCompany?.id) return;
+    setTeamViewDate(calendarDateKeyInTimeZone(new Date(), userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE));
+  }, [userCompany?.id]);
+
+  useEffect(() => {
+    if (activeTab !== "team" || !userCompany?.id || !authUser?.id || !teamViewDate) return;
     let cancelled = false;
     setTeamLoading(true);
     setTeamError("");
@@ -576,7 +631,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
           const p = profilesMap[m.user_id] || {};
           const profileFull = (p.full_name && String(p.full_name).trim()) || "";
           const profileEmailRaw = (p.email && String(p.email).trim()) || "";
-          const emailLine = profileEmailRaw || "Email not available";
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
           return {
             memberRowId: m.id,
@@ -586,14 +640,44 @@ const [uploadProgress, setUploadProgress] = useState(null);
             fullName: profileFull,
             profileEmailRaw,
             displayName: displayName || shortUserLabel(m.user_id),
-            emailLine,
           };
         });
-        if (!cancelled) setTeamRows(rows);
+
+        const dayStartIso = wallDateTimeToUtcIso(teamViewDate, "00:00:00", companyTimeZone);
+        const dayEndIso = wallDateTimeToUtcIso(teamViewDate, "23:59:59", companyTimeZone);
+        if (!dayStartIso || !dayEndIso) {
+          if (!cancelled) {
+            setTeamRows(rows);
+            setTeamDaySheets([]);
+          }
+          return;
+        }
+        let tsQuery = supabase
+          .from("timesheets")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .gte("clock_in", dayStartIso)
+          .lte("clock_in", dayEndIso)
+          .order("clock_in", { ascending: false });
+        if (!isAdmin) {
+          tsQuery = tsQuery.eq("user_id", authUser.id);
+        }
+        const { data: tsData, error: tsErr } = await tsQuery;
+        if (tsErr) throw tsErr;
+        const mappedTs = (tsData || []).map(mapTimesheetRowFromSupabase);
+        const dateFiltered = mappedTs.filter(
+          (r) => calendarDateKeyInTimeZone(r.clockIn, companyTimeZone) === teamViewDate
+        );
+
+        if (!cancelled) {
+          setTeamRows(rows);
+          setTeamDaySheets(dateFiltered);
+        }
       } catch (err) {
         if (!cancelled) {
           setTeamError(getErrorMessage(err));
           setTeamRows([]);
+          setTeamDaySheets([]);
         }
       } finally {
         if (!cancelled) setTeamLoading(false);
@@ -602,7 +686,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userCompany?.id, authUser?.id]);
+  }, [activeTab, userCompany?.id, authUser?.id, teamViewDate, companyTimeZone, isAdmin]);
 
   const teamProfileFullNameByUserId = useMemo(() => {
     const m = {};
@@ -3208,8 +3292,19 @@ const handlePhotoCapture = async (event) => {
                 <div>
                   <h2 className="font-bold text-lg">Team</h2>
                   <p className="text-xs text-slate-500">
-                    {isAdmin ? "Company members" : "Your profile in this company"}
+                    {isAdmin ? "Company members and daily attendance" : "Your attendance for the selected date"}
                   </p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Times use {companyTimeZone}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-700">View date</label>
+                  <input
+                    type="date"
+                    className="w-full rounded-xl border bg-white px-2 py-2 text-sm"
+                    value={teamViewDate}
+                    onChange={(e) => setTeamViewDate(e.target.value)}
+                    disabled={!teamViewDate}
+                  />
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-3 space-y-2">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wide">Join code</p>
@@ -3244,32 +3339,80 @@ const handlePhotoCapture = async (event) => {
                     {teamRoleFeedback.text}
                   </div>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {(isAdmin ? teamRows : teamRows.filter((r) => String(r.userId) === String(authUser?.id))).map((row) => {
-                    const joinedLabel =
-                      row.joinedAt != null && row.joinedAt !== ""
-                        ? formatDate(parseStoredInstant(row.joinedAt), companyTimeZone)
-                        : "—";
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
                     const showRoleSelect = isAdmin && !isOwnerMember;
+                    const userDayRows = teamDaySheets.filter((t) => String(t.userId) === String(row.userId));
+                    const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
+                    const att = teamAttendanceStatusForRecord(rep, {
+                      selectedDateKey: teamViewDate,
+                      companyTimeZone,
+                      now,
+                      authUser,
+                      visibleCurrentShift,
+                    });
+                    const statusBadgeClass =
+                      att.code === "clocked_in"
+                        ? "bg-green-50 text-green-800 border border-green-100"
+                        : att.code === "clocked_out"
+                          ? "bg-slate-100 text-slate-800 border border-slate-200"
+                          : att.code === "missing_out"
+                            ? "bg-amber-50 text-amber-900 border border-amber-100"
+                            : "bg-slate-50 text-slate-600 border border-slate-100";
+                    const inDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
+                    const outDisp = rep?.clockOut ? formatTime(rep.clockOut, companyTimeZone) : "—";
+                    const projectDisp = rep?.project ? String(rep.project) : "—";
+                    const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+                    const labourDisp = rep ? formatMoney(getLabourCost(rep)) : "—";
                     return (
-                      <div key={row.memberRowId} className="rounded-2xl border bg-white p-3 space-y-1.5">
-                        <div className="flex justify-between gap-2 items-start">
-                          <p className="font-semibold text-sm leading-snug">{row.displayName}</p>
+                      <div key={row.memberRowId} className="rounded-xl border border-slate-200 bg-white p-2 space-y-1">
+                        <div className="flex justify-between gap-2 items-start min-w-0">
+                          <p className="font-semibold text-[13px] leading-tight text-slate-900 min-w-0 break-words pr-1">
+                            {row.displayName}
+                          </p>
                           {!showRoleSelect && (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize">
+                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize leading-none">
                               {row.role}
                             </span>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-600 break-all">Email: {row.emailLine}</p>
-                        <p className="text-[11px] text-slate-500">Joined: {joinedLabel}</p>
+                        <p className="text-[11px] text-slate-600 leading-tight">
+                          <span className="text-slate-500">Status:</span>{" "}
+                          <span className={`inline rounded px-1.5 py-0.5 font-semibold ${statusBadgeClass}`}>
+                            {att.label}
+                          </span>
+                        </p>
+                        <div className="flex justify-between gap-2 text-[11px] leading-tight">
+                          <div className="min-w-0 shrink">
+                            <span className="text-slate-500">In:</span>{" "}
+                            <span className="font-semibold text-slate-900 tabular-nums">{inDisp}</span>
+                          </div>
+                          <div className="min-w-0 shrink text-right">
+                            <span className="text-slate-500">Out:</span>{" "}
+                            <span className="font-semibold text-slate-900 tabular-nums">{outDisp}</span>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-700 leading-snug break-words">
+                          <span className="text-slate-500">Proj:</span>{" "}
+                          <span className="font-semibold text-slate-900">{projectDisp}</span>
+                          <span className="text-slate-300 px-1" aria-hidden="true">
+                            |
+                          </span>
+                          <span className="text-slate-500">Cost:</span>{" "}
+                          <span className="font-semibold text-slate-900">{costDisp}</span>
+                          <span className="text-slate-300 px-1" aria-hidden="true">
+                            |
+                          </span>
+                          <span className="text-slate-500">Labour:</span>{" "}
+                          <span className="font-semibold text-slate-900 tabular-nums">{labourDisp}</span>
+                        </p>
                         {showRoleSelect && (
-                          <div className="pt-1 border-t border-slate-100 space-y-1">
-                            <label className="text-[10px] text-slate-500">Role</label>
+                          <div className="pt-1 mt-0.5 border-t border-slate-100">
+                            <label className="sr-only">Role</label>
                             <select
-                              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+                              className="w-full rounded-md border py-1 px-1.5 text-[11px] leading-tight"
                               value={rowRoleNorm === "supervisor" ? "supervisor" : "employee"}
                               disabled={teamRoleSavingId === String(row.memberRowId)}
                               onChange={(e) => void handleTeamMemberRoleChange(row, e.target.value)}
