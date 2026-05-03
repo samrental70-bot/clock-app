@@ -440,9 +440,72 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [settingsTzMessage, setSettingsTzMessage] = useState("");
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
 
+  const [teamRows, setTeamRows] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState("");
+  const [teamCopyOk, setTeamCopyOk] = useState(false);
+
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
   }, [userCompany?.id, userCompany?.time_zone]);
+
+  useEffect(() => {
+    if (activeTab !== "team" || !userCompany?.id || !authUser?.id) return;
+    let cancelled = false;
+    setTeamLoading(true);
+    setTeamError("");
+    (async () => {
+      try {
+        const { data: members, error: mErr } = await supabase
+          .from("company_members")
+          .select("id, user_id, role, created_at")
+          .eq("company_id", userCompany.id)
+          .order("created_at", { ascending: true });
+        if (mErr) throw mErr;
+        const list = members || [];
+        const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
+        const profilesMap = {};
+        if (ids.length > 0) {
+          let { data: profs, error: pErr } = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
+          if (pErr) {
+            const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
+            if (retry.error) throw retry.error;
+            profs = retry.data || [];
+          }
+          (profs || []).forEach((p) => {
+            profilesMap[p.id] = p;
+          });
+        }
+        const rows = list.map((m) => {
+          const p = profilesMap[m.user_id] || {};
+          const profileEmail = (p.email && String(p.email).trim()) || "";
+          const email =
+            profileEmail ||
+            (String(m.user_id) === String(authUser.id) ? authUser.email || "" : "") ||
+            "";
+          return {
+            memberRowId: m.id,
+            userId: m.user_id,
+            role: (m.role || "employee").trim(),
+            joinedAt: m.created_at ?? null,
+            fullName: (p.full_name && String(p.full_name).trim()) || "",
+            emailDisplay: email || "—",
+          };
+        });
+        if (!cancelled) setTeamRows(rows);
+      } catch (err) {
+        if (!cancelled) {
+          setTeamError(getErrorMessage(err));
+          setTeamRows([]);
+        }
+      } finally {
+        if (!cancelled) setTeamLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, userCompany?.id, authUser?.id, authUser?.email]);
 
   const fetchTimesheetsFromSupabase = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -1934,6 +1997,18 @@ const handlePhotoCapture = async (event) => {
     setIsMenuOpen(false);
   };
 
+  const handleCopyTeamJoinCode = async () => {
+    const code = userCompany?.code;
+    if (!code) return;
+    try {
+      await navigator.clipboard.writeText(code);
+      setTeamCopyOk(true);
+      setTimeout(() => setTeamCopyOk(false), 2000);
+    } catch {
+      alert("Could not copy to clipboard.");
+    }
+  };
+
   const handleSaveCompanyTimeZone = async (event) => {
     event.preventDefault();
     if (!isAdmin || !userCompany?.id) return;
@@ -2914,6 +2989,64 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "team" && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 sm:p-5 space-y-3">
+                <div>
+                  <h2 className="font-bold text-lg">Team</h2>
+                  <p className="text-xs text-slate-500">
+                    {isAdmin ? "Company members" : "Your profile in this company"}
+                  </p>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-3 space-y-2">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Join code</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 min-w-0 rounded-lg bg-white border px-2 py-1.5 text-sm font-mono tracking-wide truncate">
+                      {userCompany?.code || "—"}
+                    </code>
+                    <Button
+                      type="button"
+                      className="rounded-xl h-9 px-3 text-xs font-semibold shrink-0"
+                      onClick={() => void handleCopyTeamJoinCode()}
+                      disabled={!userCompany?.code}
+                    >
+                      {teamCopyOk ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </div>
+                {teamLoading && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading team…</div>
+                )}
+                {teamError && (
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">{teamError}</div>
+                )}
+                <div className="space-y-2">
+                  {(isAdmin ? teamRows : teamRows.filter((r) => String(r.userId) === String(authUser?.id))).map((row) => {
+                    const joinedLabel =
+                      row.joinedAt != null && row.joinedAt !== ""
+                        ? formatDate(parseStoredInstant(row.joinedAt), companyTimeZone)
+                        : "—";
+                    return (
+                      <div key={row.memberRowId} className="rounded-2xl border bg-white p-3 space-y-1">
+                        <div className="flex justify-between gap-2 items-start">
+                          <p className="font-semibold text-sm leading-snug">{row.fullName || "—"}</p>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize">
+                            {row.role}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 break-all">Email: {row.emailDisplay}</p>
+                        <p className="text-[11px] text-slate-500">Joined: {joinedLabel}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+                {!teamLoading && !teamError && (isAdmin ? teamRows.length === 0 : !teamRows.some((r) => String(r.userId) === String(authUser?.id))) && (
+                  <p className="text-xs text-slate-500 text-center py-3">No members found.</p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "settings" && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5 space-y-4">
@@ -2986,6 +3119,7 @@ const handlePhotoCapture = async (event) => {
                 <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
+                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("team")}>👥 Team</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-semibold" onClick={handleLogout}>🚪 Logout</button>
                 {isAdmin && <><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("quotations")}>📝 Quotations</button><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("reports")}>📊 Reports</button></>}
               </div>
