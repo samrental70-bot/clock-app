@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 
 const Card = ({ children, className }) => (
@@ -191,7 +191,6 @@ function withTimeout(promise, ms = 10000, message = "Operation timed out") {
 
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState(1);
   const [projectId, setProjectId] = useState(adminProjects[0].id);
   const [costCenter, setCostCenter] = useState(adminProjects[0].costCenters[0]);
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
@@ -223,14 +222,36 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
   const [authUser, setAuthUser] = useState(null);
   const [authRole, setAuthRole] = useState(null);
+  const [profileFullName, setProfileFullName] = useState("");
+  const [startupError, setStartupError] = useState("");
+  const hasSuccessfulLoginRef = useRef(false);
+  const loginClickedRef = useRef(false);
+  const [loginDebug, setLoginDebug] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  const selectedEmployee = employees.find((employee) => employee.id === selectedEmployeeId) || employees[0];
+  // Auth / onboarding flow
+  const [authStep, setAuthStep] = useState("login"); // login | signup | company_choice | create_company | join_company | company_created
+  const [signupName, setSignupName] = useState("");
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupLoading, setSignupLoading] = useState(false);
+  const [signupError, setSignupError] = useState("");
+
+  const [companyLoading, setCompanyLoading] = useState(false);
+  const [companyError, setCompanyError] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [joinCompanyCode, setJoinCompanyCode] = useState("");
+  const [createdCompanyCode, setCreatedCompanyCode] = useState("");
+  const [userCompany, setUserCompany] = useState(null); // { id, name, code }
+  const [userCompanyRole, setUserCompanyRole] = useState(null); // owner | supervisor | employee
+  const [companyChecked, setCompanyChecked] = useState(false);
+
+  const employeeDisplayName = (profileFullName || authUser?.email || "").trim();
   const selectedProject = adminProjects.find((project) => project.id === projectId) || adminProjects[0];
-  const isAdmin = selectedEmployee.role === "Admin";
+  const isAdmin = userCompanyRole === "owner" || userCompanyRole === "supervisor";
 
   const getWorkedMinutes = (record) => {
     const total = minutesBetween(record.clockIn, record.clockOut || new Date());
@@ -244,8 +265,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return hours * rate;
   };
 
-  const visibleRecords = isAdmin ? records : records.filter((record) => record.employeeId === selectedEmployee.id);
-  const visibleCurrentShift = currentShift && (isAdmin || currentShift.employeeId === selectedEmployee.id) ? currentShift : null;
+  const visibleRecords = isAdmin
+    ? records
+    : records.filter((record) => (record.userId || record.user_id || record.employeeId) === authUser?.id);
+  const visibleCurrentShift = currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
+    ? currentShift
+    : null;
 
   const filterRecordsByRange = () => {
     const nowDate = new Date();
@@ -366,108 +391,474 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
+    const ensureProfile = async (user, fullName) => {
+      if (!user) return;
+      const payload = { id: user.id };
+      if (fullName) payload.full_name = fullName;
+      // Leave role as-is if it already exists; default to employee for new users.
+      payload.role = "employee";
+      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+      if (error) throw error;
+    };
 
-const loadSession = async () => {
-  try {
-    console.log("Checking session...");
-
-    const { data, error } = await supabase.auth.getSession();
-
-    if (error) {
-      console.log("Session error:", error);
-    }
-
-    const user = data?.session?.user || null;
-
-    console.log("User:", user);
-
-    setAuthUser(user);
-
-    if (user) {
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profileError) {
-        console.log("Profile error:", profileError);
+    const loadCompanyForUser = async (user) => {
+      if (!user) {
+        setUserCompany(null);
+        setUserCompanyRole(null);
+        setCompanyChecked(true);
+        return;
       }
 
-      setAuthRole(profile?.role || "employee");
-    }
+      setCompanyChecked(false);
+      try {
+        const { data: member, error: memberError } = await withTimeout(
+          supabase
+            .from("company_members")
+            .select("company_id, role")
+            .eq("user_id", user.id)
+            .limit(1)
+            .maybeSingle(),
+          12000,
+          "Company lookup timed out"
+        );
 
-  } catch (err) {
-    console.log("CRITICAL AUTH ERROR:", err);
-  } finally {
-    console.log("Auth finished");
-    setAuthLoading(false); // 🔥 ALWAYS RUN
-  }
-};
+        if (memberError) throw memberError;
+
+        if (!member?.company_id) {
+          setUserCompany(null);
+          setUserCompanyRole(null);
+          setCompanyChecked(true);
+          return;
+        }
+
+        const { data: company, error: companyError } = await withTimeout(
+          supabase
+            .from("companies")
+            .select("id, name, code")
+            .eq("id", member.company_id)
+            .single(),
+          12000,
+          "Company fetch timed out"
+        );
+
+        if (companyError) throw companyError;
+
+        setUserCompany(company || null);
+        setUserCompanyRole(member.role || null);
+        setCompanyChecked(true);
+      } catch (err) {
+        console.log("Company load error:", err);
+        setStartupError(`Company load failed: ${getErrorMessage(err)}`);
+        setUserCompany(null);
+        setUserCompanyRole(null);
+        setCompanyChecked(true);
+      }
+    };
+
+    const loadRoleForUser = async (user) => {
+      if (!user) {
+        setAuthRole(null);
+        setProfileFullName("");
+        return;
+      }
+      try {
+        const { data: profile, error: profileError } = await withTimeout(
+          supabase
+            .from("profiles")
+            .select("role, full_name")
+            .eq("id", user.id)
+            .single(),
+          12000,
+          "Profile fetch timed out"
+        );
+
+        if (profileError) throw profileError;
+
+        setAuthRole(profile?.role || "employee");
+        setProfileFullName(profile?.full_name || "");
+      } catch (err) {
+        console.log("Profile load error:", err);
+        setStartupError(`Profile load failed: ${getErrorMessage(err)}`);
+        setAuthRole("employee");
+        setProfileFullName("");
+      }
+    };
+
+    const loadUserContext = async (user) => {
+      await loadRoleForUser(user);
+      await loadCompanyForUser(user);
+    };
+
+    const loadSession = async () => {
+      setAuthLoading(true);
+      setStartupError("");
+      console.log("Checking session...");
+
+      // Do NOT block app startup on getSession().
+      // Default: show login screen immediately, and only promote to logged-in state if session is found.
+      if (!hasSuccessfulLoginRef.current && !loginClickedRef.current) {
+        setAuthUser(null);
+        setAuthRole(null);
+        setProfileFullName("");
+        setUserCompany(null);
+        setUserCompanyRole(null);
+        setCompanyChecked(true);
+        setAuthStep("login");
+      }
+
+      (async () => {
+        try {
+          const { data, error } = await supabase.auth.getSession();
+          if (error) {
+            // Session check failing should just keep the login screen (no critical errors).
+            console.log("Session error:", error);
+            return;
+          }
+
+          // Don't let startup session check override an interactive login attempt/success.
+          if (hasSuccessfulLoginRef.current || loginClickedRef.current) return;
+
+          const user = data?.session?.user || null;
+          console.log("User:", user);
+
+          if (!user) return;
+
+          setAuthLoading(true);
+          setAuthUser(user);
+          await ensureProfile(user);
+          await loadUserContext(user);
+          setAuthStep("login");
+        } catch (err) {
+          // Never treat getSession failure as critical; just stay on login.
+          console.log("Session check failed:", err);
+        } finally {
+          setAuthLoading(false);
+        }
+      })();
+
+      // End the initial blocking spinner immediately.
+      setAuthLoading(false);
+    };
     loadSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const user = session?.user || null;
-      setAuthUser(user);
+      setAuthLoading(true);
+      setStartupError("");
+      try {
+        const user = session?.user || null;
+        setAuthUser(user);
 
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
-        setAuthRole(profile?.role || "employee");
-      } else {
-        setAuthRole(null);
-        setCurrentShift(null);
+        if (user) {
+          await ensureProfile(user);
+          await loadUserContext(user);
+        } else {
+          setAuthRole(null);
+          setProfileFullName("");
+          setCurrentShift(null);
+          setUserCompany(null);
+          setUserCompanyRole(null);
+          setCompanyChecked(true);
+          setAuthStep("login");
+        }
+      } catch (err) {
+        setStartupError(`Auth change handling failed: ${getErrorMessage(err)}`);
+        setCompanyChecked(true);
+      } finally {
+        setAuthLoading(false);
       }
-
-      setAuthLoading(false);
     });
 
     return () => {
-      isMounted = false;
       listener?.subscription?.unsubscribe();
     };
   }, []);
 
   const handleLogin = async (event) => {
     event.preventDefault();
+    console.log("LOGIN CLICKED");
+    loginClickedRef.current = true;
     setLoginLoading(true);
     setLoginError("");
+    setCompanyError("");
+    setStartupError("");
+    setLoginDebug(`Clicked. Email: ${loginEmail}`);
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: loginEmail.trim(),
-      password: loginPassword,
-    });
+    try {
+      console.log("LOGIN ATTEMPT", loginEmail.trim());
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
 
-    if (error) {
-      setLoginError(error.message);
-      setLoginLoading(false);
-      return;
-    }
-
-    const user = data?.user || null;
-    setAuthUser(user);
-
-    if (user) {
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("role")
-        .eq("id", user.id)
-        .single();
-
-      if (profileError) {
-        setLoginError(profileError.message);
-        setLoginLoading(false);
+      if (error) {
+        console.error("LOGIN ERROR", error);
+        setLoginError(error.message);
+        setLoginDebug(`Login error: ${error.message}`);
         return;
       }
 
-      setAuthRole(profile?.role || "employee");
-    }
+      // Requirement: treat signInWithPassword success as authoritative.
+      const user = data.user;
+      hasSuccessfulLoginRef.current = true;
 
-    setLoginLoading(false);
+      console.log("LOGIN SUCCESS user id", user.id);
+      setLoginDebug(`Login success. User: ${user.id}`);
+
+      setAuthUser(user);
+      setCompanyChecked(false);
+
+      // Load profile (name/role) and company membership directly (do NOT rely on getSession()).
+      try {
+        console.log("COMPANY CHECK START");
+
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role, full_name")
+          .eq("id", user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        setAuthRole(profile?.role || "employee");
+        setProfileFullName(profile?.full_name || "");
+
+        const { data: member, error: memberError } = await supabase
+          .from("company_members")
+          .select("company_id, role")
+          .eq("user_id", user.id)
+          .limit(1)
+          .maybeSingle();
+
+        if (memberError) throw memberError;
+
+        if (member?.company_id) {
+          const { data: company, error: companyError } = await supabase
+            .from("companies")
+            .select("id, name, code")
+            .eq("id", member.company_id)
+            .single();
+
+          if (companyError) throw companyError;
+
+          setUserCompany(company || null);
+          setUserCompanyRole(member.role || null);
+          console.log("COMPANY CHECK RESULT:", { hasCompany: true, companyId: company?.id, role: member.role });
+          setAuthStep("login"); // proceed into main app
+        } else {
+          setUserCompany(null);
+          setUserCompanyRole(null);
+          console.log("COMPANY CHECK RESULT:", { hasCompany: false });
+          setAuthStep("company_choice");
+        }
+      } catch (err) {
+        console.log("COMPANY CHECK ERROR:", err);
+        setCompanyError(`Company check failed: ${getErrorMessage(err)}`);
+        setAuthStep("company_choice");
+      } finally {
+        setCompanyChecked(true);
+      }
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleSignup = async (event) => {
+    event.preventDefault();
+    setSignupLoading(true);
+    setSignupError("");
+    setCompanyError("");
+
+    try {
+      const email = signupEmail.trim();
+      const password = signupPassword;
+      const fullName = signupName.trim();
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (signUpError) {
+        setSignupError(signUpError.message);
+        setSignupLoading(false);
+        return;
+      }
+
+      // Depending on email confirmation settings, session may or may not exist.
+      let user = signUpData?.user || null;
+
+      if (!user) {
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+        if (signInError) {
+          setSignupError(signInError.message);
+          setSignupLoading(false);
+          return;
+        }
+        user = signInData?.user || null;
+      }
+
+      setAuthUser(user);
+
+      if (user) {
+        await supabase.from("profiles").upsert(
+          {
+            id: user.id,
+            full_name: fullName || null,
+            role: "employee",
+          },
+          { onConflict: "id" }
+        );
+
+        setAuthRole("employee");
+        setUserCompany(null);
+        setUserCompanyRole(null);
+        setCompanyChecked(true);
+        setAuthStep("company_choice");
+      } else {
+        setSignupError("Signup created, but no user session. Check email confirmation settings.");
+      }
+    } catch (err) {
+      setSignupError(getErrorMessage(err));
+    } finally {
+      setSignupLoading(false);
+    }
+  };
+
+  const generateCompanyCode = () => {
+    const num = Math.floor(100000 + Math.random() * 900000);
+    return `ORP-${num}`;
+  };
+
+  const handleCreateCompany = async (event) => {
+    event.preventDefault();
+    if (!authUser) return;
+
+    setCompanyLoading(true);
+    setCompanyError("");
+    setCreatedCompanyCode("");
+
+    try {
+      // RLS requires an authenticated session (auth.uid()) and created_by matching that uid.
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      const uid = userData?.user?.id || null;
+      if (userError || !uid) {
+        setCompanyError("You are not fully authenticated yet. Please logout and login again, then create the company.");
+        setCompanyLoading(false);
+        return;
+      }
+
+      const name = companyName.trim();
+      if (!name) {
+        setCompanyError("Company name is required.");
+        setCompanyLoading(false);
+        return;
+      }
+
+      let created = null;
+      let lastError = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const code = generateCompanyCode();
+        const { data, error } = await supabase
+          .from("companies")
+          .insert([{ name, code, created_by: uid }])
+          .select("id, name, code")
+          .single();
+
+        if (!error && data) {
+          created = data;
+          break;
+        }
+        lastError = error;
+      }
+
+      if (!created) {
+        setCompanyError(lastError?.message || "Failed to create company.");
+        setCompanyLoading(false);
+        return;
+      }
+
+      const { error: memberError } = await supabase.from("company_members").insert([
+        { company_id: created.id, user_id: uid, role: "owner" },
+      ]);
+
+      if (memberError) {
+        setCompanyError(memberError.message);
+        setCompanyLoading(false);
+        return;
+      }
+
+      await supabase.from("profiles").upsert(
+        { id: uid, role: "supervisor" },
+        { onConflict: "id" }
+      );
+      setAuthRole("supervisor");
+
+      setUserCompany(created);
+      setUserCompanyRole("owner");
+      setCreatedCompanyCode(created.code);
+      setAuthStep("company_created");
+    } catch (err) {
+      setCompanyError(getErrorMessage(err));
+    } finally {
+      setCompanyLoading(false);
+    }
+  };
+
+  const handleJoinCompany = async (event) => {
+    event.preventDefault();
+    if (!authUser) return;
+
+    setCompanyLoading(true);
+    setCompanyError("");
+
+    try {
+      const code = joinCompanyCode.trim().toUpperCase();
+      if (!code) {
+        setCompanyError("Company code is required.");
+        setCompanyLoading(false);
+        return;
+      }
+
+      const { data: company, error: companyError } = await supabase
+        .from("companies")
+        .select("id, name, code")
+        .eq("code", code)
+        .single();
+
+      if (companyError) {
+        setCompanyError(companyError.message);
+        setCompanyLoading(false);
+        return;
+      }
+
+      const { error: memberError } = await supabase.from("company_members").insert([
+        { company_id: company.id, user_id: authUser.id, role: "employee" },
+      ]);
+
+      if (memberError) {
+        setCompanyError(memberError.message);
+        setCompanyLoading(false);
+        return;
+      }
+
+      await supabase.from("profiles").upsert(
+        { id: authUser.id, role: "employee" },
+        { onConflict: "id" }
+      );
+      setAuthRole("employee");
+
+      setUserCompany(company);
+      setUserCompanyRole("employee");
+      setCompanyChecked(true);
+      setAuthStep("login");
+    } catch (err) {
+      setCompanyError(getErrorMessage(err));
+    } finally {
+      setCompanyLoading(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -555,9 +946,12 @@ const handleClockIn = async () => {
   const clockInTime = new Date().toISOString();
 
   const newShift = {
-    employeeId: selectedEmployee.id,
-    employee: selectedEmployee.name,
-    hourlyRate: selectedEmployee.hourlyRate,
+    userId: authUser?.id || null,
+    employee: employeeDisplayName || authUser?.email || "Employee",
+    employeeEmail: authUser?.email || null,
+    companyId: userCompany?.id || null,
+    companyName: userCompany?.name || null,
+    hourlyRate: 0,
     project: selectedProject.name,
     projectId: selectedProject.id,
     costCenter,
@@ -584,22 +978,53 @@ const handleClockIn = async () => {
 
   const { data, error } = await supabase
     .from("timesheets")
-    .insert([
-      {
-        user_id: authUser.id,
-        employee_name: selectedEmployee.name,
-        project_name: selectedProject.name,
-        hourly_rate: selectedEmployee.hourlyRate,
-        cost_centre: costCenter,
-        clock_in: clockInTime,
-        status: "Active",
-        clock_in_latitude: null,
-        clock_in_longitude: null,
-      },
-    ])
+    .insert([{
+      user_id: authUser.id,
+      employee_email: authUser.email || null,
+      employee_name: employeeDisplayName || authUser.email || null,
+      company_id: userCompany?.id || null,
+      company_name: userCompany?.name || null,
+      project_name: selectedProject.name,
+      hourly_rate: 0,
+      cost_centre: costCenter,
+      clock_in: clockInTime,
+      status: "Active",
+      clock_in_latitude: null,
+      clock_in_longitude: null,
+    }])
     .select();
 
   if (error) {
+    // Backward compatibility if DB columns aren't added yet
+    const msg = error?.message || "";
+    const missingColumn = msg.includes("column") && (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
+    if (missingColumn) {
+      const { data: legacyData, error: legacyError } = await supabase
+        .from("timesheets")
+        .insert([{
+          user_id: authUser.id,
+          employee_name: employeeDisplayName || authUser.email || null,
+          project_name: selectedProject.name,
+          hourly_rate: 0,
+          cost_centre: costCenter,
+          clock_in: clockInTime,
+          status: "Active",
+          clock_in_latitude: null,
+          clock_in_longitude: null,
+        }])
+        .select();
+
+      if (legacyError) {
+        console.log("Supabase clock-in error:", legacyError);
+        alert("Clock-in saved locally, but database save failed.");
+        return;
+      }
+
+      setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
+      setLocationStatus("Clock-in saved.");
+      return;
+    }
+
     console.log("Supabase clock-in error:", error);
     alert("Clock-in saved locally, but database save failed.");
     return;
@@ -987,6 +1412,91 @@ const handlePhotoCapture = async (event) => {
   }
 
   if (!authUser) {
+    if (authStep === "signup") {
+      return (
+        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="bg-white border-b p-5">
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
+                  <p className="text-sm text-slate-600">Create Account</p>
+                </div>
+              </div>
+            </div>
+
+            <form onSubmit={handleSignup} className="p-5 space-y-4">
+              <div>
+                <h2 className="text-xl font-bold">Sign up</h2>
+                <p className="text-sm text-slate-500 mt-1">Create an account to start using the clock app.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Name</label>
+                <input
+                  type="text"
+                  className="w-full rounded-2xl border bg-white p-3 text-sm"
+                  value={signupName}
+                  onChange={(event) => setSignupName(event.target.value)}
+                  placeholder="Your name"
+                  autoComplete="name"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Email</label>
+                <input
+                  type="email"
+                  className="w-full rounded-2xl border bg-white p-3 text-sm"
+                  value={signupEmail}
+                  onChange={(event) => setSignupEmail(event.target.value)}
+                  placeholder="email@company.com"
+                  autoComplete="email"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Password</label>
+                <input
+                  type="password"
+                  className="w-full rounded-2xl border bg-white p-3 text-sm"
+                  value={signupPassword}
+                  onChange={(event) => setSignupPassword(event.target.value)}
+                  placeholder="Password"
+                  autoComplete="new-password"
+                  required
+                />
+              </div>
+
+              {signupError && (
+                <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+                  {signupError}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full rounded-2xl h-14 text-base font-bold" disabled={signupLoading}>
+                {signupLoading ? "Creating account..." : "Create account"}
+              </Button>
+
+              <button
+                type="button"
+                className="w-full text-sm text-slate-600 underline"
+                onClick={() => {
+                  setSignupError("");
+                  setAuthStep("login");
+                }}
+              >
+                Back to login
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
         <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
@@ -1041,7 +1551,213 @@ const handlePhotoCapture = async (event) => {
             <Button type="submit" className="w-full rounded-2xl h-14 text-base font-bold" disabled={loginLoading}>
               {loginLoading ? "Logging in..." : "Login"}
             </Button>
+
+            {loginDebug && (
+              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-3 text-xs text-slate-700 whitespace-pre-wrap">
+                Debug: {loginDebug}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="w-full text-sm text-slate-600 underline"
+              onClick={() => {
+                setLoginError("");
+                setAuthStep("signup");
+              }}
+            >
+              Create new account
+            </button>
           </form>
+        </div>
+      </div>
+    );
+  }
+
+  // Logged in, but still checking company membership.
+  if (!companyChecked) {
+    return (
+      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
+        <div className="text-center">
+          <div className="text-4xl mb-3">⏱️</div>
+          <p className="text-sm text-slate-300">Loading your workspace...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Logged in, but not in a company yet → onboarding
+  if (!userCompany) {
+    if (authStep === "create_company") {
+      return (
+        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="bg-white border-b p-5">
+              <h1 className="text-2xl font-bold tracking-tight">Create Company</h1>
+              <p className="text-sm text-slate-600 mt-1">You’ll get a company code to share with employees.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
+            </div>
+
+            <form onSubmit={handleCreateCompany} className="p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Company name</label>
+                <input
+                  type="text"
+                  className="w-full rounded-2xl border bg-white p-3 text-sm"
+                  value={companyName}
+                  onChange={(event) => setCompanyName(event.target.value)}
+                  placeholder="Example: Ottawa Renovation Pro LTD"
+                  required
+                />
+              </div>
+
+              {companyError && (
+                <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+                  {companyError}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full rounded-2xl h-14 text-base font-bold" disabled={companyLoading}>
+                {companyLoading ? "Creating company..." : "Create company"}
+              </Button>
+
+              <button
+                type="button"
+                className="w-full text-sm text-slate-600 underline"
+                onClick={() => {
+                  setCompanyError("");
+                  setAuthStep("company_choice");
+                }}
+              >
+                Back
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    if (authStep === "join_company") {
+      return (
+        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="bg-white border-b p-5">
+              <h1 className="text-2xl font-bold tracking-tight">Join Company</h1>
+              <p className="text-sm text-slate-600 mt-1">Enter the company code your supervisor shared.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
+            </div>
+
+            <form onSubmit={handleJoinCompany} className="p-5 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Company code</label>
+                <input
+                  type="text"
+                  className="w-full rounded-2xl border bg-white p-3 text-sm uppercase"
+                  value={joinCompanyCode}
+                  onChange={(event) => setJoinCompanyCode(event.target.value)}
+                  placeholder="ORP-123456"
+                  required
+                />
+              </div>
+
+              {companyError && (
+                <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+                  {companyError}
+                </div>
+              )}
+
+              <Button type="submit" className="w-full rounded-2xl h-14 text-base font-bold" disabled={companyLoading}>
+                {companyLoading ? "Joining..." : "Join company"}
+              </Button>
+
+              <button
+                type="button"
+                className="w-full text-sm text-slate-600 underline"
+                onClick={() => {
+                  setCompanyError("");
+                  setAuthStep("company_choice");
+                }}
+              >
+                Back
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    }
+
+    if (authStep === "company_created" && createdCompanyCode) {
+      return (
+        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+            <div className="bg-white border-b p-5">
+              <h1 className="text-2xl font-bold tracking-tight">Company Created</h1>
+              <p className="text-sm text-slate-600 mt-1">Share this code with employees so they can join.</p>
+              <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="rounded-3xl border bg-white p-4 text-center">
+                <p className="text-xs text-slate-500">Company code</p>
+                <p className="text-3xl font-black tracking-widest mt-1">{createdCompanyCode}</p>
+              </div>
+
+              <Button
+                className="w-full rounded-2xl h-14 text-base font-bold"
+                onClick={async () => {
+                  await navigator.clipboard?.writeText(createdCompanyCode).catch(() => {});
+                  alert("Company code copied (or ready to copy).");
+                }}
+              >
+                Copy code
+              </Button>
+
+              <Button
+                className="w-full rounded-2xl h-14 text-base font-bold"
+                onClick={() => {
+                  setAuthStep("login");
+                }}
+              >
+                Continue to Clock App
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Default onboarding choice
+    return (
+      <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
+          <div className="bg-white border-b p-5">
+            <h1 className="text-2xl font-bold tracking-tight">Welcome</h1>
+            <p className="text-sm text-slate-600 mt-1">Choose what you want to do next.</p>
+            <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
+          </div>
+
+          <div className="p-5 space-y-3">
+            {companyError && (
+              <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+                {companyError}
+              </div>
+            )}
+
+            <Button className="w-full rounded-2xl h-14 text-base font-bold" onClick={() => setAuthStep("create_company")}>
+              Create new company
+            </Button>
+            <Button className="w-full rounded-2xl h-14 text-base font-bold" onClick={() => setAuthStep("join_company")}>
+              Join existing company
+            </Button>
+
+            <button
+              type="button"
+              className="w-full text-sm text-slate-600 underline"
+              onClick={() => handleLogout()}
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -1057,8 +1773,9 @@ const handlePhotoCapture = async (event) => {
               <div className="flex-1">
                 <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
                 <p className="text-sm text-slate-600 mt-1">{formatDate(new Date())}</p>
-                <p className="text-xs text-slate-500 mt-1">Logged in as {selectedEmployee.name} • {selectedEmployee.role}</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">Account: {authUser.email} • {authRole || "employee"}</p>
+                <p className="text-xs text-slate-500 mt-1">Logged in as: {employeeDisplayName || authUser.email}</p>
+                <p className="text-xs text-slate-500 mt-0.5">Company: {userCompany?.name || "—"}</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
               </div>
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
             </div>
@@ -1089,15 +1806,8 @@ const handlePhotoCapture = async (event) => {
                   <div className="h-11 w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-xl">👷</div>
                   <div>
                     <h2 className="font-bold text-lg">Start Shift</h2>
-                    <p className="text-xs text-slate-500">Choose worker, project and cost centre</p>
+                    <p className="text-xs text-slate-500">Choose project and cost centre</p>
                   </div>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Logged In User</label>
-                  <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={selectedEmployeeId} onChange={(event) => setSelectedEmployeeId(Number(event.target.value))}>
-                    {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}
-                  </select>
                 </div>
 
                 <div className="space-y-2">
@@ -1310,7 +2020,12 @@ const handlePhotoCapture = async (event) => {
           <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setIsMenuOpen(false)}>
             <div className="h-full w-72 bg-white shadow-2xl p-4 space-y-4" onClick={(event) => event.stopPropagation()}>
               <div className="flex items-center justify-between">
-                <div><h2 className="font-bold text-lg">Menu</h2><p className="text-xs text-slate-500">{selectedEmployee.name} • {selectedEmployee.role}</p></div>
+                <div>
+                  <h2 className="font-bold text-lg">Menu</h2>
+                  <p className="text-xs text-slate-500">
+                    {employeeDisplayName || authUser.email} • {userCompanyRole || authRole || "employee"}
+                  </p>
+                </div>
                 <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
               </div>
               <div className="space-y-2">
