@@ -1886,7 +1886,13 @@ const handlePhotoCapture = async (event) => {
     if (!isAdmin) return;
     const rowId = record.supabaseTimesheetId ?? record.id;
     if (rowId == null) return;
-    if (!window.confirm("Delete this timesheet row permanently?")) return;
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this timesheet entry? This cannot be undone."
+      )
+    ) {
+      return;
+    }
     setDeletingTimesheetId(String(rowId));
     try {
       const { error } = await supabase.from("timesheets").delete().eq("id", rowId);
@@ -2136,14 +2142,14 @@ const handlePhotoCapture = async (event) => {
               Cancel
             </Button>
           </div>
-          {isAdmin && (
+          {isAdmin && !editTimesheetSaving && (
             <Button
               type="button"
-              className="w-full rounded-lg h-9 text-[11px] bg-red-50 text-red-700 border border-red-100 font-semibold"
-              disabled={editTimesheetSaving || busyDelete}
+              className="w-full rounded-xl h-9 text-[11px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
+              disabled={busyDelete}
               onClick={() => void handleDeleteTimesheetRecord(record)}
             >
-              {busyDelete ? "Deleting…" : "Delete row"}
+              {busyDelete ? "Deleting…" : "🗑 Delete"}
             </Button>
           )}
         </div>
@@ -2185,11 +2191,11 @@ const handlePhotoCapture = async (event) => {
               {isAdmin && (
                 <Button
                   type="button"
-                  className="rounded-xl h-9 text-[11px] bg-red-50 text-red-700 border border-red-100 font-semibold col-span-2 sm:col-span-1"
+                  className="rounded-xl h-9 text-[11px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 col-span-2 sm:col-span-1 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
                   disabled={busyDelete || busyClose}
                   onClick={() => void handleDeleteTimesheetRecord(record)}
                 >
-                  {busyDelete ? "…" : "Delete"}
+                  {busyDelete ? "Deleting…" : "🗑 Delete"}
                 </Button>
               )}
             </div>
