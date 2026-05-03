@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 
 const Card = ({ children, className }) => (
@@ -66,8 +66,58 @@ function safeRead(key, fallback) {
   }
 }
 
-function formatDate(date) {
+const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
+
+const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
+
+/** Parse Supabase/Postgres timestamps into a correct instant for Intl formatting. */
+function parseStoredInstant(value) {
+  if (value == null || value === "") return new Date(NaN);
+  if (value instanceof Date) return value;
+  const s = String(value).trim();
+  if (!s) return new Date(NaN);
+  if (/[zZ]$/.test(s)) return new Date(s);
+  if (/[+-]\d{2}:\d{2}$/.test(s) || /[+-]\d{4}$/.test(s) || /[+-]\d{2}$/.test(s)) return new Date(s);
+  const isoLike = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s);
+  if (isoLike) {
+    const normalized = s.replace(" ", "T");
+    if (/[zZ]$/.test(normalized) || /[+-]\d{2}:\d{2}$/.test(normalized) || /[+-]\d{4}$/.test(normalized)) {
+      return new Date(normalized);
+    }
+    return new Date(`${normalized}Z`);
+  }
+  return new Date(s);
+}
+
+function calendarDateKeyInTimeZone(dateOrString, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const d = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
+  if (Number.isNaN(d.getTime())) return "";
   return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+const COMPANY_TIME_ZONE_OPTIONS = [
+  "America/Toronto",
+  "America/Vancouver",
+  "America/Edmonton",
+  "America/Winnipeg",
+  "America/Halifax",
+  "America/St_Johns",
+  "Asia/Kolkata",
+  "UTC",
+];
+
+function formatDate(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -75,10 +125,13 @@ function formatDate(date) {
   }).format(date);
 }
 
-function formatDateParts(date) {
-  const d = new Date(date);
-  const day = new Intl.DateTimeFormat("en-CA", { weekday: "short" }).format(d);
+function formatDateParts(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
+  const d = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  if (Number.isNaN(d.getTime())) return { day: "—", fullDate: "—" };
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
   const fullDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -86,8 +139,12 @@ function formatDateParts(date) {
   return { day, fullDate };
 }
 
-function formatTime(date) {
+function formatTime(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
@@ -125,6 +182,41 @@ function formatLocation(location) {
 
 function getProjectFolderName(projectName) {
   return projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+/** Map Supabase `timesheets` row → UI record shape used by Timesheet tab / reports */
+function mapTimesheetRowFromSupabase(row) {
+  const projectName = row.project_name || "";
+  return {
+    id: row.id,
+    supabaseTimesheetId: row.id,
+    userId: row.user_id,
+    employee: row.employee_name || "",
+    employeeEmail: row.employee_email ?? null,
+    companyId: row.company_id ?? null,
+    companyName: row.company_name ?? null,
+    projectId: row.project_id ?? null,
+    project: projectName,
+    costCenter: row.cost_centre || "",
+    hourlyRate: Number(row.hourly_rate ?? 0),
+    clockIn: row.clock_in,
+    clockOut: row.clock_out ?? null,
+    status: row.status || "Submitted",
+    labour_cost: row.labour_cost != null ? Number(row.labour_cost) : undefined,
+    breakStart: null,
+    breakEnd: null,
+    employeeId: row.user_id,
+    projectFolder: projectName ? getProjectFolderName(projectName) : "",
+    clockInLocation: null,
+    clockOutLocation:
+      row.clock_out_latitude != null && row.clock_out_longitude != null
+        ? {
+            latitude: row.clock_out_latitude,
+            longitude: row.clock_out_longitude,
+            capturedAt: row.clock_out,
+          }
+        : null,
+  };
 }
 
 function getCurrentLocation() {
@@ -194,7 +286,10 @@ export default function EmployeeClockApp() {
   const [projectId, setProjectId] = useState(adminProjects[0].id);
   const [costCenter, setCostCenter] = useState(adminProjects[0].costCenters[0]);
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
-  const [records, setRecords] = useState(() => safeRead("orp_timesheet_records", sampleRecords));
+  const [records, setRecords] = useState(() => []);
+  const localTimesheetBackupRef = useRef(safeRead("orp_timesheet_records", sampleRecords));
+  const [timesheetsLoading, setTimesheetsLoading] = useState(false);
+  const [timesheetsError, setTimesheetsError] = useState("");
   const [projectPhotos, setProjectPhotos] = useState(() => safeRead("orp_project_photos", {}));
   const [projectReceipts, setProjectReceipts] = useState(() => safeRead("orp_project_receipts", {}));
   const [now, setNow] = useState(new Date());
@@ -256,6 +351,51 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   const employeeDisplayName = (profileFullName || authUser?.email || "").trim();
   const isAdmin = userCompanyRole === "owner" || userCompanyRole === "supervisor";
+  const companyTimeZone = userCompany?.time_zone || "America/Toronto";
+
+  const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
+  const [closingShiftId, setClosingShiftId] = useState(null);
+  const [settingsTzMessage, setSettingsTzMessage] = useState("");
+  const [settingsTzSaving, setSettingsTzSaving] = useState(false);
+
+  useEffect(() => {
+    setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
+  }, [userCompany?.id, userCompany?.time_zone]);
+
+  const fetchTimesheetsFromSupabase = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+
+    setTimesheetsLoading(true);
+    setTimesheetsError("");
+    try {
+      let query = supabase
+        .from("timesheets")
+        .select("*")
+        .eq("company_id", userCompany.id)
+        .order("clock_in", { ascending: false });
+
+      if (userCompanyRole === "employee") {
+        query = query.eq("user_id", authUser.id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+
+      const mapped = (data || []).map(mapTimesheetRowFromSupabase);
+      setRecords(mapped);
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      setTimesheetsError(msg);
+      setRecords((prev) => (prev.length > 0 ? prev : localTimesheetBackupRef.current));
+    } finally {
+      setTimesheetsLoading(false);
+    }
+  }, [authUser?.id, userCompany?.id, userCompanyRole]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    fetchTimesheetsFromSupabase();
+  }, [authUser?.id, userCompany?.id, userCompanyRole, fetchTimesheetsFromSupabase]);
 
   // V2.1: company projects + cost centres (Supabase-backed)
   const [companyProjects, setCompanyProjects] = useState([]); // [{ id, name }]
@@ -342,7 +482,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   const employeeReportRows = reportScopedRecords.map((record) => ({
     id: record.id,
-    date: formatDateParts(record.clockIn),
+    date: formatDateParts(record.clockIn, companyTimeZone),
     employee: record.employee,
     project: record.project,
     costCenter: record.costCenter,
@@ -355,7 +495,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (!acc[key]) {
         acc[key] = {
           key,
-          date: formatDateParts(record.clockIn),
+          date: formatDateParts(record.clockIn, companyTimeZone),
           project: record.project,
           costCenter: record.costCenter,
           minutes: 0,
@@ -569,7 +709,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const { data: company, error: companyError } = await withTimeout(
           supabase
             .from("companies")
-            .select("id, name, code")
+            .select("id, name, code, time_zone")
             .eq("id", member.company_id)
             .single(),
           12000,
@@ -796,7 +936,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (member?.company_id) {
           const { data: company, error: companyError } = await supabase
             .from("companies")
-            .select("id, name, code")
+            .select("id, name, code, time_zone")
             .eq("id", member.company_id)
             .single();
 
@@ -925,8 +1065,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const code = generateCompanyCode();
         const { data, error } = await supabase
           .from("companies")
-          .insert([{ name, code, created_by: uid }])
-          .select("id, name, code")
+          .insert([{ name, code, created_by: uid, time_zone: DEFAULT_COMPANY_TIME_ZONE }])
+          .select("id, name, code, time_zone")
           .single();
 
         if (!error && data) {
@@ -986,7 +1126,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
       const { data: company, error: companyError } = await supabase
         .from("companies")
-        .select("id, name, code")
+        .select("id, name, code, time_zone")
         .eq("code", code)
         .single();
 
@@ -1531,10 +1671,10 @@ const handlePhotoCapture = async (event) => {
       if (error) console.log("Supabase clock-out error:", error);
     }
 
-    setRecords([completedRecord, ...records]);
     setCurrentShift(null);
     setLocationStatus(clockOutLocation ? "Clock-out location captured" : "Clock-out saved. Location not available.");
- 	setActiveTab("clock");
+    setActiveTab("clock");
+    void fetchTimesheetsFromSupabase();
   };
 
   const startEditRecord = (record) => {
@@ -1594,7 +1734,110 @@ const handlePhotoCapture = async (event) => {
     setIsMenuOpen(false);
   };
 
-  const renderTimesheetCard = (record, allowEdit = true) => (
+  const handleSaveCompanyTimeZone = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || !userCompany?.id) return;
+    setSettingsTzSaving(true);
+    setSettingsTzMessage("");
+    try {
+      const { error } = await supabase
+        .from("companies")
+        .update({ time_zone: settingsTzDraft })
+        .eq("id", userCompany.id);
+      if (error) throw error;
+      setUserCompany((prev) => (prev ? { ...prev, time_zone: settingsTzDraft } : prev));
+      setSettingsTzMessage("Company time zone saved.");
+    } catch (err) {
+      setSettingsTzMessage(getErrorMessage(err));
+    } finally {
+      setSettingsTzSaving(false);
+    }
+  };
+
+  const handleCloseStaleShift = async (record) => {
+    if (!isAdmin) return;
+    const rowId = record.supabaseTimesheetId ?? record.id;
+    if (rowId == null) return;
+    if (
+      !window.confirm(
+        "Close this shift now? Clock-out will be set to the current time and the row marked Submitted."
+      )
+    ) {
+      return;
+    }
+    setClosingShiftId(String(rowId));
+    try {
+      const clockOutTime = new Date().toISOString();
+      const provisional = { ...record, clockOut: clockOutTime, status: "Submitted" };
+      const labourCost = getLabourCost(provisional);
+      const { error } = await supabase
+        .from("timesheets")
+        .update({
+          status: "Submitted",
+          clock_out: clockOutTime,
+          labour_cost: labourCost,
+        })
+        .eq("id", rowId);
+      if (error) throw error;
+      const myLiveId = visibleCurrentShift?.supabaseTimesheetId;
+      if (myLiveId != null && String(myLiveId) === String(rowId)) {
+        setCurrentShift(null);
+      }
+      await fetchTimesheetsFromSupabase();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setClosingShiftId(null);
+    }
+  };
+
+  const renderTimesheetCard = (record, allowEdit = true) => {
+    const st = normalizeStatus(record.status);
+    const statusBadgeLabel =
+      st === "active"
+        ? "Active"
+        : st === "submitted"
+          ? "Submitted"
+          : (String(record.status ?? "").trim() || "Submitted");
+    const statusBadgeClass =
+      st === "admin approval required" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700";
+
+    const liveRowId = visibleCurrentShift?.supabaseTimesheetId;
+    const recordRowId = record.supabaseTimesheetId ?? record.id;
+    const matchesLiveShift =
+      liveRowId != null && recordRowId != null && String(liveRowId) === String(recordRowId);
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    const clockInKey = calendarDateKeyInTimeZone(record.clockIn, companyTimeZone);
+    const isLiveOpen = matchesLiveShift && todayKey === clockInKey && todayKey !== "";
+
+    let outText = "—";
+    let outClass = "font-semibold text-slate-900";
+    let staleActiveMissingOut = false;
+    let submittedMissingClockOut = false;
+    let showCloseShift = false;
+
+    if (st === "active" && !record.clockOut) {
+      if (isLiveOpen) {
+        outText = "Still clocked in";
+      } else {
+        outText = "Missing clock-out";
+        outClass = "font-semibold text-amber-700";
+        staleActiveMissingOut = true;
+        if (isAdmin) showCloseShift = true;
+      }
+    } else if (st === "submitted" && record.clockOut) {
+      outText = formatTime(record.clockOut, companyTimeZone);
+    } else if (st === "submitted" && !record.clockOut) {
+      outText = "Missing clock-out";
+      outClass = "font-semibold text-amber-700";
+      submittedMissingClockOut = true;
+    } else if (record.clockOut) {
+      outText = formatTime(record.clockOut, companyTimeZone);
+    }
+
+    const busyClose = closingShiftId != null && String(recordRowId) === closingShiftId;
+
+    return (
     <div key={record.id} className="rounded-2xl border bg-white p-4">
       <div className="flex justify-between gap-3">
         <div>
@@ -1602,8 +1845,8 @@ const handlePhotoCapture = async (event) => {
           <p className="text-xs text-slate-600">{record.project}</p>
           <p className="text-xs text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs h-fit ${record.status === "Admin Approval Required" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-          {record.status}
+        <span className={`rounded-full px-3 py-1 text-xs h-fit ${statusBadgeClass}`}>
+          {statusBadgeLabel}
         </span>
       </div>
 
@@ -1633,15 +1876,34 @@ const handlePhotoCapture = async (event) => {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-slate-600 border-t pt-3">
-            <div><p>In</p><p className="font-semibold text-slate-900">{formatTime(new Date(record.clockIn))}</p></div>
-            <div><p>Out</p><p className="font-semibold text-slate-900">{record.clockOut ? formatTime(new Date(record.clockOut)) : "—"}</p></div>
+            <div><p>In</p><p className="font-semibold text-slate-900">{formatTime(record.clockIn, companyTimeZone)}</p></div>
+            <div><p>Out</p><p className={outClass}>{outText}</p></div>
           </div>
+          {staleActiveMissingOut && (
+            <p className="mt-1 text-[11px] text-amber-700">This shift was never clocked out.</p>
+          )}
+          {submittedMissingClockOut && (
+            <p className="mt-1 text-[11px] text-amber-700">No clock-out on file for this submitted row.</p>
+          )}
+          {showCloseShift && (
+            <Button
+              type="button"
+              className="w-full rounded-xl h-9 text-xs mt-2 border border-slate-300 bg-white text-slate-800 font-semibold"
+              disabled={busyClose}
+              onClick={() => void handleCloseStaleShift(record)}
+            >
+              {busyClose ? "Closing…" : "Close shift"}
+            </Button>
+          )}
           {record.edited && <p className="mt-2 text-xs text-red-600">Time edited by employee — waiting for admin approval.</p>}
-          {allowEdit && <Button className="w-full rounded-xl h-10 text-xs mt-3" onClick={() => startEditRecord(record)}>✏️ Edit Time</Button>}
+          {allowEdit && st !== "active" && (
+            <Button className="w-full rounded-xl h-10 text-xs mt-3" onClick={() => startEditRecord(record)}>✏️ Edit Time</Button>
+          )}
         </>
       )}
     </div>
-  );
+    );
+  };
 
   if (initialLoading) {
     return (
@@ -2033,10 +2295,14 @@ const handlePhotoCapture = async (event) => {
               <button onClick={() => setIsMenuOpen(true)} className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">☰</button>
               <div className="flex-1 min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">Clock App</h1>
-                <p className="text-xs sm:text-sm text-slate-600 mt-0.5">{formatDate(new Date())}</p>
+                <p className="text-xs sm:text-sm text-slate-600 mt-0.5">{formatDate(now, companyTimeZone)}</p>
+                <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
+                  Company time now: {formatTime(now, companyTimeZone)}
+                </p>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Logged in as: {employeeDisplayName || authUser.email}</p>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Company: {userCompany?.name || "—"}</p>
                 <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
               </div>
               <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl shrink-0">⏱️</div>
             </div>
@@ -2221,9 +2487,22 @@ const handlePhotoCapture = async (event) => {
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="font-bold text-lg">My Timesheet</h2>
-                    <p className="text-xs text-slate-500">Only showing logged-in user's time</p>
+                    <p className="text-xs text-slate-500">
+                      {isAdmin ? "All timesheets for this company" : "Only your submitted timesheets"}
+                    </p>
                   </div>
                 </div>
+                {timesheetsLoading && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 mb-3">
+                    Loading timesheets…
+                  </div>
+                )}
+                {timesheetsError && (
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900 mb-3">
+                    Could not load timesheets from the server. Showing saved offline copy if available.<br />
+                    <span className="text-[11px] text-amber-800">{timesheetsError}</span>
+                  </div>
+                )}
                 <div className="space-y-3">
                   {visibleCurrentShift && (
                     <div className="rounded-2xl border bg-blue-50 p-4">
@@ -2237,12 +2516,14 @@ const handlePhotoCapture = async (event) => {
                         </div>
                         <span className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700 h-fit">Active</span>
                       </div>
-                      <p className="text-sm mt-3">In: {formatTime(new Date(visibleCurrentShift.clockIn))}</p>
+                      <p className="text-sm mt-3">In: {formatTime(visibleCurrentShift.clockIn, companyTimeZone)}</p>
                       <p className="text-2xl font-black tabular-nums mt-2">{formatTimer(liveSeconds)}</p>
                       <p className="text-sm font-semibold mt-1 text-green-700">Money Earned: {formatMoney(liveEarnings)}</p>
                     </div>
                   )}
-                  {visibleRecords.length === 0 && !visibleCurrentShift && <p className="text-sm text-slate-500 text-center py-8">No timesheet records for this user yet.</p>}
+                  {!timesheetsLoading && visibleRecords.length === 0 && !visibleCurrentShift && (
+                    <p className="text-sm text-slate-500 text-center py-8">No timesheet records for this user yet.</p>
+                  )}
                   {visibleRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
               </CardContent>
@@ -2275,7 +2556,7 @@ const handlePhotoCapture = async (event) => {
                             <div className="p-2 text-[10px] text-slate-600">
                               <p className="font-semibold">{photo.employee}</p>
                               <p>{photo.costCenter}</p>
-                              <p>{formatDate(new Date(photo.capturedAt))}</p>
+                              <p>{formatDate(new Date(photo.capturedAt), companyTimeZone)}</p>
                               <button className="underline text-blue-700" onClick={() => openMap(photo.location)}>Map</button>
                             </div>
                           </div>
@@ -2317,7 +2598,7 @@ const handlePhotoCapture = async (event) => {
                               <div className="p-3 text-xs text-slate-600 space-y-1">
                                 <div className="flex justify-between"><p className="font-semibold">{receipt.category}</p><p className="font-bold text-slate-900">{formatMoney(receipt.amount)}</p></div>
                                 <p>{receipt.employee} • {receipt.costCenter}</p>
-                                <p>{formatDate(new Date(receipt.capturedAt))}</p>
+                                <p>{formatDate(new Date(receipt.capturedAt), companyTimeZone)}</p>
                                 {receipt.note && <p>Note: {receipt.note}</p>}
                                 <button className="underline text-blue-700" onClick={() => openMap(receipt.location)}>Map</button>
                               </div>
@@ -2328,6 +2609,60 @@ const handlePhotoCapture = async (event) => {
                     );
                   })}
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === "settings" && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-5 space-y-4">
+                <div>
+                  <h2 className="font-bold text-lg">Settings</h2>
+                  <p className="text-xs text-slate-500">Company time zone (display only — stored times stay as ISO UTC in the database).</p>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
+                  <p className="text-xs text-slate-500">Company</p>
+                  <p className="font-semibold text-slate-900">{userCompany?.name || "—"}</p>
+                </div>
+                <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
+                  <p className="text-xs text-slate-500">Current time zone</p>
+                  <p className="font-semibold text-slate-900">{companyTimeZone}</p>
+                  <p className="text-[11px] text-slate-600 mt-1">
+                    Company time now: {formatTime(now, companyTimeZone)}
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <form onSubmit={handleSaveCompanyTimeZone} className="space-y-3">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Company time zone</label>
+                      <select
+                        className="w-full rounded-2xl border bg-white py-2 px-3 text-sm"
+                        value={settingsTzDraft}
+                        onChange={(e) => setSettingsTzDraft(e.target.value)}
+                      >
+                        {COMPANY_TIME_ZONE_OPTIONS.map((tz) => (
+                          <option key={tz} value={tz}>{tz}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {settingsTzMessage && (
+                      <div
+                        className={`rounded-2xl border p-3 text-xs ${
+                          settingsTzMessage.includes("saved")
+                            ? "bg-green-50 border-green-100 text-green-800"
+                            : "bg-red-50 border-red-100 text-red-700"
+                        }`}
+                      >
+                        {settingsTzMessage}
+                      </div>
+                    )}
+                    <Button type="submit" className="w-full rounded-2xl h-12 text-sm font-bold" disabled={settingsTzSaving}>
+                      {settingsTzSaving ? "Saving…" : "Save time zone"}
+                    </Button>
+                  </form>
+                ) : (
+                  <p className="text-xs text-slate-500">Only an owner or supervisor can change the company time zone. Contact your supervisor if this should be updated.</p>
+                )}
               </CardContent>
             </Card>
           )}
@@ -2349,6 +2684,7 @@ const handlePhotoCapture = async (event) => {
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
                 <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
+                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-semibold" onClick={handleLogout}>🚪 Logout</button>
                 {isAdmin && <><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("quotations")}>📝 Quotations</button><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("reports")}>📊 Reports</button></>}
               </div>
