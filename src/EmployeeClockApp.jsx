@@ -1181,43 +1181,6 @@ const handlePhotoCapture = async (event) => {
                       <Button className="w-full rounded-2xl h-12" onClick={handleChangeTask}>🔄 Change Task</Button>
                       <Button className="w-full rounded-2xl h-12 text-base" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
-<Button
-  className="w-full rounded-2xl h-10 text-sm"
-  onClick={async () => {
-    try {
-      setPhotoStatus("Testing cloud upload...");
-
-      const testFile = new Blob(["hello"], { type: "text/plain" });
-      const filePath = `test/test-${Date.now()}.txt`;
-
-      const result = await withTimeout(
-        supabase.storage
-          .from("project-photos")
-          .upload(filePath, testFile, {
-            cacheControl: "3600",
-            upsert: false,
-            contentType: "text/plain",
-          }),
-        10000,
-        "Supabase test upload timed out after 10 seconds"
-      );
-
-      if (result.error) {
-        showErrorPopup("Test upload failed", result.error);
-        setPhotoStatus("Test upload failed.");
-        return;
-      }
-
-      alert("Test upload worked ✅");
-      setPhotoStatus("Test upload worked ✅");
-    } catch (err) {
-      showErrorPopup("Test upload error", err);
-      setPhotoStatus("Test upload failed.");
-    }
-  }}
->
-  🧪 Test Cloud Upload
-</Button>
                     <Button className="w-full rounded-2xl h-12 text-base font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
                   </div>
                 )}
