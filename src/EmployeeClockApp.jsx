@@ -603,71 +603,57 @@ const handleClockIn = async () => {
     if (!visibleCurrentShift.breakEnd) setCurrentShift({ ...visibleCurrentShift, breakEnd: new Date().toISOString() });
   };
 
-  const handlePhotoCapture = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file || !visibleCurrentShift) return;
+const handlePhotoCapture = async (event) => {
+  const file = event.target.files?.[0];
+  if (!file || !visibleCurrentShift) return;
 
-    try {
-      const folderName = getProjectFolderName(visibleCurrentShift.project);
-      const fileExt = file.name.split(".").pop() || "jpg";
-      const fileName = `${folderName}/${Date.now()}.${fileExt}`;
+  setPhotoStatus("Saving photo locally...");
 
-      setPhotoStatus("Uploading photo...");
+  const reader = new FileReader();
 
-      const { error } = await supabase.storage
-        .from("project-photos")
-        .upload(fileName, file, {
-          cacheControl: "3600",
-          upsert: false,
-        });
+  reader.onload = () => {
+    const folderName = getProjectFolderName(visibleCurrentShift.project);
 
-      if (error) {
-        console.log("Photo upload error:", error);
-        setPhotoStatus("Photo upload failed");
-        return;
-      }
+    const photo = {
+      id: Date.now(),
+      project: visibleCurrentShift.project,
+      folderName,
+      costCenter: visibleCurrentShift.costCenter,
+      employee: visibleCurrentShift.employee,
+      employeeId: visibleCurrentShift.employeeId,
+      capturedAt: new Date().toISOString(),
+      location: null,
+      dataUrl: reader.result,
+      type: "photo",
+    };
 
-      const { data } = supabase.storage
-        .from("project-photos")
-        .getPublicUrl(fileName);
+    setProjectPhotos((previous) => ({
+      ...previous,
+      [folderName]: [photo, ...(previous[folderName] || [])],
+    }));
 
-      const photo = {
-        id: Date.now(),
-        project: visibleCurrentShift.project,
-        folderName,
-        costCenter: visibleCurrentShift.costCenter,
-        employee: visibleCurrentShift.employee,
-        employeeId: visibleCurrentShift.employeeId,
-        capturedAt: new Date().toISOString(),
-        location: visibleCurrentShift.liveLocation || visibleCurrentShift.clockInLocation || null,
-        imageUrl: data.publicUrl,
-        type: "photo",
-      };
+    setPhotoNotificationCount((count) => count + 1);
 
-      setProjectPhotos((previous) => ({
-        ...previous,
-        [folderName]: [photo, ...(previous[folderName] || [])],
-      }));
+    setCurrentShift((previousShift) =>
+      previousShift
+        ? {
+            ...previousShift,
+            photosTaken: (previousShift.photosTaken || 0) + 1,
+            lastPhotoAt: photo.capturedAt,
+          }
+        : previousShift
+    );
 
-      setPhotoNotificationCount((count) => count + 1);
-
-      setCurrentShift((previousShift) =>
-        previousShift
-          ? {
-              ...previousShift,
-              photosTaken: (previousShift.photosTaken || 0) + 1,
-              lastPhotoAt: photo.capturedAt,
-            }
-          : previousShift
-      );
-
-      setPhotoStatus("Photo uploaded");
-      event.target.value = "";
-    } catch (err) {
-      console.log("Photo error:", err);
-      setPhotoStatus("Photo failed");
-    }
+    setPhotoStatus("Photo saved locally.");
+    event.target.value = "";
   };
+
+  reader.onerror = () => {
+    setPhotoStatus("Photo failed.");
+  };
+
+  reader.readAsDataURL(file);
+};
 
   const handleReceiptCapture = (event) => {
     const file = event.target.files?.[0];
@@ -748,7 +734,7 @@ const handleClockIn = async () => {
     setRecords([completedRecord, ...records]);
     setCurrentShift(null);
     setLocationStatus(clockOutLocation ? "Clock-out location captured" : "Clock-out saved. Location not available.");
-    setActiveTab("timesheet");
+ 	setActiveTab("clock");
   };
 
   const startEditRecord = (record) => {
