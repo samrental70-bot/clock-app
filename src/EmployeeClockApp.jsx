@@ -228,6 +228,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const loginClickedRef = useRef(false);
   const [loginDebug, setLoginDebug] = useState("");
   const hasOpenedAppRef = useRef(false);
+  // Live refs for auth listener stability (avoid stale closures)
+  const authUserRef = useRef(null);
+  const userCompanyRef = useRef(null);
+  const companyCheckedRef = useRef(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -378,6 +382,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, []);
 
   useEffect(() => {
+    authUserRef.current = authUser;
+  }, [authUser]);
+
+  useEffect(() => {
+    userCompanyRef.current = userCompany;
+  }, [userCompany]);
+
+  useEffect(() => {
+    companyCheckedRef.current = companyChecked;
+  }, [companyChecked]);
+
+  useEffect(() => {
     const companyId = userCompany?.id || null;
     if (!companyId || !authUser) return;
 
@@ -516,15 +532,17 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (error) throw error;
     };
 
-    const loadCompanyForUser = async (user) => {
+    const loadCompanyForUser = async (user, { background = false } = {}) => {
       if (!user) {
-        setUserCompany(null);
-        setUserCompanyRole(null);
-        setCompanyChecked(true);
+        if (!background) {
+          setUserCompany(null);
+          setUserCompanyRole(null);
+          setCompanyChecked(true);
+        }
         return;
       }
 
-      setCompanyChecked(false);
+      if (!background) setCompanyChecked(false);
       try {
         const { data: member, error: memberError } = await withTimeout(
           supabase
@@ -540,9 +558,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (memberError) throw memberError;
 
         if (!member?.company_id) {
-          setUserCompany(null);
-          setUserCompanyRole(null);
-          setCompanyChecked(true);
+          if (!background) {
+            setUserCompany(null);
+            setUserCompanyRole(null);
+            setCompanyChecked(true);
+          }
           return;
         }
 
@@ -560,8 +580,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         setUserCompany(company || null);
         setUserCompanyRole(member.role || null);
-        setCompanyChecked(true);
+        if (!background) setCompanyChecked(true);
       } catch (err) {
+        if (background) {
+          console.warn("Company load error (background):", err);
+          return;
+        }
         console.log("Company load error:", err);
         setStartupError(`Company load failed: ${getErrorMessage(err)}`);
         setUserCompany(null);
@@ -599,9 +623,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
       }
     };
 
-    const loadUserContext = async (user) => {
+    const loadUserContext = async (user, options) => {
       await loadRoleForUser(user);
-      await loadCompanyForUser(user);
+      await loadCompanyForUser(user, options);
     };
 
     const loadSession = async () => {
@@ -634,7 +658,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         setAuthUser(user);
         await ensureProfile(user);
-        await loadUserContext(user);
+        await loadUserContext(user, { background: false });
         setAuthStep("login");
       } catch (err) {
         // Never block startup on session errors. Default to login.
@@ -655,10 +679,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
     loadSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Never show global full-screen loader after initial load.
+      console.log("AUTH EVENT", event);
       setStartupError("");
 
       if (event === "SIGNED_OUT") {
+        console.log("AUTH EVENT signed out");
         setAuthUser(null);
         setAuthRole(null);
         setProfileFullName("");
@@ -670,16 +695,32 @@ const [uploadProgress, setUploadProgress] = useState(null);
         return;
       }
 
+      if (event === "TOKEN_REFRESHED" || event === "USER_UPDATED" || event === "INITIAL_SESSION") {
+        console.log("AUTH EVENT ignored background refresh");
+        return;
+      }
+
       const user = session?.user || null;
       if (!user) return;
 
-      // Only do heavy context load on true first sign-in when we don't have a user yet.
-      const isFirstSignIn = event === "SIGNED_IN" && !authUser;
-      if (isFirstSignIn) {
+      if (event === "SIGNED_IN") {
+        // If we already have a user, ignore this (prevents stale closure treating refresh as first sign-in).
+        if (authUserRef.current) {
+          console.log("AUTH EVENT ignored background refresh");
+          return;
+        }
+
+        // If handleLogin already succeeded and loaded context, ignore.
+        if (hasSuccessfulLoginRef.current) {
+          console.log("AUTH EVENT ignored background refresh");
+          return;
+        }
+
+        console.log("AUTH EVENT first sign-in context load");
         try {
           setAuthUser(user);
           await ensureProfile(user);
-          await loadUserContext(user);
+          await loadUserContext(user, { background: false });
           setAuthStep("login");
         } catch (err) {
           // Inline error only; don't full-screen load.
