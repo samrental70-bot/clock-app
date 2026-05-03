@@ -605,16 +605,16 @@ const handleClockIn = async () => {
 
 const handlePhotoCapture = async (event) => {
   const file = event.target.files?.[0];
-  if (!file || !visibleCurrentShift) return;
+  if (!file || !visibleCurrentShift || !authUser) return;
 
-  setPhotoStatus("Saving photo locally...");
+  const folderName = getProjectFolderName(visibleCurrentShift.project);
+
+  setPhotoStatus("Saving photo...");
 
   const reader = new FileReader();
 
-  reader.onload = () => {
-    const folderName = getProjectFolderName(visibleCurrentShift.project);
-
-    const photo = {
+  reader.onload = async () => {
+    const localPhoto = {
       id: Date.now(),
       project: visibleCurrentShift.project,
       folderName,
@@ -624,12 +624,13 @@ const handlePhotoCapture = async (event) => {
       capturedAt: new Date().toISOString(),
       location: null,
       dataUrl: reader.result,
+      imageUrl: "",
       type: "photo",
     };
 
     setProjectPhotos((previous) => ({
       ...previous,
-      [folderName]: [photo, ...(previous[folderName] || [])],
+      [folderName]: [localPhoto, ...(previous[folderName] || [])],
     }));
 
     setPhotoNotificationCount((count) => count + 1);
@@ -639,12 +640,43 @@ const handlePhotoCapture = async (event) => {
         ? {
             ...previousShift,
             photosTaken: (previousShift.photosTaken || 0) + 1,
-            lastPhotoAt: photo.capturedAt,
+            lastPhotoAt: localPhoto.capturedAt,
           }
         : previousShift
     );
 
-    setPhotoStatus("Photo saved locally.");
+    setPhotoStatus("Photo saved. Uploading to cloud...");
+
+    try {
+      const fileExt = file.name.split(".").pop() || "jpg";
+      const filePath = `${folderName}/${authUser.id}-${Date.now()}.${fileExt}`;
+
+const uploadPromise = supabase.storage
+  .from("project-photos")
+  .upload(filePath, file, {
+    cacheControl: "3600",
+    upsert: true,
+    contentType: file.type,
+  });
+
+const timeoutPromise = new Promise((_, reject) =>
+  setTimeout(() => reject(new Error("Cloud upload timed out")), 8000)
+);
+
+const { error } = await Promise.race([uploadPromise, timeoutPromise]);
+
+      if (error) {
+        console.log("Cloud upload error:", error);
+        setPhotoStatus("Photo saved locally. Cloud upload failed.");
+        return;
+      }
+
+      setPhotoStatus("Photo saved + uploaded ✅");
+    } catch (err) {
+      console.log("Cloud upload failed:", err);
+      setPhotoStatus("Photo saved locally. Cloud upload failed.");
+    }
+
     event.target.value = "";
   };
 
