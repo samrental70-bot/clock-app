@@ -219,7 +219,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  const [authLoading, setAuthLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [authUser, setAuthUser] = useState(null);
   const [authRole, setAuthRole] = useState(null);
   const [profileFullName, setProfileFullName] = useState("");
@@ -227,6 +227,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const hasSuccessfulLoginRef = useRef(false);
   const loginClickedRef = useRef(false);
   const [loginDebug, setLoginDebug] = useState("");
+  const hasOpenedAppRef = useRef(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -250,8 +251,40 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [companyChecked, setCompanyChecked] = useState(false);
 
   const employeeDisplayName = (profileFullName || authUser?.email || "").trim();
-  const selectedProject = adminProjects.find((project) => project.id === projectId) || adminProjects[0];
   const isAdmin = userCompanyRole === "owner" || userCompanyRole === "supervisor";
+
+  // V2.1: company projects + cost centres (Supabase-backed)
+  const [companyProjects, setCompanyProjects] = useState([]); // [{ id, name }]
+  const [costCentresByProjectId, setCostCentresByProjectId] = useState({}); // { [projectId]: string[] }
+  const [projectsLoading, setProjectsLoading] = useState(false);
+  const [projectsError, setProjectsError] = useState("");
+  const [useProjectFallback, setUseProjectFallback] = useState(false);
+
+  const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectCostCentres, setNewProjectCostCentres] = useState("");
+  const [addProjectLoading, setAddProjectLoading] = useState(false);
+  const [addProjectError, setAddProjectError] = useState("");
+
+  const fallbackProjects = useMemo(() => adminProjects.map((p) => ({ id: p.id, name: p.name })), []);
+  const effectiveProjects = useMemo(() => {
+    if (useProjectFallback) return fallbackProjects;
+    return companyProjects;
+  }, [useProjectFallback, fallbackProjects, companyProjects]);
+
+  const effectiveCostCentresByProjectId = useMemo(() => {
+    if (useProjectFallback) {
+      return adminProjects.reduce((acc, p) => {
+        acc[p.id] = p.costCenters || [];
+        return acc;
+      }, {});
+    }
+    return costCentresByProjectId;
+  }, [useProjectFallback, costCentresByProjectId]);
+
+  const selectedProject =
+    effectiveProjects.find((project) => String(project.id) === String(projectId)) ||
+    effectiveProjects[0] ||
+    { id: adminProjects[0].id, name: adminProjects[0].name };
 
   const getWorkedMinutes = (record) => {
     const total = minutesBetween(record.clockIn, record.clockOut || new Date());
@@ -343,6 +376,88 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const timer = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const companyId = userCompany?.id || null;
+    if (!companyId || !authUser) return;
+
+    let cancelled = false;
+
+    const loadProjects = async () => {
+      setProjectsLoading(true);
+      setProjectsError("");
+      setUseProjectFallback(false);
+      try {
+        const { data: projects, error: projectsErr } = await supabase
+          .from("projects")
+          .select("id, name")
+          .eq("company_id", companyId)
+          .eq("status", "active")
+          .order("name", { ascending: true });
+
+        if (projectsErr) throw projectsErr;
+
+        const projectList = Array.isArray(projects) ? projects : [];
+        if (cancelled) return;
+        setCompanyProjects(projectList);
+
+        if (projectList.length === 0) {
+          setCostCentresByProjectId({});
+          return;
+        }
+
+        const projectIds = projectList.map((p) => p.id);
+        const { data: centres, error: centresErr } = await supabase
+          .from("cost_centres")
+          .select("id, name, project_id")
+          .in("project_id", projectIds)
+          .eq("status", "active")
+          .order("name", { ascending: true });
+
+        if (centresErr) throw centresErr;
+
+        const map = (Array.isArray(centres) ? centres : []).reduce((acc, c) => {
+          const pid = c.project_id;
+          if (!acc[pid]) acc[pid] = [];
+          acc[pid].push(c.name);
+          return acc;
+        }, {});
+
+        if (cancelled) return;
+        setCostCentresByProjectId(map);
+      } catch (err) {
+        console.log("Project load failed, using fallback:", err);
+        if (cancelled) return;
+        setProjectsError(getErrorMessage(err));
+        setUseProjectFallback(true);
+      } finally {
+        if (!cancelled) setProjectsLoading(false);
+      }
+    };
+
+    loadProjects();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userCompany?.id, authUser?.id]);
+
+  useEffect(() => {
+    // When projects load/switch, ensure we have a valid project + cost centre selected.
+    if (!effectiveProjects || effectiveProjects.length === 0) return;
+
+    const hasProject = effectiveProjects.some((p) => String(p.id) === String(projectId));
+    const nextProject = hasProject ? effectiveProjects.find((p) => String(p.id) === String(projectId)) : effectiveProjects[0];
+
+    if (nextProject && String(nextProject.id) !== String(projectId)) {
+      setProjectId(nextProject.id);
+    }
+
+    const centres = effectiveCostCentresByProjectId[nextProject?.id] || [];
+    if (centres.length > 0 && !centres.includes(costCenter)) {
+      setCostCenter(centres[0]);
+    }
+  }, [effectiveProjects, effectiveCostCentresByProjectId]);
 
   useEffect(() => {
     localStorage.setItem("orp_current_shift", JSON.stringify(currentShift));
@@ -490,81 +605,87 @@ const [uploadProgress, setUploadProgress] = useState(null);
     };
 
     const loadSession = async () => {
-      setAuthLoading(true);
+      setInitialLoading(true);
       setStartupError("");
       console.log("Checking session...");
 
-      // Do NOT block app startup on getSession().
-      // Default: show login screen immediately, and only promote to logged-in state if session is found.
-      if (!hasSuccessfulLoginRef.current && !loginClickedRef.current) {
-        setAuthUser(null);
-        setAuthRole(null);
-        setProfileFullName("");
-        setUserCompany(null);
-        setUserCompanyRole(null);
-        setCompanyChecked(true);
-        setAuthStep("login");
-      }
-
-      (async () => {
-        try {
-          const { data, error } = await supabase.auth.getSession();
-          if (error) {
-            // Session check failing should just keep the login screen (no critical errors).
-            console.log("Session error:", error);
-            return;
-          }
-
-          // Don't let startup session check override an interactive login attempt/success.
-          if (hasSuccessfulLoginRef.current || loginClickedRef.current) return;
-
-          const user = data?.session?.user || null;
-          console.log("User:", user);
-
-          if (!user) return;
-
-          setAuthLoading(true);
-          setAuthUser(user);
-          await ensureProfile(user);
-          await loadUserContext(user);
-          setAuthStep("login");
-        } catch (err) {
-          // Never treat getSession failure as critical; just stay on login.
-          console.log("Session check failed:", err);
-        } finally {
-          setAuthLoading(false);
-        }
-      })();
-
-      // End the initial blocking spinner immediately.
-      setAuthLoading(false);
-    };
-    loadSession();
-
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setAuthLoading(true);
-      setStartupError("");
       try {
-        const user = session?.user || null;
-        setAuthUser(user);
+        const { data, error } = await supabase.auth.getSession();
+        if (error) {
+          console.log("Session error:", error);
+        }
 
-        if (user) {
-          await ensureProfile(user);
-          await loadUserContext(user);
-        } else {
+        // If the user is already actively logging in, do not override.
+        if (hasSuccessfulLoginRef.current || loginClickedRef.current) return;
+
+        const user = data?.session?.user || null;
+        console.log("User:", user);
+
+        if (!user) {
+          setAuthUser(null);
           setAuthRole(null);
           setProfileFullName("");
-          setCurrentShift(null);
+          setUserCompany(null);
+          setUserCompanyRole(null);
+          setCompanyChecked(true);
+          setAuthStep("login");
+          return;
+        }
+
+        setAuthUser(user);
+        await ensureProfile(user);
+        await loadUserContext(user);
+        setAuthStep("login");
+      } catch (err) {
+        // Never block startup on session errors. Default to login.
+        console.log("Session check failed:", err);
+        if (!hasSuccessfulLoginRef.current && !loginClickedRef.current) {
+          setAuthUser(null);
+          setAuthRole(null);
+          setProfileFullName("");
           setUserCompany(null);
           setUserCompanyRole(null);
           setCompanyChecked(true);
           setAuthStep("login");
         }
-      } catch (err) {
-        setStartupError(`Auth change handling failed: ${getErrorMessage(err)}`);
-        setCompanyChecked(true);
       } finally {
-        setAuthLoading(false);
+        setInitialLoading(false);
+      }
+    };
+    loadSession();
+
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Never show global full-screen loader after initial load.
+      setStartupError("");
+
+      if (event === "SIGNED_OUT") {
+        setAuthUser(null);
+        setAuthRole(null);
+        setProfileFullName("");
+        setCurrentShift(null);
+        setUserCompany(null);
+        setUserCompanyRole(null);
+        setCompanyChecked(true);
+        setAuthStep("login");
+        return;
+      }
+
+      const user = session?.user || null;
+      if (!user) return;
+
+      // Only do heavy context load on true first sign-in when we don't have a user yet.
+      const isFirstSignIn = event === "SIGNED_IN" && !authUser;
+      if (isFirstSignIn) {
+        try {
+          setAuthUser(user);
+          await ensureProfile(user);
+          await loadUserContext(user);
+          setAuthStep("login");
+        } catch (err) {
+          // Inline error only; don't full-screen load.
+          setStartupError(`Auth context load failed: ${getErrorMessage(err)}`);
+          setCompanyChecked(true);
+        }
       }
     });
 
@@ -881,9 +1002,89 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const liveEarnings = visibleCurrentShift ? (liveSeconds / 3600) * Number(visibleCurrentShift.hourlyRate || 0) : 0;
 
   const handleProjectChange = (newProjectId) => {
-    const nextProject = adminProjects.find((project) => project.id === newProjectId) || adminProjects[0];
+    const nextProject = effectiveProjects.find((project) => String(project.id) === String(newProjectId)) || effectiveProjects[0];
+    if (!nextProject) return;
     setProjectId(nextProject.id);
-    setCostCenter(nextProject.costCenters[0]);
+    const centres = effectiveCostCentresByProjectId[nextProject.id] || [];
+    if (centres.length > 0) setCostCenter(centres[0]);
+  };
+
+  const handleAddProject = async (event) => {
+    event.preventDefault();
+    console.log("ADD PROJECT authUser.id", authUser?.id);
+    console.log("ADD PROJECT userCompany", userCompany);
+    console.log("ADD PROJECT userCompanyRole", userCompanyRole);
+
+    if (!authUser?.id || !userCompany?.id) {
+      setAddProjectError("Company/user missing. Please logout and login again.");
+      return;
+    }
+    if (!isAdmin) return;
+
+    setAddProjectLoading(true);
+    setAddProjectError("");
+    try {
+      const name = newProjectName.trim();
+      if (!name) {
+        setAddProjectError("Project name is required.");
+        return;
+      }
+
+      const centres = newProjectCostCentres
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+
+      const projectPayload = {
+        company_id: userCompany.id,
+        name,
+        status: "active",
+        created_by: authUser.id,
+      };
+      console.log("ADD PROJECT payload", projectPayload);
+
+      const { data: created, error: projectErr } = await supabase
+        .from("projects")
+        .insert([projectPayload])
+        .select("id, name")
+        .single();
+
+      if (projectErr) throw projectErr;
+
+      if (centres.length > 0) {
+        const rows = centres.map((c, index) => ({
+          company_id: userCompany.id,
+          project_id: created.id,
+          name: c,
+          status: "active",
+          display_order: index,
+          created_by: authUser.id,
+        }));
+        const { error: centresErr } = await supabase.from("cost_centres").insert(rows);
+        if (centresErr) throw centresErr;
+      }
+
+      setNewProjectName("");
+      setNewProjectCostCentres("");
+
+      // Reload lists
+      setProjectsLoading(true);
+      setProjectsError("");
+      setUseProjectFallback(false);
+      const { data: projects, error: projectsErr } = await supabase
+        .from("projects")
+        .select("id, name")
+        .eq("company_id", userCompany.id)
+        .eq("status", "active")
+        .order("name", { ascending: true });
+      if (projectsErr) throw projectsErr;
+      setCompanyProjects(projects || []);
+    } catch (err) {
+      setAddProjectError(getErrorMessage(err));
+    } finally {
+      setAddProjectLoading(false);
+      setProjectsLoading(false);
+    }
   };
 
   const getInstallInstructions = () => {
@@ -984,6 +1185,7 @@ const handleClockIn = async () => {
       employee_name: employeeDisplayName || authUser.email || null,
       company_id: userCompany?.id || null,
       company_name: userCompany?.name || null,
+      project_id: selectedProject.id,
       project_name: selectedProject.name,
       hourly_rate: 0,
       cost_centre: costCenter,
@@ -1400,7 +1602,7 @@ const handlePhotoCapture = async (event) => {
     </div>
   );
 
-  if (authLoading) {
+  if (initialLoading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
         <div className="text-center">
@@ -1576,6 +1778,22 @@ const handlePhotoCapture = async (event) => {
 
   // Logged in, but still checking company membership.
   if (!companyChecked) {
+    // Inline (non-blocking) loader: do not take over the whole app once opened.
+    if (hasOpenedAppRef.current) {
+      return (
+        <div className="min-h-screen bg-neutral-950 flex justify-center text-slate-900">
+          <div className="w-full max-w-sm h-screen bg-slate-50 shadow-2xl relative overflow-hidden flex flex-col">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-28">
+              <div className="rounded-3xl bg-white border shadow-sm p-4">
+                <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
+                <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
         <div className="text-center">
@@ -1763,6 +1981,8 @@ const handlePhotoCapture = async (event) => {
     );
   }
 
+  if (!hasOpenedAppRef.current) hasOpenedAppRef.current = true;
+
   return (
     <div className="min-h-screen bg-neutral-950 flex justify-center text-slate-900">
       <div className="w-full max-w-sm h-screen bg-slate-50 shadow-2xl relative overflow-hidden flex flex-col">
@@ -1810,17 +2030,73 @@ const handlePhotoCapture = async (event) => {
                   </div>
                 </div>
 
+                {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
+                  <div className="rounded-2xl border bg-white p-4 space-y-2">
+                    <p className="font-semibold">No projects yet</p>
+                    <p className="text-xs text-slate-500">Ask your supervisor to add a project, or create one now if you're an owner/supervisor.</p>
+                  </div>
+                )}
+
+                {projectsError && (
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">
+                    Project loading failed — using emergency fallback projects.<br />
+                    <span className="text-[11px] text-amber-800">{projectsError}</span>
+                  </div>
+                )}
+
+                {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
+                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-4 space-y-3">
+                    <div>
+                      <p className="font-semibold">Add Project</p>
+                      <p className="text-xs text-slate-500">Add a project and cost centres (comma-separated).</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Project name</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-2xl border bg-white p-3 text-sm"
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="Example: Basement Renovation"
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium">Cost centres</label>
+                      <input
+                        type="text"
+                        className="w-full rounded-2xl border bg-white p-3 text-sm"
+                        value={newProjectCostCentres}
+                        onChange={(e) => setNewProjectCostCentres(e.target.value)}
+                        placeholder="Framing, Drywall, Painting"
+                      />
+                    </div>
+
+                    {addProjectError && (
+                      <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-xs text-red-700">
+                        {addProjectError}
+                      </div>
+                    )}
+
+                    <Button type="submit" className="w-full rounded-2xl h-12 text-sm font-bold" disabled={addProjectLoading}>
+                      {addProjectLoading ? "Adding..." : "Add Project"}
+                    </Button>
+                  </form>
+                )}
+
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Project / Job Site</label>
                   <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
-                    {adminProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                    {effectiveProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
                   </select>
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Cost Centre</label>
                   <select className="w-full rounded-2xl border bg-white p-3 text-sm" value={costCenter} onChange={(event) => setCostCenter(event.target.value)}>
-                    {selectedProject.costCenters.map((center) => <option key={center} value={center}>{center}</option>)}
+                    {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((center) => <option key={center} value={center}>{center}</option>)}
                   </select>
                 </div>
 
@@ -1852,10 +2128,10 @@ const handlePhotoCapture = async (event) => {
                 {isChangingTask ? (
                   <div className="space-y-2">
                     <select className="w-full rounded-2xl border p-2" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
-                      {adminProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {effectiveProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
                     <select className="w-full rounded-2xl border p-2" value={costCenter} onChange={(e) => setCostCenter(e.target.value)}>
-                      {selectedProject.costCenters.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                     <div className="grid grid-cols-2 gap-2">
                       <Button className="h-10 rounded-xl" onClick={applyTaskChange}>Save</Button>

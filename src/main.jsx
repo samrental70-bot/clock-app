@@ -11,6 +11,16 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/service-worker.js");
+    if (import.meta.env.DEV) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((r) => r.unregister())))
+        .catch(() => {});
+      return;
+    }
+
+    if (import.meta.env.PROD) {
+      navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+    }
   });
 }
