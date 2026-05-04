@@ -1966,13 +1966,23 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
     if (nextProject && String(nextProject.id) !== String(projectId)) {
       setProjectId(nextProject.id);
+      return;
     }
 
-    const centres = effectiveCostCentresByProjectId[nextProject?.id] || [];
-    if (centres.length > 0 && !centres.includes(costCenter)) {
+    const pid = nextProject?.id;
+    const centres =
+      effectiveCostCentresByProjectId[String(pid)] ||
+      effectiveCostCentresByProjectId[Number(pid)] ||
+      [];
+
+    if (centres.length === 0) {
+      if (costCenter !== "") setCostCenter("");
+      return;
+    }
+    if (!centres.includes(costCenter)) {
       setCostCenter(centres[0]);
     }
-  }, [clockSelectableProjects, effectiveCostCentresByProjectId]);
+  }, [clockSelectableProjects, effectiveCostCentresByProjectId, projectId, costCenter]);
 
   useEffect(() => {
     localStorage.setItem("orp_current_shift", JSON.stringify(currentShift));
@@ -2572,8 +2582,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
       clockSelectableProjects[0];
     if (!nextProject) return;
     setProjectId(nextProject.id);
-    const centres = effectiveCostCentresByProjectId[nextProject.id] || [];
+    const centres =
+      effectiveCostCentresByProjectId[String(nextProject.id)] ||
+      effectiveCostCentresByProjectId[Number(nextProject.id)] ||
+      [];
     if (centres.length > 0) setCostCenter(centres[0]);
+    else setCostCenter("");
   };
 
   const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
@@ -3040,158 +3054,164 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setWatchId(id);
   };
 
-const handleClockIn = async () => {
-  if (isProfileArchived) {
-    setLocationStatus("Your account is archived. Please contact your supervisor.");
-    return;
-  }
-
-  if (!authUser) {
-    alert("User not logged in");
-    return;
-  }
-
-  if (!clockSelectedProject) {
-    setLocationStatus("No projects assigned. Please contact your supervisor.");
-    return;
-  }
-
-  setLocationStatus("Clocking in...");
-
-  let employeeHourlyRate = 0;
-  try {
-    const { data: payProf } = await supabase
-      .from("profiles")
-      .select("hourly_rate")
-      .eq("id", authUser.id)
-      .maybeSingle();
-    employeeHourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
-  } catch {
-    employeeHourlyRate = 0;
-  }
-  console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
-
-  const clockInLocation = null;
-  const clockInTime = new Date().toISOString();
-  const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
-
-  const newShift = {
-    userId: authUser?.id || null,
-    employee: clockInEmployeeName || authUser?.email || "Employee",
-    employeeName: clockInEmployeeName || authUser?.email || "",
-    employeeEmail: authUser?.email || null,
-    profileDisplayName: (profileFullName || "").trim(),
-    profileEmailForRow: (authUser?.email || "").trim(),
-    companyId: userCompany?.id || null,
-    companyName: userCompany?.name || null,
-    hourlyRate: employeeHourlyRate,
-    project: clockSelectedProject.name,
-    projectId: clockSelectedProject.id,
-    costCenter,
-    date: clockInTime,
-    clockIn: clockInTime,
-    clockInLocation,
-    breakStart: null,
-    breakEnd: null,
-    status: "Active",
-    photosTaken: 0,
-    lastPhotoAt: null,
-    projectFolder: getProjectFolderName(clockSelectedProject.name),
-    liveLocation: null,
-    locationTrail: [],
-  };
-
-  setCurrentShift(newShift);
-  setLocationStatus("Clock-in saved locally.");
-
-  const { data, error } = await supabase
-    .from("timesheets")
-    .insert([{
-      user_id: authUser.id,
-      employee_email: authUser.email || null,
-      employee_name: clockInEmployeeName,
-      company_id: userCompany?.id || null,
-      company_name: userCompany?.name || null,
-      project_id: clockSelectedProject.id,
-      project_name: clockSelectedProject.name,
-      hourly_rate: employeeHourlyRate,
-      cost_centre: costCenter,
-      clock_in: clockInTime,
-      status: "Active",
-      clock_in_latitude: null,
-      clock_in_longitude: null,
-    }])
-    .select();
-
-  if (error) {
-    // Backward compatibility if DB columns aren't added yet
-    const msg = error?.message || "";
-    const missingColumn = msg.includes("column") && (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
-    if (missingColumn) {
-      const { data: legacyData, error: legacyError } = await supabase
-        .from("timesheets")
-        .insert([{
-          user_id: authUser.id,
-          employee_name: clockInEmployeeName,
-          project_name: clockSelectedProject.name,
-          hourly_rate: employeeHourlyRate,
-          cost_centre: costCenter,
-          clock_in: clockInTime,
-          status: "Active",
-          clock_in_latitude: null,
-          clock_in_longitude: null,
-        }])
-        .select();
-
-      if (legacyError) {
-        console.log("Supabase clock-in error:", legacyError);
-        alert("Clock-in saved locally, but database save failed.");
-        return;
-      }
-
-      setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
-      setLocationStatus("Clock-in saved.");
-      const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
-      void createCompanyNotifications(supabase, {
-        companyId: userCompany?.id,
-        actorUserId: authUser.id,
-        actorRole: userCompanyRole,
-        type: "clock_in",
-        title: clockInTitleForActorRole(userCompanyRole),
-        message: `${actorLabel} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
-        projectId: clockSelectedProject.id,
-        projectName: clockSelectedProject.name,
-        costCentre: costCenter,
-        relatedTimesheetId: legacyData?.[0]?.id ?? null,
-        relatedFolder: getProjectFolderName(clockSelectedProject.name),
-        itemCount: null,
-      });
+  const handleClockIn = async () => {
+    if (isProfileArchived) {
+      setLocationStatus("Your account is archived. Please contact your supervisor.");
       return;
     }
 
-    console.log("Supabase clock-in error:", error);
-    alert("Clock-in saved locally, but database save failed.");
-    return;
-  }
+    if (!authUser) {
+      alert("User not logged in");
+      return;
+    }
 
-  setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
-  setLocationStatus("Clock-in saved.");
-  const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
-  void createCompanyNotifications(supabase, {
-    companyId: userCompany?.id,
-    actorUserId: authUser.id,
-    actorRole: userCompanyRole,
-    type: "clock_in",
-    title: clockInTitleForActorRole(userCompanyRole),
-    message: `${actorLabelMain} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
-    projectId: clockSelectedProject.id,
-    projectName: clockSelectedProject.name,
-    costCentre: costCenter,
-    relatedTimesheetId: data?.[0]?.id ?? null,
-    relatedFolder: getProjectFolderName(clockSelectedProject.name),
-    itemCount: null,
-  });
-};
+    if (!clockSelectedProject) {
+      setLocationStatus("No projects assigned. Please contact your supervisor.");
+      return;
+    }
+
+    const clockInCentres = costCentresForEditProject(clockSelectedProject.id);
+    if (clockInCentres.length === 0 || !costCenter || !clockInCentres.includes(costCenter)) {
+      setLocationStatus("No cost centres available for this project.");
+      return;
+    }
+
+    setLocationStatus("Clocking in...");
+
+    let employeeHourlyRate = 0;
+    try {
+      const { data: payProf } = await supabase
+        .from("profiles")
+        .select("hourly_rate")
+        .eq("id", authUser.id)
+        .maybeSingle();
+      employeeHourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
+    } catch {
+      employeeHourlyRate = 0;
+    }
+    console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
+
+    const clockInLocation = null;
+    const clockInTime = new Date().toISOString();
+    const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
+
+    const newShift = {
+      userId: authUser?.id || null,
+      employee: clockInEmployeeName || authUser?.email || "Employee",
+      employeeName: clockInEmployeeName || authUser?.email || "",
+      employeeEmail: authUser?.email || null,
+      profileDisplayName: (profileFullName || "").trim(),
+      profileEmailForRow: (authUser?.email || "").trim(),
+      companyId: userCompany?.id || null,
+      companyName: userCompany?.name || null,
+      hourlyRate: employeeHourlyRate,
+      project: clockSelectedProject.name,
+      projectId: clockSelectedProject.id,
+      costCenter,
+      date: clockInTime,
+      clockIn: clockInTime,
+      clockInLocation,
+      breakStart: null,
+      breakEnd: null,
+      status: "Active",
+      photosTaken: 0,
+      lastPhotoAt: null,
+      projectFolder: getProjectFolderName(clockSelectedProject.name),
+      liveLocation: null,
+      locationTrail: [],
+    };
+
+    setCurrentShift(newShift);
+    setLocationStatus("Clock-in saved locally.");
+
+    const { data, error } = await supabase
+      .from("timesheets")
+      .insert([{
+        user_id: authUser.id,
+        employee_email: authUser.email || null,
+        employee_name: clockInEmployeeName,
+        company_id: userCompany?.id || null,
+        company_name: userCompany?.name || null,
+        project_id: clockSelectedProject.id,
+        project_name: clockSelectedProject.name,
+        hourly_rate: employeeHourlyRate,
+        cost_centre: costCenter,
+        clock_in: clockInTime,
+        status: "Active",
+        clock_in_latitude: null,
+        clock_in_longitude: null,
+      }])
+      .select();
+
+    if (error) {
+      // Backward compatibility if DB columns aren't added yet
+      const msg = error?.message || "";
+      const missingColumn = msg.includes("column") && (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
+      if (missingColumn) {
+        const { data: legacyData, error: legacyError } = await supabase
+          .from("timesheets")
+          .insert([{
+            user_id: authUser.id,
+            employee_name: clockInEmployeeName,
+            project_name: clockSelectedProject.name,
+            hourly_rate: employeeHourlyRate,
+            cost_centre: costCenter,
+            clock_in: clockInTime,
+            status: "Active",
+            clock_in_latitude: null,
+            clock_in_longitude: null,
+          }])
+          .select();
+
+        if (legacyError) {
+          console.log("Supabase clock-in error:", legacyError);
+          alert("Clock-in saved locally, but database save failed.");
+          return;
+        }
+
+        setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
+        setLocationStatus("Clock-in saved.");
+        const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
+        void createCompanyNotifications(supabase, {
+          companyId: userCompany?.id,
+          actorUserId: authUser.id,
+          actorRole: userCompanyRole,
+          type: "clock_in",
+          title: clockInTitleForActorRole(userCompanyRole),
+          message: `${actorLabel} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
+          projectId: clockSelectedProject.id,
+          projectName: clockSelectedProject.name,
+          costCentre: costCenter,
+          relatedTimesheetId: legacyData?.[0]?.id ?? null,
+          relatedFolder: getProjectFolderName(clockSelectedProject.name),
+          itemCount: null,
+        });
+        return;
+      }
+
+      console.log("Supabase clock-in error:", error);
+      alert("Clock-in saved locally, but database save failed.");
+      return;
+    }
+
+    setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
+    setLocationStatus("Clock-in saved.");
+    const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
+    void createCompanyNotifications(supabase, {
+      companyId: userCompany?.id,
+      actorUserId: authUser.id,
+      actorRole: userCompanyRole,
+      type: "clock_in",
+      title: clockInTitleForActorRole(userCompanyRole),
+      message: `${actorLabelMain} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
+      projectId: clockSelectedProject.id,
+      projectName: clockSelectedProject.name,
+      costCentre: costCenter,
+      relatedTimesheetId: data?.[0]?.id ?? null,
+      relatedFolder: getProjectFolderName(clockSelectedProject.name),
+      itemCount: null,
+    });
+  };
   const handleChangeTask = () => {
     if (!visibleCurrentShift) return;
     setIsChangingTask(true);
@@ -3204,6 +3224,8 @@ const handleClockIn = async () => {
       effectiveProjects.find((p) => String(p.id) === String(projectId)) ||
       adminProjects.find((p) => p.id === projectId) ||
       adminProjects[0];
+    const taskCentres = costCentresForEditProject(updatedProject.id);
+    if (taskCentres.length === 0 || !taskCentres.includes(costCenter)) return;
     setCurrentShift({
       ...visibleCurrentShift,
       project: updatedProject.name,
@@ -3500,6 +3522,12 @@ const handlePhotoCapture = async (event) => {
     effectiveCostCentresByProjectId[Number(pid)] ||
     [];
 
+  const clockCostCentresActive = useMemo(
+    () =>
+      clockSelectedProject?.id != null ? costCentresForEditProject(clockSelectedProject.id) : [],
+    [clockSelectedProject?.id, effectiveCostCentresByProjectId]
+  );
+
   const handleDashboardEmployeeClockIn = async (row) => {
     if (!isAdmin || !authUser?.id || !userCompany?.id) return;
     if (row.employmentStatus === "archived") {
@@ -3533,9 +3561,16 @@ const handlePhotoCapture = async (event) => {
       });
       return;
     }
-    let cc = rawPick.costCenter || "";
     const centres = costCentresForEditProject(proj.id);
-    if (centres.length > 0 && (!cc || !centres.includes(cc))) cc = centres[0] || "";
+    if (centres.length === 0) {
+      setDashboardActionFeedback({
+        type: "error",
+        text: "No cost centres available for this project.",
+      });
+      return;
+    }
+    let cc = rawPick.costCenter || "";
+    if (!cc || !centres.includes(cc)) cc = centres[0] || "";
 
     setDashboardSavingUserId(uid);
     setDashboardActionFeedback(null);
@@ -5133,10 +5168,14 @@ const handlePhotoCapture = async (event) => {
                   <select
                     className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
                     value={costCenter}
-                    disabled={!clockSelectedProject || clockSelectableProjects.length === 0}
+                    disabled={
+                      !clockSelectedProject ||
+                      clockSelectableProjects.length === 0 ||
+                      clockCostCentresActive.length === 0
+                    }
                     onChange={(event) => setCostCenter(event.target.value)}
                   >
-                    {costCentresForEditProject(clockSelectedProject?.id).map((center) => (
+                    {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
                       </option>
@@ -5144,9 +5183,19 @@ const handlePhotoCapture = async (event) => {
                   </select>
                 </div>
 
+                {clockSelectedProject && clockCostCentresActive.length === 0 && (
+                  <p className="text-xs text-amber-800 leading-snug">
+                    No cost centres available for this project.
+                  </p>
+                )}
+
                 <Button
                   className="w-full rounded-2xl h-12 sm:h-14 text-sm sm:text-base font-bold"
-                  disabled={!clockSelectedProject}
+                  disabled={
+                    !clockSelectedProject ||
+                    clockCostCentresActive.length === 0 ||
+                    !costCenter
+                  }
                   onClick={handleClockIn}
                 >
                   ✅ Clock In
@@ -5192,15 +5241,31 @@ const handlePhotoCapture = async (event) => {
                         </option>
                       ))}
                     </select>
-                    <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={costCenter} onChange={(e) => setCostCenter(e.target.value)}>
-                      {costCentresForEditProject(clockSelectedProject?.id).map((c) => (
+                    <select
+                      className="w-full rounded-2xl border py-2 px-2 text-sm h-10"
+                      value={costCenter}
+                      disabled={clockCostCentresActive.length === 0}
+                      onChange={(e) => setCostCenter(e.target.value)}
+                    >
+                      {clockCostCentresActive.map((c) => (
                         <option key={c} value={c}>
                           {c}
                         </option>
                       ))}
                     </select>
+                    {clockCostCentresActive.length === 0 && (
+                      <p className="text-[10px] text-amber-800 leading-snug">
+                        No cost centres available for this project.
+                      </p>
+                    )}
                     <div className="grid grid-cols-2 gap-1.5">
-                      <Button className="h-9 rounded-xl text-sm" onClick={applyTaskChange}>Save</Button>
+                      <Button
+                        className="h-9 rounded-xl text-sm"
+                        disabled={clockCostCentresActive.length === 0 || !costCenter}
+                        onClick={applyTaskChange}
+                      >
+                        Save
+                      </Button>
                       <Button className="h-9 rounded-xl text-sm" onClick={() => setIsChangingTask(false)}>Cancel</Button>
                     </div>
                   </div>
@@ -5615,7 +5680,10 @@ const handlePhotoCapture = async (event) => {
                         const showDashClockOut = att.code === "clocked_in";
                         const showDashFixOut = att.code === "missing_out";
                         const dashRowSaving = dashboardSavingUserId === uid;
-                        const dashClockInBlocked = dashProjectsForRow.length === 0;
+                        const dashClockInBlocked =
+                          dashProjectsForRow.length === 0 ||
+                          !pickProjectId ||
+                          centresForPick.length === 0;
                         return (
                           <div
                             key={row.memberRowId}
@@ -5722,11 +5790,19 @@ const handlePhotoCapture = async (event) => {
                                   {effectiveProjects.length === 0 && (
                                     <p className="text-[10px] text-amber-800">Add a company project to clock in.</p>
                                   )}
-                                  {effectiveProjects.length > 0 && dashClockInBlocked && (
+                                  {effectiveProjects.length > 0 && dashProjectsForRow.length === 0 && (
                                     <p className="text-[10px] text-amber-900 leading-snug">
                                       No projects assigned to this employee.
                                     </p>
                                   )}
+                                  {effectiveProjects.length > 0 &&
+                                    dashProjectsForRow.length > 0 &&
+                                    pickProjectId &&
+                                    centresForPick.length === 0 && (
+                                      <p className="text-[10px] text-amber-900 leading-snug">
+                                        No cost centres available for this project.
+                                      </p>
+                                    )}
                                   <Button
                                     type="button"
                                     className="w-full rounded-lg h-9 text-xs font-semibold"
