@@ -1529,6 +1529,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
     [dashboardRows]
   );
 
+  const dashboardLiveLocationByUserId = useMemo(() => {
+    const m = {};
+    for (const loc of dashboardLiveLocations || []) {
+      if (loc?.employee_id == null) continue;
+      m[String(loc.employee_id)] = loc;
+    }
+    return m;
+  }, [dashboardLiveLocations]);
+
   const updateLiveLocationOnce = useCallback(
     async ({ status, projectName, costCentre, coords }) => {
       if (!authUser?.id || !userCompany?.id) return;
@@ -6086,81 +6095,6 @@ const handlePhotoCapture = async (event) => {
                     {dashboardActionFeedback.text}
                   </div>
                 )}
-                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
-                  <h3 className="text-[10px] font-semibold text-slate-600 uppercase tracking-wide">Live Locations</h3>
-                  {dashboardLiveLocationsLoading && (
-                    <p className="text-[11px] text-slate-600">Loading live locations…</p>
-                  )}
-                  {dashboardLiveLocationsError && (
-                    <p className="text-[11px] text-amber-900 leading-snug">{dashboardLiveLocationsError}</p>
-                  )}
-                  {!dashboardLiveLocationsLoading &&
-                    !dashboardLiveLocationsError &&
-                    dashboardLiveLocations.length === 0 && (
-                      <p className="text-[11px] text-slate-600 leading-snug">No employees currently clocked in.</p>
-                    )}
-                  {!dashboardLiveLocationsLoading &&
-                    !dashboardLiveLocationsError &&
-                    dashboardLiveLocations.length > 0 && (
-                      <ul className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
-                        {dashboardLiveLocations.map((loc) => {
-                          const hasMap =
-                            loc.latitude != null &&
-                            loc.longitude != null &&
-                            Number.isFinite(Number(loc.latitude)) &&
-                            Number.isFinite(Number(loc.longitude));
-                          const updatedAt = loc.updated_at || null;
-                          const updatedLabel =
-                            updatedAt != null
-                              ? `${formatDate(updatedAt, companyTimeZone)} · ${formatTime(updatedAt, companyTimeZone)}`
-                              : "—";
-                          const acc =
-                            loc.accuracy != null && loc.accuracy !== "" && Number.isFinite(Number(loc.accuracy))
-                              ? `${Math.round(Number(loc.accuracy))} m`
-                              : "—";
-                          return (
-                            <li
-                              key={String(loc.employee_id)}
-                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] text-slate-800 leading-snug"
-                            >
-                              <div className="font-semibold text-slate-900 break-words">{loc.displayName}</div>
-                              <div className="mt-0.5 text-slate-600">
-                                <span className="text-slate-500">Status:</span>{" "}
-                                <span className="capitalize">{String(loc.status ?? "—").replace(/_/g, " ")}</span>
-                              </div>
-                              <div className="mt-0.5">
-                                <span className="text-slate-500">Project:</span>{" "}
-                                <span className="break-words">{loc.project_name || "—"}</span>
-                              </div>
-                              <div className="mt-0.5">
-                                <span className="text-slate-500">Cost centre:</span>{" "}
-                                <span className="break-words">{loc.cost_centre || "—"}</span>
-                              </div>
-                              <div className="mt-0.5 tabular-nums">
-                                <span className="text-slate-500">Last updated:</span> {updatedLabel}
-                              </div>
-                              <div className="mt-0.5 tabular-nums">
-                                <span className="text-slate-500">Accuracy:</span> {acc}
-                              </div>
-                              {hasMap ? (
-                                <button
-                                  type="button"
-                                  className="mt-1.5 text-[11px] font-semibold text-blue-700 underline"
-                                  onClick={() =>
-                                    openMap({ latitude: Number(loc.latitude), longitude: Number(loc.longitude) })
-                                  }
-                                >
-                                  View Map
-                                </button>
-                              ) : (
-                                <p className="mt-1 text-[10px] text-slate-500">No coordinates on file.</p>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
-                    )}
-                </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
@@ -6223,14 +6157,6 @@ const handlePhotoCapture = async (event) => {
                           authUser,
                           visibleCurrentShift,
                         });
-                        const statusBadgeClass =
-                          att.code === "clocked_in"
-                            ? "bg-green-50 text-green-800 border border-green-200"
-                            : att.code === "clocked_out"
-                              ? "bg-blue-50 text-blue-900 border border-blue-200"
-                              : att.code === "missing_out"
-                                ? "bg-amber-50 text-amber-900 border border-amber-200"
-                                : "bg-red-50 text-red-800 border border-red-200";
                         const dayMetrics = computeDashboardEmployeeDayMetrics(
                           userDayRows,
                           rep,
@@ -6270,10 +6196,19 @@ const handlePhotoCapture = async (event) => {
                           dashProjectsForRow.length === 0 ||
                           !pickProjectId ||
                           centresForPick.length === 0;
+                        const liveLoc = dashboardLiveLocationByUserId[uid];
+                        const hasLiveMap =
+                          att.code === "clocked_in" &&
+                          liveLoc &&
+                          liveLoc.latitude != null &&
+                          liveLoc.longitude != null &&
+                          Number.isFinite(Number(liveLoc.latitude)) &&
+                          Number.isFinite(Number(liveLoc.longitude));
+                        const isRowClockedIn = att.code === "clocked_in";
                         return (
                           <div
                             key={row.memberRowId}
-                            className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-3"
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-2"
                           >
                             <div className="flex items-start justify-between gap-3 min-w-0">
                               <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-slate-900 break-words">
@@ -6283,13 +6218,41 @@ const handlePhotoCapture = async (event) => {
                                 {rowRoleNorm}
                               </span>
                             </div>
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
-                              <span className="text-xs font-medium tracking-wide text-slate-500">Status:</span>
-                              <span
-                                className={`inline-flex max-w-full items-center rounded-md px-2.5 py-1 text-xs font-semibold leading-snug ${statusBadgeClass}`}
-                              >
-                                {att.label}
-                              </span>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-xs">
+                              {isRowClockedIn ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-green-700">
+                                  <span className="text-green-600" aria-hidden>
+                                    ●
+                                  </span>
+                                  Clocked In
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 font-semibold text-red-700">
+                                  <span className="text-red-600" aria-hidden>
+                                    ●
+                                  </span>
+                                  Not Clocked In
+                                </span>
+                              )}
+                              {hasLiveMap && (
+                                <>
+                                  <span className="text-slate-300 select-none" aria-hidden>
+                                    ·
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="text-blue-700 font-semibold underline decoration-blue-700/50 underline-offset-2"
+                                    onClick={() =>
+                                      openMap({
+                                        latitude: Number(liveLoc.latitude),
+                                        longitude: Number(liveLoc.longitude),
+                                      })
+                                    }
+                                  >
+                                    Live Location
+                                  </button>
+                                </>
+                              )}
                             </div>
                             <div className="grid grid-cols-3 gap-2 text-[13px] leading-snug text-slate-800">
                               <div className="min-w-0 break-words">
