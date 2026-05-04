@@ -542,6 +542,36 @@ function clockOutTitleForActorRole(actorRole) {
   return normalizeMemberRole(actorRole) === "supervisor" ? "Supervisor clocked out" : "Employee clocked out";
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i += 1) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+function rpcReturnedNotificationId(data) {
+  if (data == null) return null;
+  if (typeof data === "string") return data;
+  if (Array.isArray(data) && data.length > 0) return String(data[0]);
+  return null;
+}
+
+async function requestSendPushForNotificationIds(ids) {
+  if (!ids.length) return;
+  try {
+    const res = await fetch("/api/send-push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notification_ids: ids }),
+    });
+    if (!res.ok) console.warn("[NOTIFY] send-push HTTP", res.status);
+  } catch (e) {
+    console.warn("[NOTIFY] send-push fetch failed", e);
+  }
+}
+
 /** Browser/PWA Notification API for clock_in / clock_out only; never throws. */
 function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   const id = String(notificationRow?.id ?? "");
@@ -607,6 +637,8 @@ async function createCompanyNotifications(supabase, params) {
     relatedTimesheetId != null && relatedTimesheetId !== "" ? String(relatedTimesheetId) : null;
   const pItemCount = itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null;
 
+  const createdNotificationIds = [];
+
   for (const recipient_user_id of recipients) {
     const rpcPayload = {
       p_company_id: companyId,
@@ -630,9 +662,15 @@ async function createCompanyNotifications(supabase, params) {
         continue;
       }
       console.log("[NOTIFY] rpc success", data);
+      const nid = rpcReturnedNotificationId(data);
+      if (nid) createdNotificationIds.push(nid);
     } catch (e) {
       console.error("[NOTIFY] rpc exception", e);
     }
+  }
+
+  if (createdNotificationIds.length > 0) {
+    void requestSendPushForNotificationIds(createdNotificationIds);
   }
 }
 
@@ -703,6 +741,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [markingAllNotifs, setMarkingAllNotifs] = useState(false);
   const [liveToast, setLiveToast] = useState(null);
   const [mobileNotifPermissionUi, setMobileNotifPermissionUi] = useState("unknown");
+  const [backgroundPushUi, setBackgroundPushUi] = useState("unknown");
+  const [backgroundPushError, setBackgroundPushError] = useState("");
   const notifPollBootstrappedRef = useRef(false);
   const notifLastUnreadIdsRef = useRef(new Set());
   const systemNotifShownIdsRef = useRef(new Set());
@@ -1087,6 +1127,34 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (p === "granted") setMobileNotifPermissionUi("enabled");
     else if (p === "denied") setMobileNotifPermissionUi("blocked");
     else setMobileNotifPermissionUi("default");
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setBackgroundPushUi("unknown");
+      setBackgroundPushError("");
+      return;
+    }
+    if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setBackgroundPushUi("not_supported");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        if (cancelled) return;
+        const sub = await reg.pushManager.getSubscription();
+        if (Notification.permission === "denied") setBackgroundPushUi("blocked");
+        else if (sub && Notification.permission === "granted") setBackgroundPushUi("enabled");
+        else setBackgroundPushUi("default");
+      } catch {
+        if (!cancelled) setBackgroundPushUi("unknown");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [isAdmin]);
 
   const schedulePhotoNotificationAfterUpload = useCallback(() => {
@@ -2645,6 +2713,75 @@ const handlePhotoCapture = async (event) => {
     }
   };
 
+  const handleEnableBackgroundPush = async () => {
+    setBackgroundPushError("");
+    const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+    if (typeof vapid !== "string" || !vapid.trim()) {
+      setBackgroundPushUi("error");
+      setBackgroundPushError("Missing VITE_VAPID_PUBLIC_KEY");
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setBackgroundPushUi("not_supported");
+      return;
+    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setBackgroundPushUi("not_supported");
+      return;
+    }
+    if (!authUser?.id || !userCompany?.id) {
+      setBackgroundPushUi("error");
+      setBackgroundPushError("Sign in and select a company first.");
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        setBackgroundPushUi(perm === "denied" ? "blocked" : "default");
+        return;
+      }
+
+      let reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) {
+        reg = await navigator.serviceWorker.register("/service-worker.js");
+      }
+      await navigator.serviceWorker.ready;
+
+      const registration =
+        (await navigator.serviceWorker.getRegistration()) || reg;
+      if (!registration?.pushManager) {
+        setBackgroundPushUi("not_supported");
+        return;
+      }
+
+      const sub = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
+      });
+      const json = sub.toJSON();
+      const keys = json.keys || {};
+
+      const row = {
+        company_id: userCompany.id,
+        user_id: authUser.id,
+        endpoint: sub.endpoint,
+        p256dh: keys.p256dh || "",
+        auth: keys.auth || "",
+        user_agent: typeof navigator.userAgent === "string" ? navigator.userAgent.slice(0, 500) : "",
+        is_active: true,
+      };
+
+      const { error } = await supabase.from("push_subscriptions").upsert(row, {
+        onConflict: "endpoint",
+      });
+      if (error) throw error;
+      setBackgroundPushUi("enabled");
+    } catch (e) {
+      setBackgroundPushUi("error");
+      setBackgroundPushError(getErrorMessage(e));
+    }
+  };
+
   const handleMarkNotificationRead = async (n) => {
     if (!isAdmin || !authUser?.id || !n?.id) return;
     setMarkingNotifId(String(n.id));
@@ -3810,6 +3947,38 @@ const handlePhotoCapture = async (event) => {
                   </p>
                   <p className="text-[10px] text-slate-500 leading-snug">
                     Clock in and clock out only. Other alerts stay in the app until you allow more later.
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Background (PWA)</p>
+                  <Button
+                    type="button"
+                    className="w-full rounded-xl h-10 text-xs font-semibold"
+                    onClick={() => void handleEnableBackgroundPush()}
+                  >
+                    Enable Background Notifications
+                  </Button>
+                  <p className="text-[11px] text-slate-600">
+                    Status:{" "}
+                    <span className="font-semibold">
+                      {backgroundPushUi === "enabled"
+                        ? "Enabled"
+                        : backgroundPushUi === "blocked"
+                          ? "Blocked"
+                          : backgroundPushUi === "not_supported"
+                            ? "Not supported"
+                            : backgroundPushUi === "error"
+                              ? "Error"
+                              : backgroundPushUi === "default"
+                                ? "Not yet enabled"
+                                : "—"}
+                    </span>
+                  </p>
+                  {backgroundPushError && (
+                    <p className="text-[11px] text-red-700 leading-snug break-words">{backgroundPushError}</p>
+                  )}
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    Uses Web Push when the app or PWA is closed (requires deploy with push API and env keys).
                   </p>
                 </div>
                 {inAppNotifError && (
