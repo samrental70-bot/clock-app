@@ -514,12 +514,21 @@ function mapTimesheetRowFromSupabase(row) {
     breakEnd: null,
     employeeId: row.user_id,
     projectFolder: projectName ? getProjectFolderName(projectName) : "",
-    clockInLocation: null,
+    clockInLocation:
+      row.clock_in_latitude != null && row.clock_in_longitude != null
+        ? {
+            latitude: row.clock_in_latitude,
+            longitude: row.clock_in_longitude,
+            accuracy: row.clock_in_accuracy,
+            capturedAt: row.clock_in,
+          }
+        : null,
     clockOutLocation:
       row.clock_out_latitude != null && row.clock_out_longitude != null
         ? {
             latitude: row.clock_out_latitude,
             longitude: row.clock_out_longitude,
+            accuracy: row.clock_out_accuracy,
             capturedAt: row.clock_out,
           }
         : null,
@@ -548,30 +557,81 @@ async function fetchProfilesByTimesheetUserIds(supabase, userIds) {
   return map;
 }
 
+/**
+ * @returns {Promise<{
+ *   coords: { latitude: number; longitude: number; accuracy: number; capturedAt: string } | null;
+ *   error: "denied" | "unavailable" | "timeout" | null;
+ * }>}
+ */
 function getCurrentLocation() {
   return new Promise((resolve) => {
     if (!navigator.geolocation) {
-      resolve(null);
+      resolve({ coords: null, error: "unavailable" });
       return;
     }
 
     navigator.geolocation.getCurrentPosition(
       (position) => {
         resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          capturedAt: new Date().toISOString(),
+          coords: {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            capturedAt: new Date().toISOString(),
+          },
+          error: null,
         });
       },
-      () => resolve(null),
+      (err) => {
+        const code = err?.code;
+        if (code === 1) resolve({ coords: null, error: "denied" });
+        else if (code === 2) resolve({ coords: null, error: "unavailable" });
+        else if (code === 3) resolve({ coords: null, error: "timeout" });
+        else resolve({ coords: null, error: "unavailable" });
+      },
       {
         enableHighAccuracy: true,
-        timeout: 3000,
+        timeout: 12000,
         maximumAge: 0,
       }
     );
   });
+}
+
+function isMissingOptionalAccuracyColumnError(error) {
+  const m = String(error?.message || "").toLowerCase();
+  return (
+    m.includes("column") &&
+    (m.includes("accuracy") || m.includes("clock_in_accuracy") || m.includes("clock_out_accuracy"))
+  );
+}
+
+async function supabaseInsertTimesheetRow(supabase, row) {
+  let payload = { ...row };
+  let { data, error } = await supabase.from("timesheets").insert([payload]).select();
+  if (
+    error &&
+    isMissingOptionalAccuracyColumnError(error) &&
+    ("clock_in_accuracy" in payload || "clock_out_accuracy" in payload)
+  ) {
+    const { clock_in_accuracy, clock_out_accuracy, ...rest } = payload;
+    ({ data, error } = await supabase.from("timesheets").insert([rest]).select());
+  }
+  return { data, error };
+}
+
+async function supabaseUpdateTimesheetRow(supabase, id, partial) {
+  let payload = { ...partial };
+  let { data, error } = await supabase.from("timesheets").update(payload).eq("id", id).select();
+  if (
+    error &&
+    isMissingOptionalAccuracyColumnError(error) &&
+    ("clock_in_accuracy" in payload || "clock_out_accuracy" in payload)
+  ) {
+    const { clock_in_accuracy, clock_out_accuracy, ...rest } = payload;
+    ({ data, error } = await supabase.from("timesheets").update(rest).eq("id", id).select());
+  }
+  return { error, data };
 }
 
 function openMap(location) {
@@ -3309,7 +3369,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
       return;
     }
 
-    setLocationStatus("Clocking in...");
+    setLocationStatus("Getting location...");
+    const locResult = await getCurrentLocation();
+    const gps = locResult.coords;
 
     let employeeHourlyRate = 0;
     try {
@@ -3324,7 +3386,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
     }
     console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
 
-    const clockInLocation = null;
+    const clockInLocation = gps
+      ? {
+          latitude: gps.latitude,
+          longitude: gps.longitude,
+          accuracy: gps.accuracy,
+          capturedAt: gps.capturedAt,
+        }
+      : null;
     const clockInTime = new Date().toISOString();
     const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
 
@@ -3355,55 +3424,61 @@ const [uploadProgress, setUploadProgress] = useState(null);
     };
 
     setCurrentShift(newShift);
-    setLocationStatus("Clock-in saved locally.");
+    setLocationStatus("Saving clock-in…");
 
-    const { data, error } = await supabase
-      .from("timesheets")
-      .insert([{
-        user_id: authUser.id,
-        employee_email: authUser.email || null,
-        employee_name: clockInEmployeeName,
-        company_id: userCompany?.id || null,
-        company_name: userCompany?.name || null,
-        project_id: clockSelectedProject.id,
-        project_name: clockSelectedProject.name,
-        hourly_rate: employeeHourlyRate,
-        cost_centre: costCenter,
-        clock_in: clockInTime,
-        status: "Active",
-        clock_in_latitude: null,
-        clock_in_longitude: null,
-      }])
-      .select();
+    const clockInInsertBase = {
+      user_id: authUser.id,
+      employee_email: authUser.email || null,
+      employee_name: clockInEmployeeName,
+      company_id: userCompany?.id || null,
+      company_name: userCompany?.name || null,
+      project_id: clockSelectedProject.id,
+      project_name: clockSelectedProject.name,
+      hourly_rate: employeeHourlyRate,
+      cost_centre: costCenter,
+      clock_in: clockInTime,
+      status: "Active",
+      clock_in_latitude: gps?.latitude ?? null,
+      clock_in_longitude: gps?.longitude ?? null,
+      ...(gps != null && gps.accuracy != null ? { clock_in_accuracy: gps.accuracy } : {}),
+    };
+
+    const { data, error } = await supabaseInsertTimesheetRow(supabase, clockInInsertBase);
 
     if (error) {
       // Backward compatibility if DB columns aren't added yet
       const msg = error?.message || "";
       const missingColumn = msg.includes("column") && (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
       if (missingColumn) {
-        const { data: legacyData, error: legacyError } = await supabase
-          .from("timesheets")
-          .insert([{
-            user_id: authUser.id,
-            employee_name: clockInEmployeeName,
-            project_name: clockSelectedProject.name,
-            hourly_rate: employeeHourlyRate,
-            cost_centre: costCenter,
-            clock_in: clockInTime,
-            status: "Active",
-            clock_in_latitude: null,
-            clock_in_longitude: null,
-          }])
-          .select();
+        const legacyInsert = {
+          user_id: authUser.id,
+          employee_name: clockInEmployeeName,
+          project_name: clockSelectedProject.name,
+          hourly_rate: employeeHourlyRate,
+          cost_centre: costCenter,
+          clock_in: clockInTime,
+          status: "Active",
+          clock_in_latitude: gps?.latitude ?? null,
+          clock_in_longitude: gps?.longitude ?? null,
+          ...(gps != null && gps.accuracy != null ? { clock_in_accuracy: gps.accuracy } : {}),
+        };
+        const { data: legacyData, error: legacyError } = await supabaseInsertTimesheetRow(supabase, legacyInsert);
 
         if (legacyError) {
           console.log("Supabase clock-in error:", legacyError);
+          setLocationStatus("Database save failed. Your shift is still active locally.");
           alert("Clock-in saved locally, but database save failed.");
           return;
         }
 
         setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
-        setLocationStatus("Clock-in saved.");
+        setLocationStatus(
+          gps
+            ? "Clock-in saved. Location captured."
+            : locResult.error === "denied"
+              ? "Clock-in saved. Location unavailable / permission denied."
+              : "Clock-in saved. Location unavailable."
+        );
         const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
         void createCompanyNotifications(supabase, {
           companyId: userCompany?.id,
@@ -3423,12 +3498,19 @@ const [uploadProgress, setUploadProgress] = useState(null);
       }
 
       console.log("Supabase clock-in error:", error);
+      setLocationStatus("Database save failed. Your shift is still active locally.");
       alert("Clock-in saved locally, but database save failed.");
       return;
     }
 
     setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
-    setLocationStatus("Clock-in saved.");
+    setLocationStatus(
+      gps
+        ? "Clock-in saved. Location captured."
+        : locResult.error === "denied"
+          ? "Clock-in saved. Location unavailable / permission denied."
+          : "Clock-in saved. Location unavailable."
+    );
     const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
     void createCompanyNotifications(supabase, {
       companyId: userCompany?.id,
@@ -3696,8 +3778,9 @@ const handlePhotoCapture = async (event) => {
       setWatchId(null);
     }
 
-    setLocationStatus("Getting clock-out location...");
-    const clockOutLocation = await getCurrentLocation();
+    setLocationStatus("Getting location...");
+    const locResult = await getCurrentLocation();
+    const clockOutGps = locResult.coords;
     const clockOutTime = new Date().toISOString();
 
     if (visibleCurrentShift.supabaseTimesheetId) {
@@ -3714,14 +3797,19 @@ const handlePhotoCapture = async (event) => {
         hours: labourDebug.hours,
         cost: labourDebug.labourCost,
       });
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          ...labourUpdate,
-          clock_out_latitude: clockOutLocation?.latitude || null,
-          clock_out_longitude: clockOutLocation?.longitude || null,
-        })
-        .eq("id", visibleCurrentShift.supabaseTimesheetId);
+      const updatePayload = {
+        ...labourUpdate,
+        clock_out_latitude: clockOutGps?.latitude ?? null,
+        clock_out_longitude: clockOutGps?.longitude ?? null,
+        ...(clockOutGps != null && clockOutGps.accuracy != null
+          ? { clock_out_accuracy: clockOutGps.accuracy }
+          : {}),
+      };
+      const { error } = await supabaseUpdateTimesheetRow(
+        supabase,
+        visibleCurrentShift.supabaseTimesheetId,
+        updatePayload
+      );
 
       if (error) {
         console.log("Supabase clock-out error:", error);
@@ -3745,7 +3833,13 @@ const handlePhotoCapture = async (event) => {
     }
 
     setCurrentShift(null);
-    setLocationStatus(clockOutLocation ? "Clock-out location captured" : "Clock-out saved. Location not available.");
+    setLocationStatus(
+      clockOutGps
+        ? "Clock-out saved. Location captured."
+        : locResult.error === "denied"
+          ? "Clock-out saved. Location unavailable / permission denied."
+          : "Clock-out saved. Location unavailable."
+    );
     setActiveTab("clock");
     void fetchTimesheetsFromSupabase();
   };
@@ -3901,7 +3995,12 @@ const handlePhotoCapture = async (event) => {
     });
 
     try {
-      const { error } = await supabase.from("timesheets").update(labourUpdate).eq("id", rep.supabaseTimesheetId);
+      const { error } = await supabaseUpdateTimesheetRow(supabase, rep.supabaseTimesheetId, {
+        ...labourUpdate,
+        clock_out_latitude: null,
+        clock_out_longitude: null,
+        clock_out_accuracy: null,
+      });
       if (error) throw error;
       setDashboardActionFeedback({
         type: "success",
@@ -4799,6 +4898,34 @@ const handlePhotoCapture = async (event) => {
             <div><p>In</p><p className="font-semibold text-slate-900">{formatTime(record.clockIn, companyTimeZone)}</p></div>
             <div><p>Out</p><p className={outClass}>{outText}</p></div>
           </div>
+          {(record.clockInLocation || record.clockOutLocation) && (
+            <div className="mt-2 space-y-1 text-[11px] text-slate-600 border-t border-slate-100 pt-2">
+              {record.clockInLocation && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span>Clock In Location:</span>
+                  <button
+                    type="button"
+                    className="text-blue-700 font-semibold underline"
+                    onClick={() => openMap(record.clockInLocation)}
+                  >
+                    View Map
+                  </button>
+                </div>
+              )}
+              {record.clockOutLocation && (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span>Clock Out Location:</span>
+                  <button
+                    type="button"
+                    className="text-blue-700 font-semibold underline"
+                    onClick={() => openMap(record.clockOutLocation)}
+                  >
+                    View Map
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
           {staleActiveMissingOut && (
             <p className="mt-1 text-[11px] text-amber-700">This shift was never clocked out.</p>
           )}
@@ -5540,6 +5667,9 @@ const handlePhotoCapture = async (event) => {
                       <Button className="w-full rounded-2xl h-11 text-sm" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
                     <Button className="w-full rounded-2xl h-11 text-sm font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
+                    {locationStatus && (
+                      <p className="text-xs text-slate-500 text-center pt-0.5">{locationStatus}</p>
+                    )}
                   </div>
                 )}
               </CardContent>
