@@ -1818,12 +1818,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   const reportsGroupedView = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
-      return { mode: "flat", rows: [], splitBy: "none" };
+      return { mode: "flat", rows: [], splitBy: "none", groupBy: "employee" };
     }
 
-    const split = reportsSplitBy || "none";
-    const group = reportsGroupBy || "employee";
-    const effectiveSplit = split === group ? "none" : split;
+    const reportBy = reportsGroupBy === "project" ? "project" : "employee";
+    const rawSplit = reportsSplitBy || "none";
+    const splitAllowed =
+      reportBy === "project"
+        ? ["none", "employee", "cost_center"].includes(rawSplit)
+        : ["none", "project", "cost_center"].includes(rawSplit);
+    const splitBy = splitAllowed ? rawSplit : "none";
 
     const rows = reportsRowsFilteredForUi || [];
 
@@ -1849,15 +1853,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
       return { key: "all", label: "—" };
     };
 
-    if (effectiveSplit === "none") {
-      // Defer to precomputed flat aggregates for rendering.
-      return { mode: "flat", splitBy: "none", groupBy: group };
+    if (splitBy === "none") {
+      return { mode: "flat", splitBy: "none", groupBy: reportBy };
     }
 
     const mainMap = {};
     for (const r of rows) {
-      const main = getDim(group, r);
-      const sub = getDim(effectiveSplit, r);
+      const main = getDim(reportBy, r);
+      const sub = getDim(splitBy, r);
       const wm = getWorkedMinutes(r);
       const lc = getLabourCost(r);
 
@@ -1888,7 +1891,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       }))
       .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
-    return { mode: "split", splitBy: effectiveSplit, groupBy: group, rows: mainRows };
+    return { mode: "split", splitBy, groupBy: reportBy, rows: mainRows };
   }, [
     isAdmin,
     activeTab,
@@ -1901,6 +1904,54 @@ const [uploadProgress, setUploadProgress] = useState(null);
     authUser,
     teamProfileFullNameByUserId,
   ]);
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== "reports") return;
+    const rb = reportsGroupBy === "project" ? "project" : "employee";
+    const raw = reportsSplitBy || "none";
+    const ok =
+      rb === "project"
+        ? ["none", "employee", "cost_center"].includes(raw)
+        : ["none", "project", "cost_center"].includes(raw);
+    if (!ok) setReportsSplitBy("none");
+  }, [isAdmin, activeTab, reportsGroupBy, reportsSplitBy]);
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== "reports") return;
+    const rb = reportsGroupBy === "project" ? "project" : "employee";
+    const rawSplit = reportsSplitBy || "none";
+    const splitOk =
+      rb === "project"
+        ? ["none", "employee", "cost_center"].includes(rawSplit)
+        : ["none", "project", "cost_center"].includes(rawSplit);
+    const splitBy = splitOk ? rawSplit : "none";
+    console.log("[REPORTS] reportBy", rb);
+    console.log("[REPORTS] splitBy", splitBy);
+    const gv = reportsGroupedView;
+    if (gv.mode === "split" && Array.isArray(gv.rows)) {
+      console.log(
+        "[REPORTS] mainGroups",
+        gv.rows.map((r) => ({
+          key: r.key,
+          label: r.label,
+          minutes: r.minutes,
+          cost: r.cost,
+          children: r.children?.length ?? 0,
+        }))
+      );
+      const expandedKey = Object.keys(reportsExpandedGroups).find((k) => reportsExpandedGroups[k]);
+      const sample = expandedKey ? gv.rows.find((r) => r.key === expandedKey) : null;
+      const nestedSource = sample || gv.rows[0];
+      console.log(
+        "[REPORTS] nestedGroups",
+        expandedKey ? `(expanded: ${nestedSource?.label ?? expandedKey})` : "(first main row preview)",
+        nestedSource?.children ?? []
+      );
+    } else {
+      console.log("[REPORTS] mainGroups", "(flat mode — use list section, no nested split)");
+      console.log("[REPORTS] nestedGroups", "(none — Split by is None)");
+    }
+  }, [isAdmin, activeTab, reportsGroupBy, reportsSplitBy, reportsGroupedView, reportsExpandedGroups]);
 
   const reportsAggregates = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
@@ -6775,9 +6826,6 @@ const handlePhotoCapture = async (event) => {
                         setReportsSplitBy((prev) => {
                           if (next === "project" && prev === "project") return "none";
                           if (next === "employee" && prev === "employee") return "none";
-                          // Also drop invalid options when switching
-                          if (next === "project" && prev === "project") return "none";
-                          if (next === "employee" && prev === "employee") return "none";
                           return prev;
                         });
                         setReportsExpandedGroups({});
@@ -6938,13 +6986,13 @@ const handlePhotoCapture = async (event) => {
                     <div className="space-y-2">
                       <h3 className="text-base font-bold text-slate-950 leading-snug">
                         {reportsGroupBy === "employee" ? "Employees" : "Projects"}
-                        {reportsSplitBy !== "none" && reportsSplitBy !== reportsGroupBy ? (
+                        {reportsGroupedView.mode === "split" ? (
                           <span className="text-sm font-semibold text-slate-600">
                             {" "}
                             · Split by{" "}
-                            {reportsSplitBy === "cost_center"
+                            {reportsGroupedView.splitBy === "cost_center"
                               ? "Cost Centre"
-                              : reportsSplitBy === "employee"
+                              : reportsGroupedView.splitBy === "employee"
                                 ? "Employee"
                                 : "Project"}
                           </span>
