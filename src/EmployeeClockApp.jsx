@@ -3550,6 +3550,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
               ? "Clock-in saved. Location unavailable / permission denied."
               : "Clock-in saved. Location unavailable."
         );
+        void updateLiveLocationOnce({
+          status: "clocked_in",
+          projectName: clockSelectedProject.name,
+          costCentre: costCenter,
+          coords: gps,
+        });
         const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
         void createCompanyNotifications(supabase, {
           companyId: userCompany?.id,
@@ -3859,6 +3865,7 @@ const handlePhotoCapture = async (event) => {
     const locResult = await getCurrentLocation();
     const clockOutGps = locResult.coords;
     const clockOutTime = new Date().toISOString();
+    let didSaveClockOut = false;
 
     if (visibleCurrentShift.supabaseTimesheetId) {
       const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
@@ -3891,6 +3898,7 @@ const handlePhotoCapture = async (event) => {
       if (error) {
         console.log("Supabase clock-out error:", error);
       } else if (authUser?.id && userCompany?.id) {
+        didSaveClockOut = true;
         const actorLabel = (profileFullName || "").trim() || authUser?.email || "Someone";
         void createCompanyNotifications(supabase, {
           companyId: userCompany.id,
@@ -3910,12 +3918,14 @@ const handlePhotoCapture = async (event) => {
     }
 
     setCurrentShift(null);
-    void updateLiveLocationOnce({
-      status: "clocked_out",
-      projectName: visibleCurrentShift.project,
-      costCentre: visibleCurrentShift.costCenter,
-      coords: clockOutGps,
-    });
+    if (didSaveClockOut) {
+      void updateLiveLocationOnce({
+        status: "clocked_out",
+        projectName: visibleCurrentShift.project,
+        costCentre: visibleCurrentShift.costCenter,
+        coords: clockOutGps,
+      });
+    }
     setLocationStatus(
       clockOutGps
         ? "Clock-out saved. Location captured."
