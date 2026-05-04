@@ -807,6 +807,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [teamCopyOk, setTeamCopyOk] = useState(false);
   const [teamRoleFeedback, setTeamRoleFeedback] = useState({ type: "", text: "" });
   const [teamRoleSavingId, setTeamRoleSavingId] = useState(null);
+  const [dashboardViewDate, setDashboardViewDate] = useState("");
+  const [dashboardRows, setDashboardRows] = useState([]);
+  const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState("");
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -815,6 +820,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   useEffect(() => {
     if (!userCompany?.id) return;
     setTeamViewDate(calendarDateKeyInTimeZone(new Date(), userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE));
+  }, [userCompany?.id]);
+
+  useEffect(() => {
+    if (!userCompany?.id) return;
+    setDashboardViewDate(calendarDateKeyInTimeZone(new Date(), userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE));
   }, [userCompany?.id]);
 
   useEffect(() => {
@@ -906,6 +916,90 @@ const [uploadProgress, setUploadProgress] = useState(null);
     };
   }, [activeTab, userCompany?.id, authUser?.id, teamViewDate, companyTimeZone, isAdmin]);
 
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !isAdmin || !userCompany?.id || !authUser?.id || !dashboardViewDate) return;
+    let cancelled = false;
+    setDashboardLoading(true);
+    setDashboardError("");
+    (async () => {
+      try {
+        const { data: members, error: mErr } = await supabase
+          .from("company_members")
+          .select("id, user_id, role, created_at")
+          .eq("company_id", userCompany.id)
+          .order("created_at", { ascending: true });
+        if (mErr) throw mErr;
+        const list = members || [];
+        const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
+        const profilesMap = {};
+        if (ids.length > 0) {
+          let { data: profs, error: pErr } = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
+          if (pErr) {
+            const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
+            if (retry.error) throw retry.error;
+            profs = retry.data || [];
+          }
+          (profs || []).forEach((p) => {
+            profilesMap[p.id] = p;
+          });
+        }
+        const rows = list.map((m) => {
+          const p = profilesMap[m.user_id] || {};
+          const profileFull = (p.full_name && String(p.full_name).trim()) || "";
+          const profileEmailRaw = (p.email && String(p.email).trim()) || "";
+          const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
+          return {
+            memberRowId: m.id,
+            userId: m.user_id,
+            role: (m.role || "employee").trim(),
+            joinedAt: m.created_at ?? null,
+            fullName: profileFull,
+            profileEmailRaw,
+            displayName: displayName || shortUserLabel(m.user_id),
+          };
+        });
+
+        const dayStartIso = wallDateTimeToUtcIso(dashboardViewDate, "00:00:00", companyTimeZone);
+        const dayEndIso = wallDateTimeToUtcIso(dashboardViewDate, "23:59:59", companyTimeZone);
+        if (!dayStartIso || !dayEndIso) {
+          if (!cancelled) {
+            setDashboardRows(rows);
+            setDashboardDaySheets([]);
+          }
+          return;
+        }
+        const { data: tsData, error: tsErr } = await supabase
+          .from("timesheets")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .gte("clock_in", dayStartIso)
+          .lte("clock_in", dayEndIso)
+          .order("clock_in", { ascending: false });
+        if (tsErr) throw tsErr;
+        const mappedTs = (tsData || []).map(mapTimesheetRowFromSupabase);
+        const dateFiltered = mappedTs.filter(
+          (r) => calendarDateKeyInTimeZone(r.clockIn, companyTimeZone) === dashboardViewDate
+        );
+
+        if (!cancelled) {
+          setDashboardRows(rows);
+          setDashboardDaySheets(dateFiltered);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setDashboardError(getErrorMessage(err));
+          setDashboardRows([]);
+          setDashboardDaySheets([]);
+        }
+      } finally {
+        if (!cancelled) setDashboardLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, dashboardViewDate, companyTimeZone]);
+
   const teamProfileFullNameByUserId = useMemo(() => {
     const m = {};
     teamRows.forEach((r) => {
@@ -914,6 +1008,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
     });
     return m;
   }, [teamRows]);
+
+  const dashboardSelectedDateLabel = useMemo(() => {
+    if (!dashboardViewDate) return "";
+    const iso = wallDateTimeToUtcIso(dashboardViewDate, "12:00:00", companyTimeZone);
+    if (!iso) return dashboardViewDate;
+    return formatDate(iso, companyTimeZone);
+  }, [dashboardViewDate, companyTimeZone]);
 
   const fetchTimesheetsFromSupabase = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -1012,6 +1113,38 @@ const [uploadProgress, setUploadProgress] = useState(null);
     ? currentShift
     : null;
 
+  const dashboardSummary = useMemo(() => {
+    if (!isAdmin || !dashboardViewDate) {
+      return { clockedIn: 0, totalMinutes: 0, totalCost: 0, missingOut: 0 };
+    }
+    const ctx = {
+      selectedDateKey: dashboardViewDate,
+      companyTimeZone,
+      now,
+      authUser,
+      visibleCurrentShift,
+    };
+    let clockedIn = 0;
+    let totalMinutes = 0;
+    let totalCost = 0;
+    let missingOut = 0;
+    for (const row of dashboardRows) {
+      const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === String(row.userId));
+      const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
+      const att = teamAttendanceStatusForRecord(rep, ctx);
+      if (att.code === "clocked_in") clockedIn += 1;
+      if (att.code === "missing_out") missingOut += 1;
+      if (rep) {
+        const total = minutesBetween(rep.clockIn, rep.clockOut || new Date());
+        const breakTotal = rep.breakStart && rep.breakEnd ? minutesBetween(rep.breakStart, rep.breakEnd) : 0;
+        const worked = Math.max(0, total - breakTotal);
+        totalMinutes += worked;
+        totalCost += (worked / 60) * Number(rep.hourlyRate || 0);
+      }
+    }
+    return { clockedIn, totalMinutes, totalCost, missingOut };
+  }, [isAdmin, dashboardViewDate, dashboardRows, dashboardDaySheets, companyTimeZone, now, authUser, visibleCurrentShift]);
+
   const activeShiftTitle = useMemo(
     () =>
       visibleCurrentShift
@@ -1107,6 +1240,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   useEffect(() => {
     if (!isAdmin && activeTab === "notifications") setActiveTab("clock");
+  }, [isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === "dashboard") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
@@ -4070,6 +4207,144 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "dashboard" && isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 sm:p-5 space-y-4">
+                <div>
+                  <h2 className="font-bold text-lg">Dashboard</h2>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
+                    Date
+                  </label>
+                  <input
+                    id="dashboard-view-date"
+                    type="date"
+                    className="w-full rounded-xl border bg-white px-2 py-2 text-sm"
+                    value={dashboardViewDate}
+                    onChange={(e) => setDashboardViewDate(e.target.value)}
+                    disabled={!dashboardViewDate}
+                  />
+                  {dashboardSelectedDateLabel && (
+                    <p className="text-xs text-slate-600">
+                      Selected (company time): {dashboardSelectedDateLabel}
+                    </p>
+                  )}
+                </div>
+                {dashboardLoading && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Loading dashboard…
+                  </div>
+                )}
+                {dashboardError && (
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">{dashboardError}</div>
+                )}
+                {!dashboardLoading && !dashboardError && (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Clocked In</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums">{dashboardSummary.clockedIn}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total Hours</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums leading-tight">
+                          {formatDuration(dashboardSummary.totalMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Labour Cost</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums leading-tight">
+                          {formatMoney(dashboardSummary.totalCost)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Missing Clock-out</p>
+                        <p className="text-base font-bold text-slate-900 tabular-nums">{dashboardSummary.missingOut}</p>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 pt-1">
+                      {dashboardRows.map((row) => {
+                        const rowRoleNorm = normalizeMemberRole(row.role);
+                        const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === String(row.userId));
+                        const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
+                        const att = teamAttendanceStatusForRecord(rep, {
+                          selectedDateKey: dashboardViewDate,
+                          companyTimeZone,
+                          now,
+                          authUser,
+                          visibleCurrentShift,
+                        });
+                        const statusBadgeClass =
+                          att.code === "clocked_in"
+                            ? "bg-green-50 text-green-800 border border-green-100"
+                            : att.code === "clocked_out"
+                              ? "bg-slate-100 text-slate-800 border border-slate-200"
+                              : att.code === "missing_out"
+                                ? "bg-amber-50 text-amber-900 border border-amber-100"
+                                : "bg-slate-50 text-slate-600 border border-slate-100";
+                        const inDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
+                        const outDisp = rep?.clockOut ? formatTime(rep.clockOut, companyTimeZone) : "—";
+                        const totalDisp = rep ? formatDuration(getWorkedMinutes(rep)) : "—";
+                        const labourDisp = rep ? formatMoney(getLabourCost(rep)) : "—";
+                        const projectDisp = rep?.project ? String(rep.project) : "—";
+                        const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+                        return (
+                          <div
+                            key={row.memberRowId}
+                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 leading-tight"
+                          >
+                            <div className="flex flex-wrap items-center gap-x-1 gap-y-0 min-w-0 text-[10px]">
+                              <span
+                                className="min-w-0 max-w-[min(100%,11rem)] flex-1 basis-0 truncate font-semibold text-slate-900"
+                                title={row.displayName}
+                              >
+                                {row.displayName}
+                              </span>
+                              <span className="text-slate-300 shrink-0">|</span>
+                              <span
+                                className={`inline-flex shrink-0 items-center rounded px-1 py-0.5 font-semibold leading-none ${statusBadgeClass}`}
+                              >
+                                {att.label}
+                              </span>
+                              <span className="text-slate-300 shrink-0">|</span>
+                              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium capitalize leading-none text-slate-700">
+                                {rowRoleNorm}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-[9px] text-slate-600 leading-snug">
+                              <span className="text-slate-500">In:</span>{" "}
+                              <span className="font-semibold text-slate-900 tabular-nums">{inDisp}</span>
+                              <span className="text-slate-300 px-0.5">|</span>
+                              <span className="text-slate-500">Out:</span>{" "}
+                              <span className="font-semibold text-slate-900 tabular-nums">{outDisp}</span>
+                              <span className="text-slate-300 px-0.5">|</span>
+                              <span className="text-slate-500">Total:</span>{" "}
+                              <span className="font-semibold tabular-nums text-slate-900">{totalDisp}</span>
+                              <span className="text-slate-300 px-0.5">|</span>
+                              <span className="text-slate-500">Labour:</span>{" "}
+                              <span className="font-semibold tabular-nums text-slate-900">{labourDisp}</span>
+                              <span className="text-slate-300 px-0.5">|</span>
+                              <span className="text-slate-500">Project:</span>{" "}
+                              <span className="font-semibold text-slate-800">{projectDisp}</span>
+                              <span className="text-slate-300 px-0.5">|</span>
+                              <span className="text-slate-500">Cost:</span>{" "}
+                              <span className="font-semibold text-slate-800">{costDisp}</span>
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {dashboardRows.length === 0 && (
+                      <p className="text-xs text-slate-500 text-center py-2">No members in this company.</p>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "team" && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
@@ -4336,8 +4611,17 @@ const handlePhotoCapture = async (event) => {
         <div
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className={`grid gap-1.5 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("dashboard")}
+                className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                📊 Dashboard
+              </button>
+            )}
             <button onClick={() => setActiveTab("timesheet")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "timesheet" ? "bg-slate-900 text-white" : "text-slate-500"}`}>📄 Timesheet</button>
           </div>
         </div>
