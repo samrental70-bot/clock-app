@@ -1235,6 +1235,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectsScreenError, setProjectsScreenError] = useState("");
   const [projectsScreenRefreshKey, setProjectsScreenRefreshKey] = useState(0);
   const [companyProjectsRefreshKey, setCompanyProjectsRefreshKey] = useState(0);
+  /** Active project_ids from project_assignments for the signed-in employee (Clock filter only). */
+  const [employeeClockAssignedProjectIds, setEmployeeClockAssignedProjectIds] = useState([]);
 
   const [projectsAddFormOpen, setProjectsAddFormOpen] = useState(false);
   const [projectsAddName, setProjectsAddName] = useState("");
@@ -1282,6 +1284,24 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
 
+  /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
+  const clockSelectableProjects = useMemo(() => {
+    if (useProjectFallback) {
+      if (isAdmin) return effectiveProjects;
+      return [];
+    }
+    if (isAdmin) return companyProjects;
+    const ids = new Set((employeeClockAssignedProjectIds || []).map((id) => String(id)));
+    return companyProjects.filter((p) => ids.has(String(p.id)));
+  }, [useProjectFallback, isAdmin, effectiveProjects, companyProjects, employeeClockAssignedProjectIds]);
+
+  const clockSelectedProject = useMemo(() => {
+    const list = clockSelectableProjects;
+    if (!list || list.length === 0) return null;
+    const found = list.find((p) => String(p.id) === String(projectId));
+    return found || list[0];
+  }, [clockSelectableProjects, projectId]);
+
   const dashboardRowsForAttendance = useMemo(
     () => dashboardRows.filter((r) => r.employmentStatus !== "archived"),
     [dashboardRows]
@@ -1315,11 +1335,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
       return next;
     });
   }, [activeTab, isAdmin, dashboardRowsForAttendance, effectiveProjects, effectiveCostCentresByProjectId]);
-
-  const selectedProject =
-    effectiveProjects.find((project) => String(project.id) === String(projectId)) ||
-    effectiveProjects[0] ||
-    { id: adminProjects[0].id, name: adminProjects[0].name };
 
   const getWorkedMinutes = (record) => {
     const total = minutesBetween(record.clockIn, record.clockOut || new Date());
@@ -1753,6 +1768,31 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [userCompany?.id, authUser?.id, companyProjectsRefreshKey]);
 
   useEffect(() => {
+    if (!userCompany?.id || !authUser?.id || isAdmin) {
+      setEmployeeClockAssignedProjectIds([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("project_assignments")
+        .select("project_id")
+        .eq("company_id", userCompany.id)
+        .eq("user_id", authUser.id)
+        .eq("status", "active");
+      if (cancelled) return;
+      if (error) {
+        setEmployeeClockAssignedProjectIds([]);
+        return;
+      }
+      setEmployeeClockAssignedProjectIds((data || []).map((r) => r.project_id).filter(Boolean));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userCompany?.id, authUser?.id, isAdmin, companyProjectsRefreshKey, projectsScreenRefreshKey]);
+
+  useEffect(() => {
     if (activeTab !== "projects" || !isAdmin || !userCompany?.id) return;
 
     let cancelled = false;
@@ -1864,11 +1904,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [activeTab, isAdmin, userCompany?.id, projectsScreenRefreshKey]);
 
   useEffect(() => {
-    // When projects load/switch, ensure we have a valid project + cost centre selected.
-    if (!effectiveProjects || effectiveProjects.length === 0) return;
+    // When projects load/switch, ensure we have a valid project + cost centre selected (Clock uses clockSelectableProjects).
+    if (!clockSelectableProjects || clockSelectableProjects.length === 0) return;
 
-    const hasProject = effectiveProjects.some((p) => String(p.id) === String(projectId));
-    const nextProject = hasProject ? effectiveProjects.find((p) => String(p.id) === String(projectId)) : effectiveProjects[0];
+    const hasProject = clockSelectableProjects.some((p) => String(p.id) === String(projectId));
+    const nextProject = hasProject
+      ? clockSelectableProjects.find((p) => String(p.id) === String(projectId))
+      : clockSelectableProjects[0];
 
     if (nextProject && String(nextProject.id) !== String(projectId)) {
       setProjectId(nextProject.id);
@@ -1878,7 +1920,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (centres.length > 0 && !centres.includes(costCenter)) {
       setCostCenter(centres[0]);
     }
-  }, [effectiveProjects, effectiveCostCentresByProjectId]);
+  }, [clockSelectableProjects, effectiveCostCentresByProjectId]);
 
   useEffect(() => {
     localStorage.setItem("orp_current_shift", JSON.stringify(currentShift));
@@ -2473,7 +2515,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const liveEarnings = visibleCurrentShift ? (liveSeconds / 3600) * Number(visibleCurrentShift.hourlyRate || 0) : 0;
 
   const handleProjectChange = (newProjectId) => {
-    const nextProject = effectiveProjects.find((project) => String(project.id) === String(newProjectId)) || effectiveProjects[0];
+    const nextProject =
+      clockSelectableProjects.find((project) => String(project.id) === String(newProjectId)) ||
+      clockSelectableProjects[0];
     if (!nextProject) return;
     setProjectId(nextProject.id);
     const centres = effectiveCostCentresByProjectId[nextProject.id] || [];
@@ -2955,6 +2999,11 @@ const handleClockIn = async () => {
     return;
   }
 
+  if (!clockSelectedProject) {
+    setLocationStatus("No projects assigned. Please contact your supervisor.");
+    return;
+  }
+
   setLocationStatus("Clocking in...");
 
   let employeeHourlyRate = 0;
@@ -2984,8 +3033,8 @@ const handleClockIn = async () => {
     companyId: userCompany?.id || null,
     companyName: userCompany?.name || null,
     hourlyRate: employeeHourlyRate,
-    project: selectedProject.name,
-    projectId: selectedProject.id,
+    project: clockSelectedProject.name,
+    projectId: clockSelectedProject.id,
     costCenter,
     date: clockInTime,
     clockIn: clockInTime,
@@ -2995,7 +3044,7 @@ const handleClockIn = async () => {
     status: "Active",
     photosTaken: 0,
     lastPhotoAt: null,
-    projectFolder: getProjectFolderName(selectedProject.name),
+    projectFolder: getProjectFolderName(clockSelectedProject.name),
     liveLocation: null,
     locationTrail: [],
   };
@@ -3011,8 +3060,8 @@ const handleClockIn = async () => {
       employee_name: clockInEmployeeName,
       company_id: userCompany?.id || null,
       company_name: userCompany?.name || null,
-      project_id: selectedProject.id,
-      project_name: selectedProject.name,
+      project_id: clockSelectedProject.id,
+      project_name: clockSelectedProject.name,
       hourly_rate: employeeHourlyRate,
       cost_centre: costCenter,
       clock_in: clockInTime,
@@ -3032,7 +3081,7 @@ const handleClockIn = async () => {
         .insert([{
           user_id: authUser.id,
           employee_name: clockInEmployeeName,
-          project_name: selectedProject.name,
+          project_name: clockSelectedProject.name,
           hourly_rate: employeeHourlyRate,
           cost_centre: costCenter,
           clock_in: clockInTime,
@@ -3057,12 +3106,12 @@ const handleClockIn = async () => {
         actorRole: userCompanyRole,
         type: "clock_in",
         title: clockInTitleForActorRole(userCompanyRole),
-        message: `${actorLabel} clocked in at ${selectedProject.name} - ${costCenter}`,
-        projectId: selectedProject.id,
-        projectName: selectedProject.name,
+        message: `${actorLabel} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
+        projectId: clockSelectedProject.id,
+        projectName: clockSelectedProject.name,
         costCentre: costCenter,
         relatedTimesheetId: legacyData?.[0]?.id ?? null,
-        relatedFolder: getProjectFolderName(selectedProject.name),
+        relatedFolder: getProjectFolderName(clockSelectedProject.name),
         itemCount: null,
       });
       return;
@@ -3082,12 +3131,12 @@ const handleClockIn = async () => {
     actorRole: userCompanyRole,
     type: "clock_in",
     title: clockInTitleForActorRole(userCompanyRole),
-    message: `${actorLabelMain} clocked in at ${selectedProject.name} - ${costCenter}`,
-    projectId: selectedProject.id,
-    projectName: selectedProject.name,
+    message: `${actorLabelMain} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
+    projectId: clockSelectedProject.id,
+    projectName: clockSelectedProject.name,
     costCentre: costCenter,
     relatedTimesheetId: data?.[0]?.id ?? null,
-    relatedFolder: getProjectFolderName(selectedProject.name),
+    relatedFolder: getProjectFolderName(clockSelectedProject.name),
     itemCount: null,
   });
 };
@@ -3098,7 +3147,11 @@ const handleClockIn = async () => {
 
   const applyTaskChange = () => {
     if (!visibleCurrentShift) return;
-    const updatedProject = adminProjects.find((p) => p.id === projectId) || adminProjects[0];
+    const updatedProject =
+      clockSelectableProjects.find((p) => String(p.id) === String(projectId)) ||
+      effectiveProjects.find((p) => String(p.id) === String(projectId)) ||
+      adminProjects.find((p) => p.id === projectId) ||
+      adminProjects[0];
     setCurrentShift({
       ...visibleCurrentShift,
       project: updatedProject.name,
@@ -4941,6 +4994,18 @@ const handlePhotoCapture = async (event) => {
                   </div>
                 )}
 
+                {!useProjectFallback &&
+                  !projectsLoading &&
+                  !isAdmin &&
+                  effectiveProjects.length > 0 &&
+                  clockSelectableProjects.length === 0 && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                      <p className="text-sm text-amber-950 leading-snug">
+                        No projects assigned. Please contact your supervisor.
+                      </p>
+                    </div>
+                  )}
+
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
                   <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
                     <div>
@@ -4985,19 +5050,43 @@ const handlePhotoCapture = async (event) => {
 
                 <div className="space-y-1">
                   <label className="text-xs sm:text-sm font-medium">Project / Job Site</label>
-                  <select className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight" value={projectId} onChange={(event) => handleProjectChange(event.target.value)}>
-                    {effectiveProjects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+                  <select
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    value={projectId}
+                    disabled={clockSelectableProjects.length === 0}
+                    onChange={(event) => handleProjectChange(event.target.value)}
+                  >
+                    {clockSelectableProjects.map((project) => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div className="space-y-1">
                   <label className="text-xs sm:text-sm font-medium">Cost Centre</label>
-                  <select className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight" value={costCenter} onChange={(event) => setCostCenter(event.target.value)}>
-                    {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((center) => <option key={center} value={center}>{center}</option>)}
+                  <select
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    value={costCenter}
+                    disabled={!clockSelectedProject || clockSelectableProjects.length === 0}
+                    onChange={(event) => setCostCenter(event.target.value)}
+                  >
+                    {costCentresForEditProject(clockSelectedProject?.id).map((center) => (
+                      <option key={center} value={center}>
+                        {center}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
-                <Button className="w-full rounded-2xl h-12 sm:h-14 text-sm sm:text-base font-bold" onClick={handleClockIn}>✅ Clock In</Button>
+                <Button
+                  className="w-full rounded-2xl h-12 sm:h-14 text-sm sm:text-base font-bold"
+                  disabled={!clockSelectedProject}
+                  onClick={handleClockIn}
+                >
+                  ✅ Clock In
+                </Button>
                 {locationStatus && <p className="text-xs text-slate-500 text-center">{locationStatus}</p>}
               </CardContent>
             </Card>
@@ -5033,10 +5122,18 @@ const handlePhotoCapture = async (event) => {
                 {isChangingTask ? (
                   <div className="space-y-1.5">
                     <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
-                      {effectiveProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      {clockSelectableProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
                     </select>
                     <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={costCenter} onChange={(e) => setCostCenter(e.target.value)}>
-                      {(effectiveCostCentresByProjectId[selectedProject.id] || []).map((c) => <option key={c} value={c}>{c}</option>)}
+                      {costCentresForEditProject(clockSelectedProject?.id).map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
                     </select>
                     <div className="grid grid-cols-2 gap-1.5">
                       <Button className="h-9 rounded-xl text-sm" onClick={applyTaskChange}>Save</Button>
