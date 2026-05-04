@@ -1233,6 +1233,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectsScreenRows, setProjectsScreenRows] = useState([]);
   const [projectsScreenLoading, setProjectsScreenLoading] = useState(false);
   const [projectsScreenError, setProjectsScreenError] = useState("");
+  const [projectsScreenRefreshKey, setProjectsScreenRefreshKey] = useState(0);
+  const [companyProjectsRefreshKey, setCompanyProjectsRefreshKey] = useState(0);
+
+  const [projectsAddFormOpen, setProjectsAddFormOpen] = useState(false);
+  const [projectsAddName, setProjectsAddName] = useState("");
+  const [projectsAddCostCentres, setProjectsAddCostCentres] = useState("");
+  const [projectsAddSaving, setProjectsAddSaving] = useState(false);
+  const [projectsAddError, setProjectsAddError] = useState("");
+  const [projectsAddSuccess, setProjectsAddSuccess] = useState("");
 
   const fallbackProjects = useMemo(() => adminProjects.map((p) => ({ id: p.id, name: p.name })), []);
   const effectiveProjects = useMemo(() => {
@@ -1718,7 +1727,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [userCompany?.id, authUser?.id]);
+  }, [userCompany?.id, authUser?.id, companyProjectsRefreshKey]);
 
   useEffect(() => {
     if (activeTab !== "projects" || !isAdmin || !userCompany?.id) return;
@@ -1784,7 +1793,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, userCompany?.id]);
+  }, [activeTab, isAdmin, userCompany?.id, projectsScreenRefreshKey]);
 
   useEffect(() => {
     // When projects load/switch, ensure we have a valid project + cost centre selected.
@@ -2403,11 +2412,50 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (centres.length > 0) setCostCenter(centres[0]);
   };
 
+  const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
+    const name = String(projectName || "").trim();
+    if (!name) {
+      const err = new Error("Project name is required.");
+      throw err;
+    }
+    const centres = String(costCentresCsv || "")
+      .split(",")
+      .map((c) => c.trim())
+      .filter(Boolean);
+
+    const projectPayload = {
+      company_id: companyId,
+      name,
+      status: "active",
+      created_by: userId,
+    };
+
+    const { data: created, error: projectErr } = await supabase
+      .from("projects")
+      .insert([projectPayload])
+      .select("id, name")
+      .single();
+
+    if (projectErr) throw projectErr;
+
+    if (centres.length > 0) {
+      const rows = centres.map((c, index) => ({
+        company_id: companyId,
+        project_id: created.id,
+        name: c,
+        status: "active",
+        display_order: index,
+        created_by: userId,
+      }));
+      const { error: centresErr } = await supabase.from("cost_centres").insert(rows);
+      if (centresErr) throw centresErr;
+    }
+
+    return created;
+  };
+
   const handleAddProject = async (event) => {
     event.preventDefault();
-    console.log("ADD PROJECT authUser.id", authUser?.id);
-    console.log("ADD PROJECT userCompany", userCompany);
-    console.log("ADD PROJECT userCompanyRole", userCompanyRole);
 
     if (!authUser?.id || !userCompany?.id) {
       setAddProjectError("Company/user missing. Please logout and login again.");
@@ -2424,60 +2472,67 @@ const [uploadProgress, setUploadProgress] = useState(null);
         return;
       }
 
-      const centres = newProjectCostCentres
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-
-      const projectPayload = {
-        company_id: userCompany.id,
-        name,
-        status: "active",
-        created_by: authUser.id,
-      };
-      console.log("ADD PROJECT payload", projectPayload);
-
-      const { data: created, error: projectErr } = await supabase
-        .from("projects")
-        .insert([projectPayload])
-        .select("id, name")
-        .single();
-
-      if (projectErr) throw projectErr;
-
-      if (centres.length > 0) {
-        const rows = centres.map((c, index) => ({
-          company_id: userCompany.id,
-          project_id: created.id,
-          name: c,
-          status: "active",
-          display_order: index,
-          created_by: authUser.id,
-        }));
-        const { error: centresErr } = await supabase.from("cost_centres").insert(rows);
-        if (centresErr) throw centresErr;
-      }
+      await insertCompanyProjectWithCentres({
+        companyId: userCompany.id,
+        userId: authUser.id,
+        projectName: name,
+        costCentresCsv: newProjectCostCentres,
+      });
 
       setNewProjectName("");
       setNewProjectCostCentres("");
-
-      // Reload lists
-      setProjectsLoading(true);
-      setProjectsError("");
-      setUseProjectFallback(false);
-      const { data: projects, error: projectsErr } = await supabase
-        .from("projects")
-        .select("id, name")
-        .eq("company_id", userCompany.id)
-        .eq("status", "active")
-        .order("name", { ascending: true });
-      if (projectsErr) throw projectsErr;
-      setCompanyProjects(projects || []);
+      setCompanyProjectsRefreshKey((k) => k + 1);
     } catch (err) {
       setAddProjectError(getErrorMessage(err));
     } finally {
       setAddProjectLoading(false);
-      setProjectsLoading(false);
+    }
+  };
+
+  const cancelProjectsAddForm = () => {
+    setProjectsAddFormOpen(false);
+    setProjectsAddName("");
+    setProjectsAddCostCentres("");
+    setProjectsAddError("");
+    setProjectsAddSuccess("");
+  };
+
+  const handleProjectsScreenSaveNewProject = async (event) => {
+    event.preventDefault();
+    if (!authUser?.id || !userCompany?.id) {
+      setProjectsAddError("Company/user missing. Please logout and login again.");
+      return;
+    }
+    if (!isAdmin) return;
+
+    setProjectsAddSaving(true);
+    setProjectsAddError("");
+    setProjectsAddSuccess("");
+    try {
+      const name = projectsAddName.trim();
+      if (!name) {
+        setProjectsAddError("Project name is required.");
+        return;
+      }
+
+      await insertCompanyProjectWithCentres({
+        companyId: userCompany.id,
+        userId: authUser.id,
+        projectName: name,
+        costCentresCsv: projectsAddCostCentres,
+      });
+
+      setCompanyProjectsRefreshKey((k) => k + 1);
+      setProjectsScreenRefreshKey((k) => k + 1);
+      setProjectsAddName("");
+      setProjectsAddCostCentres("");
+      setProjectsAddFormOpen(false);
+      setProjectsAddError("");
+      setProjectsAddSuccess("Project added.");
+    } catch (err) {
+      setProjectsAddError(getErrorMessage(err));
+    } finally {
+      setProjectsAddSaving(false);
     }
   };
 
@@ -5186,10 +5241,93 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "projects" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
-                <div>
-                  <h2 className="font-bold text-lg">Projects</h2>
-                  <p className="text-xs text-slate-500">Company projects and cost centres (read-only)</p>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-lg">Projects</h2>
+                    <p className="text-xs text-slate-500">Company projects and cost centres</p>
+                  </div>
+                  {!projectsAddFormOpen && (
+                    <Button
+                      type="button"
+                      className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
+                      onClick={() => {
+                        setProjectsAddSuccess("");
+                        setProjectsAddError("");
+                        setProjectsAddFormOpen(true);
+                      }}
+                    >
+                      Add Project
+                    </Button>
+                  )}
                 </div>
+                {projectsAddFormOpen && (
+                  <form
+                    onSubmit={(e) => void handleProjectsScreenSaveNewProject(e)}
+                    className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 space-y-2.5"
+                  >
+                    <p className="text-xs font-semibold text-slate-800">New project</p>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-add-name">
+                        Project name
+                      </label>
+                      <input
+                        id="projects-add-name"
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={projectsAddName}
+                        onChange={(e) => setProjectsAddName(e.target.value)}
+                        placeholder="e.g. Basement Renovation"
+                        disabled={projectsAddSaving}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="block text-[11px] font-medium text-slate-600">Status</p>
+                      <p className="text-xs font-medium text-slate-900">active</p>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-add-cc">
+                        Cost centres
+                      </label>
+                      <input
+                        id="projects-add-cc"
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={projectsAddCostCentres}
+                        onChange={(e) => setProjectsAddCostCentres(e.target.value)}
+                        placeholder="Comma-separated, e.g. Framing, Drywall, Painting"
+                        disabled={projectsAddSaving}
+                      />
+                    </div>
+                    {projectsAddError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                        {projectsAddError}
+                      </div>
+                    )}
+                    <div className="flex gap-2 pt-0.5">
+                      <Button
+                        type="submit"
+                        className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                        disabled={projectsAddSaving}
+                      >
+                        {projectsAddSaving ? "Saving…" : "Save"}
+                      </Button>
+                      <Button
+                        type="button"
+                        className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                        disabled={projectsAddSaving}
+                        onClick={cancelProjectsAddForm}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                )}
+                {projectsAddSuccess && (
+                  <div className="rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
+                    {projectsAddSuccess}
+                  </div>
+                )}
                 {projectsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                     Loading projects…
