@@ -251,6 +251,81 @@ function wallDateTimeToUtcIso(dateStr, timeStr, timeZone) {
   return new Date(t).toISOString();
 }
 
+function wallWeekdayLongInTimeZone(dateKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const iso = wallDateTimeToUtcIso(dateKey, "12:00:00", tz);
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "long" }).format(new Date(iso));
+}
+
+function addWallDaysInTimeZone(dateKey, deltaDays, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const iso = wallDateTimeToUtcIso(dateKey, "12:00:00", tz);
+  if (!iso) return "";
+  const t = new Date(iso).getTime() + Number(deltaDays) * 86400000;
+  return calendarDateKeyInTimeZone(new Date(t), tz);
+}
+
+function mondayStartOfWallWeekContaining(todayKey, timeZone) {
+  let key = todayKey;
+  for (let i = 0; i < 8; i++) {
+    if (wallWeekdayLongInTimeZone(key, timeZone) === "Monday") return key;
+    const prev = addWallDaysInTimeZone(key, -1, timeZone);
+    if (!prev || prev === key) return todayKey;
+    key = prev;
+  }
+  return todayKey;
+}
+
+function lastWallDayOfMonthInTimeZone(year, month1to12, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  let key = `${year}-${String(month1to12).padStart(2, "0")}-28`;
+  for (;;) {
+    const next = addWallDaysInTimeZone(key, 1, tz);
+    if (!next) return key;
+    const [ny, nm] = next.split("-").map(Number);
+    if (ny !== year || nm !== month1to12) return key;
+    key = next;
+  }
+}
+
+/** Reports quick ranges: wall dates in `timeZone` (Monday–Sunday week). */
+function computeReportsQuickRange(preset, now, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const todayKey = calendarDateKeyInTimeZone(now, tz);
+  if (!todayKey) return { from: "", to: "" };
+  const [yStr, mStr] = todayKey.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr);
+  if (!y || !m) return { from: "", to: "" };
+  if (preset === "weekly") {
+    const mon = mondayStartOfWallWeekContaining(todayKey, tz);
+    const sun = addWallDaysInTimeZone(mon, 6, tz);
+    return { from: mon, to: sun || mon };
+  }
+  if (preset === "monthly") {
+    const fromKey = `${y}-${String(m).padStart(2, "0")}-01`;
+    const toKey = lastWallDayOfMonthInTimeZone(y, m, tz);
+    return { from: fromKey, to: toKey };
+  }
+  if (preset === "yearly") {
+    const fromKey = `${y}-01-01`;
+    const toKey = lastWallDayOfMonthInTimeZone(y, 12, tz);
+    return { from: fromKey, to: toKey };
+  }
+  if (preset === "last_year") {
+    const ly = y - 1;
+    const fromKey = `${ly}-01-01`;
+    const toKey = lastWallDayOfMonthInTimeZone(ly, 12, tz);
+    return { from: fromKey, to: toKey };
+  }
+  return { from: "", to: "" };
+}
+
+function reportsCostCentreKeyFromRow(row) {
+  return String(row?.costCenter ?? "").trim() || "—";
+}
+
 function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone) {
   if (!visibleCurrentShift) return false;
   const liveRowId = visibleCurrentShift.supabaseTimesheetId;
@@ -1076,6 +1151,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [reportsScreenRows, setReportsScreenRows] = useState([]);
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
+  const [reportsRangePreset, setReportsRangePreset] = useState(null);
+  const [reportsGroupBy, setReportsGroupBy] = useState("employee");
+  const [reportsCostCentreAll, setReportsCostCentreAll] = useState(true);
+  const [reportsCostCentrePicked, setReportsCostCentrePicked] = useState([]);
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -1720,6 +1799,21 @@ const [uploadProgress, setUploadProgress] = useState(null);
     ? currentShift
     : null;
 
+  const reportsDistinctCostCentres = useMemo(() => {
+    const s = new Set();
+    for (const r of reportsScreenRows) {
+      s.add(reportsCostCentreKeyFromRow(r));
+    }
+    return [...s].sort((a, b) => a.localeCompare(b));
+  }, [reportsScreenRows]);
+
+  const reportsRowsFilteredForUi = useMemo(() => {
+    if (reportsCostCentreAll) return reportsScreenRows;
+    if (!reportsCostCentrePicked.length) return [];
+    const allowed = new Set(reportsCostCentrePicked.map((x) => String(x).trim()));
+    return reportsScreenRows.filter((r) => allowed.has(reportsCostCentreKeyFromRow(r)));
+  }, [reportsScreenRows, reportsCostCentreAll, reportsCostCentrePicked]);
+
   const reportsAggregates = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
       return {
@@ -1731,7 +1825,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         byProject: [],
       };
     }
-    const rows = reportsScreenRows;
+    const rows = reportsRowsFilteredForUi;
     let totalMinutes = 0;
     let totalCost = 0;
     let missingOut = 0;
@@ -1778,7 +1872,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [
     isAdmin,
     activeTab,
-    reportsScreenRows,
+    reportsRowsFilteredForUi,
     getWorkedMinutes,
     getLabourCost,
     profileFullName,
@@ -6554,6 +6648,113 @@ const handlePhotoCapture = async (event) => {
                   <h2 className="font-bold text-lg">Reports</h2>
                   <p className="text-[10px] text-slate-400 mt-0.5">Read-only · Times: {companyTimeZone}</p>
                 </div>
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-medium text-slate-600">Quick range</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { id: "weekly", label: "Weekly" },
+                      { id: "monthly", label: "Monthly" },
+                      { id: "yearly", label: "Yearly" },
+                      { id: "last_year", label: "Last Year" },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors ${
+                          reportsRangePreset === p.id
+                            ? "bg-slate-900 text-white border-slate-900"
+                            : "bg-white text-slate-700 border-slate-200 active:bg-slate-50"
+                        }`}
+                        onClick={() => {
+                          const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
+                          if (from && to) {
+                            setReportsDateFrom(from);
+                            setReportsDateTo(to);
+                            setReportsRangePreset(p.id);
+                          }
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="space-y-1 text-xs font-medium text-slate-700">
+                    Report by
+                    <select
+                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
+                      value={reportsGroupBy}
+                      onChange={(e) => setReportsGroupBy(e.target.value)}
+                    >
+                      <option value="employee">Employee</option>
+                      <option value="project">Project</option>
+                    </select>
+                  </label>
+                  <div className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
+                    <span className="block">Cost centres</span>
+                    <details className="rounded-xl border border-slate-200 bg-white overflow-hidden group">
+                      <summary className="px-2 py-2 cursor-pointer text-sm font-normal text-slate-900 list-none flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate">
+                          {reportsCostCentreAll
+                            ? "All cost centres"
+                            : reportsCostCentrePicked.length
+                              ? `${reportsCostCentrePicked.length} selected`
+                              : "Choose cost centres"}
+                        </span>
+                        <span className="text-slate-400 text-[10px] shrink-0 group-open:rotate-180 transition-transform">▼</span>
+                      </summary>
+                      <div className="border-t border-slate-100 px-2 py-2 space-y-2 max-h-44 overflow-y-auto overscroll-y-contain">
+                        <label className="flex items-start gap-2 text-xs font-normal">
+                          <input
+                            type="checkbox"
+                            className="mt-0.5 shrink-0"
+                            checked={reportsCostCentreAll}
+                            onChange={(e) => {
+                              const on = e.target.checked;
+                              setReportsCostCentreAll(on);
+                              if (on) {
+                                setReportsCostCentrePicked([]);
+                              } else {
+                                setReportsCostCentrePicked((prev) => {
+                                  if (prev.length > 0) return prev;
+                                  const next = reportsDistinctCostCentres.slice();
+                                  return next;
+                                });
+                              }
+                            }}
+                          />
+                          <span>All cost centres</span>
+                        </label>
+                        {!reportsCostCentreAll && (
+                          <div className="space-y-1.5 pl-1 border-l-2 border-slate-100 ml-1">
+                            {reportsDistinctCostCentres.length === 0 ? (
+                              <p className="text-[11px] text-slate-500 leading-snug">No cost centres in loaded timesheets for this range.</p>
+                            ) : (
+                              reportsDistinctCostCentres.map((cc) => (
+                                <label key={cc} className="flex items-start gap-2 text-xs font-normal">
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 shrink-0"
+                                    checked={reportsCostCentrePicked.includes(cc)}
+                                    onChange={(ev) => {
+                                      const checked = ev.target.checked;
+                                      setReportsCostCentrePicked((prev) => {
+                                        if (checked) return [...new Set([...prev, cc])];
+                                        return prev.filter((x) => x !== cc);
+                                      });
+                                    }}
+                                  />
+                                  <span className="min-w-0 break-words">{cc === "—" ? "(none)" : cc}</span>
+                                </label>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1 text-xs font-medium text-slate-700">
                     Date from
@@ -6561,7 +6762,10 @@ const handlePhotoCapture = async (event) => {
                       type="date"
                       className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
                       value={reportsDateFrom}
-                      onChange={(e) => setReportsDateFrom(e.target.value)}
+                      onChange={(e) => {
+                        setReportsDateFrom(e.target.value);
+                        setReportsRangePreset(null);
+                      }}
                     />
                   </label>
                   <label className="space-y-1 text-xs font-medium text-slate-700">
@@ -6570,7 +6774,10 @@ const handlePhotoCapture = async (event) => {
                       type="date"
                       className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
                       value={reportsDateTo}
-                      onChange={(e) => setReportsDateTo(e.target.value)}
+                      onChange={(e) => {
+                        setReportsDateTo(e.target.value);
+                        setReportsRangePreset(null);
+                      }}
                     />
                   </label>
                 </div>
@@ -6609,40 +6816,48 @@ const handlePhotoCapture = async (event) => {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-slate-900">By employee</h3>
-                      {reportsAggregates.byEmployee.length === 0 ? (
-                        <p className="text-xs text-slate-500 py-1">No timesheets in this range.</p>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                          {reportsAggregates.byEmployee.map((row) => (
-                            <div
-                              key={row.key || row.name}
-                              className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-xs"
-                            >
-                              <p className="font-semibold text-slate-900 min-w-0 break-words flex-1 basis-[8rem]">{row.name}</p>
-                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 tabular-nums">
-                                <span>
-                                  <span className="text-slate-500">Hours </span>
-                                  <span className="font-semibold text-slate-900">{formatDuration(row.minutes)}</span>
-                                </span>
-                                <span>
-                                  <span className="text-slate-500">Labour </span>
-                                  <span className="font-semibold text-slate-900">{formatMoney(row.cost)}</span>
-                                </span>
-                                <span>
-                                  <span className="text-slate-500">Shifts </span>
-                                  <span className="font-semibold text-slate-900">{row.shifts}</span>
-                                </span>
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        {reportsGroupBy === "employee" ? "By employee" : "By project"}
+                      </h3>
+                      {reportsGroupBy === "employee" ? (
+                        reportsAggregates.byEmployee.length === 0 ? (
+                          <p className="text-xs text-slate-500 py-1 leading-snug">
+                            {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0
+                              ? "No timesheets match the selected cost centres."
+                              : "No timesheets in this range."}
+                          </p>
+                        ) : (
+                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                            {reportsAggregates.byEmployee.map((row) => (
+                              <div
+                                key={row.key || row.name}
+                                className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-xs"
+                              >
+                                <p className="font-semibold text-slate-900 min-w-0 break-words flex-1 basis-[8rem]">{row.name}</p>
+                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 tabular-nums">
+                                  <span>
+                                    <span className="text-slate-500">Hours </span>
+                                    <span className="font-semibold text-slate-900">{formatDuration(row.minutes)}</span>
+                                  </span>
+                                  <span>
+                                    <span className="text-slate-500">Labour </span>
+                                    <span className="font-semibold text-slate-900">{formatMoney(row.cost)}</span>
+                                  </span>
+                                  <span>
+                                    <span className="text-slate-500">Shifts </span>
+                                    <span className="font-semibold text-slate-900">{row.shifts}</span>
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-slate-900">By project</h3>
-                      {reportsAggregates.byProject.length === 0 ? (
-                        <p className="text-xs text-slate-500 py-1">No timesheets in this range.</p>
+                            ))}
+                          </div>
+                        )
+                      ) : reportsAggregates.byProject.length === 0 ? (
+                        <p className="text-xs text-slate-500 py-1 leading-snug">
+                          {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0
+                            ? "No timesheets match the selected cost centres."
+                            : "No timesheets in this range."}
+                        </p>
                       ) : (
                         <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
                           {reportsAggregates.byProject.map((row) => (
