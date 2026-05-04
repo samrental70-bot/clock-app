@@ -1250,6 +1250,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectEditError, setProjectEditError] = useState("");
   const [projectsEditSuccess, setProjectsEditSuccess] = useState("");
 
+  const [assignmentsManageProjectId, setAssignmentsManageProjectId] = useState(null);
+  const [assignmentsEditorLoading, setAssignmentsEditorLoading] = useState(false);
+  const [assignmentsEditorMembers, setAssignmentsEditorMembers] = useState([]);
+  const [assignmentsEditorChecks, setAssignmentsEditorChecks] = useState({});
+  const [assignmentsEditorSaving, setAssignmentsEditorSaving] = useState(false);
+  const [assignmentsEditorError, setAssignmentsEditorError] = useState("");
+  const [assignmentsSuccess, setAssignmentsSuccess] = useState("");
+
   const displayedProjectsScreenRows = useMemo(() => {
     const rows = projectsScreenRows || [];
     const norm = (s) => String(s ?? "").trim().toLowerCase();
@@ -1787,11 +1795,56 @@ const [uploadProgress, setUploadProgress] = useState(null);
           });
         }
 
+        const { data: pas, error: pasErr } = await supabase
+          .from("project_assignments")
+          .select("id, project_id, user_id, status")
+          .eq("company_id", userCompany.id)
+          .in("project_id", projectIds);
+
+        if (pasErr) throw pasErr;
+
+        const assignList = Array.isArray(pas) ? pas : [];
+        const activeAssignUserIds = [
+          ...new Set(
+            assignList
+              .filter((a) => String(a.status ?? "").toLowerCase() === "active")
+              .map((a) => a.user_id)
+              .filter(Boolean)
+          ),
+        ];
+
+        const assignProfileMap = {};
+        if (activeAssignUserIds.length > 0) {
+          const { data: profAssign, error: profAssignErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email")
+            .in("id", activeAssignUserIds);
+          if (profAssignErr) throw profAssignErr;
+          (profAssign || []).forEach((p) => {
+            assignProfileMap[p.id] = p;
+          });
+        }
+
+        const assignedActiveNamesForProject = (pid) => {
+          const act = assignList.filter(
+            (a) =>
+              String(a.project_id) === String(pid) && String(a.status ?? "").toLowerCase() === "active"
+          );
+          const names = act.map((a) => {
+            const p = assignProfileMap[a.user_id];
+            const full = p?.full_name && String(p.full_name).trim();
+            const em = p?.email && String(p.email).trim();
+            return full || em || shortUserLabel(a.user_id);
+          });
+          return [...names].sort((a, b) => a.localeCompare(b));
+        };
+
         const rows = projectList.map((p) => ({
           id: p.id,
           name: p.name,
           status: p.status,
           costCentres: byProjectId[String(p.id)] || [],
+          assignedActiveNames: assignedActiveNamesForProject(p.id),
         }));
 
         if (!cancelled) setProjectsScreenRows(rows);
@@ -2523,6 +2576,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setProjectsAddSaving(true);
     setProjectsAddError("");
     setProjectsAddSuccess("");
+    setAssignmentsSuccess("");
     try {
       const name = projectsAddName.trim();
       if (!name) {
@@ -2555,8 +2609,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const beginProjectEdit = (row) => {
     setProjectsAddSuccess("");
     setProjectsEditSuccess("");
+    setAssignmentsSuccess("");
     setProjectEditError("");
     setProjectsAddFormOpen(false);
+    setAssignmentsManageProjectId(null);
+    setAssignmentsEditorMembers([]);
+    setAssignmentsEditorChecks({});
+    setAssignmentsEditorError("");
     setEditingProjectId(row.id);
     const normSt = (s) => (String(s ?? "").trim().toLowerCase() === "archived" ? "archived" : "active");
     setProjectEditDraft({
@@ -2585,6 +2644,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
     setProjectEditSaving(true);
     setProjectEditError("");
+    setAssignmentsSuccess("");
     try {
       const name = String(projectEditDraft.name || "").trim();
       if (!name) {
@@ -2668,6 +2728,166 @@ const [uploadProgress, setUploadProgress] = useState(null);
       setProjectEditError(getErrorMessage(err));
     } finally {
       setProjectEditSaving(false);
+    }
+  };
+
+  const closeAssignmentsEditor = () => {
+    if (assignmentsEditorSaving) return;
+    setAssignmentsManageProjectId(null);
+    setAssignmentsEditorMembers([]);
+    setAssignmentsEditorChecks({});
+    setAssignmentsEditorError("");
+    setAssignmentsEditorLoading(false);
+  };
+
+  const openAssignmentsEditor = async (projectId) => {
+    if (!userCompany?.id || !authUser?.id || !isAdmin) return;
+    setAssignmentsEditorError("");
+    setAssignmentsSuccess("");
+    setProjectsAddSuccess("");
+    setProjectsEditSuccess("");
+    setAssignmentsManageProjectId(projectId);
+    setAssignmentsEditorLoading(true);
+    setAssignmentsEditorMembers([]);
+    setAssignmentsEditorChecks({});
+    try {
+      const { data: members, error: mErr } = await supabase
+        .from("company_members")
+        .select("id, user_id, role")
+        .eq("company_id", userCompany.id);
+      if (mErr) throw mErr;
+      const userIds = [...new Set((members || []).map((m) => m.user_id).filter(Boolean))];
+      const profilesMap = {};
+      if (userIds.length > 0) {
+        const { data: profs, error: pErr } = await supabase
+          .from("profiles")
+          .select("id, full_name, email, employment_status")
+          .in("id", userIds);
+        if (pErr) throw pErr;
+        (profs || []).forEach((p) => {
+          profilesMap[p.id] = p;
+        });
+      }
+
+      const { data: paRows, error: paErr } = await supabase
+        .from("project_assignments")
+        .select("id, user_id, status")
+        .eq("company_id", userCompany.id)
+        .eq("project_id", projectId);
+      if (paErr) throw paErr;
+      const byUser = {};
+      for (const r of paRows || []) {
+        byUser[String(r.user_id)] = { id: r.id, status: r.status };
+      }
+
+      const eligible = (members || []).filter((m) => {
+        const p = profilesMap[m.user_id];
+        const emp =
+          p?.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
+        return emp !== "archived";
+      });
+
+      const list = eligible.map((m) => {
+        const p = profilesMap[m.user_id] || {};
+        const full = (p.full_name && String(p.full_name).trim()) || "";
+        const em = (p.email && String(p.email).trim()) || "";
+        const displayName = full || em || shortUserLabel(m.user_id);
+        const au = byUser[String(m.user_id)];
+        const st = au?.status != null ? String(au.status).toLowerCase() : "";
+        const initialChecked = st === "active";
+        return {
+          userId: m.user_id,
+          displayName: displayName || shortUserLabel(m.user_id),
+          role: (m.role || "employee").trim(),
+          assignmentId: au?.id ?? null,
+          assignmentStatus: au?.status ?? null,
+          initialChecked,
+        };
+      });
+
+      list.sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+      setAssignmentsEditorMembers(list);
+      const checks = {};
+      for (const row of list) {
+        checks[String(row.userId)] = row.initialChecked;
+      }
+      setAssignmentsEditorChecks(checks);
+    } catch (err) {
+      setAssignmentsEditorError(getErrorMessage(err));
+    } finally {
+      setAssignmentsEditorLoading(false);
+    }
+  };
+
+  const handleSaveProjectAssignments = async () => {
+    if (!assignmentsManageProjectId || !userCompany?.id || !authUser?.id || !isAdmin) return;
+    setAssignmentsEditorSaving(true);
+    setAssignmentsEditorError("");
+    try {
+      for (const m of assignmentsEditorMembers) {
+        const uid = String(m.userId);
+        const want = Boolean(assignmentsEditorChecks[uid]);
+        if (want === m.initialChecked) continue;
+
+        if (want) {
+          if (m.assignmentId) {
+            const { error: uErr } = await supabase
+              .from("project_assignments")
+              .update({ status: "active", assigned_by: authUser.id })
+              .eq("id", m.assignmentId)
+              .eq("company_id", userCompany.id);
+            if (uErr) throw uErr;
+          } else {
+            const { error: iErr } = await supabase.from("project_assignments").insert({
+              company_id: userCompany.id,
+              project_id: assignmentsManageProjectId,
+              user_id: m.userId,
+              assigned_by: authUser.id,
+              status: "active",
+            });
+            if (iErr) {
+              const { data: existing, error: exErr } = await supabase
+                .from("project_assignments")
+                .select("id")
+                .eq("company_id", userCompany.id)
+                .eq("project_id", assignmentsManageProjectId)
+                .eq("user_id", m.userId)
+                .maybeSingle();
+              if (exErr) throw iErr;
+              if (existing?.id) {
+                const { error: rErr } = await supabase
+                  .from("project_assignments")
+                  .update({ status: "active", assigned_by: authUser.id })
+                  .eq("id", existing.id)
+                  .eq("company_id", userCompany.id);
+                if (rErr) throw rErr;
+              } else {
+                throw iErr;
+              }
+            }
+          }
+        } else if (m.assignmentId) {
+          const { error: aErr } = await supabase
+            .from("project_assignments")
+            .update({ status: "archived" })
+            .eq("id", m.assignmentId)
+            .eq("company_id", userCompany.id);
+          if (aErr) throw aErr;
+        }
+      }
+
+      setProjectsScreenRefreshKey((k) => k + 1);
+      setAssignmentsManageProjectId(null);
+      setAssignmentsEditorMembers([]);
+      setAssignmentsEditorChecks({});
+      setProjectsAddSuccess("");
+      setProjectsEditSuccess("");
+      setAssignmentsSuccess("Assignments saved.");
+    } catch (err) {
+      setAssignmentsEditorError(getErrorMessage(err));
+    } finally {
+      setAssignmentsEditorSaving(false);
     }
   };
 
@@ -5392,6 +5612,11 @@ const handlePhotoCapture = async (event) => {
                         setProjectEditError("");
                         setProjectsAddSuccess("");
                         setProjectsAddError("");
+                        setAssignmentsManageProjectId(null);
+                        setAssignmentsEditorMembers([]);
+                        setAssignmentsEditorChecks({});
+                        setAssignmentsEditorError("");
+                        setAssignmentsSuccess("");
                         setProjectsAddFormOpen(true);
                       }}
                     >
@@ -5472,6 +5697,11 @@ const handlePhotoCapture = async (event) => {
                     {projectsEditSuccess}
                   </div>
                 )}
+                {assignmentsSuccess && (
+                  <div className="rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
+                    {assignmentsSuccess}
+                  </div>
+                )}
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
                   <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
@@ -5489,7 +5719,11 @@ const handlePhotoCapture = async (event) => {
                             : "text-slate-600 hover:text-slate-900"
                         }`}
                         onClick={() => setProjectsListFilter(opt.id)}
-                        disabled={Boolean(projectEditSaving) || Boolean(projectsAddSaving)}
+                        disabled={
+                          Boolean(projectEditSaving) ||
+                          Boolean(projectsAddSaving) ||
+                          Boolean(assignmentsEditorSaving)
+                        }
                       >
                         {opt.label}
                       </button>
@@ -5720,6 +5954,7 @@ const handlePhotoCapture = async (event) => {
                                       Boolean(projectsAddSaving) ||
                                       Boolean(projectEditSaving) ||
                                       projectsAddFormOpen ||
+                                      assignmentsManageProjectId != null ||
                                       (editingProjectId != null &&
                                         String(editingProjectId) !== String(proj.id))
                                     }
@@ -5755,6 +5990,110 @@ const handlePhotoCapture = async (event) => {
                                   </ul>
                                 )}
                               </div>
+                              <div className="border-t border-slate-100 pt-2 space-y-2">
+                                <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
+                                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                    Assigned employees
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    className="shrink-0 rounded-lg h-8 px-2.5 text-[11px] font-semibold"
+                                    disabled={
+                                      Boolean(projectsAddSaving) ||
+                                      Boolean(projectEditSaving) ||
+                                      projectsAddFormOpen ||
+                                      Boolean(assignmentsEditorSaving) ||
+                                      Boolean(assignmentsEditorLoading) ||
+                                      editingProjectId != null ||
+                                      assignmentsManageProjectId != null
+                                    }
+                                    onClick={() => void openAssignmentsEditor(proj.id)}
+                                  >
+                                    Manage Assignments
+                                  </Button>
+                                </div>
+                                {(proj.assignedActiveNames || []).length === 0 ? (
+                                  <p className="text-xs text-slate-500">No employees assigned</p>
+                                ) : (
+                                  <ul className="space-y-1">
+                                    {(proj.assignedActiveNames || []).map((nm, ni) => (
+                                      <li
+                                        key={`${proj.id}-asgn-${ni}`}
+                                        className="text-xs text-slate-800 font-medium break-words leading-snug"
+                                      >
+                                        {nm}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                              {assignmentsManageProjectId != null &&
+                                String(assignmentsManageProjectId) === String(proj.id) && (
+                                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 space-y-2.5">
+                                    <p className="text-xs font-semibold text-slate-900">Assignment editor</p>
+                                    {assignmentsEditorLoading ? (
+                                      <p className="text-xs text-slate-600">Loading company members…</p>
+                                    ) : (
+                                      <>
+                                        <div className="space-y-2 max-h-64 overflow-y-auto pr-0.5">
+                                          {assignmentsEditorMembers.map((m) => (
+                                            <label
+                                              key={String(m.userId)}
+                                              className="flex items-start gap-2.5 rounded-lg bg-white/95 border border-slate-200 px-2.5 py-2 cursor-pointer"
+                                            >
+                                              <input
+                                                type="checkbox"
+                                                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
+                                                checked={Boolean(assignmentsEditorChecks[String(m.userId)])}
+                                                disabled={assignmentsEditorSaving}
+                                                onChange={(e) =>
+                                                  setAssignmentsEditorChecks((prev) => ({
+                                                    ...prev,
+                                                    [String(m.userId)]: e.target.checked,
+                                                  }))
+                                                }
+                                              />
+                                              <span className="min-w-0 flex-1">
+                                                <span className="block text-xs font-semibold text-slate-900 break-words">
+                                                  {m.displayName}
+                                                </span>
+                                                <span className="block text-[10px] text-slate-500 capitalize mt-0.5">
+                                                  {m.role || "employee"}
+                                                </span>
+                                              </span>
+                                            </label>
+                                          ))}
+                                        </div>
+                                        {assignmentsEditorMembers.length === 0 && (
+                                          <p className="text-xs text-slate-500">No active employees in this company.</p>
+                                        )}
+                                        {assignmentsEditorError && (
+                                          <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                                            {assignmentsEditorError}
+                                          </div>
+                                        )}
+                                        <div className="flex gap-2 pt-0.5">
+                                          <Button
+                                            type="button"
+                                            className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                                            disabled={assignmentsEditorSaving || assignmentsEditorLoading}
+                                            onClick={() => void handleSaveProjectAssignments()}
+                                          >
+                                            {assignmentsEditorSaving ? "Saving…" : "Save"}
+                                          </Button>
+                                          <Button
+                                            type="button"
+                                            className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                                            disabled={assignmentsEditorSaving || assignmentsEditorLoading}
+                                            onClick={closeAssignmentsEditor}
+                                          >
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+                                )}
                             </>
                           )}
                         </div>
