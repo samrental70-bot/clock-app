@@ -56,6 +56,7 @@ export default async function handler(req, res) {
 
   const hourly_raw = body.hourly_rate;
   const pay_rate_effective_date = body.pay_rate_effective_date;
+  const joining_date_raw = body.joining_date;
 
   if (!company_id || !full_name || !email || !password) {
     res.status(400).json({ error: "Missing required fields" });
@@ -86,6 +87,11 @@ export default async function handler(req, res) {
   let pay_date = null;
   if (pay_rate_effective_date != null && String(pay_rate_effective_date).trim() !== "") {
     pay_date = String(pay_rate_effective_date).trim().slice(0, 10);
+  }
+
+  let joining_date = null;
+  if (joining_date_raw != null && String(joining_date_raw).trim() !== "") {
+    joining_date = String(joining_date_raw).trim().slice(0, 10);
   }
 
   const supabase = createClient(url, serviceKey, {
@@ -154,6 +160,7 @@ export default async function handler(req, res) {
       role: profileRole,
       hourly_rate: hrNum,
       pay_rate_effective_date: pay_date,
+      joining_date,
       employment_status: "active",
     },
     { onConflict: "id" }

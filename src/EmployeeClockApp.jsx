@@ -85,6 +85,7 @@ const TEAM_ADD_INITIAL_DRAFT = {
   role: "employee",
   hourlyRate: "",
   payRateEffectiveDate: "",
+  joiningDate: "",
 };
 
 function looksLikeEmail(value) {
@@ -604,7 +605,7 @@ function isMissingDbColumnError(error) {
 }
 
 const TEAM_PROFILES_SQL_HINT =
-  "Add to public.profiles: hourly_rate (numeric), pay_rate_effective_date (date), employment_status (text). Example: ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hourly_rate numeric DEFAULT 0; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pay_rate_effective_date date; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS employment_status text DEFAULT 'active';";
+  "Add to public.profiles: hourly_rate (numeric), pay_rate_effective_date (date), employment_status (text), joining_date (date). Example: ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hourly_rate numeric DEFAULT 0; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pay_rate_effective_date date; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS employment_status text DEFAULT 'active'; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS joining_date date;";
 
 function showErrorPopup(title, error) {
   const message = getErrorMessage(error);
@@ -979,13 +980,21 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const profilesMap = {};
         if (ids.length > 0) {
           const extendedSelect =
-            "id, full_name, email, role, hourly_rate, pay_rate_effective_date, employment_status";
+            "id, full_name, email, role, hourly_rate, pay_rate_effective_date, employment_status, joining_date";
           let { data: profs, error: pErr } = await supabase.from("profiles").select(extendedSelect).in("id", ids);
           if (pErr && isMissingDbColumnError(pErr)) {
             if (!cancelled) setTeamSchemaWarning(`Profiles table is missing columns. ${TEAM_PROFILES_SQL_HINT}`);
-            const retry = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
-            if (retry.error) throw retry.error;
-            profs = retry.data || [];
+            const retryMid = await supabase
+              .from("profiles")
+              .select("id, full_name, email, role, hourly_rate, pay_rate_effective_date, employment_status")
+              .in("id", ids);
+            if (retryMid.error) {
+              const retry = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
+              if (retry.error) throw retry.error;
+              profs = retry.data || [];
+            } else {
+              profs = retryMid.data || [];
+            }
           } else if (pErr) {
             const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
             if (retry.error) throw retry.error;
@@ -1005,6 +1014,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
             hr != null && hr !== "" && Number.isFinite(Number(hr)) ? Number(hr) : null;
           const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
           const employmentStatus = empRaw === "archived" ? "archived" : "active";
+          const jd = p.joining_date;
+          const joiningDate =
+            jd != null && String(jd).trim() !== ""
+              ? String(jd).trim().slice(0, 10)
+              : null;
           return {
             memberRowId: m.id,
             userId: m.user_id,
@@ -1016,6 +1030,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
             hourlyRate: hourlyRateNum,
             payRateEffectiveDate: p.pay_rate_effective_date ?? null,
             employmentStatus,
+            joiningDate,
           };
         });
 
@@ -3408,6 +3423,13 @@ const handlePhotoCapture = async (event) => {
       return;
     }
     const role = teamAddDraft.role === "supervisor" ? "supervisor" : "employee";
+    let joining_date = String(teamAddDraft.joiningDate || "").trim().slice(0, 10);
+    if (!joining_date) {
+      joining_date = calendarDateKeyInTimeZone(
+        new Date(),
+        userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE
+      );
+    }
     setTeamAddSubmitting(true);
     try {
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
@@ -3431,6 +3453,7 @@ const handlePhotoCapture = async (event) => {
           role,
           hourly_rate: hourlyNum,
           pay_rate_effective_date: eff,
+          joining_date,
           employment_status: "active",
         }),
       });
@@ -3463,6 +3486,10 @@ const handlePhotoCapture = async (event) => {
     setTeamEditingMemberRowId(String(row.memberRowId));
     setTeamEditInlineError("");
     setTeamRoleFeedback({ type: "", text: "" });
+    const joinEff =
+      row.joiningDate != null && row.joiningDate !== ""
+        ? String(row.joiningDate).slice(0, 10)
+        : "";
     setTeamEditDraft({
       memberRole:
         rowRoleNorm === "supervisor"
@@ -3472,6 +3499,7 @@ const handlePhotoCapture = async (event) => {
             : "employee",
       hourlyRate: row.hourlyRate != null ? String(row.hourlyRate) : "",
       payRateEffectiveDate: eff,
+      joiningDate: joinEff,
       employmentStatus: row.employmentStatus === "archived" ? "archived" : "active",
     });
   };
@@ -3498,6 +3526,8 @@ const handlePhotoCapture = async (event) => {
     const hourly_rate = Number.isFinite(hourlyNum) ? hourlyNum : 0;
     let pay_date = teamEditDraft.payRateEffectiveDate?.trim() || null;
     if (pay_date === "") pay_date = null;
+    let join_date = teamEditDraft.joiningDate?.trim() || null;
+    if (join_date === "") join_date = null;
 
     let newCompanyRole = normalizeMemberRole(row.role);
     if (!isOwner) {
@@ -3518,6 +3548,7 @@ const handlePhotoCapture = async (event) => {
       const profilePayload = {
         hourly_rate,
         pay_rate_effective_date: pay_date,
+        joining_date: join_date,
         employment_status: isOwner ? "active" : teamEditDraft.employmentStatus,
       };
       if (!isOwner) {
@@ -3546,6 +3577,7 @@ const handlePhotoCapture = async (event) => {
                 role: !isOwner ? newCompanyRole : r.role,
                 hourlyRate: hourly_rate,
                 payRateEffectiveDate: pay_date,
+                joiningDate: join_date,
                 employmentStatus: teamEditDraft.employmentStatus,
               }
             : r
@@ -5182,6 +5214,22 @@ const handlePhotoCapture = async (event) => {
                             onChange={(e) => setTeamAddDraft((d) => ({ ...d, payRateEffectiveDate: e.target.value }))}
                           />
                         </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-join">
+                            Joining date
+                          </label>
+                          <input
+                            id="team-add-join"
+                            type="date"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.joiningDate}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, joiningDate: e.target.value }))}
+                          />
+                          <p className="text-[10px] text-slate-500 leading-snug">
+                            Optional — defaults to today (company time zone) if left empty.
+                          </p>
+                        </div>
                         <div className="space-y-0.5">
                           <p className="text-[11px] font-medium text-slate-600">Status</p>
                           <p className="text-xs font-medium text-slate-900">active</p>
@@ -5227,6 +5275,7 @@ const handlePhotoCapture = async (event) => {
                     const effDisp = row.payRateEffectiveDate
                       ? String(row.payRateEffectiveDate).slice(0, 10)
                       : "Not set";
+                    const joinDisp = row.joiningDate ? String(row.joiningDate).slice(0, 10) : "Not set";
                     const empArchived = row.employmentStatus === "archived";
                     return (
                       <div
@@ -5362,6 +5411,24 @@ const handlePhotoCapture = async (event) => {
                                 </select>
                               )}
                             </div>
+                            <div className="space-y-1">
+                              <label
+                                className="text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-join-${row.memberRowId}`}
+                              >
+                                Joining date
+                              </label>
+                              <input
+                                id={`team-join-${row.memberRowId}`}
+                                type="date"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.joiningDate ?? ""}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, joiningDate: e.target.value } : d))
+                                }
+                              />
+                            </div>
                             <div className="flex gap-2 pt-1">
                               <Button
                                 type="button"
@@ -5406,6 +5473,10 @@ const handlePhotoCapture = async (event) => {
                             <div className="flex justify-between gap-3">
                               <span className="text-slate-500 shrink-0">Effective date</span>
                               <span className="font-medium text-slate-700 text-right">{effDisp}</span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-500 shrink-0">Joining date</span>
+                              <span className="font-medium text-slate-700 text-right">{joinDisp}</span>
                             </div>
                           </div>
                         )}
