@@ -346,6 +346,29 @@ function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZon
 }
 
 /** One row per member per day for Team attendance (prefer open active, then submitted missing out, then latest completed). */
+/** Live dashboard: row is an active shift if clock_out is empty/null OR status is active (existing fields only). */
+function isTimesheetRowActiveForLiveDashboard(record) {
+  if (record == null) return false;
+  const out = record.clockOut;
+  const hasClockOut = out != null && String(out).trim() !== "";
+  if (!hasClockOut) return true;
+  return normalizeStatus(record.status) === "active";
+}
+
+function pickLatestActiveTimesheetForLiveDashboard(userRows) {
+  const list = Array.isArray(userRows) ? userRows : [];
+  const active = list.filter(isTimesheetRowActiveForLiveDashboard);
+  if (!active.length) return null;
+  const sorted = [...active].sort((a, b) => {
+    const ta = parseStoredInstant(a?.clockIn).getTime();
+    const tb = parseStoredInstant(b?.clockIn).getTime();
+    const na = Number.isFinite(ta) ? ta : 0;
+    const nb = Number.isFinite(tb) ? tb : 0;
+    return nb - na;
+  });
+  return sorted[0] || null;
+}
+
 function pickRepresentativeTeamDayTimesheet(rowsForUser) {
   if (!rowsForUser?.length) return null;
   const byInDesc = [...rowsForUser].sort(
@@ -1165,6 +1188,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
+  /** Today's timesheets (company TZ) for live “currently working” list; extra fetch only when selected date ≠ today. */
+  const [dashboardTodaySheets, setDashboardTodaySheets] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
@@ -1380,7 +1405,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [activeTab, userCompany?.id]);
 
   useEffect(() => {
-    if (activeTab !== "dashboard" || !isAdmin || !userCompany?.id || !authUser?.id || !dashboardViewDate) return;
+    if (
+      activeTab !== "dashboard" ||
+      !isAdmin ||
+      !userCompany?.id ||
+      !authUser?.id ||
+      !dashboardViewDate ||
+      !companyChecked
+    ) {
+      return;
+    }
     let cancelled = false;
     setDashboardLoading(true);
     setDashboardError("");
@@ -1447,10 +1481,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         const dayStartIso = wallDateTimeToUtcIso(dashboardViewDate, "00:00:00", companyTimeZone);
         const dayEndIso = wallDateTimeToUtcIso(dashboardViewDate, "23:59:59", companyTimeZone);
-        if (!dayStartIso || !dayEndIso) {
+        const todayKeyLive = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+        const todayStartIso = wallDateTimeToUtcIso(todayKeyLive, "00:00:00", companyTimeZone);
+        const todayEndIso = wallDateTimeToUtcIso(todayKeyLive, "23:59:59", companyTimeZone);
+        if (!dayStartIso || !dayEndIso || !todayStartIso || !todayEndIso) {
           if (!cancelled) {
             setDashboardRows(rows);
             setDashboardDaySheets([]);
+            setDashboardTodaySheets([]);
             setDashboardAssignmentsByUserId(assignByUser);
           }
           return;
@@ -1468,9 +1506,26 @@ const [uploadProgress, setUploadProgress] = useState(null);
           (r) => calendarDateKeyInTimeZone(r.clockIn, companyTimeZone) === dashboardViewDate
         );
 
+        let todayFiltered = dateFiltered;
+        if (todayKeyLive !== dashboardViewDate) {
+          const { data: tsToday, error: tsTodayErr } = await supabase
+            .from("timesheets")
+            .select("*")
+            .eq("company_id", userCompany.id)
+            .gte("clock_in", todayStartIso)
+            .lte("clock_in", todayEndIso)
+            .order("clock_in", { ascending: false });
+          if (tsTodayErr) throw tsTodayErr;
+          const mappedToday = (tsToday || []).map(mapTimesheetRowFromSupabase);
+          todayFiltered = mappedToday.filter(
+            (r) => calendarDateKeyInTimeZone(r.clockIn, companyTimeZone) === todayKeyLive
+          );
+        }
+
         if (!cancelled) {
           setDashboardRows(rows);
           setDashboardDaySheets(dateFiltered);
+          setDashboardTodaySheets(Array.isArray(todayFiltered) ? todayFiltered : []);
           setDashboardAssignmentsByUserId(assignByUser);
         }
       } catch (err) {
@@ -1478,6 +1533,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           setDashboardError(getErrorMessage(err));
           setDashboardRows([]);
           setDashboardDaySheets([]);
+          setDashboardTodaySheets([]);
           setDashboardAssignmentsByUserId({});
         }
       } finally {
@@ -1492,6 +1548,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     isAdmin,
     userCompany?.id,
     authUser?.id,
+    companyChecked,
     dashboardViewDate,
     companyTimeZone,
     dashboardRefreshKey,
@@ -1726,10 +1783,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
     [clockSelectedProject?.id, clockCostCentreOptionsForProject]
   );
 
-  const dashboardRowsForAttendance = useMemo(
-    () => dashboardRows.filter((r) => r.employmentStatus !== "archived"),
-    [dashboardRows]
-  );
+  const dashboardRowsForAttendance = useMemo(() => {
+    const rows = Array.isArray(dashboardRows) ? dashboardRows : [];
+    return rows.filter((r) => r?.employmentStatus !== "archived");
+  }, [dashboardRows]);
 
   const dashboardLiveLocationByUserId = useMemo(() => {
     const m = {};
@@ -1739,6 +1796,35 @@ const [uploadProgress, setUploadProgress] = useState(null);
     }
     return m;
   }, [dashboardLiveLocations]);
+
+  /** Clocked-in employees today for live strip (defensive arrays). */
+  const dashboardLiveWorkingCards = useMemo(() => {
+    if (!isAdmin) return [];
+    const attendance = Array.isArray(dashboardRowsForAttendance) ? dashboardRowsForAttendance : [];
+    const sheets = Array.isArray(dashboardTodaySheets) ? dashboardTodaySheets : [];
+    const byUid = {};
+    for (const ts of sheets) {
+      const uid = ts?.userId ?? ts?.employeeId;
+      if (uid == null) continue;
+      const k = String(uid);
+      if (!byUid[k]) byUid[k] = [];
+      byUid[k].push(ts);
+    }
+    const cards = [];
+    for (const row of attendance) {
+      if (row == null || row.userId == null) continue;
+      const uid = String(row.userId);
+      const rep = pickLatestActiveTimesheetForLiveDashboard(byUid[uid]);
+      if (!rep) continue;
+      const displayName =
+        (row.displayName && String(row.displayName).trim()) || shortUserLabel(row.userId);
+      cards.push({ row, rep, uid, displayName });
+    }
+    cards.sort((a, b) =>
+      String(a.displayName || "").localeCompare(String(b.displayName || ""), undefined, { sensitivity: "base" })
+    );
+    return cards;
+  }, [isAdmin, dashboardRowsForAttendance, dashboardTodaySheets]);
 
   const updateLiveLocationOnce = useCallback(
     async ({ status, projectName, costCentre, coords }) => {
@@ -6489,6 +6575,18 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "dashboard" && !isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-5 space-y-3">
+                <h2 className="font-bold text-lg">Access restricted</h2>
+                <p className="text-sm text-slate-600">Dashboard is only available to supervisors and company owners.</p>
+                <Button type="button" className="w-full rounded-2xl h-11 text-sm font-semibold" onClick={() => setActiveTab("clock")}>
+                  Back to Clock
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "dashboard" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-4">
@@ -6496,6 +6594,9 @@ const handlePhotoCapture = async (event) => {
                   <h2 className="font-bold text-lg">Dashboard</h2>
                   <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
                 </div>
+                {!userCompany?.id || !companyChecked ? (
+                  <p className="text-sm text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
+                ) : null}
                 {dashboardActionFeedback && (
                   <div
                     className={`rounded-xl border p-2.5 text-xs ${
@@ -6507,6 +6608,132 @@ const handlePhotoCapture = async (event) => {
                     {dashboardActionFeedback.text}
                   </div>
                 )}
+                {userCompany?.id && companyChecked ? (
+                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-3 sm:p-4 space-y-3 min-w-0">
+                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 min-w-0">
+                      <h3 className="text-sm font-bold text-slate-900">Live team (today)</h3>
+                      <p className="text-sm text-slate-800 min-w-0">
+                        <span className="text-slate-600 font-medium">Currently Working: </span>
+                        <span className="font-bold tabular-nums text-slate-900">
+                          {dashboardLoading ? "—" : (dashboardLiveWorkingCards || []).length}
+                        </span>
+                      </p>
+                    </div>
+                    {dashboardLiveLocationsLoading ? (
+                      <p className="text-[11px] text-slate-600">Refreshing live GPS…</p>
+                    ) : null}
+                    {dashboardLiveLocationsError ? (
+                      <p className="text-[11px] text-amber-800">{String(dashboardLiveLocationsError)}</p>
+                    ) : null}
+                    {dashboardLoading ? (
+                      <p className="text-xs text-slate-600">Loading active employees…</p>
+                    ) : null}
+                    {!dashboardLoading &&
+                      (dashboardLiveWorkingCards || []).map((card) => {
+                        const { rep, uid, displayName } = card || {};
+                        if (!rep || !uid) return null;
+                        const liveCtx = {
+                          selectedDateKey: calendarDateKeyInTimeZone(now, companyTimeZone) || "",
+                          companyTimeZone,
+                          now,
+                          authUser,
+                          visibleCurrentShift,
+                        };
+                        const att = teamAttendanceStatusForRecord(rep, liveCtx);
+                        const statusLabel = att?.label ? String(att.label) : "—";
+                        const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
+                        const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
+                        const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
+                        const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
+                        const hasLiveGps =
+                          latRaw != null &&
+                          lngRaw != null &&
+                          Number.isFinite(Number(latRaw)) &&
+                          Number.isFinite(Number(lngRaw));
+                        const ciLoc = rep?.clockInLocation;
+                        const hasClockInGps =
+                          ciLoc &&
+                          ciLoc.latitude != null &&
+                          ciLoc.longitude != null &&
+                          Number.isFinite(Number(ciLoc.latitude)) &&
+                          Number.isFinite(Number(ciLoc.longitude));
+                        return (
+                          <div
+                            key={`live-${String(uid)}`}
+                            className="rounded-xl border border-white/90 bg-white p-3 space-y-2 shadow-sm min-w-0 max-w-full"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
+                              <p className="text-sm font-semibold text-slate-900 leading-snug break-words min-w-0 flex-1">
+                                {displayName || "—"}
+                              </p>
+                              <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-900 max-w-[55%] text-right break-words">
+                                {statusLabel}
+                              </span>
+                            </div>
+                            <dl className="grid grid-cols-1 gap-1.5 text-sm text-slate-800 min-w-0">
+                              <div className="min-w-0">
+                                <dt className="text-xs font-medium text-slate-500">Project</dt>
+                                <dd className="font-medium break-words">{rep?.project != null ? String(rep.project) : "—"}</dd>
+                              </div>
+                              <div className="min-w-0">
+                                <dt className="text-xs font-medium text-slate-500">Cost centre</dt>
+                                <dd className="font-medium break-words">{rep?.costCenter != null ? String(rep.costCenter) : "—"}</dd>
+                              </div>
+                              <div className="min-w-0">
+                                <dt className="text-xs font-medium text-slate-500">Clock-in</dt>
+                                <dd className="font-semibold tabular-nums">{clockInDisp}</dd>
+                              </div>
+                            </dl>
+                            <div className="text-xs leading-snug pt-1 border-t border-slate-100 min-w-0">
+                              {hasLiveGps ? (
+                                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start sm:gap-2">
+                                  <span className="text-slate-700 break-all min-w-0">
+                                    Live GPS:{" "}
+                                    {formatLocation({
+                                      latitude: Number(latRaw),
+                                      longitude: Number(lngRaw),
+                                    })}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="text-blue-700 font-semibold underline shrink-0 text-left"
+                                    onClick={() =>
+                                      openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })
+                                    }
+                                  >
+                                    Map
+                                  </button>
+                                </div>
+                              ) : hasClockInGps ? (
+                                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start sm:gap-2">
+                                  <span className="text-slate-700 break-all min-w-0">
+                                    Clock-in GPS: {formatLocation(ciLoc)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    className="text-blue-700 font-semibold underline shrink-0 text-left"
+                                    onClick={() =>
+                                      openMap({
+                                        latitude: Number(ciLoc.latitude),
+                                        longitude: Number(ciLoc.longitude),
+                                      })
+                                    }
+                                  >
+                                    Map
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">Location not available.</span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
+                      <p className="text-sm text-slate-700 text-center py-2">No employees currently clocked in.</p>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
