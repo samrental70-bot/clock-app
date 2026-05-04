@@ -72,6 +72,15 @@ const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
 
+const TEAM_ADD_INITIAL_DRAFT = {
+  fullName: "",
+  email: "",
+  password: "",
+  role: "employee",
+  hourlyRate: "",
+  payRateEffectiveDate: "",
+};
+
 function looksLikeEmail(value) {
   const s = String(value || "").trim();
   if (!s.includes("@")) return false;
@@ -821,6 +830,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [teamEditInlineError, setTeamEditInlineError] = useState("");
   const [teamSchemaWarning, setTeamSchemaWarning] = useState("");
   const [teamSavingMemberRowId, setTeamSavingMemberRowId] = useState(null);
+  const [teamRefreshKey, setTeamRefreshKey] = useState(0);
+  const [teamAddFormOpen, setTeamAddFormOpen] = useState(false);
+  const [teamAddDraft, setTeamAddDraft] = useState(() => ({ ...TEAM_ADD_INITIAL_DRAFT }));
+  const [teamAddSubmitting, setTeamAddSubmitting] = useState(false);
+  const [teamAddError, setTeamAddError] = useState("");
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -913,12 +927,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userCompany?.id, authUser?.id]);
+  }, [activeTab, userCompany?.id, authUser?.id, teamRefreshKey]);
 
   useEffect(() => {
     setTeamEditingMemberRowId(null);
     setTeamEditDraft(null);
     setTeamEditInlineError("");
+    setTeamAddFormOpen(false);
+    setTeamAddError("");
+    setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
   }, [activeTab, userCompany?.id]);
 
   useEffect(() => {
@@ -3178,8 +3195,87 @@ const handlePhotoCapture = async (event) => {
     }
   };
 
+  const handleSubmitAddEmployee = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || !userCompany?.id) return;
+    setTeamAddError("");
+    const name = String(teamAddDraft.fullName || "").trim();
+    const email = String(teamAddDraft.email || "").trim();
+    const password = String(teamAddDraft.password || "");
+    if (!name) {
+      setTeamAddError("Name is required.");
+      return;
+    }
+    if (!email) {
+      setTeamAddError("Email is required.");
+      return;
+    }
+    if (!looksLikeEmail(email)) {
+      setTeamAddError("Enter a valid email.");
+      return;
+    }
+    if (password.length < 6) {
+      setTeamAddError("Password must be at least 6 characters.");
+      return;
+    }
+    const eff = String(teamAddDraft.payRateEffectiveDate || "").trim();
+    if (!eff) {
+      setTeamAddError("Effective date is required.");
+      return;
+    }
+    const hourlyNum = parseFloat(String(teamAddDraft.hourlyRate).replace(",", "."));
+    if (!Number.isFinite(hourlyNum) || hourlyNum < 0) {
+      setTeamAddError("Enter a valid pay rate.");
+      return;
+    }
+    const role = teamAddDraft.role === "supervisor" ? "supervisor" : "employee";
+    setTeamAddSubmitting(true);
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        setTeamAddError("Not signed in.");
+        return;
+      }
+      const res = await fetch("/api/create-employee", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          company_id: userCompany.id,
+          full_name: name,
+          email: email.toLowerCase(),
+          password,
+          role,
+          hourly_rate: hourlyNum,
+          pay_rate_effective_date: eff,
+          employment_status: "active",
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTeamAddError(typeof json.error === "string" ? json.error : "Could not create employee.");
+        return;
+      }
+      setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+      setTeamAddFormOpen(false);
+      setTeamRefreshKey((k) => k + 1);
+      setTeamRoleFeedback({ type: "success", text: "Employee added." });
+    } catch (err) {
+      setTeamAddError(getErrorMessage(err));
+    } finally {
+      setTeamAddSubmitting(false);
+    }
+  };
+
   const beginTeamMemberEdit = (row) => {
     if (!isAdmin) return;
+    setTeamAddFormOpen(false);
+    setTeamAddError("");
+    setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
     const rowRoleNorm = normalizeMemberRole(row.role);
     const eff =
       row.payRateEffectiveDate != null && row.payRateEffectiveDate !== ""
@@ -4738,6 +4834,152 @@ const handlePhotoCapture = async (event) => {
                 {teamSchemaWarning && (
                   <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-950 leading-snug">
                     {teamSchemaWarning}
+                  </div>
+                )}
+                {isAdmin && (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
+                    {!teamAddFormOpen ? (
+                      <Button
+                        type="button"
+                        className="w-full sm:w-auto rounded-lg h-9 text-xs font-semibold"
+                        onClick={() => {
+                          cancelTeamMemberEdit();
+                          setTeamAddError("");
+                          setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+                          setTeamAddFormOpen(true);
+                        }}
+                        disabled={Boolean(teamAddSubmitting) || Boolean(teamSavingMemberRowId)}
+                      >
+                        Add Employee
+                      </Button>
+                    ) : (
+                      <form className="space-y-2" onSubmit={(e) => void handleSubmitAddEmployee(e)} noValidate>
+                        {teamAddError && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                            {teamAddError}
+                          </div>
+                        )}
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-name">
+                            Name
+                          </label>
+                          <input
+                            id="team-add-name"
+                            type="text"
+                            autoComplete="name"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.fullName}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, fullName: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-email">
+                            Email
+                          </label>
+                          <input
+                            id="team-add-email"
+                            type="email"
+                            autoComplete="email"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.email}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, email: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-password">
+                            Temporary password
+                          </label>
+                          <input
+                            id="team-add-password"
+                            type="password"
+                            autoComplete="new-password"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.password}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, password: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-role">
+                            Role
+                          </label>
+                          <select
+                            id="team-add-role"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.role === "supervisor" ? "supervisor" : "employee"}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) =>
+                              setTeamAddDraft((d) => ({
+                                ...d,
+                                role: e.target.value === "supervisor" ? "supervisor" : "employee",
+                              }))
+                            }
+                          >
+                            <option value="employee">employee</option>
+                            <option value="supervisor">supervisor</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-pay">
+                            Pay rate ($/hr)
+                          </label>
+                          <input
+                            id="team-add-pay"
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            step="0.01"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.hourlyRate}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, hourlyRate: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-eff">
+                            Effective date
+                          </label>
+                          <input
+                            id="team-add-eff"
+                            type="date"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.payRateEffectiveDate}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, payRateEffectiveDate: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-0.5">
+                          <p className="text-[11px] font-medium text-slate-600">Status</p>
+                          <p className="text-xs font-medium text-slate-900">active</p>
+                        </div>
+                        {teamAddSubmitting && (
+                          <p className="text-xs text-slate-600">Creating employee…</p>
+                        )}
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            type="submit"
+                            className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                            disabled={teamAddSubmitting}
+                          >
+                            {teamAddSubmitting ? "Saving…" : "Save"}
+                          </Button>
+                          <Button
+                            type="button"
+                            className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100 hover:border-slate-500 active:!bg-slate-200"
+                            disabled={teamAddSubmitting}
+                            onClick={() => {
+                              setTeamAddFormOpen(false);
+                              setTeamAddError("");
+                              setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </form>
+                    )}
                   </div>
                 )}
                 <div className="space-y-2">
