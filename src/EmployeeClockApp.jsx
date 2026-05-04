@@ -1243,6 +1243,21 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectsAddError, setProjectsAddError] = useState("");
   const [projectsAddSuccess, setProjectsAddSuccess] = useState("");
 
+  const [projectsListFilter, setProjectsListFilter] = useState("active"); // active | archived | all
+  const [editingProjectId, setEditingProjectId] = useState(null);
+  const [projectEditDraft, setProjectEditDraft] = useState(null);
+  const [projectEditSaving, setProjectEditSaving] = useState(false);
+  const [projectEditError, setProjectEditError] = useState("");
+  const [projectsEditSuccess, setProjectsEditSuccess] = useState("");
+
+  const displayedProjectsScreenRows = useMemo(() => {
+    const rows = projectsScreenRows || [];
+    const norm = (s) => String(s ?? "").trim().toLowerCase();
+    if (projectsListFilter === "all") return rows;
+    if (projectsListFilter === "archived") return rows.filter((p) => norm(p.status) === "archived");
+    return rows.filter((p) => norm(p.status) !== "archived");
+  }, [projectsScreenRows, projectsListFilter]);
+
   const fallbackProjects = useMemo(() => adminProjects.map((p) => ({ id: p.id, name: p.name })), []);
   const effectiveProjects = useMemo(() => {
     if (useProjectFallback) return fallbackProjects;
@@ -2528,11 +2543,131 @@ const [uploadProgress, setUploadProgress] = useState(null);
       setProjectsAddCostCentres("");
       setProjectsAddFormOpen(false);
       setProjectsAddError("");
+      setProjectsEditSuccess("");
       setProjectsAddSuccess("Project added.");
     } catch (err) {
       setProjectsAddError(getErrorMessage(err));
     } finally {
       setProjectsAddSaving(false);
+    }
+  };
+
+  const beginProjectEdit = (row) => {
+    setProjectsAddSuccess("");
+    setProjectsEditSuccess("");
+    setProjectEditError("");
+    setProjectsAddFormOpen(false);
+    setEditingProjectId(row.id);
+    const normSt = (s) => (String(s ?? "").trim().toLowerCase() === "archived" ? "archived" : "active");
+    setProjectEditDraft({
+      name: row.name || "",
+      status: normSt(row.status),
+      lines: (row.costCentres || []).map((cc) => ({
+        key: `db-${cc.id}`,
+        dbId: cc.id,
+        name: cc.name || "",
+        status: normSt(cc.status),
+        isNew: false,
+      })),
+      initialCcIds: (row.costCentres || []).map((cc) => cc.id).filter((id) => id != null),
+    });
+  };
+
+  const cancelProjectEdit = () => {
+    setEditingProjectId(null);
+    setProjectEditDraft(null);
+    setProjectEditError("");
+    setProjectEditSaving(false);
+  };
+
+  const handleProjectsScreenSaveEdit = async () => {
+    if (!editingProjectId || !projectEditDraft || !authUser?.id || !userCompany?.id || !isAdmin) return;
+
+    setProjectEditSaving(true);
+    setProjectEditError("");
+    try {
+      const name = String(projectEditDraft.name || "").trim();
+      if (!name) {
+        setProjectEditError("Project name is required.");
+        return;
+      }
+      const projStatus = projectEditDraft.status === "archived" ? "archived" : "active";
+
+      const { error: pErr } = await supabase
+        .from("projects")
+        .update({ name, status: projStatus })
+        .eq("id", editingProjectId)
+        .eq("company_id", userCompany.id);
+      if (pErr) throw pErr;
+
+      const initialIds = projectEditDraft.initialCcIds || [];
+      const lines = projectEditDraft.lines || [];
+      const currentDbIds = new Set(
+        lines.filter((l) => l.dbId != null).map((l) => String(l.dbId))
+      );
+
+      for (const cid of initialIds) {
+        if (!currentDbIds.has(String(cid))) {
+          const { error: archErr } = await supabase
+            .from("cost_centres")
+            .update({ status: "archived" })
+            .eq("id", cid)
+            .eq("project_id", editingProjectId);
+          if (archErr) throw archErr;
+        }
+      }
+
+      const { data: maxOrdRows, error: maxErr } = await supabase
+        .from("cost_centres")
+        .select("display_order")
+        .eq("project_id", editingProjectId)
+        .order("display_order", { ascending: false })
+        .limit(1);
+      if (maxErr) throw maxErr;
+      let nextOrder =
+        maxOrdRows?.[0]?.display_order != null && Number.isFinite(Number(maxOrdRows[0].display_order))
+          ? Number(maxOrdRows[0].display_order) + 1
+          : 0;
+
+      for (const line of lines) {
+        const ccName = String(line.name || "").trim();
+        const ccStatus = line.status === "archived" ? "archived" : "active";
+
+        if (line.dbId != null) {
+          if (!ccName) {
+            setProjectEditError("Cost centre name cannot be empty.");
+            return;
+          }
+          const { error: uErr } = await supabase
+            .from("cost_centres")
+            .update({ name: ccName, status: ccStatus })
+            .eq("id", line.dbId)
+            .eq("project_id", editingProjectId);
+          if (uErr) throw uErr;
+        } else if (line.isNew && ccName) {
+          const { error: iErr } = await supabase.from("cost_centres").insert({
+            company_id: userCompany.id,
+            project_id: editingProjectId,
+            name: ccName,
+            status: ccStatus,
+            display_order: nextOrder,
+            created_by: authUser.id,
+          });
+          if (iErr) throw iErr;
+          nextOrder += 1;
+        }
+      }
+
+      setCompanyProjectsRefreshKey((k) => k + 1);
+      setProjectsScreenRefreshKey((k) => k + 1);
+      setEditingProjectId(null);
+      setProjectEditDraft(null);
+      setProjectsAddSuccess("");
+      setProjectsEditSuccess("Project saved.");
+    } catch (err) {
+      setProjectEditError(getErrorMessage(err));
+    } finally {
+      setProjectEditSaving(false);
     }
   };
 
@@ -5251,6 +5386,10 @@ const handlePhotoCapture = async (event) => {
                       type="button"
                       className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
                       onClick={() => {
+                        setProjectsEditSuccess("");
+                        setEditingProjectId(null);
+                        setProjectEditDraft(null);
+                        setProjectEditError("");
                         setProjectsAddSuccess("");
                         setProjectsAddError("");
                         setProjectsAddFormOpen(true);
@@ -5328,6 +5467,35 @@ const handlePhotoCapture = async (event) => {
                     {projectsAddSuccess}
                   </div>
                 )}
+                {projectsEditSuccess && (
+                  <div className="rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
+                    {projectsEditSuccess}
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                    {[
+                      { id: "active", label: "Active" },
+                      { id: "archived", label: "Archived" },
+                      { id: "all", label: "All" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                          projectsListFilter === opt.id
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                        onClick={() => setProjectsListFilter(opt.id)}
+                        disabled={Boolean(projectEditSaving) || Boolean(projectsAddSaving)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {projectsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                     Loading projects…
@@ -5341,51 +5509,257 @@ const handlePhotoCapture = async (event) => {
                 {!projectsScreenLoading && !projectsScreenError && projectsScreenRows.length === 0 && (
                   <p className="text-xs text-slate-500 text-center py-4">No projects for this company yet.</p>
                 )}
-                {!projectsScreenLoading && !projectsScreenError && projectsScreenRows.length > 0 && (
+                {!projectsScreenLoading &&
+                  !projectsScreenError &&
+                  projectsScreenRows.length > 0 &&
+                  displayedProjectsScreenRows.length === 0 && (
+                    <p className="text-xs text-slate-500 text-center py-4">
+                      {projectsListFilter === "all"
+                        ? "No projects match this filter."
+                        : `No ${projectsListFilter === "active" ? "active" : "archived"} projects in this view.`}
+                    </p>
+                  )}
+                {!projectsScreenLoading && !projectsScreenError && displayedProjectsScreenRows.length > 0 && (
                   <div className="space-y-2.5">
-                    {projectsScreenRows.map((proj) => (
-                      <div
-                        key={proj.id}
-                        className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
-                          <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words min-w-0 flex-1">
-                            {proj.name}
-                          </h3>
-                          <span className="shrink-0 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-800 ring-1 ring-slate-200/80 capitalize">
-                            {proj.status != null && String(proj.status).trim() !== ""
-                              ? String(proj.status).replace(/_/g, " ")
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="border-t border-slate-100 pt-2 space-y-1">
-                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                            Cost centres
-                          </p>
-                          {proj.costCentres.length === 0 ? (
-                            <p className="text-xs text-slate-500">None</p>
-                          ) : (
-                            <ul className="space-y-1.5">
-                              {proj.costCentres.map((cc) => (
-                                <li
-                                  key={cc.id}
-                                  className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs text-slate-800"
+                    {displayedProjectsScreenRows.map((proj) => {
+                      const isEditing = editingProjectId != null && String(editingProjectId) === String(proj.id);
+                      return (
+                        <div
+                          key={proj.id}
+                          className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm"
+                        >
+                          {isEditing && projectEditDraft ? (
+                            <div className="space-y-2.5">
+                              <p className="text-xs font-semibold text-slate-800">Edit project</p>
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-slate-600" htmlFor={`pe-name-${proj.id}`}>
+                                  Project name
+                                </label>
+                                <input
+                                  id={`pe-name-${proj.id}`}
+                                  type="text"
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={projectEditDraft.name}
+                                  onChange={(e) =>
+                                    setProjectEditDraft((d) => (d ? { ...d, name: e.target.value } : d))
+                                  }
+                                  disabled={projectEditSaving}
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="block text-[11px] font-medium text-slate-600" htmlFor={`pe-st-${proj.id}`}>
+                                  Project status
+                                </label>
+                                <select
+                                  id={`pe-st-${proj.id}`}
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={projectEditDraft.status}
+                                  onChange={(e) =>
+                                    setProjectEditDraft((d) =>
+                                      d
+                                        ? {
+                                            ...d,
+                                            status: e.target.value === "archived" ? "archived" : "active",
+                                          }
+                                        : d
+                                    )
+                                  }
+                                  disabled={projectEditSaving}
                                 >
-                                  <span className="font-medium break-words min-w-0">{cc.name}</span>
-                                  {cc.status != null &&
-                                    String(cc.status).trim() !== "" &&
-                                    String(cc.status).toLowerCase() !== "active" && (
-                                      <span className="shrink-0 text-[10px] text-slate-500 capitalize">
-                                        {String(cc.status).replace(/_/g, " ")}
-                                      </span>
-                                    )}
-                                </li>
-                              ))}
-                            </ul>
+                                  <option value="active">active</option>
+                                  <option value="archived">archived</option>
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                  Cost centres
+                                </p>
+                                {projectEditDraft.lines.length === 0 && (
+                                  <p className="text-xs text-slate-500">None — add one below if needed.</p>
+                                )}
+                                {projectEditDraft.lines.map((line) => (
+                                  <div
+                                    key={line.key}
+                                    className="flex flex-col gap-1.5 rounded-lg border border-slate-100 bg-slate-50/80 p-2"
+                                  >
+                                    <div className="flex flex-wrap items-end gap-2">
+                                      <div className="min-w-0 flex-1 space-y-0.5">
+                                        <label className="text-[10px] font-medium text-slate-600">Name</label>
+                                        <input
+                                          type="text"
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                          value={line.name}
+                                          onChange={(e) =>
+                                            setProjectEditDraft((d) => {
+                                              if (!d) return d;
+                                              return {
+                                                ...d,
+                                                lines: d.lines.map((l) =>
+                                                  l.key === line.key ? { ...l, name: e.target.value } : l
+                                                ),
+                                              };
+                                            })
+                                          }
+                                          disabled={projectEditSaving}
+                                        />
+                                      </div>
+                                      <div className="w-full min-w-0 sm:w-32 space-y-0.5">
+                                        <label className="text-[10px] font-medium text-slate-600">Status</label>
+                                        <select
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                          value={line.status}
+                                          onChange={(e) =>
+                                            setProjectEditDraft((d) => {
+                                              if (!d) return d;
+                                              return {
+                                                ...d,
+                                                lines: d.lines.map((l) =>
+                                                  l.key === line.key
+                                                    ? {
+                                                        ...l,
+                                                        status: e.target.value === "archived" ? "archived" : "active",
+                                                      }
+                                                    : l
+                                                ),
+                                              };
+                                            })
+                                          }
+                                          disabled={projectEditSaving}
+                                        >
+                                          <option value="active">active</option>
+                                          <option value="archived">archived</option>
+                                        </select>
+                                      </div>
+                                    </div>
+                                    <div className="flex justify-end">
+                                      <button
+                                        type="button"
+                                        className="text-[11px] font-semibold text-slate-600 underline"
+                                        disabled={projectEditSaving}
+                                        onClick={() =>
+                                          setProjectEditDraft((d) => {
+                                            if (!d) return d;
+                                            return {
+                                              ...d,
+                                              lines: d.lines.filter((l) => l.key !== line.key),
+                                            };
+                                          })
+                                        }
+                                      >
+                                        Remove from list
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                                <Button
+                                  type="button"
+                                  className="w-full rounded-lg h-8 text-[11px] font-semibold !bg-white !text-slate-900 border border-slate-300"
+                                  disabled={projectEditSaving}
+                                  onClick={() =>
+                                    setProjectEditDraft((d) => {
+                                      if (!d) return d;
+                                      return {
+                                        ...d,
+                                        lines: [
+                                          ...d.lines,
+                                          {
+                                            key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                            dbId: null,
+                                            name: "",
+                                            status: "active",
+                                            isNew: true,
+                                          },
+                                        ],
+                                      };
+                                    })
+                                  }
+                                >
+                                  + Add cost centre
+                                </Button>
+                              </div>
+                              {projectEditError && (
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                                  {projectEditError}
+                                </div>
+                              )}
+                              <div className="flex gap-2 pt-0.5">
+                                <Button
+                                  type="button"
+                                  className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                                  disabled={projectEditSaving}
+                                  onClick={() => void handleProjectsScreenSaveEdit()}
+                                >
+                                  {projectEditSaving ? "Saving…" : "Save"}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                                  disabled={projectEditSaving}
+                                  onClick={cancelProjectEdit}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
+                                <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words min-w-0 flex-1">
+                                  {proj.name}
+                                </h3>
+                                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                  <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-800 ring-1 ring-slate-200/80 capitalize">
+                                    {proj.status != null && String(proj.status).trim() !== ""
+                                      ? String(proj.status).replace(/_/g, " ")
+                                      : "—"}
+                                  </span>
+                                  <Button
+                                    type="button"
+                                    className="rounded-lg h-8 px-2.5 text-[11px] font-semibold"
+                                    disabled={
+                                      Boolean(projectsAddSaving) ||
+                                      Boolean(projectEditSaving) ||
+                                      projectsAddFormOpen ||
+                                      (editingProjectId != null &&
+                                        String(editingProjectId) !== String(proj.id))
+                                    }
+                                    onClick={() => beginProjectEdit(proj)}
+                                  >
+                                    Edit
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="border-t border-slate-100 pt-2 space-y-1">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                  Cost centres
+                                </p>
+                                {proj.costCentres.length === 0 ? (
+                                  <p className="text-xs text-slate-500">None</p>
+                                ) : (
+                                  <ul className="space-y-1.5">
+                                    {proj.costCentres.map((cc) => (
+                                      <li
+                                        key={cc.id}
+                                        className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs text-slate-800"
+                                      >
+                                        <span className="font-medium break-words min-w-0">{cc.name}</span>
+                                        {cc.status != null &&
+                                          String(cc.status).trim() !== "" &&
+                                          String(cc.status).toLowerCase() !== "active" && (
+                                            <span className="shrink-0 text-[10px] text-slate-500 capitalize">
+                                              {String(cc.status).replace(/_/g, " ")}
+                                            </span>
+                                          )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                            </>
                           )}
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
