@@ -542,6 +542,28 @@ function clockOutTitleForActorRole(actorRole) {
   return normalizeMemberRole(actorRole) === "supervisor" ? "Supervisor clocked out" : "Employee clocked out";
 }
 
+/** Browser/PWA Notification API for clock_in / clock_out only; never throws. */
+function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
+  const id = String(notificationRow?.id ?? "");
+  if (!id || shownIdsRef.current.has(id)) return;
+  const t = String(notificationRow?.type || "").trim();
+  if (t !== "clock_in" && t !== "clock_out") return;
+  if (typeof window === "undefined" || !window.Notification) return;
+  if (window.Notification.permission !== "granted") return;
+  try {
+    shownIdsRef.current.add(id);
+    new window.Notification(String(notificationRow.title || "Clock App"), {
+      body: String(notificationRow.message || ""),
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: id,
+    });
+  } catch (e) {
+    console.warn("[NOTIFY] system Notification failed", e);
+    shownIdsRef.current.delete(id);
+  }
+}
+
 /** Insert one in-app row per recipient. Failures are logged only — never throws. */
 async function createCompanyNotifications(supabase, params) {
   const {
@@ -680,8 +702,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [markingNotifId, setMarkingNotifId] = useState(null);
   const [markingAllNotifs, setMarkingAllNotifs] = useState(false);
   const [liveToast, setLiveToast] = useState(null);
+  const [mobileNotifPermissionUi, setMobileNotifPermissionUi] = useState("unknown");
   const notifPollBootstrappedRef = useRef(false);
   const notifLastUnreadIdsRef = useRef(new Set());
+  const systemNotifShownIdsRef = useRef(new Set());
 
   const photoNotifyBatchRef = useRef({
     timer: null,
@@ -1000,12 +1024,21 @@ const [uploadProgress, setUploadProgress] = useState(null);
           notifPollBootstrappedRef.current = true;
           notifLastUnreadIdsRef.current = unreadIds;
         } else {
-          for (const id of unreadIds) {
-            if (!notifLastUnreadIdsRef.current.has(id)) {
-              const row = rows.find((r) => String(r.id) === id);
-              if (row) setLiveToast({ id: row.id, title: row.title, message: row.message });
-              break;
-            }
+          const previous = notifLastUnreadIdsRef.current;
+          const newUnreadIds = [...unreadIds].filter((id) => !previous.has(id));
+          for (const id of newUnreadIds) {
+            const row = rows.find((r) => String(r.id) === id);
+            if (row) tryShowClockBrowserNotification(row, systemNotifShownIdsRef);
+          }
+          const firstToastRow = newUnreadIds
+            .map((id) => rows.find((r) => String(r.id) === id))
+            .find(Boolean);
+          if (firstToastRow) {
+            setLiveToast({
+              id: firstToastRow.id,
+              title: firstToastRow.title,
+              message: firstToastRow.message,
+            });
           }
           notifLastUnreadIdsRef.current = unreadIds;
         }
@@ -1023,6 +1056,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       setLiveToast(null);
       notifPollBootstrappedRef.current = false;
       notifLastUnreadIdsRef.current = new Set();
+      systemNotifShownIdsRef.current = new Set();
       return;
     }
     void pollInAppNotifications();
@@ -1037,7 +1071,23 @@ const [uploadProgress, setUploadProgress] = useState(null);
   useEffect(() => {
     notifPollBootstrappedRef.current = false;
     notifLastUnreadIdsRef.current = new Set();
+    systemNotifShownIdsRef.current = new Set();
   }, [authUser?.id, userCompany?.id]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setMobileNotifPermissionUi("unknown");
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setMobileNotifPermissionUi("not_supported");
+      return;
+    }
+    const p = Notification.permission;
+    if (p === "granted") setMobileNotifPermissionUi("enabled");
+    else if (p === "denied") setMobileNotifPermissionUi("blocked");
+    else setMobileNotifPermissionUi("default");
+  }, [isAdmin]);
 
   const schedulePhotoNotificationAfterUpload = useCallback(() => {
     const uid = authUser?.id;
@@ -2580,6 +2630,21 @@ const handlePhotoCapture = async (event) => {
     setIsMenuOpen(false);
   };
 
+  const handleEnableMobileNotifications = async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setMobileNotifPermissionUi("not_supported");
+      return;
+    }
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm === "granted") setMobileNotifPermissionUi("enabled");
+      else if (perm === "denied") setMobileNotifPermissionUi("blocked");
+      else setMobileNotifPermissionUi("default");
+    } catch {
+      setMobileNotifPermissionUi("blocked");
+    }
+  };
+
   const handleMarkNotificationRead = async (n) => {
     if (!isAdmin || !authUser?.id || !n?.id) return;
     setMarkingNotifId(String(n.id));
@@ -3719,6 +3784,33 @@ const handlePhotoCapture = async (event) => {
                   >
                     {markingAllNotifs ? "…" : "Mark all read"}
                   </Button>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
+                  <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Mobile alerts</p>
+                  <Button
+                    type="button"
+                    className="w-full rounded-xl h-10 text-xs font-semibold"
+                    onClick={() => void handleEnableMobileNotifications()}
+                  >
+                    Enable Mobile Notifications
+                  </Button>
+                  <p className="text-[11px] text-slate-600">
+                    Status:{" "}
+                    <span className="font-semibold">
+                      {mobileNotifPermissionUi === "enabled"
+                        ? "Enabled"
+                        : mobileNotifPermissionUi === "blocked"
+                          ? "Blocked"
+                          : mobileNotifPermissionUi === "not_supported"
+                            ? "Not supported"
+                            : mobileNotifPermissionUi === "default"
+                              ? "Not yet enabled"
+                              : "—"}
+                    </span>
+                  </p>
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    Clock in and clock out only. Other alerts stay in the app until you allow more later.
+                  </p>
                 </div>
                 {inAppNotifError && (
                   <div className="rounded-xl bg-amber-50 border border-amber-100 p-2 text-xs text-amber-900">{inAppNotifError}</div>
