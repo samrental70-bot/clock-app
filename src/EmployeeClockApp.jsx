@@ -1152,11 +1152,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
-  const [reportsGroupBy, setReportsGroupBy] = useState("employee");
-  const [reportsSplitBy, setReportsSplitBy] = useState("none"); // none | employee | project | cost_center
+  /** Reports breakdown dimensions: Level 1 required; Level 2/3 optional (none). */
+  const [reportsLevel1, setReportsLevel1] = useState("project");
+  const [reportsLevel2, setReportsLevel2] = useState("none");
+  const [reportsLevel3, setReportsLevel3] = useState("none");
   const [reportsCostCentreAll, setReportsCostCentreAll] = useState(true);
   const [reportsCostCentrePicked, setReportsCostCentrePicked] = useState([]);
-  const [reportsExpandedGroups, setReportsExpandedGroups] = useState({});
+  const [reportsExpandedL1, setReportsExpandedL1] = useState({});
+  const [reportsExpandedL2, setReportsExpandedL2] = useState({});
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -1816,87 +1819,108 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return reportsScreenRows.filter((r) => allowed.has(reportsCostCentreKeyFromRow(r)));
   }, [reportsScreenRows, reportsCostCentreAll, reportsCostCentrePicked]);
 
-  const reportsGroupedView = useMemo(() => {
+  const REPORT_DIMS = ["employee", "project", "cost_center"];
+
+  const reportsBreakdownTree = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
-      return { mode: "flat", rows: [], splitBy: "none", groupBy: "employee" };
+      return { level1Rows: [], d1: "project", d2: "none", d3: "none", hasL2: false, hasL3: false };
     }
 
-    const reportBy = reportsGroupBy === "project" ? "project" : "employee";
-    const rawSplit = reportsSplitBy || "none";
-    const splitAllowed =
-      reportBy === "project"
-        ? ["none", "employee", "cost_center"].includes(rawSplit)
-        : ["none", "project", "cost_center"].includes(rawSplit);
-    const splitBy = splitAllowed ? rawSplit : "none";
+    const d1 = REPORT_DIMS.includes(reportsLevel1) ? reportsLevel1 : "project";
+    let d2 = reportsLevel2 === "none" || !REPORT_DIMS.includes(reportsLevel2) ? "none" : reportsLevel2;
+    let d3 = reportsLevel3 === "none" || !REPORT_DIMS.includes(reportsLevel3) ? "none" : reportsLevel3;
+
+    if (d2 === d1) d2 = "none";
+    if (d3 === d1 || d3 === d2) d3 = "none";
+    if (d2 === "none") d3 = "none";
 
     const rows = reportsRowsFilteredForUi || [];
 
-    const getEmployee = (r) => {
-      const uid = String(r?.userId ?? r?.employeeId ?? "");
-      const name = resolveTimesheetEmployeeTitle(r, { profileFullName, authUser, teamProfileFullNameByUserId });
-      return { key: uid || name || "employee", label: name || "Employee" };
-    };
-    const getProject = (r) => {
-      const label = (r?.project && String(r.project).trim()) || "Unassigned";
-      const pid = r?.projectId != null ? String(r.projectId) : "";
-      const key = pid ? `id:${pid}` : `n:${label}`;
-      return { key, label };
-    };
-    const getCostCentre = (r) => {
-      const cc = reportsCostCentreKeyFromRow(r);
-      return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
-    };
-    const getDim = (dim, r) => {
-      if (dim === "employee") return getEmployee(r);
-      if (dim === "project") return getProject(r);
-      if (dim === "cost_center") return getCostCentre(r);
-      return { key: "all", label: "—" };
+    const getDim = (dim, rec) => {
+      if (dim === "employee") {
+        const uid = String(rec?.userId ?? rec?.employeeId ?? "").trim();
+        const name = resolveTimesheetEmployeeTitle(rec, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        });
+        const label = name || "Employee";
+        const key = uid ? `emp:${uid}` : `empn:${label}`;
+        return { key, label };
+      }
+      if (dim === "project") {
+        const label = (rec?.project && String(rec.project).trim()) || "Unassigned";
+        return { key: `proj:${label}`, label };
+      }
+      if (dim === "cost_center") {
+        const cc = reportsCostCentreKeyFromRow(rec);
+        return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
+      }
+      return { key: "?", label: "—" };
     };
 
-    if (splitBy === "none") {
-      return { mode: "flat", splitBy: "none", groupBy: reportBy };
-    }
-
-    const mainMap = {};
+    const l1Map = {};
     for (const r of rows) {
-      const main = getDim(reportBy, r);
-      const sub = getDim(splitBy, r);
+      const k1 = getDim(d1, r);
+      const k1s = String(k1.key);
       const wm = getWorkedMinutes(r);
       const lc = getLabourCost(r);
 
-      if (!mainMap[main.key]) {
-        mainMap[main.key] = {
-          key: main.key,
-          label: main.label,
-          minutes: 0,
-          cost: 0,
-          children: {},
-        };
+      if (!l1Map[k1s]) {
+        l1Map[k1s] = { key: k1s, label: k1.label, minutes: 0, cost: 0, children: {} };
       }
-      const m = mainMap[main.key];
-      m.minutes += wm;
-      m.cost += lc;
+      const n1 = l1Map[k1s];
+      n1.minutes += wm;
+      n1.cost += lc;
 
-      if (!m.children[sub.key]) {
-        m.children[sub.key] = { key: sub.key, label: sub.label, minutes: 0, cost: 0 };
+      if (d2 === "none") continue;
+
+      const k2 = getDim(d2, r);
+      const k2s = String(k2.key);
+      if (!n1.children[k2s]) {
+        n1.children[k2s] = { key: k2s, label: k2.label, minutes: 0, cost: 0, children: {} };
       }
-      m.children[sub.key].minutes += wm;
-      m.children[sub.key].cost += lc;
+      const n2 = n1.children[k2s];
+      n2.minutes += wm;
+      n2.cost += lc;
+
+      if (d3 === "none") continue;
+
+      const k3 = getDim(d3, r);
+      const k3s = String(k3.key);
+      if (!n2.children[k3s]) {
+        n2.children[k3s] = { key: k3s, label: k3.label, minutes: 0, cost: 0 };
+      }
+      n2.children[k3s].minutes += wm;
+      n2.children[k3s].cost += lc;
     }
 
-    const mainRows = Object.values(mainMap)
-      .map((m) => ({
-        ...m,
-        children: Object.values(m.children).sort((a, b) => String(a.label).localeCompare(String(b.label))),
+    const level1Rows = Object.values(l1Map)
+      .map((n1) => ({
+        ...n1,
+        children: Object.values(n1.children)
+          .map((n2) => ({
+            ...n2,
+            children: Object.values(n2.children).sort((a, b) => String(a.label).localeCompare(String(b.label))),
+          }))
+          .sort((a, b) => String(a.label).localeCompare(String(b.label))),
       }))
       .sort((a, b) => String(a.label).localeCompare(String(b.label)));
 
-    return { mode: "split", splitBy, groupBy: reportBy, rows: mainRows };
+    return {
+      level1Rows,
+      d1,
+      d2,
+      d3,
+      hasL2: d2 !== "none",
+      hasL3: d2 !== "none" && d3 !== "none",
+    };
   }, [
     isAdmin,
     activeTab,
-    reportsSplitBy,
-    reportsGroupBy,
+    reportsLevel1,
+    reportsLevel2,
+    reportsLevel3,
     reportsRowsFilteredForUi,
     getWorkedMinutes,
     getLabourCost,
@@ -1907,51 +1931,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   useEffect(() => {
     if (!isAdmin || activeTab !== "reports") return;
-    const rb = reportsGroupBy === "project" ? "project" : "employee";
-    const raw = reportsSplitBy || "none";
-    const ok =
-      rb === "project"
-        ? ["none", "employee", "cost_center"].includes(raw)
-        : ["none", "project", "cost_center"].includes(raw);
-    if (!ok) setReportsSplitBy("none");
-  }, [isAdmin, activeTab, reportsGroupBy, reportsSplitBy]);
-
-  useEffect(() => {
-    if (!isAdmin || activeTab !== "reports") return;
-    const rb = reportsGroupBy === "project" ? "project" : "employee";
-    const rawSplit = reportsSplitBy || "none";
-    const splitOk =
-      rb === "project"
-        ? ["none", "employee", "cost_center"].includes(rawSplit)
-        : ["none", "project", "cost_center"].includes(rawSplit);
-    const splitBy = splitOk ? rawSplit : "none";
-    console.log("[REPORTS] reportBy", rb);
-    console.log("[REPORTS] splitBy", splitBy);
-    const gv = reportsGroupedView;
-    if (gv.mode === "split" && Array.isArray(gv.rows)) {
-      console.log(
-        "[REPORTS] mainGroups",
-        gv.rows.map((r) => ({
-          key: r.key,
-          label: r.label,
-          minutes: r.minutes,
-          cost: r.cost,
-          children: r.children?.length ?? 0,
-        }))
-      );
-      const expandedKey = Object.keys(reportsExpandedGroups).find((k) => reportsExpandedGroups[k]);
-      const sample = expandedKey ? gv.rows.find((r) => r.key === expandedKey) : null;
-      const nestedSource = sample || gv.rows[0];
-      console.log(
-        "[REPORTS] nestedGroups",
-        expandedKey ? `(expanded: ${nestedSource?.label ?? expandedKey})` : "(first main row preview)",
-        nestedSource?.children ?? []
-      );
-    } else {
-      console.log("[REPORTS] mainGroups", "(flat mode — use list section, no nested split)");
-      console.log("[REPORTS] nestedGroups", "(none — Split by is None)");
-    }
-  }, [isAdmin, activeTab, reportsGroupBy, reportsSplitBy, reportsGroupedView, reportsExpandedGroups]);
+    const l1 = REPORT_DIMS.includes(reportsLevel1) ? reportsLevel1 : "project";
+    let l2 = reportsLevel2;
+    if (l2 !== "none" && (!REPORT_DIMS.includes(l2) || l2 === l1)) l2 = "none";
+    let l3 = reportsLevel3;
+    if (l2 === "none") l3 = "none";
+    else if (l3 !== "none" && (!REPORT_DIMS.includes(l3) || l3 === l1 || l3 === l2)) l3 = "none";
+    if (l2 !== reportsLevel2) setReportsLevel2(l2);
+    if (l3 !== reportsLevel3) setReportsLevel3(l3);
+  }, [isAdmin, activeTab, reportsLevel1, reportsLevel2, reportsLevel3]);
 
   const reportsAggregates = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
@@ -6814,54 +6802,87 @@ const handlePhotoCapture = async (event) => {
                     ))}
                   </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <label className="space-y-1 text-xs font-medium text-slate-700">
-                    Report by
-                    <select
-                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
-                      value={reportsGroupBy}
-                      onChange={(e) => {
-                        const next = e.target.value;
-                        setReportsGroupBy(next);
-                        setReportsSplitBy((prev) => {
-                          if (next === "project" && prev === "project") return "none";
-                          if (next === "employee" && prev === "employee") return "none";
-                          return prev;
-                        });
-                        setReportsExpandedGroups({});
-                      }}
-                    >
-                      <option value="employee">Employee</option>
-                      <option value="project">Project</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1 text-xs font-medium text-slate-700">
-                    Split by
-                    <select
-                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
-                      value={reportsSplitBy}
-                      onChange={(e) => {
-                        setReportsSplitBy(e.target.value);
-                        setReportsExpandedGroups({});
-                      }}
-                    >
-                      <option value="none">None</option>
-                      {reportsGroupBy === "project" ? (
-                        <>
-                          <option value="employee">Employee</option>
-                          <option value="cost_center">Cost Centre</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="project">Project</option>
-                          <option value="cost_center">Cost Centre</option>
-                        </>
-                      )}
-                    </select>
-                  </label>
-                  <div className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                    <span className="block">Cost centres</span>
-                    <details className="rounded-xl border border-slate-200 bg-white overflow-hidden group">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-800">Group report</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
+                      Level 1
+                      <select
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0"
+                        value={reportsLevel1}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (!REPORT_DIMS.includes(v)) return;
+                          setReportsLevel1(v);
+                          setReportsLevel2((p) => (p === v ? "none" : p));
+                          setReportsLevel3((p) => (p === v ? "none" : p));
+                          setReportsExpandedL1({});
+                          setReportsExpandedL2({});
+                        }}
+                      >
+                        <option value="employee">Employee</option>
+                        <option value="project">Project</option>
+                        <option value="cost_center">Cost Centre</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
+                      Level 2
+                      <select
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0"
+                        value={reportsLevel2}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setReportsLevel2(v);
+                          if (v === "none") setReportsLevel3("none");
+                          else
+                            setReportsLevel3((p) =>
+                              p === v || p === reportsLevel1 ? "none" : p
+                            );
+                          setReportsExpandedL1({});
+                          setReportsExpandedL2({});
+                        }}
+                      >
+                        <option value="none">None</option>
+                        {REPORT_DIMS.filter((d) => d !== reportsLevel1).map((d) => (
+                          <option key={d} value={d}>
+                            {d === "employee"
+                              ? "Employee"
+                              : d === "project"
+                                ? "Project"
+                                : "Cost Centre"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
+                      Level 3
+                      <select
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0 disabled:bg-slate-100 disabled:text-slate-500"
+                        disabled={reportsLevel2 === "none"}
+                        value={reportsLevel2 === "none" ? "none" : reportsLevel3}
+                        onChange={(e) => {
+                          setReportsLevel3(e.target.value);
+                          setReportsExpandedL1({});
+                          setReportsExpandedL2({});
+                        }}
+                      >
+                        <option value="none">None</option>
+                        {REPORT_DIMS.filter((d) => d !== reportsLevel1 && d !== reportsLevel2).map((d) => (
+                          <option key={d} value={d}>
+                            {d === "employee"
+                              ? "Employee"
+                              : d === "project"
+                                ? "Project"
+                                : "Cost Centre"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div className="space-y-1 text-xs font-medium text-slate-600 min-w-0">
+                  <span className="block text-[11px] font-medium text-slate-500">Secondary filter · Cost centres</span>
+                  <details className="rounded-xl border border-slate-200 bg-white overflow-hidden group">
                       <summary className="px-2 py-2 cursor-pointer text-sm font-normal text-slate-900 list-none flex items-center justify-between gap-2">
                         <span className="min-w-0 truncate">
                           {reportsCostCentreAll
@@ -6881,7 +6902,8 @@ const handlePhotoCapture = async (event) => {
                             onChange={(e) => {
                               const on = e.target.checked;
                               setReportsCostCentreAll(on);
-                              setReportsExpandedGroups({});
+                              setReportsExpandedL1({});
+                              setReportsExpandedL2({});
                               if (on) {
                                 setReportsCostCentrePicked([]);
                               } else {
@@ -6908,7 +6930,8 @@ const handlePhotoCapture = async (event) => {
                                     checked={reportsCostCentrePicked.includes(cc)}
                                     onChange={(ev) => {
                                       const checked = ev.target.checked;
-                                      setReportsExpandedGroups({});
+                                      setReportsExpandedL1({});
+                                      setReportsExpandedL2({});
                                       setReportsCostCentrePicked((prev) => {
                                         if (checked) return [...new Set([...prev, cc])];
                                         return prev.filter((x) => x !== cc);
@@ -6923,7 +6946,6 @@ const handlePhotoCapture = async (event) => {
                         )}
                       </div>
                     </details>
-                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1 text-xs font-medium text-slate-700">
@@ -6935,7 +6957,8 @@ const handlePhotoCapture = async (event) => {
                       onChange={(e) => {
                         setReportsDateFrom(e.target.value);
                         setReportsRangePreset(null);
-                        setReportsExpandedGroups({});
+                        setReportsExpandedL1({});
+                        setReportsExpandedL2({});
                       }}
                     />
                   </label>
@@ -6948,7 +6971,8 @@ const handlePhotoCapture = async (event) => {
                       onChange={(e) => {
                         setReportsDateTo(e.target.value);
                         setReportsRangePreset(null);
-                        setReportsExpandedGroups({});
+                        setReportsExpandedL1({});
+                        setReportsExpandedL2({});
                       }}
                     />
                   </label>
@@ -6985,122 +7009,191 @@ const handlePhotoCapture = async (event) => {
                     </div>
                     <div className="space-y-2">
                       <h3 className="text-base font-bold text-slate-950 leading-snug">
-                        {reportsGroupBy === "employee" ? "Employees" : "Projects"}
-                        {reportsGroupedView.mode === "split" ? (
-                          <span className="text-sm font-semibold text-slate-600">
-                            {" "}
-                            · Split by{" "}
-                            {reportsGroupedView.splitBy === "cost_center"
-                              ? "Cost Centre"
-                              : reportsGroupedView.splitBy === "employee"
+                        Breakdown
+                        <span className="text-sm font-semibold text-slate-600 block sm:inline sm:ml-1.5 mt-1 sm:mt-0 leading-snug">
+                          ·{" "}
+                          {reportsBreakdownTree.d1 === "employee"
+                            ? "Employee"
+                            : reportsBreakdownTree.d1 === "project"
+                              ? "Project"
+                              : "Cost Centre"}
+                          {reportsBreakdownTree.d2 !== "none" && (
+                            <>
+                              {" "}
+                              →{" "}
+                              {reportsBreakdownTree.d2 === "employee"
                                 ? "Employee"
-                                : "Project"}
-                          </span>
-                        ) : null}
+                                : reportsBreakdownTree.d2 === "project"
+                                  ? "Project"
+                                  : "Cost Centre"}
+                            </>
+                          )}
+                          {reportsBreakdownTree.d3 !== "none" && (
+                            <>
+                              {" "}
+                              →{" "}
+                              {reportsBreakdownTree.d3 === "employee"
+                                ? "Employee"
+                                : reportsBreakdownTree.d3 === "project"
+                                  ? "Project"
+                                  : "Cost Centre"}
+                            </>
+                          )}
+                        </span>
                       </h3>
 
                       {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0 ? (
                         <p className="text-sm text-slate-600 py-1 leading-snug">
                           No timesheets match the selected cost centres.
                         </p>
-                      ) : reportsGroupedView.mode === "split" ? (
-                        reportsGroupedView.rows.length === 0 ? (
-                          <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
-                        ) : (
-                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
-                            {reportsGroupedView.rows.map((m) => {
-                              const expanded = Boolean(reportsExpandedGroups[m.key]);
-                              return (
-                                <div key={m.key} className="px-3 py-3 space-y-2">
+                      ) : reportsBreakdownTree.level1Rows.length === 0 ? (
+                        <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
+                      ) : (
+                        <div className="rounded-2xl border border-slate-200 overflow-x-hidden divide-y divide-slate-100 bg-white min-w-0">
+                          {reportsBreakdownTree.level1Rows.map((n1) => {
+                            const l1Key = String(n1.key);
+                            const l2List = Array.isArray(n1.children) ? n1.children : [];
+                            const openL1 = reportsBreakdownTree.hasL2 && Boolean(reportsExpandedL1[l1Key]);
+                            return (
+                              <div key={l1Key} className="px-3 py-3 space-y-2 min-w-0">
+                                {reportsBreakdownTree.hasL2 ? (
                                   <button
                                     type="button"
-                                    className="w-full text-left flex items-start justify-between gap-3"
+                                    className="w-full text-left flex items-start justify-between gap-3 min-w-0"
                                     onClick={() =>
-                                      setReportsExpandedGroups((prev) => ({
+                                      setReportsExpandedL1((prev) => ({
                                         ...prev,
-                                        [m.key]: !prev[m.key],
+                                        [l1Key]: !prev[l1Key],
                                       }))
                                     }
                                   >
                                     <div className="min-w-0 flex-1">
                                       <p className="text-sm font-bold text-slate-950 leading-snug break-words">
                                         <span className="mr-1.5 inline-block w-4 text-slate-400" aria-hidden>
-                                          {expanded ? "▾" : "▸"}
+                                          {openL1 ? "▾" : "▸"}
                                         </span>
-                                        {m.label}
+                                        {n1.label}
                                       </p>
                                     </div>
                                     <div className="shrink-0 text-right">
                                       <p className="text-sm font-bold text-slate-950 tabular-nums leading-snug">
-                                        {formatDuration(m.minutes)}
+                                        {formatDuration(n1.minutes)}
                                       </p>
                                       <p className="text-sm font-semibold text-slate-900 tabular-nums leading-snug">
-                                        {formatMoney(m.cost)}
+                                        {formatMoney(n1.cost)}
                                       </p>
                                     </div>
                                   </button>
-
-                                  {expanded && (
-                                    <div className="pl-4 border-l border-slate-100 space-y-1.5">
-                                      {m.children.map((c) => (
-                                        <div key={c.key} className="flex items-start justify-between gap-3 py-1">
-                                          <p className="min-w-0 flex-1 text-[13px] font-semibold text-slate-900 leading-snug break-words">
-                                            {c.label}
-                                          </p>
-                                          <div className="shrink-0 text-right tabular-nums">
-                                            <p className="text-[13px] font-semibold text-slate-900 leading-snug">
-                                              {formatDuration(c.minutes)}
-                                            </p>
-                                            <p className="text-[13px] font-medium text-slate-800 leading-snug">
-                                              {formatMoney(c.cost)}
-                                            </p>
-                                          </div>
-                                        </div>
-                                      ))}
+                                ) : (
+                                  <div className="flex items-start justify-between gap-3 min-w-0">
+                                    <p className="text-sm font-bold text-slate-950 leading-snug break-words min-w-0 flex-1">
+                                      {n1.label}
+                                    </p>
+                                    <div className="shrink-0 text-right">
+                                      <p className="text-sm font-bold text-slate-950 tabular-nums leading-snug">
+                                        {formatDuration(n1.minutes)}
+                                      </p>
+                                      <p className="text-sm font-semibold text-slate-900 tabular-nums leading-snug">
+                                        {formatMoney(n1.cost)}
+                                      </p>
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )
-                      ) : reportsGroupBy === "employee" ? (
-                        reportsAggregates.byEmployee.length === 0 ? (
-                          <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
-                        ) : (
-                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
-                            {reportsAggregates.byEmployee.map((row) => (
-                              <div key={row.key || row.name} className="px-3 py-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <p className="text-sm font-bold text-slate-950 leading-snug min-w-0 break-words flex-1">
-                                    {row.name}
-                                  </p>
-                                  <div className="shrink-0 text-right tabular-nums">
-                                    <p className="text-sm font-bold text-slate-950 leading-snug">{formatDuration(row.minutes)}</p>
-                                    <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
                                   </div>
-                                </div>
+                                )}
+
+                                {reportsBreakdownTree.hasL2 && openL1 && (
+                                  <div className="pl-4 border-l border-slate-100 space-y-2 min-w-0">
+                                    {l2List.length === 0 ? (
+                                      <p className="text-[13px] text-slate-600 leading-snug py-0.5">No breakdown data</p>
+                                    ) : (
+                                      l2List.map((n2) => {
+                                        const l2Composite = `${l1Key}|||${String(n2.key)}`;
+                                        const l3List = Array.isArray(n2.children) ? n2.children : [];
+                                        const openL2 =
+                                          reportsBreakdownTree.hasL3 && Boolean(reportsExpandedL2[l2Composite]);
+                                        return (
+                                          <div key={String(n2.key)} className="space-y-1.5 min-w-0">
+                                            {reportsBreakdownTree.hasL3 ? (
+                                              <>
+                                                <button
+                                                  type="button"
+                                                  className="w-full text-left flex items-start justify-between gap-3 min-w-0"
+                                                  onClick={() =>
+                                                    setReportsExpandedL2((prev) => ({
+                                                      ...prev,
+                                                      [l2Composite]: !prev[l2Composite],
+                                                    }))
+                                                  }
+                                                >
+                                                  <div className="min-w-0 flex-1">
+                                                    <p className="text-[13px] font-semibold text-slate-900 leading-snug break-words">
+                                                      <span className="mr-1 inline-block w-3.5 text-slate-400 text-xs" aria-hidden>
+                                                        {openL2 ? "▾" : "▸"}
+                                                      </span>
+                                                      {n2.label}
+                                                    </p>
+                                                  </div>
+                                                  <div className="shrink-0 text-right tabular-nums">
+                                                    <p className="text-[13px] font-semibold text-slate-900 leading-snug">
+                                                      {formatDuration(n2.minutes)}
+                                                    </p>
+                                                    <p className="text-[13px] font-medium text-slate-800 leading-snug">
+                                                      {formatMoney(n2.cost)}
+                                                    </p>
+                                                  </div>
+                                                </button>
+                                                {openL2 && (
+                                                  <div className="pl-3 border-l border-slate-100 space-y-1 min-w-0">
+                                                    {l3List.length === 0 ? (
+                                                      <p className="text-[12px] text-slate-600 leading-snug py-0.5">
+                                                        No breakdown data
+                                                      </p>
+                                                    ) : (
+                                                      l3List.map((n3) => (
+                                                        <div
+                                                          key={String(n3.key)}
+                                                          className="flex items-start justify-between gap-3 py-0.5 min-w-0"
+                                                        >
+                                                          <p className="min-w-0 flex-1 text-[12px] font-semibold text-slate-900 leading-snug break-words">
+                                                            {n3.label}
+                                                          </p>
+                                                          <div className="shrink-0 text-right tabular-nums">
+                                                            <p className="text-[12px] font-semibold text-slate-900 leading-snug">
+                                                              {formatDuration(n3.minutes)}
+                                                            </p>
+                                                            <p className="text-[12px] font-medium text-slate-800 leading-snug">
+                                                              {formatMoney(n3.cost)}
+                                                            </p>
+                                                          </div>
+                                                        </div>
+                                                      ))
+                                                    )}
+                                                  </div>
+                                                )}
+                                              </>
+                                            ) : (
+                                              <div className="flex items-start justify-between gap-3 py-0.5 min-w-0">
+                                                <p className="min-w-0 flex-1 text-[13px] font-semibold text-slate-900 leading-snug break-words">
+                                                  {n2.label}
+                                                </p>
+                                                <div className="shrink-0 text-right tabular-nums">
+                                                  <p className="text-[13px] font-semibold text-slate-900 leading-snug">
+                                                    {formatDuration(n2.minutes)}
+                                                  </p>
+                                                  <p className="text-[13px] font-medium text-slate-800 leading-snug">
+                                                    {formatMoney(n2.cost)}
+                                                  </p>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                )}
                               </div>
-                            ))}
-                          </div>
-                        )
-                      ) : reportsAggregates.byProject.length === 0 ? (
-                        <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
-                      ) : (
-                        <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
-                          {reportsAggregates.byProject.map((row) => (
-                            <div key={row.key} className="px-3 py-3">
-                              <div className="flex items-start justify-between gap-3">
-                                <p className="text-sm font-bold text-slate-950 leading-snug min-w-0 break-words flex-1">
-                                  {row.project}
-                                </p>
-                                <div className="shrink-0 text-right tabular-nums">
-                                  <p className="text-sm font-bold text-slate-950 leading-snug">{formatDuration(row.minutes)}</p>
-                                  <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       )}
                     </div>
