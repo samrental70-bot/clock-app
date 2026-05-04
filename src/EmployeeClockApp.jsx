@@ -1284,9 +1284,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [assignmentsEditorLoading, setAssignmentsEditorLoading] = useState(false);
   const [assignmentsEditorMembers, setAssignmentsEditorMembers] = useState([]);
   const [assignmentsEditorChecks, setAssignmentsEditorChecks] = useState({});
+  /** Active cost centres for the assignment editor project (id + name). */
+  const [assignmentsEditorCostCentres, setAssignmentsEditorCostCentres] = useState([]);
+  /** `${userId}::${costCentreId}` -> checked */
+  const [assignmentsEditorCcChecks, setAssignmentsEditorCcChecks] = useState({});
+  const [assignmentsEditorCcInitial, setAssignmentsEditorCcInitial] = useState({});
+  /** `${userId}::${costCentreId}` -> existing assignment row id (if any). */
+  const [assignmentsEditorPccaByKey, setAssignmentsEditorPccaByKey] = useState({});
   const [assignmentsEditorSaving, setAssignmentsEditorSaving] = useState(false);
   const [assignmentsEditorError, setAssignmentsEditorError] = useState("");
   const [assignmentsSuccess, setAssignmentsSuccess] = useState("");
+
+  const pccaKey = (uid, ccid) => `${String(uid)}::${String(ccid)}`;
 
   const displayedProjectsScreenRows = useMemo(() => {
     const rows = projectsScreenRows || [];
@@ -1917,18 +1926,43 @@ const [uploadProgress, setUploadProgress] = useState(null);
           });
         }
 
-        const assignedActiveNamesForProject = (pid) => {
+        const { data: pccaRows, error: pccaErr } = await supabase
+          .from("project_cost_centre_assignments")
+          .select("project_id, user_id, cost_centre_id, status")
+          .eq("company_id", userCompany.id)
+          .in("project_id", projectIds);
+        if (pccaErr) throw pccaErr;
+        const pccaListAll = Array.isArray(pccaRows) ? pccaRows : [];
+
+        const ccNameById = {};
+        for (const c of Array.isArray(centres) ? centres : []) {
+          ccNameById[String(c.id)] = c.name;
+        }
+
+        const assignedSummariesForProject = (pid) => {
           const act = assignList.filter(
             (a) =>
               String(a.project_id) === String(pid) && String(a.status ?? "").toLowerCase() === "active"
           );
-          const names = act.map((a) => {
+          const rowsOut = act.map((a) => {
             const p = assignProfileMap[a.user_id];
             const full = p?.full_name && String(p.full_name).trim();
             const em = p?.email && String(p.email).trim();
-            return full || em || shortUserLabel(a.user_id);
+            const displayName = full || em || shortUserLabel(a.user_id);
+            const labels = pccaListAll
+              .filter(
+                (r) =>
+                  String(r.project_id) === String(pid) &&
+                  String(r.user_id) === String(a.user_id) &&
+                  String(r.status ?? "").toLowerCase() === "active"
+              )
+              .map((r) => ccNameById[String(r.cost_centre_id)])
+              .filter(Boolean)
+              .sort((x, y) => x.localeCompare(y));
+            return { displayName, costCentreLabels: labels };
           });
-          return [...names].sort((a, b) => a.localeCompare(b));
+          rowsOut.sort((a, b) => a.displayName.localeCompare(b.displayName));
+          return rowsOut;
         };
 
         const rows = projectList.map((p) => ({
@@ -1936,7 +1970,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           name: p.name,
           status: p.status,
           costCentres: byProjectId[String(p.id)] || [],
-          assignedActiveNames: assignedActiveNamesForProject(p.id),
+          assignedSummaries: assignedSummariesForProject(p.id),
         }));
 
         if (!cancelled) setProjectsScreenRows(rows);
@@ -2846,6 +2880,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setAssignmentsManageProjectId(null);
     setAssignmentsEditorMembers([]);
     setAssignmentsEditorChecks({});
+    setAssignmentsEditorCostCentres([]);
+    setAssignmentsEditorCcChecks({});
+    setAssignmentsEditorCcInitial({});
+    setAssignmentsEditorPccaByKey({});
     setAssignmentsEditorError("");
     setAssignmentsEditorLoading(false);
   };
@@ -2860,6 +2898,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setAssignmentsEditorLoading(true);
     setAssignmentsEditorMembers([]);
     setAssignmentsEditorChecks({});
+    setAssignmentsEditorCostCentres([]);
+    setAssignmentsEditorCcChecks({});
+    setAssignmentsEditorCcInitial({});
+    setAssignmentsEditorPccaByKey({});
     try {
       const { data: members, error: mErr } = await supabase
         .from("company_members")
@@ -2917,12 +2959,53 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
       list.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
+      const { data: ccRows, error: ccErr } = await supabase
+        .from("cost_centres")
+        .select("id, name")
+        .eq("project_id", projectId)
+        .eq("status", "active")
+        .order("name", { ascending: true });
+      if (ccErr) throw ccErr;
+      const costCentres = Array.isArray(ccRows) ? ccRows : [];
+
+      const { data: pccaRaw, error: pccaErr } = await supabase
+        .from("project_cost_centre_assignments")
+        .select("id, user_id, cost_centre_id, status")
+        .eq("company_id", userCompany.id)
+        .eq("project_id", projectId);
+      if (pccaErr) throw pccaErr;
+      const pccaList = Array.isArray(pccaRaw) ? pccaRaw : [];
+
+      const pccaByKey = {};
+      for (const r of pccaList) {
+        pccaByKey[pccaKey(r.user_id, r.cost_centre_id)] = { id: r.id };
+      }
+
+      const ccCh = {};
+      const ccInit = {};
+      for (const row of list) {
+        const uid = String(row.userId);
+        for (const cc of costCentres) {
+          const k = pccaKey(uid, cc.id);
+          const pr = pccaList.find(
+            (x) => String(x.user_id) === uid && String(x.cost_centre_id) === String(cc.id)
+          );
+          const active = pr && String(pr.status ?? "").toLowerCase() === "active";
+          ccCh[k] = active;
+          ccInit[k] = active;
+        }
+      }
+
       setAssignmentsEditorMembers(list);
       const checks = {};
       for (const row of list) {
         checks[String(row.userId)] = row.initialChecked;
       }
       setAssignmentsEditorChecks(checks);
+      setAssignmentsEditorCostCentres(costCentres);
+      setAssignmentsEditorPccaByKey(pccaByKey);
+      setAssignmentsEditorCcChecks(ccCh);
+      setAssignmentsEditorCcInitial(ccInit);
     } catch (err) {
       setAssignmentsEditorError(getErrorMessage(err));
     } finally {
@@ -2987,10 +3070,86 @@ const [uploadProgress, setUploadProgress] = useState(null);
         }
       }
 
+      const removedFromProjectUids = assignmentsEditorMembers
+        .filter((m) => m.initialChecked && !assignmentsEditorChecks[String(m.userId)])
+        .map((m) => String(m.userId));
+      if (removedFromProjectUids.length > 0) {
+        const { error: archPccaErr } = await supabase
+          .from("project_cost_centre_assignments")
+          .update({ status: "archived" })
+          .eq("company_id", userCompany.id)
+          .eq("project_id", assignmentsManageProjectId)
+          .in("user_id", removedFromProjectUids);
+        if (archPccaErr) throw archPccaErr;
+      }
+
+      for (const m of assignmentsEditorMembers) {
+        const uid = String(m.userId);
+        if (!assignmentsEditorChecks[uid]) continue;
+        for (const cc of assignmentsEditorCostCentres) {
+          const k = pccaKey(uid, cc.id);
+          const want = Boolean(assignmentsEditorCcChecks[k]);
+          const init = Boolean(assignmentsEditorCcInitial[k]);
+          if (want === init) continue;
+          const meta = assignmentsEditorPccaByKey[k];
+          if (want) {
+            if (meta?.id) {
+              const { error: uErr } = await supabase
+                .from("project_cost_centre_assignments")
+                .update({ status: "active", assigned_by: authUser.id })
+                .eq("id", meta.id)
+                .eq("company_id", userCompany.id);
+              if (uErr) throw uErr;
+            } else {
+              const { error: iErr } = await supabase.from("project_cost_centre_assignments").insert({
+                company_id: userCompany.id,
+                project_id: assignmentsManageProjectId,
+                cost_centre_id: cc.id,
+                user_id: m.userId,
+                assigned_by: authUser.id,
+                status: "active",
+              });
+              if (iErr) {
+                const { data: existing, error: exErr } = await supabase
+                  .from("project_cost_centre_assignments")
+                  .select("id")
+                  .eq("company_id", userCompany.id)
+                  .eq("project_id", assignmentsManageProjectId)
+                  .eq("user_id", m.userId)
+                  .eq("cost_centre_id", cc.id)
+                  .maybeSingle();
+                if (exErr) throw iErr;
+                if (existing?.id) {
+                  const { error: rErr } = await supabase
+                    .from("project_cost_centre_assignments")
+                    .update({ status: "active", assigned_by: authUser.id })
+                    .eq("id", existing.id)
+                    .eq("company_id", userCompany.id);
+                  if (rErr) throw rErr;
+                } else {
+                  throw iErr;
+                }
+              }
+            }
+          } else if (meta?.id) {
+            const { error: aErr } = await supabase
+              .from("project_cost_centre_assignments")
+              .update({ status: "archived" })
+              .eq("id", meta.id)
+              .eq("company_id", userCompany.id);
+            if (aErr) throw aErr;
+          }
+        }
+      }
+
       setProjectsScreenRefreshKey((k) => k + 1);
       setAssignmentsManageProjectId(null);
       setAssignmentsEditorMembers([]);
       setAssignmentsEditorChecks({});
+      setAssignmentsEditorCostCentres([]);
+      setAssignmentsEditorCcChecks({});
+      setAssignmentsEditorCcInitial({});
+      setAssignmentsEditorPccaByKey({});
       setProjectsAddSuccess("");
       setProjectsEditSuccess("");
       setAssignmentsSuccess("Assignments saved.");
@@ -6266,16 +6425,21 @@ const handlePhotoCapture = async (event) => {
                                     Manage Assignments
                                   </Button>
                                 </div>
-                                {(proj.assignedActiveNames || []).length === 0 ? (
+                                {(proj.assignedSummaries || []).length === 0 ? (
                                   <p className="text-xs text-slate-500">No employees assigned</p>
                                 ) : (
-                                  <ul className="space-y-1">
-                                    {(proj.assignedActiveNames || []).map((nm, ni) => (
+                                  <ul className="space-y-1.5">
+                                    {(proj.assignedSummaries || []).map((s, ni) => (
                                       <li
                                         key={`${proj.id}-asgn-${ni}`}
-                                        className="text-xs text-slate-800 font-medium break-words leading-snug"
+                                        className="text-xs text-slate-800 leading-snug break-words"
                                       >
-                                        {nm}
+                                        <span className="font-semibold text-slate-900">{s.displayName}</span>
+                                        {s.costCentreLabels && s.costCentreLabels.length > 0 ? (
+                                          <span className="text-slate-600"> · {s.costCentreLabels.join(", ")}</span>
+                                        ) : (
+                                          <span className="text-amber-800 font-medium"> · No cost centres assigned</span>
+                                        )}
                                       </li>
                                     ))}
                                   </ul>
@@ -6289,34 +6453,96 @@ const handlePhotoCapture = async (event) => {
                                       <p className="text-xs text-slate-600">Loading company members…</p>
                                     ) : (
                                       <>
-                                        <div className="space-y-2 max-h-64 overflow-y-auto pr-0.5">
-                                          {assignmentsEditorMembers.map((m) => (
-                                            <label
-                                              key={String(m.userId)}
-                                              className="flex items-start gap-2.5 rounded-lg bg-white/95 border border-slate-200 px-2.5 py-2 cursor-pointer"
-                                            >
-                                              <input
-                                                type="checkbox"
-                                                className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
-                                                checked={Boolean(assignmentsEditorChecks[String(m.userId)])}
-                                                disabled={assignmentsEditorSaving}
-                                                onChange={(e) =>
-                                                  setAssignmentsEditorChecks((prev) => ({
-                                                    ...prev,
-                                                    [String(m.userId)]: e.target.checked,
-                                                  }))
-                                                }
-                                              />
-                                              <span className="min-w-0 flex-1">
-                                                <span className="block text-xs font-semibold text-slate-900 break-words">
-                                                  {m.displayName}
-                                                </span>
-                                                <span className="block text-[10px] text-slate-500 capitalize mt-0.5">
-                                                  {m.role || "employee"}
-                                                </span>
-                                              </span>
-                                            </label>
-                                          ))}
+                                        <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-0.5">
+                                          {assignmentsEditorMembers.map((m) => {
+                                            const uid = String(m.userId);
+                                            const projectAssigned = Boolean(assignmentsEditorChecks[uid]);
+                                            const anyCcChecked =
+                                              assignmentsEditorCostCentres.some((cc) =>
+                                                Boolean(assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)])
+                                              );
+                                            return (
+                                              <div
+                                                key={uid}
+                                                className="rounded-lg bg-white/95 border border-slate-200 px-2.5 py-2 space-y-2"
+                                              >
+                                                <label className="flex items-start gap-2.5 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
+                                                    checked={projectAssigned}
+                                                    disabled={assignmentsEditorSaving}
+                                                    onChange={(e) => {
+                                                      const checked = e.target.checked;
+                                                      setAssignmentsEditorChecks((prev) => ({
+                                                        ...prev,
+                                                        [uid]: checked,
+                                                      }));
+                                                      if (!checked) {
+                                                        setAssignmentsEditorCcChecks((prev) => {
+                                                          const next = { ...prev };
+                                                          for (const cc of assignmentsEditorCostCentres) {
+                                                            next[pccaKey(m.userId, cc.id)] = false;
+                                                          }
+                                                          return next;
+                                                        });
+                                                      }
+                                                    }}
+                                                  />
+                                                  <span className="min-w-0 flex-1">
+                                                    <span className="block text-xs font-semibold text-slate-900 break-words">
+                                                      {m.displayName}
+                                                    </span>
+                                                    <span className="block text-[10px] text-slate-500 capitalize mt-0.5">
+                                                      {m.role || "employee"}
+                                                    </span>
+                                                  </span>
+                                                </label>
+                                                {projectAssigned && assignmentsEditorCostCentres.length > 0 && (
+                                                  <div className="pl-6 space-y-1.5 border-t border-slate-100 pt-2">
+                                                    <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                                      Cost centres
+                                                    </p>
+                                                    {assignmentsEditorCostCentres.map((cc) => (
+                                                      <label
+                                                        key={String(cc.id)}
+                                                        className="flex items-center gap-2 cursor-pointer"
+                                                      >
+                                                        <input
+                                                          type="checkbox"
+                                                          className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                                                          checked={Boolean(
+                                                            assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)]
+                                                          )}
+                                                          disabled={assignmentsEditorSaving}
+                                                          onChange={(e) => {
+                                                            const k = pccaKey(m.userId, cc.id);
+                                                            setAssignmentsEditorCcChecks((prev) => ({
+                                                              ...prev,
+                                                              [k]: e.target.checked,
+                                                            }));
+                                                          }}
+                                                        />
+                                                        <span className="text-[11px] text-slate-800">{cc.name}</span>
+                                                      </label>
+                                                    ))}
+                                                  </div>
+                                                )}
+                                                {projectAssigned &&
+                                                  assignmentsEditorCostCentres.length > 0 &&
+                                                  !anyCcChecked && (
+                                                    <p className="text-[10px] text-amber-800 leading-snug pl-6">
+                                                      No cost centres assigned
+                                                    </p>
+                                                  )}
+                                                {projectAssigned && assignmentsEditorCostCentres.length === 0 && (
+                                                  <p className="text-[10px] text-slate-500 leading-snug pl-6">
+                                                    No active cost centres on this project.
+                                                  </p>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
                                         </div>
                                         {assignmentsEditorMembers.length === 0 && (
                                           <p className="text-xs text-slate-500">No active employees in this company.</p>
