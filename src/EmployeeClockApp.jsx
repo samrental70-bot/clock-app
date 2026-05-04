@@ -812,6 +812,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
+  const [dashboardClockPick, setDashboardClockPick] = useState({});
+  const [dashboardActionFeedback, setDashboardActionFeedback] = useState(null);
+  const [dashboardSavingUserId, setDashboardSavingUserId] = useState(null);
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -998,7 +1002,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, dashboardViewDate, companyTimeZone]);
+  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, dashboardViewDate, companyTimeZone, dashboardRefreshKey]);
+
+  useEffect(() => {
+    setDashboardActionFeedback(null);
+  }, [dashboardViewDate]);
 
   const teamProfileFullNameByUserId = useMemo(() => {
     const m = {};
@@ -1088,6 +1096,26 @@ const [uploadProgress, setUploadProgress] = useState(null);
     }
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !isAdmin) return;
+    setDashboardClockPick((prev) => {
+      const next = { ...prev };
+      const fp = effectiveProjects[0];
+      const defPid = fp ? String(fp.id) : "";
+      const centres = defPid
+        ? effectiveCostCentresByProjectId[defPid] ||
+          effectiveCostCentresByProjectId[Number(defPid)] ||
+          []
+        : [];
+      const defCc = centres[0] || "";
+      for (const r of dashboardRows) {
+        const uid = String(r.userId);
+        if (!next[uid]) next[uid] = { projectId: defPid, costCenter: defCc };
+      }
+      return next;
+    });
+  }, [activeTab, isAdmin, dashboardRows, effectiveProjects, effectiveCostCentresByProjectId]);
 
   const selectedProject =
     effectiveProjects.find((project) => String(project.id) === String(projectId)) ||
@@ -2679,6 +2707,132 @@ const handlePhotoCapture = async (event) => {
     effectiveCostCentresByProjectId[Number(pid)] ||
     [];
 
+  const handleDashboardEmployeeClockIn = async (row) => {
+    if (!isAdmin || !authUser?.id || !userCompany?.id) return;
+    if (!window.confirm("Clock in this employee now?")) return;
+    const uid = String(row.userId);
+    const rawPick =
+      dashboardClockPick[uid] || {
+        projectId: String(effectiveProjects[0]?.id ?? ""),
+        costCenter: costCentresForEditProject(effectiveProjects[0]?.id)[0] || "",
+      };
+    const proj = effectiveProjects.find((p) => String(p.id) === String(rawPick.projectId));
+    if (!proj) {
+      setDashboardActionFeedback({ type: "error", text: "No project available. Add a company project first." });
+      return;
+    }
+    let cc = rawPick.costCenter || "";
+    const centres = costCentresForEditProject(proj.id);
+    if (centres.length > 0 && (!cc || !centres.includes(cc))) cc = centres[0] || "";
+
+    setDashboardSavingUserId(uid);
+    setDashboardActionFeedback(null);
+    const clockInTime = new Date().toISOString();
+    const employeeName = (row.displayName || "").trim() || shortUserLabel(row.userId);
+    const employeeEmail = row.profileEmailRaw || null;
+    const hourlyRate = 0;
+
+    try {
+      const { error } = await supabase
+        .from("timesheets")
+        .insert([
+          {
+            user_id: row.userId,
+            employee_email: employeeEmail,
+            employee_name: employeeName,
+            company_id: userCompany.id,
+            company_name: userCompany.name || null,
+            project_id: proj.id,
+            project_name: proj.name,
+            hourly_rate: hourlyRate,
+            cost_centre: cc,
+            clock_in: clockInTime,
+            status: "Active",
+            clock_in_latitude: null,
+            clock_in_longitude: null,
+          },
+        ])
+        .select();
+
+      if (error) {
+        const msg = error?.message || "";
+        const missingColumn =
+          msg.includes("column") &&
+          (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
+        if (missingColumn) {
+          const { error: legacyError } = await supabase
+            .from("timesheets")
+            .insert([
+              {
+                user_id: row.userId,
+                employee_name: employeeName,
+                project_name: proj.name,
+                hourly_rate: hourlyRate,
+                cost_centre: cc,
+                clock_in: clockInTime,
+                status: "Active",
+                clock_in_latitude: null,
+                clock_in_longitude: null,
+              },
+            ])
+            .select();
+          if (legacyError) throw legacyError;
+        } else {
+          throw error;
+        }
+      }
+
+      setDashboardActionFeedback({ type: "success", text: `${employeeName} clocked in.` });
+      setDashboardRefreshKey((k) => k + 1);
+      await fetchTimesheetsFromSupabase();
+    } catch (e) {
+      setDashboardActionFeedback({ type: "error", text: getErrorMessage(e) });
+    } finally {
+      setDashboardSavingUserId(null);
+    }
+  };
+
+  const handleDashboardEmployeeClockOutOrFix = async (row, rep, mode) => {
+    if (!isAdmin || !rep?.supabaseTimesheetId) return;
+    const confirmMsg =
+      mode === "fix"
+        ? "Fix missing clock-out for this employee using current time?"
+        : "Clock out this employee now?";
+    if (!window.confirm(confirmMsg)) return;
+
+    setDashboardSavingUserId(String(row.userId));
+    setDashboardActionFeedback(null);
+    const clockOutTime = new Date().toISOString();
+    const completedRecord = {
+      ...rep,
+      clockOut: clockOutTime,
+      status: "Submitted",
+    };
+    const labourCost = getLabourCost(completedRecord);
+
+    try {
+      const { error } = await supabase
+        .from("timesheets")
+        .update({
+          clock_out: clockOutTime,
+          status: "Submitted",
+          labour_cost: labourCost,
+        })
+        .eq("id", rep.supabaseTimesheetId);
+      if (error) throw error;
+      setDashboardActionFeedback({
+        type: "success",
+        text: mode === "fix" ? "Clock-out saved." : "Employee clocked out.",
+      });
+      setDashboardRefreshKey((k) => k + 1);
+      await fetchTimesheetsFromSupabase();
+    } catch (e) {
+      setDashboardActionFeedback({ type: "error", text: getErrorMessage(e) });
+    } finally {
+      setDashboardSavingUserId(null);
+    }
+  };
+
   const startEditRecord = (record) => {
     if (!canEditTimesheetRecord(record)) return;
     const inParts = wallClockPartsInTimeZone(record.clockIn, companyTimeZone);
@@ -4214,6 +4368,17 @@ const handlePhotoCapture = async (event) => {
                   <h2 className="font-bold text-lg">Dashboard</h2>
                   <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
                 </div>
+                {dashboardActionFeedback && (
+                  <div
+                    className={`rounded-xl border p-2.5 text-xs ${
+                      dashboardActionFeedback.type === "success"
+                        ? "border-green-100 bg-green-50 text-green-900"
+                        : "border-red-100 bg-red-50 text-red-800"
+                    }`}
+                  >
+                    {dashboardActionFeedback.text}
+                  </div>
+                )}
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
@@ -4278,60 +4443,170 @@ const handlePhotoCapture = async (event) => {
                         });
                         const statusBadgeClass =
                           att.code === "clocked_in"
-                            ? "bg-green-50 text-green-800 border border-green-100"
+                            ? "bg-green-50 text-green-800 border border-green-200"
                             : att.code === "clocked_out"
-                              ? "bg-slate-100 text-slate-800 border border-slate-200"
+                              ? "bg-blue-50 text-blue-900 border border-blue-200"
                               : att.code === "missing_out"
-                                ? "bg-amber-50 text-amber-900 border border-amber-100"
-                                : "bg-slate-50 text-slate-600 border border-slate-100";
+                                ? "bg-amber-50 text-amber-900 border border-amber-200"
+                                : "bg-red-50 text-red-800 border border-red-200";
                         const inDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
                         const outDisp = rep?.clockOut ? formatTime(rep.clockOut, companyTimeZone) : "—";
                         const totalDisp = rep ? formatDuration(getWorkedMinutes(rep)) : "—";
                         const labourDisp = rep ? formatMoney(getLabourCost(rep)) : "—";
                         const projectDisp = rep?.project ? String(rep.project) : "—";
                         const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+                        const uid = String(row.userId);
+                        const pick =
+                          dashboardClockPick[uid] || {
+                            projectId: String(effectiveProjects[0]?.id ?? ""),
+                            costCenter: costCentresForEditProject(effectiveProjects[0]?.id)[0] || "",
+                          };
+                        const centresForPick = costCentresForEditProject(pick.projectId);
+                        const showDashClockIn = att.code === "none";
+                        const showDashClockOut = att.code === "clocked_in";
+                        const showDashFixOut = att.code === "missing_out";
+                        const dashRowSaving = dashboardSavingUserId === uid;
                         return (
                           <div
                             key={row.memberRowId}
-                            className="rounded-lg border border-slate-200 bg-white px-2 py-1 leading-tight"
+                            className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-3"
                           >
-                            <div className="flex flex-wrap items-center gap-x-1 gap-y-0 min-w-0 text-[10px]">
-                              <span
-                                className="min-w-0 max-w-[min(100%,11rem)] flex-1 basis-0 truncate font-semibold text-slate-900"
-                                title={row.displayName}
-                              >
+                            <div className="flex items-start justify-between gap-3 min-w-0">
+                              <p className="min-w-0 flex-1 text-sm font-semibold leading-snug text-slate-900 break-words">
                                 {row.displayName}
-                              </span>
-                              <span className="text-slate-300 shrink-0">|</span>
-                              <span
-                                className={`inline-flex shrink-0 items-center rounded px-1 py-0.5 font-semibold leading-none ${statusBadgeClass}`}
-                              >
-                                {att.label}
-                              </span>
-                              <span className="text-slate-300 shrink-0">|</span>
-                              <span className="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium capitalize leading-none text-slate-700">
+                              </p>
+                              <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium capitalize leading-snug text-slate-700">
                                 {rowRoleNorm}
                               </span>
                             </div>
-                            <p className="mt-0.5 text-[9px] text-slate-600 leading-snug">
-                              <span className="text-slate-500">In:</span>{" "}
-                              <span className="font-semibold text-slate-900 tabular-nums">{inDisp}</span>
-                              <span className="text-slate-300 px-0.5">|</span>
-                              <span className="text-slate-500">Out:</span>{" "}
-                              <span className="font-semibold text-slate-900 tabular-nums">{outDisp}</span>
-                              <span className="text-slate-300 px-0.5">|</span>
-                              <span className="text-slate-500">Total:</span>{" "}
-                              <span className="font-semibold tabular-nums text-slate-900">{totalDisp}</span>
-                              <span className="text-slate-300 px-0.5">|</span>
-                              <span className="text-slate-500">Labour:</span>{" "}
-                              <span className="font-semibold tabular-nums text-slate-900">{labourDisp}</span>
-                              <span className="text-slate-300 px-0.5">|</span>
-                              <span className="text-slate-500">Project:</span>{" "}
-                              <span className="font-semibold text-slate-800">{projectDisp}</span>
-                              <span className="text-slate-300 px-0.5">|</span>
-                              <span className="text-slate-500">Cost:</span>{" "}
-                              <span className="font-semibold text-slate-800">{costDisp}</span>
-                            </p>
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 min-w-0">
+                              <span className="text-xs font-medium tracking-wide text-slate-500">Status:</span>
+                              <span
+                                className={`inline-flex max-w-full items-center rounded-md px-2.5 py-1 text-xs font-semibold leading-snug ${statusBadgeClass}`}
+                              >
+                                {att.label}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-[13px] leading-snug text-slate-800">
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">In:</span>{" "}
+                                <span className="font-semibold text-slate-900 tabular-nums">{inDisp}</span>
+                              </div>
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">Out:</span>{" "}
+                                <span className="font-semibold text-slate-900 tabular-nums">{outDisp}</span>
+                              </div>
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">Total:</span>{" "}
+                                <span className="font-semibold text-slate-900 tabular-nums">{totalDisp}</span>
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 text-[13px] leading-snug text-slate-800">
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">Labour:</span>{" "}
+                                <span className="font-semibold text-slate-900 tabular-nums">{labourDisp}</span>
+                              </div>
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">Project:</span>{" "}
+                                <span className="font-semibold text-slate-900">{projectDisp}</span>
+                              </div>
+                              <div className="min-w-0 break-words">
+                                <span className="text-slate-500">Cost:</span>{" "}
+                                <span className="font-semibold text-slate-900">{costDisp}</span>
+                              </div>
+                            </div>
+                            <div className="border-t border-slate-100 pt-2 mt-1 space-y-2">
+                              {showDashClockIn && (
+                                <>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <label className="block min-w-0 text-[10px] font-medium text-slate-600">
+                                      Project
+                                      <select
+                                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                        value={pick.projectId}
+                                        disabled={dashRowSaving || effectiveProjects.length === 0}
+                                        onChange={(e) => {
+                                          const pid = e.target.value;
+                                          const cents = costCentresForEditProject(pid);
+                                          setDashboardClockPick((prev) => ({
+                                            ...prev,
+                                            [uid]: { projectId: pid, costCenter: cents[0] || "" },
+                                          }));
+                                        }}
+                                      >
+                                        {effectiveProjects.map((p) => (
+                                          <option key={p.id} value={String(p.id)}>
+                                            {p.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                    <label className="block min-w-0 text-[10px] font-medium text-slate-600">
+                                      Cost centre
+                                      <select
+                                        className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                        value={
+                                          centresForPick.includes(pick.costCenter)
+                                            ? pick.costCenter
+                                            : centresForPick[0] || ""
+                                        }
+                                        disabled={dashRowSaving}
+                                        onChange={(e) =>
+                                          setDashboardClockPick((prev) => ({
+                                            ...prev,
+                                            [uid]: {
+                                              ...(prev[uid] || pick),
+                                              costCenter: e.target.value,
+                                            },
+                                          }))
+                                        }
+                                      >
+                                        {centresForPick.length === 0 ? (
+                                          <option value="">—</option>
+                                        ) : (
+                                          centresForPick.map((c) => (
+                                            <option key={c} value={c}>
+                                              {c}
+                                            </option>
+                                          ))
+                                        )}
+                                      </select>
+                                    </label>
+                                  </div>
+                                  {effectiveProjects.length === 0 && (
+                                    <p className="text-[10px] text-amber-800">Add a company project to clock in.</p>
+                                  )}
+                                  <Button
+                                    type="button"
+                                    className="w-full rounded-lg h-9 text-xs font-semibold"
+                                    disabled={dashRowSaving || effectiveProjects.length === 0}
+                                    onClick={() => void handleDashboardEmployeeClockIn(row)}
+                                  >
+                                    {dashRowSaving ? "…" : "Clock In"}
+                                  </Button>
+                                </>
+                              )}
+                              {showDashClockOut && (
+                                <Button
+                                  type="button"
+                                  className="w-full rounded-lg h-9 text-xs font-semibold"
+                                  disabled={dashRowSaving || !rep?.supabaseTimesheetId}
+                                  onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
+                                >
+                                  {dashRowSaving ? "…" : "Clock Out"}
+                                </Button>
+                              )}
+                              {showDashFixOut && (
+                                <Button
+                                  type="button"
+                                  className="w-full rounded-lg h-9 text-xs font-semibold border border-amber-200 bg-amber-50 text-amber-900"
+                                  disabled={dashRowSaving || !rep?.supabaseTimesheetId}
+                                  onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "fix")}
+                                >
+                                  {dashRowSaving ? "…" : "Fix Clock Out"}
+                                </Button>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
