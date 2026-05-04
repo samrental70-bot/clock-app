@@ -634,6 +634,37 @@ async function supabaseUpdateTimesheetRow(supabase, id, partial) {
   return { error, data };
 }
 
+async function upsertLiveLocationRow(supabase, { companyId, employeeId, status, projectName, costCentre, coords }) {
+  if (!companyId || !employeeId) return { error: null };
+  const base = {
+    company_id: companyId,
+    employee_id: employeeId,
+    status: status || null,
+    project_name: projectName || null,
+    cost_centre: costCentre || null,
+    updated_at: new Date().toISOString(),
+    latitude: coords?.latitude ?? null,
+    longitude: coords?.longitude ?? null,
+    accuracy: coords?.accuracy ?? null,
+  };
+
+  // Select-update/insert to avoid duplicates even without a unique constraint.
+  const { data: existing, error: exErr } = await supabase
+    .from("live_locations")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("employee_id", employeeId)
+    .maybeSingle();
+  if (exErr) return { error: exErr };
+
+  if (existing?.id) {
+    const { error } = await supabase.from("live_locations").update(base).eq("id", existing.id);
+    return { error };
+  }
+  const { error } = await supabase.from("live_locations").insert(base);
+  return { error };
+}
+
 function openMap(location) {
   if (!location) return;
   window.open(`https://www.google.com/maps?q=${location.latitude},${location.longitude}`, "_blank");
@@ -1428,6 +1459,24 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const dashboardRowsForAttendance = useMemo(
     () => dashboardRows.filter((r) => r.employmentStatus !== "archived"),
     [dashboardRows]
+  );
+
+  const updateLiveLocationOnce = useCallback(
+    async ({ status, projectName, costCentre, coords }) => {
+      if (!authUser?.id || !userCompany?.id) return;
+      if (isAdmin) return; // employee-only for now
+      if (!coords) return;
+      const { error } = await upsertLiveLocationRow(supabase, {
+        companyId: userCompany.id,
+        employeeId: authUser.id,
+        status,
+        projectName,
+        costCentre,
+        coords,
+      });
+      if (error) console.warn("[LIVE_LOCATION] update failed:", error);
+    },
+    [authUser?.id, userCompany?.id, isAdmin]
   );
 
   const displayedTeamRows = useMemo(() => {
@@ -3511,6 +3560,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
           ? "Clock-in saved. Location unavailable / permission denied."
           : "Clock-in saved. Location unavailable."
     );
+    void updateLiveLocationOnce({
+      status: "clocked_in",
+      projectName: clockSelectedProject.name,
+      costCentre: costCenter,
+      coords: gps,
+    });
     const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
     void createCompanyNotifications(supabase, {
       companyId: userCompany?.id,
@@ -3833,6 +3888,12 @@ const handlePhotoCapture = async (event) => {
     }
 
     setCurrentShift(null);
+    void updateLiveLocationOnce({
+      status: "clocked_out",
+      projectName: visibleCurrentShift.project,
+      costCentre: visibleCurrentShift.costCenter,
+      coords: clockOutGps,
+    });
     setLocationStatus(
       clockOutGps
         ? "Clock-out saved. Location captured."
