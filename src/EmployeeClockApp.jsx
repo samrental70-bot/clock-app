@@ -1265,6 +1265,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [companyProjectsRefreshKey, setCompanyProjectsRefreshKey] = useState(0);
   /** Active project_ids from project_assignments for the signed-in employee (Clock filter only). */
   const [employeeClockAssignedProjectIds, setEmployeeClockAssignedProjectIds] = useState([]);
+  /** Employee Clock only: project_id -> assigned active cost centre names (from project_cost_centre_assignments). */
+  const [employeeClockAssignedCostNamesByProjectId, setEmployeeClockAssignedCostNamesByProjectId] = useState({});
 
   const [projectsAddFormOpen, setProjectsAddFormOpen] = useState(false);
   const [projectsAddName, setProjectsAddName] = useState("");
@@ -1321,6 +1323,24 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
 
+  /** Clock tab Start Shift / Change Task: admins see all active cost centres; employees see assigned centres only. */
+  const clockCostCentreOptionsForProject = useCallback(
+    (pid) => {
+      const all =
+        effectiveCostCentresByProjectId[String(pid)] ||
+        effectiveCostCentresByProjectId[Number(pid)] ||
+        [];
+      if (isAdmin) return all;
+      const assigned =
+        employeeClockAssignedCostNamesByProjectId[String(pid)] ||
+        employeeClockAssignedCostNamesByProjectId[Number(pid)] ||
+        [];
+      const allSet = new Set(all);
+      return assigned.filter((n) => allSet.has(n)).sort((a, b) => a.localeCompare(b));
+    },
+    [isAdmin, effectiveCostCentresByProjectId, employeeClockAssignedCostNamesByProjectId]
+  );
+
   /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
   const clockSelectableProjects = useMemo(() => {
     if (useProjectFallback) {
@@ -1338,6 +1358,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const found = list.find((p) => String(p.id) === String(projectId));
     return found || list[0];
   }, [clockSelectableProjects, projectId]);
+
+  const clockCostCentresActive = useMemo(
+    () =>
+      clockSelectedProject?.id != null ? clockCostCentreOptionsForProject(clockSelectedProject.id) : [],
+    [clockSelectedProject?.id, clockCostCentreOptionsForProject]
+  );
 
   const dashboardRowsForAttendance = useMemo(
     () => dashboardRows.filter((r) => r.employmentStatus !== "archived"),
@@ -1831,6 +1857,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   useEffect(() => {
     if (!userCompany?.id || !authUser?.id || isAdmin) {
       setEmployeeClockAssignedProjectIds([]);
+      setEmployeeClockAssignedCostNamesByProjectId({});
       return;
     }
     let cancelled = false;
@@ -1844,9 +1871,52 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (cancelled) return;
       if (error) {
         setEmployeeClockAssignedProjectIds([]);
+        setEmployeeClockAssignedCostNamesByProjectId({});
         return;
       }
       setEmployeeClockAssignedProjectIds((data || []).map((r) => r.project_id).filter(Boolean));
+
+      const { data: pccaRows, error: pccaErr } = await supabase
+        .from("project_cost_centre_assignments")
+        .select("project_id, cost_centre_id")
+        .eq("company_id", userCompany.id)
+        .eq("user_id", authUser.id)
+        .eq("status", "active");
+      if (cancelled) return;
+      if (pccaErr) {
+        setEmployeeClockAssignedCostNamesByProjectId({});
+        return;
+      }
+      const rows = Array.isArray(pccaRows) ? pccaRows : [];
+      if (rows.length === 0) {
+        setEmployeeClockAssignedCostNamesByProjectId({});
+        return;
+      }
+      const ccIds = [...new Set(rows.map((r) => r.cost_centre_id).filter(Boolean))];
+      const { data: ccRows, error: ccErr } = await supabase
+        .from("cost_centres")
+        .select("id, name, project_id, status")
+        .in("id", ccIds);
+      if (cancelled) return;
+      if (ccErr) {
+        setEmployeeClockAssignedCostNamesByProjectId({});
+        return;
+      }
+      const ccById = Object.fromEntries((ccRows || []).map((c) => [String(c.id), c]));
+      const byProject = {};
+      for (const r of rows) {
+        const cc = ccById[String(r.cost_centre_id)];
+        if (!cc) continue;
+        if (String(cc.status ?? "").toLowerCase() !== "active") continue;
+        if (String(cc.project_id) !== String(r.project_id)) continue;
+        const pk = String(r.project_id);
+        if (!byProject[pk]) byProject[pk] = [];
+        byProject[pk].push(cc.name);
+      }
+      for (const k of Object.keys(byProject)) {
+        byProject[k] = [...new Set(byProject[k])].sort((a, b) => a.localeCompare(b));
+      }
+      setEmployeeClockAssignedCostNamesByProjectId(byProject);
     })();
     return () => {
       cancelled = true;
@@ -2004,10 +2074,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     }
 
     const pid = nextProject?.id;
-    const centres =
-      effectiveCostCentresByProjectId[String(pid)] ||
-      effectiveCostCentresByProjectId[Number(pid)] ||
-      [];
+    const centres = clockCostCentreOptionsForProject(pid);
 
     if (centres.length === 0) {
       if (costCenter !== "") setCostCenter("");
@@ -2016,7 +2083,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (!centres.includes(costCenter)) {
       setCostCenter(centres[0]);
     }
-  }, [clockSelectableProjects, effectiveCostCentresByProjectId, projectId, costCenter]);
+  }, [clockSelectableProjects, clockCostCentreOptionsForProject, projectId, costCenter]);
 
   useEffect(() => {
     localStorage.setItem("orp_current_shift", JSON.stringify(currentShift));
@@ -2616,10 +2683,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       clockSelectableProjects[0];
     if (!nextProject) return;
     setProjectId(nextProject.id);
-    const centres =
-      effectiveCostCentresByProjectId[String(nextProject.id)] ||
-      effectiveCostCentresByProjectId[Number(nextProject.id)] ||
-      [];
+    const centres = clockCostCentreOptionsForProject(nextProject.id);
     if (centres.length > 0) setCostCenter(centres[0]);
     else setCostCenter("");
   };
@@ -3229,9 +3293,19 @@ const [uploadProgress, setUploadProgress] = useState(null);
       return;
     }
 
-    const clockInCentres = costCentresForEditProject(clockSelectedProject.id);
+    const allActiveOnProject =
+      effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
+      effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
+      [];
+    const clockInCentres = clockCostCentreOptionsForProject(clockSelectedProject.id);
     if (clockInCentres.length === 0 || !costCenter || !clockInCentres.includes(costCenter)) {
-      setLocationStatus("No cost centres available for this project.");
+      if (!isAdmin && allActiveOnProject.length > 0) {
+        setLocationStatus(
+          "No cost centres assigned for this project. Please contact your supervisor."
+        );
+      } else {
+        setLocationStatus("No cost centres available for this project.");
+      }
       return;
     }
 
@@ -3383,7 +3457,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       effectiveProjects.find((p) => String(p.id) === String(projectId)) ||
       adminProjects.find((p) => p.id === projectId) ||
       adminProjects[0];
-    const taskCentres = costCentresForEditProject(updatedProject.id);
+    const taskCentres = clockCostCentreOptionsForProject(updatedProject.id);
     if (taskCentres.length === 0 || !taskCentres.includes(costCenter)) return;
     setCurrentShift({
       ...visibleCurrentShift,
@@ -3680,12 +3754,6 @@ const handlePhotoCapture = async (event) => {
     effectiveCostCentresByProjectId[String(pid)] ||
     effectiveCostCentresByProjectId[Number(pid)] ||
     [];
-
-  const clockCostCentresActive = useMemo(
-    () =>
-      clockSelectedProject?.id != null ? costCentresForEditProject(clockSelectedProject.id) : [],
-    [clockSelectedProject?.id, effectiveCostCentresByProjectId]
-  );
 
   const handleDashboardEmployeeClockIn = async (row) => {
     if (!isAdmin || !authUser?.id || !userCompany?.id) return;
@@ -5344,7 +5412,14 @@ const handlePhotoCapture = async (event) => {
 
                 {clockSelectedProject && clockCostCentresActive.length === 0 && (
                   <p className="text-xs text-amber-800 leading-snug">
-                    No cost centres available for this project.
+                    {!isAdmin &&
+                    (
+                      effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
+                      effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
+                      []
+                    ).length > 0
+                      ? "No cost centres assigned for this project. Please contact your supervisor."
+                      : "No cost centres available for this project."}
                   </p>
                 )}
 
@@ -5414,7 +5489,14 @@ const handlePhotoCapture = async (event) => {
                     </select>
                     {clockCostCentresActive.length === 0 && (
                       <p className="text-[10px] text-amber-800 leading-snug">
-                        No cost centres available for this project.
+                        {!isAdmin &&
+                        (
+                          effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
+                          effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
+                          []
+                        ).length > 0
+                          ? "No cost centres assigned for this project. Please contact your supervisor."
+                          : "No cost centres available for this project."}
                       </p>
                     )}
                     <div className="grid grid-cols-2 gap-1.5">
