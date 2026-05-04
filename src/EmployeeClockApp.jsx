@@ -483,6 +483,18 @@ function getErrorMessage(error) {
   }
 }
 
+/** Detect missing-column errors from PostgREST / Postgres. */
+function isMissingDbColumnError(error) {
+  const m = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  return (
+    (m.includes("column") && (m.includes("does not exist") || m.includes("undefined"))) ||
+    m.includes("42703")
+  );
+}
+
+const TEAM_PROFILES_SQL_HINT =
+  "Add to public.profiles: hourly_rate (numeric), pay_rate_effective_date (date), employment_status (text). Example: ALTER TABLE profiles ADD COLUMN IF NOT EXISTS hourly_rate numeric DEFAULT 0; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS pay_rate_effective_date date; ALTER TABLE profiles ADD COLUMN IF NOT EXISTS employment_status text DEFAULT 'active';";
+
 function showErrorPopup(title, error) {
   const message = getErrorMessage(error);
   console.error(title, error);
@@ -800,13 +812,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
 
   const [teamRows, setTeamRows] = useState([]);
-  const [teamDaySheets, setTeamDaySheets] = useState([]);
-  const [teamViewDate, setTeamViewDate] = useState("");
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState("");
   const [teamCopyOk, setTeamCopyOk] = useState(false);
   const [teamRoleFeedback, setTeamRoleFeedback] = useState({ type: "", text: "" });
-  const [teamRoleSavingId, setTeamRoleSavingId] = useState(null);
+  const [teamEditingMemberRowId, setTeamEditingMemberRowId] = useState(null);
+  const [teamEditDraft, setTeamEditDraft] = useState(null);
+  const [teamEditInlineError, setTeamEditInlineError] = useState("");
+  const [teamSchemaWarning, setTeamSchemaWarning] = useState("");
+  const [teamSavingMemberRowId, setTeamSavingMemberRowId] = useState(null);
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -823,20 +837,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   useEffect(() => {
     if (!userCompany?.id) return;
-    setTeamViewDate(calendarDateKeyInTimeZone(new Date(), userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE));
-  }, [userCompany?.id]);
-
-  useEffect(() => {
-    if (!userCompany?.id) return;
     setDashboardViewDate(calendarDateKeyInTimeZone(new Date(), userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE));
   }, [userCompany?.id]);
 
   useEffect(() => {
-    if (activeTab !== "team" || !userCompany?.id || !authUser?.id || !teamViewDate) return;
+    if (activeTab !== "team" || !userCompany?.id || !authUser?.id) return;
     let cancelled = false;
     setTeamLoading(true);
     setTeamError("");
     setTeamRoleFeedback({ type: "", text: "" });
+    setTeamSchemaWarning("");
     (async () => {
       try {
         const { data: members, error: mErr } = await supabase
@@ -849,8 +859,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
         const profilesMap = {};
         if (ids.length > 0) {
-          let { data: profs, error: pErr } = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
-          if (pErr) {
+          const extendedSelect =
+            "id, full_name, email, role, hourly_rate, pay_rate_effective_date, employment_status";
+          let { data: profs, error: pErr } = await supabase.from("profiles").select(extendedSelect).in("id", ids);
+          if (pErr && isMissingDbColumnError(pErr)) {
+            if (!cancelled) setTeamSchemaWarning(`Profiles table is missing columns. ${TEAM_PROFILES_SQL_HINT}`);
+            const retry = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
+            if (retry.error) throw retry.error;
+            profs = retry.data || [];
+          } else if (pErr) {
             const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
             if (retry.error) throw retry.error;
             profs = retry.data || [];
@@ -864,6 +881,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
           const profileFull = (p.full_name && String(p.full_name).trim()) || "";
           const profileEmailRaw = (p.email && String(p.email).trim()) || "";
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
+          const hr = p.hourly_rate;
+          const hourlyRateNum =
+            hr != null && hr !== "" && Number.isFinite(Number(hr)) ? Number(hr) : null;
+          const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
+          const employmentStatus = empRaw === "archived" ? "archived" : "active";
           return {
             memberRowId: m.id,
             userId: m.user_id,
@@ -872,44 +894,17 @@ const [uploadProgress, setUploadProgress] = useState(null);
             fullName: profileFull,
             profileEmailRaw,
             displayName: displayName || shortUserLabel(m.user_id),
+            hourlyRate: hourlyRateNum,
+            payRateEffectiveDate: p.pay_rate_effective_date ?? null,
+            employmentStatus,
           };
         });
 
-        const dayStartIso = wallDateTimeToUtcIso(teamViewDate, "00:00:00", companyTimeZone);
-        const dayEndIso = wallDateTimeToUtcIso(teamViewDate, "23:59:59", companyTimeZone);
-        if (!dayStartIso || !dayEndIso) {
-          if (!cancelled) {
-            setTeamRows(rows);
-            setTeamDaySheets([]);
-          }
-          return;
-        }
-        let tsQuery = supabase
-          .from("timesheets")
-          .select("*")
-          .eq("company_id", userCompany.id)
-          .gte("clock_in", dayStartIso)
-          .lte("clock_in", dayEndIso)
-          .order("clock_in", { ascending: false });
-        if (!isAdmin) {
-          tsQuery = tsQuery.eq("user_id", authUser.id);
-        }
-        const { data: tsData, error: tsErr } = await tsQuery;
-        if (tsErr) throw tsErr;
-        const mappedTs = (tsData || []).map(mapTimesheetRowFromSupabase);
-        const dateFiltered = mappedTs.filter(
-          (r) => calendarDateKeyInTimeZone(r.clockIn, companyTimeZone) === teamViewDate
-        );
-
-        if (!cancelled) {
-          setTeamRows(rows);
-          setTeamDaySheets(dateFiltered);
-        }
+        if (!cancelled) setTeamRows(rows);
       } catch (err) {
         if (!cancelled) {
           setTeamError(getErrorMessage(err));
           setTeamRows([]);
-          setTeamDaySheets([]);
         }
       } finally {
         if (!cancelled) setTeamLoading(false);
@@ -918,7 +913,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userCompany?.id, authUser?.id, teamViewDate, companyTimeZone, isAdmin]);
+  }, [activeTab, userCompany?.id, authUser?.id]);
+
+  useEffect(() => {
+    setTeamEditingMemberRowId(null);
+    setTeamEditDraft(null);
+    setTeamEditInlineError("");
+  }, [activeTab, userCompany?.id]);
 
   useEffect(() => {
     if (activeTab !== "dashboard" || !isAdmin || !userCompany?.id || !authUser?.id || !dashboardViewDate) return;
@@ -3177,37 +3178,109 @@ const handlePhotoCapture = async (event) => {
     }
   };
 
-  const handleTeamMemberRoleChange = async (row, newRole) => {
-    if (!isAdmin || !userCompany?.id) return;
-    if (newRole !== "employee" && newRole !== "supervisor") return;
-    if (normalizeMemberRole(row.role) === "owner") return;
-    if (normalizeMemberRole(newRole) === normalizeMemberRole(row.role)) return;
-    if (!window.confirm("Change this member role?")) return;
+  const beginTeamMemberEdit = (row) => {
+    if (!isAdmin) return;
+    const rowRoleNorm = normalizeMemberRole(row.role);
+    const eff =
+      row.payRateEffectiveDate != null && row.payRateEffectiveDate !== ""
+        ? String(row.payRateEffectiveDate).slice(0, 10)
+        : "";
+    setTeamEditingMemberRowId(String(row.memberRowId));
+    setTeamEditInlineError("");
     setTeamRoleFeedback({ type: "", text: "" });
-    setTeamRoleSavingId(String(row.memberRowId));
+    setTeamEditDraft({
+      memberRole:
+        rowRoleNorm === "supervisor"
+          ? "supervisor"
+          : rowRoleNorm === "owner"
+            ? "owner"
+            : "employee",
+      hourlyRate: row.hourlyRate != null ? String(row.hourlyRate) : "",
+      payRateEffectiveDate: eff,
+      employmentStatus: row.employmentStatus === "archived" ? "archived" : "active",
+    });
+  };
+
+  const cancelTeamMemberEdit = () => {
+    setTeamEditingMemberRowId(null);
+    setTeamEditDraft(null);
+    setTeamEditInlineError("");
+  };
+
+  const handleTeamMemberSave = async (row) => {
+    if (!isAdmin || !userCompany?.id || !teamEditDraft || String(teamEditingMemberRowId) !== String(row.memberRowId)) {
+      return;
+    }
+    const isOwner = normalizeMemberRole(row.role) === "owner";
+    if (isOwner && teamEditDraft.employmentStatus === "archived") {
+      setTeamEditInlineError("The owner cannot be archived.");
+      return;
+    }
+
+    setTeamSavingMemberRowId(String(row.memberRowId));
+    setTeamEditInlineError("");
+    const hourlyNum = parseFloat(String(teamEditDraft.hourlyRate).replace(",", "."));
+    const hourly_rate = Number.isFinite(hourlyNum) ? hourlyNum : 0;
+    let pay_date = teamEditDraft.payRateEffectiveDate?.trim() || null;
+    if (pay_date === "") pay_date = null;
+
+    let newCompanyRole = normalizeMemberRole(row.role);
+    if (!isOwner) {
+      newCompanyRole = teamEditDraft.memberRole === "supervisor" ? "supervisor" : "employee";
+    }
+
     try {
-      const { error: mErr } = await supabase
-        .from("company_members")
-        .update({ role: newRole })
-        .eq("id", row.memberRowId)
-        .eq("company_id", userCompany.id)
-        .eq("user_id", row.userId);
-      if (mErr) throw mErr;
-      const profileRole = newRole === "supervisor" ? "supervisor" : "employee";
-      const { error: pErr } = await supabase.from("profiles").update({ role: profileRole }).eq("id", row.userId);
-      if (pErr) throw pErr;
-      if (String(row.userId) === String(authUser?.id)) {
-        setUserCompanyRole(newRole);
-        setAuthRole(profileRole);
+      if (!isOwner && newCompanyRole !== normalizeMemberRole(row.role)) {
+        const { error: mErr } = await supabase
+          .from("company_members")
+          .update({ role: newCompanyRole })
+          .eq("id", row.memberRowId)
+          .eq("company_id", userCompany.id)
+          .eq("user_id", row.userId);
+        if (mErr) throw mErr;
       }
+
+      const profilePayload = {
+        hourly_rate,
+        pay_rate_effective_date: pay_date,
+        employment_status: isOwner ? "active" : teamEditDraft.employmentStatus,
+      };
+      if (!isOwner) {
+        profilePayload.role = newCompanyRole === "supervisor" ? "supervisor" : "employee";
+      }
+
+      const { error: pErr } = await supabase.from("profiles").update(profilePayload).eq("id", row.userId);
+      if (pErr) {
+        if (isMissingDbColumnError(pErr)) {
+          throw new Error(`Missing profiles columns. ${TEAM_PROFILES_SQL_HINT} (${getErrorMessage(pErr)})`);
+        }
+        throw pErr;
+      }
+
+      if (!isOwner && String(row.userId) === String(authUser?.id)) {
+        setUserCompanyRole(newCompanyRole);
+        setAuthRole(newCompanyRole === "supervisor" ? "supervisor" : "employee");
+      }
+
       setTeamRows((prev) =>
-        prev.map((r) => (r.memberRowId === row.memberRowId ? { ...r, role: newRole } : r))
+        prev.map((r) =>
+          String(r.memberRowId) === String(row.memberRowId)
+            ? {
+                ...r,
+                role: !isOwner ? newCompanyRole : r.role,
+                hourlyRate: hourly_rate,
+                payRateEffectiveDate: pay_date,
+                employmentStatus: teamEditDraft.employmentStatus,
+              }
+            : r
+        )
       );
-      setTeamRoleFeedback({ type: "success", text: "Role updated." });
+      setTeamRoleFeedback({ type: "success", text: "Member saved." });
+      cancelTeamMemberEdit();
     } catch (err) {
-      setTeamRoleFeedback({ type: "error", text: getErrorMessage(err) });
+      setTeamEditInlineError(getErrorMessage(err));
     } finally {
-      setTeamRoleSavingId(null);
+      setTeamSavingMemberRowId(null);
     }
   };
 
@@ -4626,19 +4699,8 @@ const handlePhotoCapture = async (event) => {
                 <div>
                   <h2 className="font-bold text-lg">Team</h2>
                   <p className="text-xs text-slate-500">
-                    {isAdmin ? "Company members and daily attendance" : "Your attendance for the selected date"}
+                    {isAdmin ? "Company members" : "Your membership"}
                   </p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Times use {companyTimeZone}</p>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-700">View date</label>
-                  <input
-                    type="date"
-                    className="w-full rounded-xl border bg-white px-2 py-2 text-sm"
-                    value={teamViewDate}
-                    onChange={(e) => setTeamViewDate(e.target.value)}
-                    disabled={!teamViewDate}
-                  />
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-3 space-y-2">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wide">Join code</p>
@@ -4673,87 +4735,184 @@ const handlePhotoCapture = async (event) => {
                     {teamRoleFeedback.text}
                   </div>
                 )}
-                <div className="space-y-1.5">
+                {teamSchemaWarning && (
+                  <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-950 leading-snug">
+                    {teamSchemaWarning}
+                  </div>
+                )}
+                <div className="space-y-2">
                   {(isAdmin ? teamRows : teamRows.filter((r) => String(r.userId) === String(authUser?.id))).map((row) => {
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
-                    const showRoleSelect = isAdmin && !isOwnerMember;
-                    const userDayRows = teamDaySheets.filter((t) => String(t.userId) === String(row.userId));
-                    const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
-                    const att = teamAttendanceStatusForRecord(rep, {
-                      selectedDateKey: teamViewDate,
-                      companyTimeZone,
-                      now,
-                      authUser,
-                      visibleCurrentShift,
-                    });
-                    const statusBadgeClass =
-                      att.code === "clocked_in"
-                        ? "bg-green-50 text-green-800 border border-green-100"
-                        : att.code === "clocked_out"
-                          ? "bg-slate-100 text-slate-800 border border-slate-200"
-                          : att.code === "missing_out"
-                            ? "bg-amber-50 text-amber-900 border border-amber-100"
-                            : "bg-slate-50 text-slate-600 border border-slate-100";
-                    const inDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
-                    const outDisp = rep?.clockOut ? formatTime(rep.clockOut, companyTimeZone) : "—";
-                    const projectDisp = rep?.project ? String(rep.project) : "—";
-                    const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
-                    const labourDisp = rep ? formatMoney(getLabourCost(rep)) : "—";
+                    const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "—";
+                    const isEditing = isAdmin && String(teamEditingMemberRowId) === String(row.memberRowId);
+                    const payDisp =
+                      row.hourlyRate != null && Number.isFinite(Number(row.hourlyRate))
+                        ? `${formatMoney(Number(row.hourlyRate))}/hr`
+                        : "Not set";
+                    const effDisp = row.payRateEffectiveDate
+                      ? String(row.payRateEffectiveDate).slice(0, 10)
+                      : "Not set";
+                    const empArchived = row.employmentStatus === "archived";
                     return (
-                      <div key={row.memberRowId} className="rounded-xl border border-slate-200 bg-white p-2 space-y-1">
-                        <div className="flex justify-between gap-2 items-start min-w-0">
-                          <p className="font-semibold text-[13px] leading-tight text-slate-900 min-w-0 break-words pr-1">
-                            {row.displayName}
-                          </p>
-                          {!showRoleSelect && (
-                            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-700 shrink-0 capitalize leading-none">
-                              {row.role}
-                            </span>
+                      <div key={row.memberRowId} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
+                        <div className="flex items-start justify-between gap-2 min-w-0">
+                          <div className="min-w-0 flex-1">
+                            <p className="font-semibold text-sm leading-snug text-slate-900 break-words">{row.displayName}</p>
+                            <p className="mt-1 text-xs text-slate-600">
+                              <span className="font-medium text-slate-500">Email: </span>
+                              <span className="break-all">{emailLine}</span>
+                            </p>
+                          </div>
+                          {isAdmin && !isEditing && (
+                            <Button
+                              type="button"
+                              className="shrink-0 rounded-lg h-8 px-3 text-xs font-semibold"
+                              onClick={() => beginTeamMemberEdit(row)}
+                              disabled={Boolean(teamSavingMemberRowId)}
+                            >
+                              Edit
+                            </Button>
                           )}
                         </div>
-                        <p className="text-[11px] text-slate-600 leading-tight">
-                          <span className="text-slate-500">Status:</span>{" "}
-                          <span className={`inline rounded px-1.5 py-0.5 font-semibold ${statusBadgeClass}`}>
-                            {att.label}
-                          </span>
-                        </p>
-                        <div className="flex justify-between gap-2 text-[11px] leading-tight">
-                          <div className="min-w-0 shrink">
-                            <span className="text-slate-500">In:</span>{" "}
-                            <span className="font-semibold text-slate-900 tabular-nums">{inDisp}</span>
+                        {isEditing && teamEditDraft ? (
+                          <div className="space-y-2 border-t border-slate-100 pt-2">
+                            {teamEditInlineError && (
+                              <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                                {teamEditInlineError}
+                              </div>
+                            )}
+                            <div className="space-y-1.5">
+                              <label className="block text-[11px] font-medium text-slate-600">Role</label>
+                              {isOwnerMember ? (
+                                <p className="text-xs font-medium text-slate-900 capitalize">owner</p>
+                              ) : (
+                                <select
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={teamEditDraft.memberRole === "supervisor" ? "supervisor" : "employee"}
+                                  disabled={Boolean(teamSavingMemberRowId)}
+                                  onChange={(e) =>
+                                    setTeamEditDraft((d) =>
+                                      d
+                                        ? {
+                                            ...d,
+                                            memberRole: e.target.value === "supervisor" ? "supervisor" : "employee",
+                                          }
+                                        : d
+                                    )
+                                  }
+                                >
+                                  <option value="employee">employee</option>
+                                  <option value="supervisor">supervisor</option>
+                                </select>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-slate-600" htmlFor={`team-pay-${row.memberRowId}`}>
+                                Pay rate ($/hr)
+                              </label>
+                              <input
+                                id={`team-pay-${row.memberRowId}`}
+                                type="number"
+                                inputMode="decimal"
+                                min={0}
+                                step="0.01"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.hourlyRate}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, hourlyRate: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-slate-600" htmlFor={`team-eff-${row.memberRowId}`}>
+                                Effective date
+                              </label>
+                              <input
+                                id={`team-eff-${row.memberRowId}`}
+                                type="date"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.payRateEffectiveDate}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, payRateEffectiveDate: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[11px] font-medium text-slate-600">Status</label>
+                              {isOwnerMember ? (
+                                <div>
+                                  <p className="text-xs font-medium text-slate-900">active</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">Owner cannot be archived.</p>
+                                </div>
+                              ) : (
+                                <select
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={teamEditDraft.employmentStatus}
+                                  disabled={Boolean(teamSavingMemberRowId)}
+                                  onChange={(e) =>
+                                    setTeamEditDraft((d) =>
+                                      d
+                                        ? {
+                                            ...d,
+                                            employmentStatus: e.target.value === "archived" ? "archived" : "active",
+                                          }
+                                        : d
+                                    )
+                                  }
+                                >
+                                  <option value="active">active</option>
+                                  <option value="archived">archived</option>
+                                </select>
+                              )}
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <Button
+                                type="button"
+                                className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onClick={() => void handleTeamMemberSave(row)}
+                              >
+                                {teamSavingMemberRowId === String(row.memberRowId) ? "Saving…" : "Save"}
+                              </Button>
+                              <Button
+                                type="button"
+                                className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100 hover:border-slate-500 active:!bg-slate-200"
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onClick={cancelTeamMemberEdit}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
                           </div>
-                          <div className="min-w-0 shrink text-right">
-                            <span className="text-slate-500">Out:</span>{" "}
-                            <span className="font-semibold text-slate-900 tabular-nums">{outDisp}</span>
-                          </div>
-                        </div>
-                        <p className="text-[11px] text-slate-700 leading-snug break-words">
-                          <span className="text-slate-500">Proj:</span>{" "}
-                          <span className="font-semibold text-slate-900">{projectDisp}</span>
-                          <span className="text-slate-300 px-1" aria-hidden="true">
-                            |
-                          </span>
-                          <span className="text-slate-500">Cost:</span>{" "}
-                          <span className="font-semibold text-slate-900">{costDisp}</span>
-                          <span className="text-slate-300 px-1" aria-hidden="true">
-                            |
-                          </span>
-                          <span className="text-slate-500">Labour:</span>{" "}
-                          <span className="font-semibold text-slate-900 tabular-nums">{labourDisp}</span>
-                        </p>
-                        {showRoleSelect && (
-                          <div className="pt-1 mt-0.5 border-t border-slate-100">
-                            <label className="sr-only">Role</label>
-                            <select
-                              className="w-full rounded-md border py-1 px-1.5 text-[11px] leading-tight"
-                              value={rowRoleNorm === "supervisor" ? "supervisor" : "employee"}
-                              disabled={teamRoleSavingId === String(row.memberRowId)}
-                              onChange={(e) => void handleTeamMemberRoleChange(row, e.target.value)}
-                            >
-                              <option value="employee">employee</option>
-                              <option value="supervisor">supervisor</option>
-                            </select>
+                        ) : (
+                          <div className="space-y-1.5 text-xs leading-snug">
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-500 shrink-0">Role</span>
+                              <span className="font-medium text-slate-900 text-right capitalize">{rowRoleNorm}</span>
+                            </div>
+                            <div className="flex justify-between gap-3 items-center">
+                              <span className="text-slate-500 shrink-0">Status</span>
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
+                                  empArchived
+                                    ? "bg-slate-100 text-slate-800 ring-slate-200"
+                                    : "bg-green-50 text-green-800 ring-green-100"
+                                }`}
+                              >
+                                {empArchived ? "Archived" : "Active"}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-500 shrink-0">Pay rate</span>
+                              <span className="font-medium text-slate-700 text-right">{payDisp}</span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-slate-500 shrink-0">Effective date</span>
+                              <span className="font-medium text-slate-700 text-right">{effDisp}</span>
+                            </div>
                           </div>
                         )}
                       </div>
