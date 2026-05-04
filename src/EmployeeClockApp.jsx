@@ -309,6 +309,48 @@ function teamAttendanceStatusForRecord(record, ctx) {
   return { label: "Missing clock-out", code: "missing_out" };
 }
 
+/** Dashboard row: aggregate display for all timesheets that day for one employee (multiple shifts). */
+function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, getWorkedMinutes, getLabourCost) {
+  const projectDisp = rep?.project ? String(rep.project) : "—";
+  const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+  if (!userDayRows?.length) {
+    return {
+      inDisp: "—",
+      outDisp: "—",
+      totalDisp: "—",
+      labourDisp: "—",
+      projectDisp,
+      costDisp,
+    };
+  }
+  const byInAsc = [...userDayRows].sort(
+    (a, b) => parseStoredInstant(a.clockIn).getTime() - parseStoredInstant(b.clockIn).getTime()
+  );
+  const inDisp = byInAsc[0]?.clockIn ? formatTime(byInAsc[0].clockIn, companyTimeZone) : "—";
+  const outsDesc = [...userDayRows]
+    .filter((r) => r.clockOut)
+    .sort((a, b) => parseStoredInstant(b.clockOut).getTime() - parseStoredInstant(a.clockOut).getTime());
+  const anyOpenNoOut = userDayRows.some(
+    (r) => normalizeStatus(r.status) === "active" && !r.clockOut
+  );
+  const outDisp =
+    anyOpenNoOut || !outsDesc.length ? "—" : formatTime(outsDesc[0].clockOut, companyTimeZone);
+  let sumMin = 0;
+  let sumLab = 0;
+  for (const ts of userDayRows) {
+    sumMin += getWorkedMinutes(ts);
+    sumLab += getLabourCost(ts);
+  }
+  return {
+    inDisp,
+    outDisp,
+    totalDisp: formatDuration(sumMin),
+    labourDisp: formatMoney(sumLab),
+    projectDisp,
+    costDisp,
+  };
+}
+
 const COMPANY_TIME_ZONE_OPTIONS = [
   "America/Toronto",
   "America/Vancouver",
@@ -392,6 +434,59 @@ function getProjectFolderName(projectName) {
   return projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
+/** Normalize profiles.hourly_rate for inserts (missing / invalid → 0). */
+function hourlyRateFromProfileValue(hr) {
+  if (hr == null || hr === "") return 0;
+  const n = typeof hr === "number" ? hr : Number(String(hr).replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+
+/** labour_cost = ((clock_out - clock_in) ms / 3600000) * hourly_rate */
+function computeLabourCostFromWallTimes(clockInIso, clockOutIso, hourlyRate) {
+  const t0 = new Date(clockInIso).getTime();
+  const t1 = new Date(clockOutIso).getTime();
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
+  const hours = (t1 - t0) / 3600000;
+  const rate = Number(hourlyRate) || 0;
+  return hours * rate;
+}
+
+/**
+ * Build Supabase timesheets update for clock-out with profile hourly_rate fallback when timesheet rate is missing/0.
+ */
+async function buildTimesheetClockOutUpdate(supabase, { userId, clockInIso, clockOutIso, timesheetHourlyRate }) {
+  let rate = Number(timesheetHourlyRate);
+  if (!Number.isFinite(rate) || rate <= 0) {
+    const { data: prof } = await supabase.from("profiles").select("hourly_rate").eq("id", userId).maybeSingle();
+    rate = hourlyRateFromProfileValue(prof?.hourly_rate);
+  }
+  const labourCost = computeLabourCostFromWallTimes(clockInIso, clockOutIso, rate);
+  const t0 = new Date(clockInIso).getTime();
+  const t1 = new Date(clockOutIso).getTime();
+  const hours =
+    Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0 ? (t1 - t0) / 3600000 : 0;
+  const update = {
+    clock_out: clockOutIso,
+    status: "Submitted",
+    labour_cost: labourCost,
+  };
+  const rawTs = Number(timesheetHourlyRate);
+  if ((!Number.isFinite(rawTs) || rawTs <= 0) && rate > 0) {
+    update.hourly_rate = rate;
+  }
+  return {
+    update,
+    debug: {
+      clockInIso,
+      clockOutIso,
+      hourlyRate: rate,
+      hours,
+      labourCost,
+    },
+  };
+}
+
 /** Map Supabase `timesheets` row → UI record shape used by Timesheet tab / reports */
 function mapTimesheetRowFromSupabase(row) {
   const projectName = row.project_name || "";
@@ -412,7 +507,8 @@ function mapTimesheetRowFromSupabase(row) {
     clockIn: row.clock_in,
     clockOut: row.clock_out ?? null,
     status: row.status || "Submitted",
-    labour_cost: row.labour_cost != null ? Number(row.labour_cost) : undefined,
+    labour_cost:
+      row.labour_cost != null && row.labour_cost !== "" ? Number(row.labour_cost) : undefined,
     breakStart: null,
     breakEnd: null,
     employeeId: row.user_id,
@@ -966,7 +1062,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (ids.length > 0) {
           let { data: profs, error: pErr } = await supabase
             .from("profiles")
-            .select("id, full_name, email, role, employment_status")
+            .select("id, full_name, email, role, employment_status, hourly_rate")
             .in("id", ids);
           if (pErr) {
             const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
@@ -984,6 +1080,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
           const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
           const employmentStatus = empRaw === "archived" ? "archived" : "active";
+          const hr = p.hourly_rate;
+          const hourlyRate =
+            hr != null && hr !== "" && Number.isFinite(Number(hr)) ? Number(hr) : null;
           return {
             memberRowId: m.id,
             userId: m.user_id,
@@ -993,6 +1092,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
             profileEmailRaw,
             displayName: displayName || shortUserLabel(m.user_id),
             employmentStatus,
+            hourlyRate,
           };
         });
 
@@ -1176,9 +1276,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
   };
 
   const getLabourCost = (record) => {
-    const hours = getWorkedMinutes(record) / 60;
-    const rate = Number(record.hourlyRate || 0);
-    return hours * rate;
+    if (record == null) return 0;
+    const hasOut = Boolean(record.clockOut);
+    const st = normalizeStatus(record.status);
+    const closed = st === "submitted" || hasOut;
+    if (closed && record.labour_cost != null && record.labour_cost !== "") {
+      const stored = Number(record.labour_cost);
+      if (Number.isFinite(stored)) return stored;
+    }
+    const end = hasOut ? record.clockOut : new Date();
+    return computeLabourCostFromWallTimes(record.clockIn, end, Number(record.hourlyRate ?? 0));
   };
 
   const visibleRecords = isAdmin
@@ -1209,16 +1316,22 @@ const [uploadProgress, setUploadProgress] = useState(null);
       const att = teamAttendanceStatusForRecord(rep, ctx);
       if (att.code === "clocked_in") clockedIn += 1;
       if (att.code === "missing_out") missingOut += 1;
-      if (rep) {
-        const total = minutesBetween(rep.clockIn, rep.clockOut || new Date());
-        const breakTotal = rep.breakStart && rep.breakEnd ? minutesBetween(rep.breakStart, rep.breakEnd) : 0;
-        const worked = Math.max(0, total - breakTotal);
-        totalMinutes += worked;
-        totalCost += (worked / 60) * Number(rep.hourlyRate || 0);
+      for (const ts of userDayRows) {
+        totalMinutes += getWorkedMinutes(ts);
+        totalCost += getLabourCost(ts);
       }
     }
     return { clockedIn, totalMinutes, totalCost, missingOut };
   }, [isAdmin, dashboardViewDate, dashboardRowsForAttendance, dashboardDaySheets, companyTimeZone, now, authUser, visibleCurrentShift]);
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== "dashboard") return;
+    console.log("[LABOUR] dashboard totals", {
+      labourCostSum: dashboardSummary.totalCost,
+      minutesSum: dashboardSummary.totalMinutes,
+      date: dashboardViewDate,
+    });
+  }, [isAdmin, activeTab, dashboardSummary.totalCost, dashboardSummary.totalMinutes, dashboardViewDate]);
 
   const activeShiftTitle = useMemo(
     () =>
@@ -2337,7 +2450,25 @@ const handleClockIn = async () => {
     return;
   }
 
+  if (!authUser) {
+    alert("User not logged in");
+    return;
+  }
+
   setLocationStatus("Clocking in...");
+
+  let employeeHourlyRate = 0;
+  try {
+    const { data: payProf } = await supabase
+      .from("profiles")
+      .select("hourly_rate")
+      .eq("id", authUser.id)
+      .maybeSingle();
+    employeeHourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
+  } catch {
+    employeeHourlyRate = 0;
+  }
+  console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
 
   const clockInLocation = null;
   const clockInTime = new Date().toISOString();
@@ -2352,7 +2483,7 @@ const handleClockIn = async () => {
     profileEmailForRow: (authUser?.email || "").trim(),
     companyId: userCompany?.id || null,
     companyName: userCompany?.name || null,
-    hourlyRate: 0,
+    hourlyRate: employeeHourlyRate,
     project: selectedProject.name,
     projectId: selectedProject.id,
     costCenter,
@@ -2372,11 +2503,6 @@ const handleClockIn = async () => {
   setCurrentShift(newShift);
   setLocationStatus("Clock-in saved locally.");
 
-  if (!authUser) {
-    alert("User not logged in");
-    return;
-  }
-
   const { data, error } = await supabase
     .from("timesheets")
     .insert([{
@@ -2387,7 +2513,7 @@ const handleClockIn = async () => {
       company_name: userCompany?.name || null,
       project_id: selectedProject.id,
       project_name: selectedProject.name,
-      hourly_rate: 0,
+      hourly_rate: employeeHourlyRate,
       cost_centre: costCenter,
       clock_in: clockInTime,
       status: "Active",
@@ -2407,7 +2533,7 @@ const handleClockIn = async () => {
           user_id: authUser.id,
           employee_name: clockInEmployeeName,
           project_name: selectedProject.name,
-          hourly_rate: 0,
+          hourly_rate: employeeHourlyRate,
           cost_centre: costCenter,
           clock_in: clockInTime,
           status: "Active",
@@ -2714,22 +2840,24 @@ const handlePhotoCapture = async (event) => {
     const clockOutLocation = await getCurrentLocation();
     const clockOutTime = new Date().toISOString();
 
-    const completedRecord = {
-      id: Date.now(),
-      ...visibleCurrentShift,
-      clockOut: clockOutTime,
-      clockOutLocation,
-      status: "Submitted",
-    };
-
     if (visibleCurrentShift.supabaseTimesheetId) {
-      const labourCost = getLabourCost(completedRecord);
+      const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
+        userId: authUser.id,
+        clockInIso: visibleCurrentShift.clockIn,
+        clockOutIso: clockOutTime,
+        timesheetHourlyRate: visibleCurrentShift.hourlyRate,
+      });
+      console.log("[LABOUR] clockOut", {
+        clockIn: labourDebug.clockInIso,
+        clockOut: labourDebug.clockOutIso,
+        hourlyRate: labourDebug.hourlyRate,
+        hours: labourDebug.hours,
+        cost: labourDebug.labourCost,
+      });
       const { error } = await supabase
         .from("timesheets")
         .update({
-          clock_out: clockOutTime,
-          status: "Submitted",
-          labour_cost: labourCost,
+          ...labourUpdate,
           clock_out_latitude: clockOutLocation?.latitude || null,
           clock_out_longitude: clockOutLocation?.longitude || null,
         })
@@ -2797,7 +2925,16 @@ const handlePhotoCapture = async (event) => {
     const clockInTime = new Date().toISOString();
     const employeeName = (row.displayName || "").trim() || shortUserLabel(row.userId);
     const employeeEmail = row.profileEmailRaw || null;
-    const hourlyRate = 0;
+    let hourlyRate = hourlyRateFromProfileValue(row.hourlyRate);
+    if (!hourlyRate) {
+      const { data: payProf } = await supabase
+        .from("profiles")
+        .select("hourly_rate")
+        .eq("id", row.userId)
+        .maybeSingle();
+      hourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
+    }
+    console.log("[LABOUR] clockIn hourlyRate", hourlyRate);
 
     try {
       const { error } = await supabase
@@ -2870,22 +3007,22 @@ const handlePhotoCapture = async (event) => {
     setDashboardSavingUserId(String(row.userId));
     setDashboardActionFeedback(null);
     const clockOutTime = new Date().toISOString();
-    const completedRecord = {
-      ...rep,
-      clockOut: clockOutTime,
-      status: "Submitted",
-    };
-    const labourCost = getLabourCost(completedRecord);
+    const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
+      userId: row.userId,
+      clockInIso: rep.clockIn,
+      clockOutIso: clockOutTime,
+      timesheetHourlyRate: rep.hourlyRate,
+    });
+    console.log("[LABOUR] clockOut", {
+      clockIn: labourDebug.clockInIso,
+      clockOut: labourDebug.clockOutIso,
+      hourlyRate: labourDebug.hourlyRate,
+      hours: labourDebug.hours,
+      cost: labourDebug.labourCost,
+    });
 
     try {
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          clock_out: clockOutTime,
-          status: "Submitted",
-          labour_cost: labourCost,
-        })
-        .eq("id", rep.supabaseTimesheetId);
+      const { error } = await supabase.from("timesheets").update(labourUpdate).eq("id", rep.supabaseTimesheetId);
       if (error) throw error;
       setDashboardActionFeedback({
         type: "success",
@@ -2960,30 +3097,23 @@ const handlePhotoCapture = async (event) => {
       return;
     }
 
-    const updatedRecord = {
-      ...record,
-      clockIn: clockInIso,
-      clockOut: clockOutIso,
-      status: "Submitted",
-      projectId: proj.id,
-      project: proj.name,
-      projectFolder: getProjectFolderName(proj.name),
-      costCenter: editCostCenter || "",
-    };
-    const labourCost = getLabourCost(updatedRecord);
-
     setEditTimesheetSaving(true);
     try {
+      const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
+        userId: record.userId,
+        clockInIso,
+        clockOutIso,
+        timesheetHourlyRate: record.hourlyRate,
+      });
       const { error } = await supabase
         .from("timesheets")
         .update({
           clock_in: clockInIso,
           clock_out: clockOutIso,
-          status: "Submitted",
           project_id: proj.id,
           project_name: proj.name,
           cost_centre: editCostCenter || "",
-          labour_cost: labourCost,
+          ...labourUpdate,
         })
         .eq("id", rowId);
       if (error) throw error;
@@ -3464,16 +3594,13 @@ const handlePhotoCapture = async (event) => {
     setClosingShiftId(String(rowId));
     try {
       const clockOutTime = new Date().toISOString();
-      const provisional = { ...record, clockOut: clockOutTime, status: "Submitted" };
-      const labourCost = getLabourCost(provisional);
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          status: "Submitted",
-          clock_out: clockOutTime,
-          labour_cost: labourCost,
-        })
-        .eq("id", rowId);
+      const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
+        userId: record.userId,
+        clockInIso: record.clockIn,
+        clockOutIso: clockOutTime,
+        timesheetHourlyRate: record.hourlyRate,
+      });
+      const { error } = await supabase.from("timesheets").update(labourUpdate).eq("id", rowId);
       if (error) throw error;
       const myLiveId = visibleCurrentShift?.supabaseTimesheetId;
       if (myLiveId != null && String(myLiveId) === String(rowId)) {
@@ -3558,6 +3685,12 @@ const handlePhotoCapture = async (event) => {
     });
     const timesheetEmailSecondary = resolveTimesheetEmployeeSecondary(record, timesheetTitle);
 
+    const rateFromTimesheet = Number(record.hourlyRate ?? 0);
+    const totalCostDisplay =
+      record.clockOut && record.labour_cost != null && record.labour_cost !== ""
+        ? Number(record.labour_cost)
+        : getLabourCost(record);
+
     return (
     <div key={record.id} className="rounded-2xl border bg-white p-4">
       <div className="flex justify-between gap-3">
@@ -3576,8 +3709,13 @@ const handlePhotoCapture = async (event) => {
 
       <div className="grid grid-cols-3 gap-2 mt-3 text-xs text-slate-600">
         <div><p>Hours</p><p className="font-semibold text-slate-900">{formatDuration(getWorkedMinutes(record))}</p></div>
-        <div><p>Rate</p><p className="font-semibold text-slate-900">{formatMoney(record.hourlyRate || 0)}/hr</p></div>
-        <div><p>Total Cost</p><p className="font-semibold text-slate-900">{formatMoney(getLabourCost(record))}</p></div>
+        <div><p>Rate</p><p className="font-semibold text-slate-900">{formatMoney(rateFromTimesheet)}/hr</p></div>
+        <div>
+          <p>Total Cost</p>
+          <p className="font-semibold text-slate-900">
+            {formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record))}
+          </p>
+        </div>
       </div>
 
       {editingRecordId === record.id ? (
@@ -4684,12 +4822,14 @@ const handlePhotoCapture = async (event) => {
                               : att.code === "missing_out"
                                 ? "bg-amber-50 text-amber-900 border border-amber-200"
                                 : "bg-red-50 text-red-800 border border-red-200";
-                        const inDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
-                        const outDisp = rep?.clockOut ? formatTime(rep.clockOut, companyTimeZone) : "—";
-                        const totalDisp = rep ? formatDuration(getWorkedMinutes(rep)) : "—";
-                        const labourDisp = rep ? formatMoney(getLabourCost(rep)) : "—";
-                        const projectDisp = rep?.project ? String(rep.project) : "—";
-                        const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+                        const dayMetrics = computeDashboardEmployeeDayMetrics(
+                          userDayRows,
+                          rep,
+                          companyTimeZone,
+                          getWorkedMinutes,
+                          getLabourCost
+                        );
+                        const { inDisp, outDisp, totalDisp, labourDisp, projectDisp, costDisp } = dayMetrics;
                         const uid = String(row.userId);
                         const pick =
                           dashboardClockPick[uid] || {
@@ -4697,7 +4837,8 @@ const handlePhotoCapture = async (event) => {
                             costCenter: costCentresForEditProject(effectiveProjects[0]?.id)[0] || "",
                           };
                         const centresForPick = costCentresForEditProject(pick.projectId);
-                        const showDashClockIn = att.code === "none";
+                        const showDashClockIn =
+                          att.code === "none" || att.code === "clocked_out";
                         const showDashClockOut = att.code === "clocked_in";
                         const showDashFixOut = att.code === "missing_out";
                         const dashRowSaving = dashboardSavingUserId === uid;
