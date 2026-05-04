@@ -2,7 +2,6 @@
  * Vercel serverless: create Auth user + profile + company membership (service role only).
  * Env: VITE_SUPABASE_URL or SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
  */
-/* eslint-env node */
 import { createClient } from "@supabase/supabase-js";
 
 function getSupabaseUrl() {
