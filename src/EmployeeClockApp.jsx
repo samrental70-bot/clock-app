@@ -509,12 +509,17 @@ function formatTime(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 }
 
 function minutesBetween(start, end) {
-  return Math.max(0, Math.round((new Date(end) - new Date(start)) / 60000));
+  const t0 = new Date(start).getTime();
+  const t1 = new Date(end).getTime();
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
+  return Math.max(0, Math.round((t1 - t0) / 60000));
 }
 
 function formatDuration(minutes) {
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
+  const raw = Number(minutes);
+  const safeMin = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  const h = Math.floor(safeMin / 60);
+  const m = safeMin % 60;
   return `${h}h ${m}m`;
 }
 
@@ -526,15 +531,20 @@ function formatTimer(seconds) {
 }
 
 function formatMoney(amount) {
+  const n = Number(amount);
+  const safe = Number.isFinite(n) ? n : 0;
   return new Intl.NumberFormat("en-CA", {
     style: "currency",
     currency: "CAD",
-  }).format(amount || 0);
+  }).format(safe);
 }
 
 function formatLocation(location) {
   if (!location) return "Location not captured";
-  return `${Number(location.latitude).toFixed(5)}, ${Number(location.longitude).toFixed(5)}`;
+  const lat = Number(location.latitude);
+  const lng = Number(location.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "Location not available";
+  return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 }
 
 function getProjectFolderName(projectName) {
@@ -610,12 +620,18 @@ function mapTimesheetRowFromSupabase(row) {
     projectId: row.project_id ?? null,
     project: projectName,
     costCenter: row.cost_centre || "",
-    hourlyRate: Number(row.hourly_rate ?? 0),
+    hourlyRate: (() => {
+      const hr = Number(row.hourly_rate ?? 0);
+      return Number.isFinite(hr) ? hr : 0;
+    })(),
     clockIn: row.clock_in,
     clockOut: row.clock_out ?? null,
     status: row.status || "Submitted",
-    labour_cost:
-      row.labour_cost != null && row.labour_cost !== "" ? Number(row.labour_cost) : undefined,
+    labour_cost: (() => {
+      if (row.labour_cost == null || row.labour_cost === "") return undefined;
+      const n = Number(row.labour_cost);
+      return Number.isFinite(n) ? n : undefined;
+    })(),
     breakStart: null,
     breakEnd: null,
     employeeId: row.user_id,
@@ -1914,7 +1930,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (Number.isFinite(stored)) return stored;
     }
     const end = hasOut ? record.clockOut : new Date();
-    return computeLabourCostFromWallTimes(record.clockIn, end, Number(record.hourlyRate ?? 0));
+    const raw = computeLabourCostFromWallTimes(record.clockIn, end, Number(record.hourlyRate ?? 0));
+    return Number.isFinite(raw) ? raw : 0;
   };
 
   const visibleRecords = isAdmin
@@ -3346,15 +3363,28 @@ const [uploadProgress, setUploadProgress] = useState(null);
   };
 
   const liveSeconds = useMemo(() => {
-    if (!visibleCurrentShift) return 0;
-    const totalSeconds = Math.max(0, Math.floor((now - new Date(visibleCurrentShift.clockIn)) / 1000));
-    const activeBreakSeconds = visibleCurrentShift.breakStart && !visibleCurrentShift.breakEnd
-      ? Math.max(0, Math.floor((now - new Date(visibleCurrentShift.breakStart)) / 1000))
-      : 0;
+    if (!visibleCurrentShift?.clockIn) return 0;
+    const tIn = new Date(visibleCurrentShift.clockIn).getTime();
+    const tNow = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    if (!Number.isFinite(tIn) || !Number.isFinite(tNow)) return 0;
+    const totalSeconds = Math.max(0, Math.floor((tNow - tIn) / 1000));
+    let activeBreakSeconds = 0;
+    if (visibleCurrentShift.breakStart && !visibleCurrentShift.breakEnd) {
+      const tBreak = new Date(visibleCurrentShift.breakStart).getTime();
+      if (Number.isFinite(tBreak)) {
+        activeBreakSeconds = Math.max(0, Math.floor((tNow - tBreak) / 1000));
+      }
+    }
     return Math.max(0, totalSeconds - activeBreakSeconds);
   }, [visibleCurrentShift, now]);
 
-  const liveEarnings = visibleCurrentShift ? (liveSeconds / 3600) * Number(visibleCurrentShift.hourlyRate || 0) : 0;
+  const liveEarnings = (() => {
+    if (!visibleCurrentShift) return 0;
+    const rate = Number(visibleCurrentShift.hourlyRate ?? 0);
+    const r = Number.isFinite(rate) ? rate : 0;
+    const earned = (liveSeconds / 3600) * r;
+    return Number.isFinite(earned) ? earned : 0;
+  })();
 
   const handleProjectChange = (newProjectId) => {
     const nextProject =
