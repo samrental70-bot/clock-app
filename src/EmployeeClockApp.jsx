@@ -72,6 +72,12 @@ const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
 
+/** profiles.employment_status → "active" | "archived" */
+function normalizeEmploymentStatus(raw) {
+  const s = raw != null ? String(raw).trim().toLowerCase() : "active";
+  return s === "archived" ? "archived" : "active";
+}
+
 const TEAM_ADD_INITIAL_DRAFT = {
   fullName: "",
   email: "",
@@ -780,6 +786,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [authUser, setAuthUser] = useState(null);
   const [authRole, setAuthRole] = useState(null);
   const [profileFullName, setProfileFullName] = useState("");
+  const [profileEmploymentStatus, setProfileEmploymentStatus] = useState("active");
   const [startupError, setStartupError] = useState("");
   const hasSuccessfulLoginRef = useRef(false);
   const loginClickedRef = useRef(false);
@@ -813,6 +820,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   const employeeDisplayName = (profileFullName || authUser?.email || "").trim();
   const isAdmin = userCompanyRole === "owner" || userCompanyRole === "supervisor";
+  const isProfileArchived = normalizeEmploymentStatus(profileEmploymentStatus) === "archived";
   const companyTimeZone = userCompany?.time_zone || "America/Toronto";
 
   const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
@@ -835,6 +843,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [teamAddDraft, setTeamAddDraft] = useState(() => ({ ...TEAM_ADD_INITIAL_DRAFT }));
   const [teamAddSubmitting, setTeamAddSubmitting] = useState(false);
   const [teamAddError, setTeamAddError] = useState("");
+  const [teamListFilter, setTeamListFilter] = useState("active"); // active | archived | all
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -955,7 +964,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
         const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
         const profilesMap = {};
         if (ids.length > 0) {
-          let { data: profs, error: pErr } = await supabase.from("profiles").select("id, full_name, email, role").in("id", ids);
+          let { data: profs, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email, role, employment_status")
+            .in("id", ids);
           if (pErr) {
             const retry = await supabase.from("profiles").select("id, full_name, role").in("id", ids);
             if (retry.error) throw retry.error;
@@ -970,6 +982,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
           const profileFull = (p.full_name && String(p.full_name).trim()) || "";
           const profileEmailRaw = (p.email && String(p.email).trim()) || "";
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
+          const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
+          const employmentStatus = empRaw === "archived" ? "archived" : "active";
           return {
             memberRowId: m.id,
             userId: m.user_id,
@@ -978,6 +992,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
             fullName: profileFull,
             profileEmailRaw,
             displayName: displayName || shortUserLabel(m.user_id),
+            employmentStatus,
           };
         });
 
@@ -1115,6 +1130,20 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
 
+  const dashboardRowsForAttendance = useMemo(
+    () => dashboardRows.filter((r) => r.employmentStatus !== "archived"),
+    [dashboardRows]
+  );
+
+  const displayedTeamRows = useMemo(() => {
+    const selfRows = teamRows.filter((r) => String(r.userId) === String(authUser?.id));
+    const base = isAdmin ? teamRows : selfRows;
+    if (!isAdmin) return base;
+    if (teamListFilter === "all") return base;
+    if (teamListFilter === "archived") return base.filter((r) => r.employmentStatus === "archived");
+    return base.filter((r) => r.employmentStatus !== "archived");
+  }, [isAdmin, teamRows, authUser?.id, teamListFilter]);
+
   useEffect(() => {
     if (activeTab !== "dashboard" || !isAdmin) return;
     setDashboardClockPick((prev) => {
@@ -1127,13 +1156,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
           []
         : [];
       const defCc = centres[0] || "";
-      for (const r of dashboardRows) {
+      for (const r of dashboardRowsForAttendance) {
         const uid = String(r.userId);
         if (!next[uid]) next[uid] = { projectId: defPid, costCenter: defCc };
       }
       return next;
     });
-  }, [activeTab, isAdmin, dashboardRows, effectiveProjects, effectiveCostCentresByProjectId]);
+  }, [activeTab, isAdmin, dashboardRowsForAttendance, effectiveProjects, effectiveCostCentresByProjectId]);
 
   const selectedProject =
     effectiveProjects.find((project) => String(project.id) === String(projectId)) ||
@@ -1174,7 +1203,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     let totalMinutes = 0;
     let totalCost = 0;
     let missingOut = 0;
-    for (const row of dashboardRows) {
+    for (const row of dashboardRowsForAttendance) {
       const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === String(row.userId));
       const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
       const att = teamAttendanceStatusForRecord(rep, ctx);
@@ -1189,7 +1218,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       }
     }
     return { clockedIn, totalMinutes, totalCost, missingOut };
-  }, [isAdmin, dashboardViewDate, dashboardRows, dashboardDaySheets, companyTimeZone, now, authUser, visibleCurrentShift]);
+  }, [isAdmin, dashboardViewDate, dashboardRowsForAttendance, dashboardDaySheets, companyTimeZone, now, authUser, visibleCurrentShift]);
 
   const activeShiftTitle = useMemo(
     () =>
@@ -1695,13 +1724,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (!user) {
         setAuthRole(null);
         setProfileFullName("");
+        setProfileEmploymentStatus("active");
         return;
       }
       try {
         const { data: profile, error: profileError } = await withTimeout(
           supabase
             .from("profiles")
-            .select("role, full_name, email")
+            .select("role, full_name, email, employment_status")
             .eq("id", user.id)
             .single(),
           12000,
@@ -1717,11 +1747,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         setAuthRole(profile?.role || "employee");
         setProfileFullName(profile?.full_name || "");
+        setProfileEmploymentStatus(normalizeEmploymentStatus(profile?.employment_status));
       } catch (err) {
         console.log("Profile load error:", err);
         setStartupError(`Profile load failed: ${getErrorMessage(err)}`);
         setAuthRole("employee");
         setProfileFullName("");
+        setProfileEmploymentStatus("active");
       }
     };
 
@@ -1751,6 +1783,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           setAuthUser(null);
           setAuthRole(null);
           setProfileFullName("");
+          setProfileEmploymentStatus("active");
           setUserCompany(null);
           setUserCompanyRole(null);
           setCompanyChecked(true);
@@ -1769,6 +1802,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           setAuthUser(null);
           setAuthRole(null);
           setProfileFullName("");
+          setProfileEmploymentStatus("active");
           setUserCompany(null);
           setUserCompanyRole(null);
           setCompanyChecked(true);
@@ -1789,6 +1823,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         setAuthUser(null);
         setAuthRole(null);
         setProfileFullName("");
+        setProfileEmploymentStatus("active");
         setCurrentShift(null);
         setUserCompany(null);
         setUserCompanyRole(null);
@@ -1877,7 +1912,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         const { data: profile, error: profileError } = await supabase
           .from("profiles")
-          .select("role, full_name, email")
+          .select("role, full_name, email, employment_status")
           .eq("id", user.id)
           .single();
 
@@ -1890,6 +1925,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
         setAuthRole(profile?.role || "employee");
         setProfileFullName(profile?.full_name || "");
+        setProfileEmploymentStatus(normalizeEmploymentStatus(profile?.employment_status));
 
         const { data: member, error: memberError } = await supabase
           .from("company_members")
@@ -2140,6 +2176,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     await supabase.auth.signOut();
     setAuthUser(null);
     setAuthRole(null);
+    setProfileEmploymentStatus("active");
     setCurrentShift(null);
     setIsMenuOpen(false);
   };
@@ -2295,6 +2332,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   };
 
 const handleClockIn = async () => {
+  if (isProfileArchived) {
+    setLocationStatus("Your account is archived. Please contact your supervisor.");
+    return;
+  }
+
   setLocationStatus("Clocking in...");
 
   const clockInLocation = null;
@@ -2727,6 +2769,13 @@ const handlePhotoCapture = async (event) => {
 
   const handleDashboardEmployeeClockIn = async (row) => {
     if (!isAdmin || !authUser?.id || !userCompany?.id) return;
+    if (row.employmentStatus === "archived") {
+      setDashboardActionFeedback({
+        type: "error",
+        text: "This employee is archived and cannot be clocked in.",
+      });
+      return;
+    }
     if (!window.confirm("Clock in this employee now?")) return;
     const uid = String(row.userId);
     const rawPick =
@@ -3356,6 +3405,7 @@ const handlePhotoCapture = async (event) => {
       if (!isOwner && String(row.userId) === String(authUser?.id)) {
         setUserCompanyRole(newCompanyRole);
         setAuthRole(newCompanyRole === "supervisor" ? "supervisor" : "employee");
+        setProfileEmploymentStatus(normalizeEmploymentStatus(teamEditDraft.employmentStatus));
       }
 
       setTeamRows((prev) =>
@@ -4102,6 +4152,17 @@ const handlePhotoCapture = async (event) => {
             </div>
           </div>
 
+          {activeTab === "clock" && !visibleCurrentShift && isProfileArchived && (
+            <Card className="rounded-3xl border border-slate-300 bg-slate-100 shadow-sm">
+              <CardContent className="p-4 space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Account archived</p>
+                <p className="text-xs text-slate-700 leading-snug">
+                  Your account is archived. Please contact your supervisor.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "clock" && !isInstalled && (
             <Card className="rounded-3xl border-blue-100 bg-blue-50 shadow-sm">
               <CardContent className="p-3 space-y-2">
@@ -4120,7 +4181,7 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
-          {activeTab === "clock" && !visibleCurrentShift && (
+          {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-2.5 sm:p-4 space-y-2">
                 <div className="flex items-center gap-1.5">
@@ -4210,6 +4271,11 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "clock" && visibleCurrentShift && (
             <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50">
               <CardContent className="p-2.5 flex flex-col gap-2">
+                {isProfileArchived && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
+                    Your account is archived. Please contact your supervisor. You can still clock out this shift.
+                  </div>
+                )}
                 <div className="space-y-0.5">
                   <h2 className="font-bold text-sm sm:text-lg leading-tight">Active Shift</h2>
                   <p className="text-xs sm:text-sm text-slate-700 leading-snug">{activeShiftTitle}</p>
@@ -4599,7 +4665,7 @@ const handlePhotoCapture = async (event) => {
                       </div>
                     </div>
                     <div className="space-y-1.5 pt-1">
-                      {dashboardRows.map((row) => {
+                      {dashboardRowsForAttendance.map((row) => {
                         const rowRoleNorm = normalizeMemberRole(row.role);
                         const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === String(row.userId));
                         const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
@@ -4798,6 +4864,31 @@ const handlePhotoCapture = async (event) => {
                     {isAdmin ? "Company members" : "Your membership"}
                   </p>
                 </div>
+                {isAdmin && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                      {[
+                        { id: "active", label: "Active" },
+                        { id: "archived", label: "Archived" },
+                        { id: "all", label: "All" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                            teamListFilter === opt.id
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                          onClick={() => setTeamListFilter(opt.id)}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="rounded-2xl border bg-slate-50 p-3 space-y-2">
                   <p className="text-[10px] text-slate-500 uppercase tracking-wide">Join code</p>
                   <div className="flex items-center gap-2">
@@ -4983,7 +5074,7 @@ const handlePhotoCapture = async (event) => {
                   </div>
                 )}
                 <div className="space-y-2">
-                  {(isAdmin ? teamRows : teamRows.filter((r) => String(r.userId) === String(authUser?.id))).map((row) => {
+                  {displayedTeamRows.map((row) => {
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
                     const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "—";
@@ -4997,10 +5088,30 @@ const handlePhotoCapture = async (event) => {
                       : "Not set";
                     const empArchived = row.employmentStatus === "archived";
                     return (
-                      <div key={row.memberRowId} className="rounded-xl border border-slate-200 bg-white p-3 space-y-2.5">
+                      <div
+                        key={row.memberRowId}
+                        className={`rounded-xl border p-3 space-y-2.5 ${
+                          empArchived
+                            ? "border-slate-300 bg-slate-50"
+                            : "border-slate-200 bg-white"
+                        }`}
+                      >
                         <div className="flex items-start justify-between gap-2 min-w-0">
                           <div className="min-w-0 flex-1">
-                            <p className="font-semibold text-sm leading-snug text-slate-900 break-words">{row.displayName}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p
+                                className={`font-semibold text-sm leading-snug break-words ${
+                                  empArchived ? "text-slate-600" : "text-slate-900"
+                                }`}
+                              >
+                                {row.displayName}
+                              </p>
+                              {empArchived && !isEditing && (
+                                <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-300/80 text-slate-800 ring-1 ring-slate-400/80">
+                                  Archived
+                                </span>
+                              )}
+                            </div>
                             <p className="mt-1 text-xs text-slate-600">
                               <span className="font-medium text-slate-500">Email: </span>
                               <span className="break-all">{emailLine}</span>
@@ -5140,7 +5251,7 @@ const handlePhotoCapture = async (event) => {
                               <span
                                 className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
                                   empArchived
-                                    ? "bg-slate-100 text-slate-800 ring-slate-200"
+                                    ? "bg-slate-200 text-slate-800 ring-slate-400"
                                     : "bg-green-50 text-green-800 ring-green-100"
                                 }`}
                               >
@@ -5161,9 +5272,23 @@ const handlePhotoCapture = async (event) => {
                     );
                   })}
                 </div>
-                {!teamLoading && !teamError && (isAdmin ? teamRows.length === 0 : !teamRows.some((r) => String(r.userId) === String(authUser?.id))) && (
-                  <p className="text-xs text-slate-500 text-center py-3">No members found.</p>
-                )}
+                {!teamLoading &&
+                  !teamError &&
+                  displayedTeamRows.length === 0 &&
+                  (isAdmin ? teamRows.length === 0 : !teamRows.some((r) => String(r.userId) === String(authUser?.id))) && (
+                    <p className="text-xs text-slate-500 text-center py-3">No members found.</p>
+                  )}
+                {!teamLoading &&
+                  !teamError &&
+                  isAdmin &&
+                  teamRows.length > 0 &&
+                  displayedTeamRows.length === 0 && (
+                    <p className="text-xs text-slate-500 text-center py-3">
+                      {teamListFilter === "all"
+                        ? "No members in this view."
+                        : `No ${teamListFilter === "active" ? "active" : "archived"} members in this view.`}
+                    </p>
+                  )}
               </CardContent>
             </Card>
           )}
