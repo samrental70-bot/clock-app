@@ -634,35 +634,56 @@ async function supabaseUpdateTimesheetRow(supabase, id, partial) {
   return { error, data };
 }
 
-async function upsertLiveLocationRow(supabase, { companyId, employeeId, status, projectName, costCentre, coords }) {
+async function saveLiveLocationRowManual(
+  supabase,
+  { companyId, employeeId, status, projectName, costCentre, coords }
+) {
   if (!companyId || !employeeId) return { error: null };
-  const base = {
-    company_id: companyId,
+  const payload = {
     employee_id: employeeId,
-    status: status || null,
-    project_name: projectName || null,
-    cost_centre: costCentre || null,
-    updated_at: new Date().toISOString(),
+    company_id: companyId,
     latitude: coords?.latitude ?? null,
     longitude: coords?.longitude ?? null,
     accuracy: coords?.accuracy ?? null,
+    updated_at: new Date().toISOString(),
+    status: status || null,
+    project_name: projectName || null,
+    cost_centre: costCentre || null,
   };
 
-  // Select-update/insert to avoid duplicates even without a unique constraint.
+  console.log("[LIVE GPS] payload", payload);
+
+  // Manual select/update/insert (no upsert) to avoid conflicts.
   const { data: existing, error: exErr } = await supabase
     .from("live_locations")
-    .select("id")
-    .eq("company_id", companyId)
+    .select("id, employee_id, company_id, status, updated_at")
     .eq("employee_id", employeeId)
     .maybeSingle();
-  if (exErr) return { error: exErr };
+
+  if (exErr) {
+    console.warn("[LIVE GPS] error", exErr);
+    return { error: exErr };
+  }
+
+  console.log("[LIVE GPS] existing row", existing || null);
 
   if (existing?.id) {
-    const { error } = await supabase.from("live_locations").update(base).eq("id", existing.id);
-    return { error };
+    const { error: uErr } = await supabase.from("live_locations").update(payload).eq("id", existing.id);
+    if (uErr) {
+      console.warn("[LIVE GPS] error", uErr);
+      return { error: uErr };
+    }
+    console.log("[LIVE GPS] update success", { id: existing.id });
+    return { error: null };
   }
-  const { error } = await supabase.from("live_locations").insert(base);
-  return { error };
+
+  const { error: iErr } = await supabase.from("live_locations").insert(payload);
+  if (iErr) {
+    console.warn("[LIVE GPS] error", iErr);
+    return { error: iErr };
+  }
+  console.log("[LIVE GPS] insert success");
+  return { error: null };
 }
 
 function openMap(location) {
@@ -1466,7 +1487,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       if (!authUser?.id || !userCompany?.id) return;
       if (isAdmin) return; // employee-only for now
       if (!coords) return;
-      const { error } = await upsertLiveLocationRow(supabase, {
+      const { error } = await saveLiveLocationRowManual(supabase, {
         companyId: userCompany.id,
         employeeId: authUser.id,
         status,
@@ -1474,7 +1495,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
         costCentre,
         coords,
       });
-      if (error) console.warn("[LIVE_LOCATION] update failed:", error);
+      // Must not break clock-in/out; warn only.
+      if (error) console.warn("[LIVE GPS] error", error);
     },
     [authUser?.id, userCompany?.id, isAdmin]
   );
