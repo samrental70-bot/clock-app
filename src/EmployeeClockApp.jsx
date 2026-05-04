@@ -3491,6 +3491,9 @@ const handlePhotoCapture = async (event) => {
         ? String(row.joiningDate).slice(0, 10)
         : "";
     setTeamEditDraft({
+      fullName: (row.fullName && String(row.fullName).trim()) || "",
+      email: (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "",
+      newPassword: "",
       memberRole:
         rowRoleNorm === "supervisor"
           ? "supervisor"
@@ -3520,6 +3523,36 @@ const handlePhotoCapture = async (event) => {
       return;
     }
 
+    const nameDraft = String(teamEditDraft.fullName || "").trim();
+    const emailDraft = String(teamEditDraft.email || "").trim().toLowerCase();
+    const passwordDraft = String(teamEditDraft.newPassword || "").trim();
+
+    if (!nameDraft) {
+      setTeamEditInlineError("Name is required.");
+      return;
+    }
+    if (!looksLikeEmail(emailDraft)) {
+      setTeamEditInlineError("Enter a valid email.");
+      return;
+    }
+    if (passwordDraft && passwordDraft.length < 6) {
+      setTeamEditInlineError("New password must be at least 6 characters.");
+      return;
+    }
+
+    const origName = (row.fullName && String(row.fullName).trim()) || "";
+    const origEmail = ((row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "").toLowerCase();
+
+    const loginFieldsDirty =
+      nameDraft !== origName || emailDraft !== origEmail || passwordDraft.length > 0;
+
+    const ownerLoginLocked = isOwner && String(authUser?.id) !== String(row.userId);
+
+    if (loginFieldsDirty && ownerLoginLocked) {
+      setTeamEditInlineError("Only the owner can change this account's login email or password.");
+      return;
+    }
+
     setTeamSavingMemberRowId(String(row.memberRowId));
     setTeamEditInlineError("");
     const hourlyNum = parseFloat(String(teamEditDraft.hourlyRate).replace(",", "."));
@@ -3535,6 +3568,39 @@ const handlePhotoCapture = async (event) => {
     }
 
     try {
+      if (loginFieldsDirty && !ownerLoginLocked) {
+        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+        if (sessionErr) throw sessionErr;
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) {
+          throw new Error("Not signed in.");
+        }
+        const apiBody = {
+          company_id: userCompany.id,
+          target_user_id: row.userId,
+          full_name: nameDraft,
+          email: emailDraft,
+        };
+        if (passwordDraft) {
+          apiBody.new_password = passwordDraft;
+        }
+        const res = await fetch("/api/update-employee-login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(apiBody),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(typeof json.error === "string" ? json.error : "Could not update login details.");
+        }
+        if (String(row.userId) === String(authUser?.id)) {
+          setProfileFullName(nameDraft);
+        }
+      }
+
       if (!isOwner && newCompanyRole !== normalizeMemberRole(row.role)) {
         const { error: mErr } = await supabase
           .from("company_members")
@@ -3546,6 +3612,8 @@ const handlePhotoCapture = async (event) => {
       }
 
       const profilePayload = {
+        full_name: nameDraft,
+        email: emailDraft,
         hourly_rate,
         pay_rate_effective_date: pay_date,
         joining_date: join_date,
@@ -3569,12 +3637,20 @@ const handlePhotoCapture = async (event) => {
         setProfileEmploymentStatus(normalizeEmploymentStatus(teamEditDraft.employmentStatus));
       }
 
+      const newDisplay =
+        nameDraft || emailDraft
+          ? nameDraft || emailDraft.split("@")[0] || shortUserLabel(row.userId)
+          : row.displayName;
+
       setTeamRows((prev) =>
         prev.map((r) =>
           String(r.memberRowId) === String(row.memberRowId)
             ? {
                 ...r,
                 role: !isOwner ? newCompanyRole : r.role,
+                fullName: nameDraft,
+                profileEmailRaw: emailDraft,
+                displayName: newDisplay || r.displayName,
                 hourlyRate: hourly_rate,
                 payRateEffectiveDate: pay_date,
                 joiningDate: join_date,
@@ -3583,7 +3659,11 @@ const handlePhotoCapture = async (event) => {
             : r
         )
       );
-      setTeamRoleFeedback({ type: "success", text: "Member saved." });
+      setTeamRefreshKey((k) => k + 1);
+      setTeamRoleFeedback({
+        type: "success",
+        text: loginFieldsDirty ? "Member saved (including login details)." : "Member saved.",
+      });
       cancelTeamMemberEdit();
     } catch (err) {
       setTeamEditInlineError(getErrorMessage(err));
@@ -5277,6 +5357,8 @@ const handlePhotoCapture = async (event) => {
                       : "Not set";
                     const joinDisp = row.joiningDate ? String(row.joiningDate).slice(0, 10) : "Not set";
                     const empArchived = row.employmentStatus === "archived";
+                    const ownerLoginLocked =
+                      isOwnerMember && String(authUser?.id) !== String(row.userId);
                     return (
                       <div
                         key={row.memberRowId}
@@ -5324,6 +5406,70 @@ const handlePhotoCapture = async (event) => {
                               <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
                                 {teamEditInlineError}
                               </div>
+                            )}
+                            <div className="space-y-1">
+                              <label
+                                className="block text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-name-${row.memberRowId}`}
+                              >
+                                Name
+                              </label>
+                              <input
+                                id={`team-name-${row.memberRowId}`}
+                                type="text"
+                                autoComplete="name"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.fullName}
+                                disabled={Boolean(teamSavingMemberRowId) || ownerLoginLocked}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, fullName: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                className="block text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-email-${row.memberRowId}`}
+                              >
+                                Email
+                              </label>
+                              <input
+                                id={`team-email-${row.memberRowId}`}
+                                type="email"
+                                autoComplete="email"
+                                inputMode="email"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.email}
+                                disabled={Boolean(teamSavingMemberRowId) || ownerLoginLocked}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, email: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                className="block text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-pass-${row.memberRowId}`}
+                              >
+                                New password <span className="font-normal text-slate-500">(optional)</span>
+                              </label>
+                              <input
+                                id={`team-pass-${row.memberRowId}`}
+                                type="password"
+                                autoComplete="new-password"
+                                placeholder="Leave blank to keep current"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.newPassword}
+                                disabled={Boolean(teamSavingMemberRowId) || ownerLoginLocked}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, newPassword: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            {ownerLoginLocked && (
+                              <p className="text-[10px] text-slate-500 leading-snug">
+                                Only the owner can change this account&apos;s name, email, or password.
+                              </p>
                             )}
                             <div className="space-y-1.5">
                               <label className="block text-[11px] font-medium text-slate-600">Role</label>
