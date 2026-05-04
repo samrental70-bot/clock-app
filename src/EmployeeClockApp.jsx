@@ -1153,8 +1153,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
   const [reportsGroupBy, setReportsGroupBy] = useState("employee");
+  const [reportsSplitBy, setReportsSplitBy] = useState("none"); // none | employee | project | cost_center
   const [reportsCostCentreAll, setReportsCostCentreAll] = useState(true);
   const [reportsCostCentrePicked, setReportsCostCentrePicked] = useState([]);
+  const [reportsExpandedGroups, setReportsExpandedGroups] = useState({});
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -1813,6 +1815,95 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const allowed = new Set(reportsCostCentrePicked.map((x) => String(x).trim()));
     return reportsScreenRows.filter((r) => allowed.has(reportsCostCentreKeyFromRow(r)));
   }, [reportsScreenRows, reportsCostCentreAll, reportsCostCentrePicked]);
+
+  const reportsGroupedView = useMemo(() => {
+    if (!isAdmin || activeTab !== "reports") {
+      return { mode: "flat", rows: [], splitBy: "none" };
+    }
+
+    const split = reportsSplitBy || "none";
+    const group = reportsGroupBy || "employee";
+    const effectiveSplit = split === group ? "none" : split;
+
+    const rows = reportsRowsFilteredForUi || [];
+
+    const getEmployee = (r) => {
+      const uid = String(r?.userId ?? r?.employeeId ?? "");
+      const name = resolveTimesheetEmployeeTitle(r, { profileFullName, authUser, teamProfileFullNameByUserId });
+      return { key: uid || name || "employee", label: name || "Employee" };
+    };
+    const getProject = (r) => {
+      const label = (r?.project && String(r.project).trim()) || "Unassigned";
+      const pid = r?.projectId != null ? String(r.projectId) : "";
+      const key = pid ? `id:${pid}` : `n:${label}`;
+      return { key, label };
+    };
+    const getCostCentre = (r) => {
+      const cc = reportsCostCentreKeyFromRow(r);
+      return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
+    };
+    const getDim = (dim, r) => {
+      if (dim === "employee") return getEmployee(r);
+      if (dim === "project") return getProject(r);
+      if (dim === "cost_center") return getCostCentre(r);
+      return { key: "all", label: "—" };
+    };
+
+    if (effectiveSplit === "none") {
+      // Defer to precomputed flat aggregates for rendering.
+      return { mode: "flat", splitBy: "none", groupBy: group };
+    }
+
+    const mainMap = {};
+    for (const r of rows) {
+      const main = getDim(group, r);
+      const sub = getDim(effectiveSplit, r);
+      const wm = getWorkedMinutes(r);
+      const lc = getLabourCost(r);
+
+      if (!mainMap[main.key]) {
+        mainMap[main.key] = {
+          key: main.key,
+          label: main.label,
+          minutes: 0,
+          cost: 0,
+          shifts: 0,
+          children: {},
+        };
+      }
+      const m = mainMap[main.key];
+      m.minutes += wm;
+      m.cost += lc;
+      m.shifts += 1;
+
+      if (!m.children[sub.key]) {
+        m.children[sub.key] = { key: sub.key, label: sub.label, minutes: 0, cost: 0, shifts: 0 };
+      }
+      m.children[sub.key].minutes += wm;
+      m.children[sub.key].cost += lc;
+      m.children[sub.key].shifts += 1;
+    }
+
+    const mainRows = Object.values(mainMap)
+      .map((m) => ({
+        ...m,
+        children: Object.values(m.children).sort((a, b) => String(a.label).localeCompare(String(b.label))),
+      }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+
+    return { mode: "split", splitBy: effectiveSplit, groupBy: group, rows: mainRows };
+  }, [
+    isAdmin,
+    activeTab,
+    reportsSplitBy,
+    reportsGroupBy,
+    reportsRowsFilteredForUi,
+    getWorkedMinutes,
+    getLabourCost,
+    profileFullName,
+    authUser,
+    teamProfileFullNameByUserId,
+  ]);
 
   const reportsAggregates = useMemo(() => {
     if (!isAdmin || activeTab !== "reports") {
@@ -6643,14 +6734,14 @@ const handlePhotoCapture = async (event) => {
 
           {activeTab === "reports" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 sm:p-5 space-y-4">
+              <CardContent className="p-4 sm:p-5 space-y-5">
                 <div>
                   <h2 className="font-bold text-lg">Reports</h2>
                   <p className="text-[10px] text-slate-400 mt-0.5">Read-only · Times: {companyTimeZone}</p>
                 </div>
                 <div className="space-y-1.5">
-                  <p className="text-[11px] font-medium text-slate-600">Quick range</p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <p className="text-xs font-semibold text-slate-700">Quick range</p>
+                  <div className="flex flex-wrap gap-2">
                     {[
                       { id: "weekly", label: "Weekly" },
                       { id: "monthly", label: "Monthly" },
@@ -6660,10 +6751,10 @@ const handlePhotoCapture = async (event) => {
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-full px-3 py-1.5 text-xs font-semibold border transition-colors ${
+                        className={`rounded-full px-3.5 py-2 text-sm font-semibold border transition-colors leading-none ${
                           reportsRangePreset === p.id
                             ? "bg-slate-900 text-white border-slate-900"
-                            : "bg-white text-slate-700 border-slate-200 active:bg-slate-50"
+                            : "bg-white text-slate-800 border-slate-200 active:bg-slate-50"
                         }`}
                         onClick={() => {
                           const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
@@ -6685,10 +6776,29 @@ const handlePhotoCapture = async (event) => {
                     <select
                       className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
                       value={reportsGroupBy}
-                      onChange={(e) => setReportsGroupBy(e.target.value)}
+                      onChange={(e) => {
+                        setReportsGroupBy(e.target.value);
+                        setReportsExpandedGroups({});
+                      }}
                     >
                       <option value="employee">Employee</option>
                       <option value="project">Project</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs font-medium text-slate-700">
+                    Split by
+                    <select
+                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
+                      value={reportsSplitBy}
+                      onChange={(e) => {
+                        setReportsSplitBy(e.target.value);
+                        setReportsExpandedGroups({});
+                      }}
+                    >
+                      <option value="none">None</option>
+                      <option value="employee">Employee</option>
+                      <option value="project">Project</option>
+                      <option value="cost_center">Cost Centre</option>
                     </select>
                   </label>
                   <div className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
@@ -6713,6 +6823,7 @@ const handlePhotoCapture = async (event) => {
                             onChange={(e) => {
                               const on = e.target.checked;
                               setReportsCostCentreAll(on);
+                              setReportsExpandedGroups({});
                               if (on) {
                                 setReportsCostCentrePicked([]);
                               } else {
@@ -6739,6 +6850,7 @@ const handlePhotoCapture = async (event) => {
                                     checked={reportsCostCentrePicked.includes(cc)}
                                     onChange={(ev) => {
                                       const checked = ev.target.checked;
+                                      setReportsExpandedGroups({});
                                       setReportsCostCentrePicked((prev) => {
                                         if (checked) return [...new Set([...prev, cc])];
                                         return prev.filter((x) => x !== cc);
@@ -6765,6 +6877,7 @@ const handlePhotoCapture = async (event) => {
                       onChange={(e) => {
                         setReportsDateFrom(e.target.value);
                         setReportsRangePreset(null);
+                        setReportsExpandedGroups({});
                       }}
                     />
                   </label>
@@ -6777,6 +6890,7 @@ const handlePhotoCapture = async (event) => {
                       onChange={(e) => {
                         setReportsDateTo(e.target.value);
                         setReportsRangePreset(null);
+                        setReportsExpandedGroups({});
                       }}
                     />
                   </label>
@@ -6796,90 +6910,150 @@ const handlePhotoCapture = async (event) => {
                     <div className="grid grid-cols-2 gap-2">
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total hours</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">
+                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">
                           {formatDuration(reportsAggregates.totalMinutes)}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Labour cost</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">
+                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">
                           {formatMoney(reportsAggregates.totalCost)}
                         </p>
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Shifts</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">{reportsAggregates.totalShifts}</p>
+                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">{reportsAggregates.totalShifts}</p>
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Missing clock-out</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">{reportsAggregates.missingOut}</p>
+                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">{reportsAggregates.missingOut}</p>
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <h3 className="text-sm font-semibold text-slate-900">
-                        {reportsGroupBy === "employee" ? "By employee" : "By project"}
+                      <h3 className="text-base font-bold text-slate-950 leading-snug">
+                        {reportsGroupBy === "employee" ? "Employees" : "Projects"}
+                        {reportsSplitBy !== "none" && reportsSplitBy !== reportsGroupBy ? (
+                          <span className="text-sm font-semibold text-slate-600">
+                            {" "}
+                            · Split by{" "}
+                            {reportsSplitBy === "cost_center"
+                              ? "Cost Centre"
+                              : reportsSplitBy === "employee"
+                                ? "Employee"
+                                : "Project"}
+                          </span>
+                        ) : null}
                       </h3>
-                      {reportsGroupBy === "employee" ? (
-                        reportsAggregates.byEmployee.length === 0 ? (
-                          <p className="text-xs text-slate-500 py-1 leading-snug">
-                            {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0
-                              ? "No timesheets match the selected cost centres."
-                              : "No timesheets in this range."}
-                          </p>
+
+                      {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0 ? (
+                        <p className="text-sm text-slate-600 py-1 leading-snug">
+                          No timesheets match the selected cost centres.
+                        </p>
+                      ) : reportsGroupedView.mode === "split" ? (
+                        reportsGroupedView.rows.length === 0 ? (
+                          <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
                         ) : (
-                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                            {reportsAggregates.byEmployee.map((row) => (
-                              <div
-                                key={row.key || row.name}
-                                className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-xs"
-                              >
-                                <p className="font-semibold text-slate-900 min-w-0 break-words flex-1 basis-[8rem]">{row.name}</p>
-                                <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 tabular-nums">
-                                  <span>
-                                    <span className="text-slate-500">Hours </span>
-                                    <span className="font-semibold text-slate-900">{formatDuration(row.minutes)}</span>
-                                  </span>
-                                  <span>
-                                    <span className="text-slate-500">Labour </span>
-                                    <span className="font-semibold text-slate-900">{formatMoney(row.cost)}</span>
-                                  </span>
-                                  <span>
-                                    <span className="text-slate-500">Shifts </span>
-                                    <span className="font-semibold text-slate-900">{row.shifts}</span>
-                                  </span>
+                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
+                            {reportsGroupedView.rows.map((m) => {
+                              const expanded = Boolean(reportsExpandedGroups[m.key]);
+                              return (
+                                <div key={m.key} className="px-3 py-3 space-y-2">
+                                  <button
+                                    type="button"
+                                    className="w-full text-left flex items-start justify-between gap-3"
+                                    onClick={() =>
+                                      setReportsExpandedGroups((prev) => ({
+                                        ...prev,
+                                        [m.key]: !prev[m.key],
+                                      }))
+                                    }
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-sm font-bold text-slate-950 leading-snug break-words">
+                                        <span className="mr-1.5 inline-block w-4 text-slate-400" aria-hidden>
+                                          {expanded ? "▾" : "▸"}
+                                        </span>
+                                        {m.label}
+                                      </p>
+                                      <p className="text-xs text-slate-600 leading-snug mt-0.5">
+                                        Shifts <span className="font-semibold text-slate-900 tabular-nums">{m.shifts}</span>
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 text-right">
+                                      <p className="text-sm font-bold text-slate-950 tabular-nums leading-snug">
+                                        {formatDuration(m.minutes)}
+                                      </p>
+                                      <p className="text-sm font-semibold text-slate-900 tabular-nums leading-snug">
+                                        {formatMoney(m.cost)}
+                                      </p>
+                                    </div>
+                                  </button>
+
+                                  {expanded && (
+                                    <div className="pl-4 border-l border-slate-100 space-y-1.5">
+                                      {m.children.map((c) => (
+                                        <div key={c.key} className="flex items-start justify-between gap-3 py-1">
+                                          <p className="min-w-0 flex-1 text-[13px] font-semibold text-slate-900 leading-snug break-words">
+                                            {c.label}
+                                          </p>
+                                          <div className="shrink-0 text-right tabular-nums">
+                                            <p className="text-[13px] font-semibold text-slate-900 leading-snug">
+                                              {formatDuration(c.minutes)}
+                                            </p>
+                                            <p className="text-[13px] font-medium text-slate-800 leading-snug">
+                                              {formatMoney(c.cost)}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
+                              );
+                            })}
+                          </div>
+                        )
+                      ) : reportsGroupBy === "employee" ? (
+                        reportsAggregates.byEmployee.length === 0 ? (
+                          <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
+                        ) : (
+                          <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
+                            {reportsAggregates.byEmployee.map((row) => (
+                              <div key={row.key || row.name} className="px-3 py-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <p className="text-sm font-bold text-slate-950 leading-snug min-w-0 break-words flex-1">
+                                    {row.name}
+                                  </p>
+                                  <div className="shrink-0 text-right tabular-nums">
+                                    <p className="text-sm font-bold text-slate-950 leading-snug">{formatDuration(row.minutes)}</p>
+                                    <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-slate-600 leading-snug mt-0.5">
+                                  Shifts <span className="font-semibold text-slate-900 tabular-nums">{row.shifts}</span>
+                                </p>
                               </div>
                             ))}
                           </div>
                         )
                       ) : reportsAggregates.byProject.length === 0 ? (
-                        <p className="text-xs text-slate-500 py-1 leading-snug">
-                          {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0
-                            ? "No timesheets match the selected cost centres."
-                            : "No timesheets in this range."}
-                        </p>
+                        <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
                       ) : (
-                        <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
+                        <div className="rounded-2xl border border-slate-200 overflow-hidden divide-y divide-slate-100 bg-white">
                           {reportsAggregates.byProject.map((row) => (
-                            <div
-                              key={row.key}
-                              className="flex flex-wrap items-baseline justify-between gap-2 px-3 py-2.5 text-xs"
-                            >
-                              <p className="font-semibold text-slate-900 min-w-0 break-words flex-1 basis-[8rem]">{row.project}</p>
-                              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-700 tabular-nums">
-                                <span>
-                                  <span className="text-slate-500">Hours </span>
-                                  <span className="font-semibold text-slate-900">{formatDuration(row.minutes)}</span>
-                                </span>
-                                <span>
-                                  <span className="text-slate-500">Labour </span>
-                                  <span className="font-semibold text-slate-900">{formatMoney(row.cost)}</span>
-                                </span>
-                                <span>
-                                  <span className="text-slate-500">Shifts </span>
-                                  <span className="font-semibold text-slate-900">{row.shifts}</span>
-                                </span>
+                            <div key={row.key} className="px-3 py-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <p className="text-sm font-bold text-slate-950 leading-snug min-w-0 break-words flex-1">
+                                  {row.project}
+                                </p>
+                                <div className="shrink-0 text-right tabular-nums">
+                                  <p className="text-sm font-bold text-slate-950 leading-snug">{formatDuration(row.minutes)}</p>
+                                  <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
+                                </div>
                               </div>
+                              <p className="text-xs text-slate-600 leading-snug mt-0.5">
+                                Shifts <span className="font-semibold text-slate-900 tabular-nums">{row.shifts}</span>
+                              </p>
                             </div>
                           ))}
                         </div>
