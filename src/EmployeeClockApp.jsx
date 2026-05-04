@@ -1229,6 +1229,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [addProjectLoading, setAddProjectLoading] = useState(false);
   const [addProjectError, setAddProjectError] = useState("");
 
+  /** Read-only Projects tab: fetched only when tab is active (not clock onboarding lists). */
+  const [projectsScreenRows, setProjectsScreenRows] = useState([]);
+  const [projectsScreenLoading, setProjectsScreenLoading] = useState(false);
+  const [projectsScreenError, setProjectsScreenError] = useState("");
+
   const fallbackProjects = useMemo(() => adminProjects.map((p) => ({ id: p.id, name: p.name })), []);
   const effectiveProjects = useMemo(() => {
     if (useProjectFallback) return fallbackProjects;
@@ -1447,6 +1452,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   useEffect(() => {
     if (!isAdmin && activeTab === "dashboard") setActiveTab("clock");
+  }, [isAdmin, activeTab]);
+
+  useEffect(() => {
+    if (!isAdmin && activeTab === "projects") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
@@ -1710,6 +1719,72 @@ const [uploadProgress, setUploadProgress] = useState(null);
       cancelled = true;
     };
   }, [userCompany?.id, authUser?.id]);
+
+  useEffect(() => {
+    if (activeTab !== "projects" || !isAdmin || !userCompany?.id) return;
+
+    let cancelled = false;
+
+    (async () => {
+      setProjectsScreenLoading(true);
+      setProjectsScreenError("");
+      try {
+        const { data: projects, error: projectsErr } = await supabase
+          .from("projects")
+          .select("id, name, status")
+          .eq("company_id", userCompany.id)
+          .order("name", { ascending: true });
+
+        if (projectsErr) throw projectsErr;
+
+        const projectList = Array.isArray(projects) ? projects : [];
+        if (projectList.length === 0) {
+          if (!cancelled) setProjectsScreenRows([]);
+          return;
+        }
+
+        const projectIds = projectList.map((p) => p.id);
+        const { data: centres, error: centresErr } = await supabase
+          .from("cost_centres")
+          .select("id, name, project_id, status")
+          .in("project_id", projectIds)
+          .order("name", { ascending: true });
+
+        if (centresErr) throw centresErr;
+
+        const byProjectId = {};
+        for (const c of Array.isArray(centres) ? centres : []) {
+          const pid = String(c.project_id);
+          if (!byProjectId[pid]) byProjectId[pid] = [];
+          byProjectId[pid].push({
+            id: c.id,
+            name: c.name,
+            status: c.status,
+          });
+        }
+
+        const rows = projectList.map((p) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status,
+          costCentres: byProjectId[String(p.id)] || [],
+        }));
+
+        if (!cancelled) setProjectsScreenRows(rows);
+      } catch (err) {
+        if (!cancelled) {
+          setProjectsScreenError(getErrorMessage(err));
+          setProjectsScreenRows([]);
+        }
+      } finally {
+        if (!cancelled) setProjectsScreenLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, userCompany?.id]);
 
   useEffect(() => {
     // When projects load/switch, ensure we have a valid project + cost centre selected.
@@ -5108,6 +5183,77 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "projects" && isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 sm:p-5 space-y-3">
+                <div>
+                  <h2 className="font-bold text-lg">Projects</h2>
+                  <p className="text-xs text-slate-500">Company projects and cost centres (read-only)</p>
+                </div>
+                {projectsScreenLoading && (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                    Loading projects…
+                  </div>
+                )}
+                {projectsScreenError && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900 leading-snug">
+                    {projectsScreenError}
+                  </div>
+                )}
+                {!projectsScreenLoading && !projectsScreenError && projectsScreenRows.length === 0 && (
+                  <p className="text-xs text-slate-500 text-center py-4">No projects for this company yet.</p>
+                )}
+                {!projectsScreenLoading && !projectsScreenError && projectsScreenRows.length > 0 && (
+                  <div className="space-y-2.5">
+                    {projectsScreenRows.map((proj) => (
+                      <div
+                        key={proj.id}
+                        className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
+                          <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words min-w-0 flex-1">
+                            {proj.name}
+                          </h3>
+                          <span className="shrink-0 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-800 ring-1 ring-slate-200/80 capitalize">
+                            {proj.status != null && String(proj.status).trim() !== ""
+                              ? String(proj.status).replace(/_/g, " ")
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className="border-t border-slate-100 pt-2 space-y-1">
+                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                            Cost centres
+                          </p>
+                          {proj.costCentres.length === 0 ? (
+                            <p className="text-xs text-slate-500">None</p>
+                          ) : (
+                            <ul className="space-y-1.5">
+                              {proj.costCentres.map((cc) => (
+                                <li
+                                  key={cc.id}
+                                  className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs text-slate-800"
+                                >
+                                  <span className="font-medium break-words min-w-0">{cc.name}</span>
+                                  {cc.status != null &&
+                                    String(cc.status).trim() !== "" &&
+                                    String(cc.status).toLowerCase() !== "active" && (
+                                      <span className="shrink-0 text-[10px] text-slate-500 capitalize">
+                                        {String(cc.status).replace(/_/g, " ")}
+                                      </span>
+                                    )}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "team" && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
@@ -5760,6 +5906,15 @@ const handlePhotoCapture = async (event) => {
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("team")}>👥 Team</button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                    onClick={() => openMenuTab("projects")}
+                  >
+                    📁 Projects
+                  </button>
+                )}
                 <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-semibold" onClick={handleLogout}>🚪 Logout</button>
                 {isAdmin && <><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("quotations")}>📝 Quotations</button><button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("reports")}>📊 Reports</button></>}
               </div>
