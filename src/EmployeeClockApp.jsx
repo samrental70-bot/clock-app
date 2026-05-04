@@ -72,6 +72,14 @@ const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
 
+/** Single canonical role from company_members / local state. Unknown → employee (safe). admin → owner. */
+function normalizeCompanyMemberRole(role) {
+  const r = normalizeMemberRole(role);
+  if (r === "owner" || r === "admin") return "owner";
+  if (r === "supervisor") return "supervisor";
+  return "employee";
+}
+
 /** profiles.employment_status → "active" | "archived" */
 function normalizeEmploymentStatus(raw) {
   const s = raw != null ? String(raw).trim().toLowerCase() : "active";
@@ -1103,9 +1111,35 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [companyChecked, setCompanyChecked] = useState(false);
 
   const employeeDisplayName = (profileFullName || authUser?.email || "").trim();
-  const isAdmin = userCompanyRole === "owner" || userCompanyRole === "supervisor";
+  const resolvedCompanyRole = useMemo(() => normalizeCompanyMemberRole(userCompanyRole), [userCompanyRole]);
+  const isOwner = resolvedCompanyRole === "owner";
+  const isSupervisor = resolvedCompanyRole === "supervisor";
+  const isEmployeeRole = resolvedCompanyRole === "employee";
+  const isAdmin = isOwner || isSupervisor;
   const isProfileArchived = normalizeEmploymentStatus(profileEmploymentStatus) === "archived";
   const companyTimeZone = userCompany?.time_zone || "America/Toronto";
+
+  const scopedProjectPhotos = useMemo(() => {
+    if (!isEmployeeRole || !authUser?.id) return projectPhotos;
+    const uid = String(authUser.id);
+    const out = {};
+    for (const [folder, photos] of Object.entries(projectPhotos || {})) {
+      const filtered = (photos || []).filter((p) => String(p.employeeId) === uid);
+      if (filtered.length > 0) out[folder] = filtered;
+    }
+    return out;
+  }, [isEmployeeRole, authUser?.id, projectPhotos]);
+
+  const scopedProjectReceipts = useMemo(() => {
+    if (!isEmployeeRole || !authUser?.id) return projectReceipts;
+    const uid = String(authUser.id);
+    const out = {};
+    for (const [folder, receipts] of Object.entries(projectReceipts || {})) {
+      const filtered = (receipts || []).filter((r) => String(r.employeeId) === uid);
+      if (filtered.length > 0) out[folder] = filtered;
+    }
+    return out;
+  }, [isEmployeeRole, authUser?.id, projectReceipts]);
 
   const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
   const [closingShiftId, setClosingShiftId] = useState(null);
@@ -1248,7 +1282,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [isAdmin, activeTab, userCompany?.id, reportsDateFrom, reportsDateTo, companyTimeZone]);
 
   useEffect(() => {
-    if (activeTab !== "team" || !userCompany?.id || !authUser?.id) return;
+    if (activeTab !== "team" || !isAdmin || !userCompany?.id || !authUser?.id) return;
     let cancelled = false;
     setTeamLoading(true);
     setTeamError("");
@@ -1334,7 +1368,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, userCompany?.id, authUser?.id, teamRefreshKey]);
+  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, teamRefreshKey]);
 
   useEffect(() => {
     setTeamEditingMemberRowId(null);
@@ -1540,7 +1574,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         .eq("company_id", userCompany.id)
         .order("clock_in", { ascending: false });
 
-      if (userCompanyRole === "employee") {
+      if (isEmployeeRole) {
         query = query.eq("user_id", authUser.id);
       }
 
@@ -1566,7 +1600,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     } finally {
       setTimesheetsLoading(false);
     }
-  }, [authUser?.id, userCompany?.id, userCompanyRole]);
+  }, [authUser?.id, userCompany?.id, userCompanyRole, isEmployeeRole]);
 
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -2148,6 +2182,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
+    if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
+  }, [isEmployeeRole, activeTab]);
+
+  useEffect(() => {
     notifPollBootstrappedRef.current = false;
     notifLastUnreadIdsRef.current = new Set();
     systemNotifShownIdsRef.current = new Set();
@@ -2207,7 +2245,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const payload = {
       companyId: cid,
       actorUserId: uid,
-      actorRole: userCompanyRole,
+      actorRole: resolvedCompanyRole,
       actorName,
       projectId: vs.projectId,
       projectName: vs.project,
@@ -2242,7 +2280,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       r.timer = null;
       if (p && c > 0) void sendPhotoBatchNotifications(supabase, p, c);
     }, 45000);
-  }, [authUser, userCompany, userCompanyRole, visibleCurrentShift, profileFullName]);
+  }, [authUser, userCompany, resolvedCompanyRole, visibleCurrentShift, profileFullName]);
 
   const canEditTimesheetRecord = (record) => {
     const st = normalizeStatus(record.status);
@@ -2319,12 +2357,12 @@ const [uploadProgress, setUploadProgress] = useState(null);
     }, {})
   );
 
-  const photoFolders = Object.keys(projectPhotos);
+  const photoFolders = Object.keys(scopedProjectPhotos);
   const visiblePhotoFolders = selectedPhotoFolder === "all" ? photoFolders : photoFolders.filter((folder) => folder === selectedPhotoFolder);
-  const receiptFolders = Object.keys(projectReceipts);
+  const receiptFolders = Object.keys(scopedProjectReceipts);
   const visibleReceiptFolders = selectedReceiptFolder === "all" ? receiptFolders : receiptFolders.filter((folder) => folder === selectedReceiptFolder);
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
-    return total + (projectReceipts[folder] || []).reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+    return total + (scopedProjectReceipts[folder] || []).reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
   }, 0);
 
   useEffect(() => {
@@ -2745,7 +2783,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (companyError) throw companyError;
 
         setUserCompany(company || null);
-        setUserCompanyRole(member.role || null);
+        setUserCompanyRole(normalizeCompanyMemberRole(member.role));
         if (!background) setCompanyChecked(true);
       } catch (err) {
         if (background) {
@@ -2986,7 +3024,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
           if (companyError) throw companyError;
 
           setUserCompany(company || null);
-          setUserCompanyRole(member.role || null);
+          setUserCompanyRole(normalizeCompanyMemberRole(member.role));
           console.log("COMPANY CHECK RESULT:", { hasCompany: true, companyId: company?.id, role: member.role });
           setAuthStep("login"); // proceed into main app
         } else {
@@ -3984,9 +4022,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
         void createCompanyNotifications(supabase, {
           companyId: userCompany?.id,
           actorUserId: authUser.id,
-          actorRole: userCompanyRole,
+          actorRole: resolvedCompanyRole,
           type: "clock_in",
-          title: clockInTitleForActorRole(userCompanyRole),
+          title: clockInTitleForActorRole(resolvedCompanyRole),
           message: `${actorLabel} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
           projectId: clockSelectedProject.id,
           projectName: clockSelectedProject.name,
@@ -4022,9 +4060,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
     void createCompanyNotifications(supabase, {
       companyId: userCompany?.id,
       actorUserId: authUser.id,
-      actorRole: userCompanyRole,
+      actorRole: resolvedCompanyRole,
       type: "clock_in",
-      title: clockInTitleForActorRole(userCompanyRole),
+      title: clockInTitleForActorRole(resolvedCompanyRole),
       message: `${actorLabelMain} clocked in at ${clockSelectedProject.name} - ${costCenter}`,
       projectId: clockSelectedProject.id,
       projectName: clockSelectedProject.name,
@@ -4255,7 +4293,7 @@ const handlePhotoCapture = async (event) => {
         void createCompanyNotifications(supabase, {
           companyId: userCompany.id,
           actorUserId: authUser.id,
-          actorRole: userCompanyRole,
+          actorRole: resolvedCompanyRole,
           type: "receipt_uploaded",
           title: "Receipt uploaded",
           message: `${actorLabel} uploaded a receipt for ${visibleCurrentShift.project} - ${visibleCurrentShift.costCenter}`,
@@ -4327,9 +4365,9 @@ const handlePhotoCapture = async (event) => {
         void createCompanyNotifications(supabase, {
           companyId: userCompany.id,
           actorUserId: authUser.id,
-          actorRole: userCompanyRole,
+          actorRole: resolvedCompanyRole,
           type: "clock_out",
-          title: clockOutTitleForActorRole(userCompanyRole),
+          title: clockOutTitleForActorRole(resolvedCompanyRole),
           message: `${actorLabel} clocked out from ${visibleCurrentShift.project} - ${visibleCurrentShift.costCenter}`,
           projectId: visibleCurrentShift.projectId,
           projectName: visibleCurrentShift.project,
@@ -4678,6 +4716,12 @@ const handlePhotoCapture = async (event) => {
   };
 
   const openMenuTab = (tabName) => {
+    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings"]);
+    if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
+      setIsMenuOpen(false);
+      setActiveTab("clock");
+      return;
+    }
     setActiveTab(tabName);
     if (tabName === "photos") setPhotoNotificationCount(0);
     setIsMenuOpen(false);
@@ -5112,7 +5156,7 @@ const handlePhotoCapture = async (event) => {
       }
 
       if (!isOwner && String(row.userId) === String(authUser?.id)) {
-        setUserCompanyRole(newCompanyRole);
+        setUserCompanyRole(normalizeCompanyMemberRole(newCompanyRole));
         setAuthRole(newCompanyRole === "supervisor" ? "supervisor" : "employee");
         setProfileEmploymentStatus(normalizeEmploymentStatus(teamEditDraft.employmentStatus));
       }
@@ -5206,9 +5250,9 @@ const handlePhotoCapture = async (event) => {
         void createCompanyNotifications(supabase, {
           companyId: userCompany.id,
           actorUserId: authUser.id,
-          actorRole: userCompanyRole,
+          actorRole: resolvedCompanyRole,
           type: "clock_out",
-          title: clockOutTitleForActorRole(userCompanyRole),
+          title: clockOutTitleForActorRole(resolvedCompanyRole),
           message: `${empLabel} clocked out from ${record.project} - ${record.costCenter}`,
           projectId: record.projectId,
           projectName: record.project,
@@ -5886,7 +5930,7 @@ const handlePhotoCapture = async (event) => {
                 </p>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Logged in as: {employeeDisplayName || authUser.email}</p>
                 <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Company: {userCompany?.name || "—"}</p>
-                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {userCompanyRole || authRole || "employee"}</p>
+                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {resolvedCompanyRole || authRole || "employee"}</p>
                 <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
@@ -6261,11 +6305,11 @@ const handlePhotoCapture = async (event) => {
                   {visiblePhotoFolders.map((folder) => (
                     <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{(projectPhotos[folder] || []).length} photos</p></div>
+                        <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{(scopedProjectPhotos[folder] || []).length} photos</p></div>
                         <Button className="rounded-xl h-10 text-xs" onClick={() => shareProjectFolder(folder)}>Share Link</Button>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        {(projectPhotos[folder] || []).map((photo) => (
+                        {(scopedProjectPhotos[folder] || []).map((photo) => (
                           <div key={photo.id} className="rounded-xl overflow-hidden border bg-slate-50">
                             <img src={photo.imageUrl || photo.dataUrl} alt="Project" className="w-full h-28 object-cover" />
                             <div className="p-2 text-[10px] text-slate-600">
@@ -6298,7 +6342,7 @@ const handlePhotoCapture = async (event) => {
                 )}
                 <div className="space-y-4">
                   {visibleReceiptFolders.map((folder) => {
-                    const folderReceipts = projectReceipts[folder] || [];
+                    const folderReceipts = scopedProjectReceipts[folder] || [];
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
                       <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
@@ -7782,14 +7826,24 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
-          {activeTab === "team" && (
+          {activeTab === "team" && !isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-5 space-y-3">
+                <h2 className="font-bold text-lg">Access restricted</h2>
+                <p className="text-sm text-slate-600">You do not have access to the team screen.</p>
+                <Button type="button" className="w-full rounded-2xl h-11 text-sm font-semibold" onClick={() => setActiveTab("clock")}>
+                  Back to Clock
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === "team" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
                 <div>
                   <h2 className="font-bold text-lg">Team</h2>
-                  <p className="text-xs text-slate-500">
-                    {isAdmin ? "Company members" : "Your membership"}
-                  </p>
+                  <p className="text-xs text-slate-500">Company members</p>
                 </div>
                 {isAdmin && (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -8409,7 +8463,7 @@ const handlePhotoCapture = async (event) => {
                 <div>
                   <h2 className="font-bold text-lg">Menu</h2>
                   <p className="text-xs text-slate-500">
-                    {employeeDisplayName || authUser.email} • {userCompanyRole || authRole || "employee"}
+                    {employeeDisplayName || authUser.email} • {resolvedCompanyRole || authRole || "employee"}
                   </p>
                 </div>
                 <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
@@ -8433,7 +8487,9 @@ const handlePhotoCapture = async (event) => {
                 <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("team")}>👥 Team</button>
+                {isAdmin && (
+                  <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("team")}>👥 Team</button>
+                )}
                 {isAdmin && (
                   <>
                     <button
