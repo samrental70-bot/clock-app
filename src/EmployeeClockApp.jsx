@@ -1066,6 +1066,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectsScreenRefreshKey, setProjectsScreenRefreshKey] = useState(0);
   const [dashboardActionFeedback, setDashboardActionFeedback] = useState(null);
   const [dashboardSavingUserId, setDashboardSavingUserId] = useState(null);
+  const [dashboardLiveLocations, setDashboardLiveLocations] = useState([]);
+  const [dashboardLiveLocationsLoading, setDashboardLiveLocationsLoading] = useState(false);
+  const [dashboardLiveLocationsError, setDashboardLiveLocationsError] = useState("");
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -1292,6 +1295,50 @@ const [uploadProgress, setUploadProgress] = useState(null);
     dashboardRefreshKey,
     projectsScreenRefreshKey,
   ]);
+
+  useEffect(() => {
+    if (activeTab !== "dashboard" || !isAdmin || !userCompany?.id) {
+      setDashboardLiveLocations([]);
+      setDashboardLiveLocationsError("");
+      setDashboardLiveLocationsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDashboardLiveLocationsLoading(true);
+      setDashboardLiveLocationsError("");
+      try {
+        const { data, error } = await supabase
+          .from("live_locations")
+          .select("employee_id, latitude, longitude, accuracy, updated_at, status, project_name, cost_centre")
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        const raw = Array.isArray(data) ? data : [];
+        const clockedIn = raw.filter((r) => String(r.status ?? "").trim().toLowerCase() === "clocked_in");
+        const uids = [...new Set(clockedIn.map((r) => r.employee_id).filter(Boolean))];
+        const pmap = await fetchProfilesByTimesheetUserIds(supabase, uids);
+        const enriched = clockedIn.map((r) => {
+          const pr = pmap[r.employee_id] || {};
+          const full = (pr.full_name && String(pr.full_name).trim()) || "";
+          const em = (pr.email && String(pr.email).trim()) || "";
+          const displayName = full || em || shortUserLabel(r.employee_id);
+          return { ...r, displayName };
+        });
+        enriched.sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+        if (!cancelled) setDashboardLiveLocations(enriched);
+      } catch (err) {
+        if (!cancelled) {
+          setDashboardLiveLocations([]);
+          setDashboardLiveLocationsError(getErrorMessage(err));
+        }
+      } finally {
+        if (!cancelled) setDashboardLiveLocationsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, userCompany?.id, dashboardRefreshKey]);
 
   useEffect(() => {
     setDashboardActionFeedback(null);
@@ -6039,6 +6086,81 @@ const handlePhotoCapture = async (event) => {
                     {dashboardActionFeedback.text}
                   </div>
                 )}
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3 space-y-2">
+                  <h3 className="text-[10px] font-semibold text-slate-600 uppercase tracking-wide">Live Locations</h3>
+                  {dashboardLiveLocationsLoading && (
+                    <p className="text-[11px] text-slate-600">Loading live locations…</p>
+                  )}
+                  {dashboardLiveLocationsError && (
+                    <p className="text-[11px] text-amber-900 leading-snug">{dashboardLiveLocationsError}</p>
+                  )}
+                  {!dashboardLiveLocationsLoading &&
+                    !dashboardLiveLocationsError &&
+                    dashboardLiveLocations.length === 0 && (
+                      <p className="text-[11px] text-slate-600 leading-snug">No employees currently clocked in.</p>
+                    )}
+                  {!dashboardLiveLocationsLoading &&
+                    !dashboardLiveLocationsError &&
+                    dashboardLiveLocations.length > 0 && (
+                      <ul className="space-y-2 max-h-56 overflow-y-auto pr-0.5">
+                        {dashboardLiveLocations.map((loc) => {
+                          const hasMap =
+                            loc.latitude != null &&
+                            loc.longitude != null &&
+                            Number.isFinite(Number(loc.latitude)) &&
+                            Number.isFinite(Number(loc.longitude));
+                          const updatedAt = loc.updated_at || null;
+                          const updatedLabel =
+                            updatedAt != null
+                              ? `${formatDate(updatedAt, companyTimeZone)} · ${formatTime(updatedAt, companyTimeZone)}`
+                              : "—";
+                          const acc =
+                            loc.accuracy != null && loc.accuracy !== "" && Number.isFinite(Number(loc.accuracy))
+                              ? `${Math.round(Number(loc.accuracy))} m`
+                              : "—";
+                          return (
+                            <li
+                              key={String(loc.employee_id)}
+                              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] text-slate-800 leading-snug"
+                            >
+                              <div className="font-semibold text-slate-900 break-words">{loc.displayName}</div>
+                              <div className="mt-0.5 text-slate-600">
+                                <span className="text-slate-500">Status:</span>{" "}
+                                <span className="capitalize">{String(loc.status ?? "—").replace(/_/g, " ")}</span>
+                              </div>
+                              <div className="mt-0.5">
+                                <span className="text-slate-500">Project:</span>{" "}
+                                <span className="break-words">{loc.project_name || "—"}</span>
+                              </div>
+                              <div className="mt-0.5">
+                                <span className="text-slate-500">Cost centre:</span>{" "}
+                                <span className="break-words">{loc.cost_centre || "—"}</span>
+                              </div>
+                              <div className="mt-0.5 tabular-nums">
+                                <span className="text-slate-500">Last updated:</span> {updatedLabel}
+                              </div>
+                              <div className="mt-0.5 tabular-nums">
+                                <span className="text-slate-500">Accuracy:</span> {acc}
+                              </div>
+                              {hasMap ? (
+                                <button
+                                  type="button"
+                                  className="mt-1.5 text-[11px] font-semibold text-blue-700 underline"
+                                  onClick={() =>
+                                    openMap({ latitude: Number(loc.latitude), longitude: Number(loc.longitude) })
+                                  }
+                                >
+                                  View Map
+                                </button>
+                              ) : (
+                                <p className="mt-1 text-[10px] text-slate-500">No coordinates on file.</p>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
