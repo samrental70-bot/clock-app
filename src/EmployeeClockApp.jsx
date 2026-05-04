@@ -1867,21 +1867,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
           label: main.label,
           minutes: 0,
           cost: 0,
-          shifts: 0,
           children: {},
         };
       }
       const m = mainMap[main.key];
       m.minutes += wm;
       m.cost += lc;
-      m.shifts += 1;
 
       if (!m.children[sub.key]) {
-        m.children[sub.key] = { key: sub.key, label: sub.label, minutes: 0, cost: 0, shifts: 0 };
+        m.children[sub.key] = { key: sub.key, label: sub.label, minutes: 0, cost: 0 };
       }
       m.children[sub.key].minutes += wm;
       m.children[sub.key].cost += lc;
-      m.children[sub.key].shifts += 1;
     }
 
     const mainRows = Object.values(mainMap)
@@ -1910,7 +1907,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
       return {
         totalMinutes: 0,
         totalCost: 0,
-        totalShifts: 0,
         missingOut: 0,
         byEmployee: [],
         byProject: [],
@@ -1935,27 +1931,24 @@ const [uploadProgress, setUploadProgress] = useState(null);
         teamProfileFullNameByUserId,
       });
       if (!empMap[uid]) {
-        empMap[uid] = { key: uid, name, minutes: 0, cost: 0, shifts: 0 };
+        empMap[uid] = { key: uid, name, minutes: 0, cost: 0 };
       }
       empMap[uid].minutes += wm;
       empMap[uid].cost += lc;
-      empMap[uid].shifts += 1;
       const pLabel = (r.project && String(r.project).trim()) || "Unassigned";
       const pid = r.projectId != null ? String(r.projectId) : "";
       const pkey = pid ? `id:${pid}` : `n:${pLabel}`;
       if (!projMap[pkey]) {
-        projMap[pkey] = { key: pkey, project: pLabel, minutes: 0, cost: 0, shifts: 0 };
+        projMap[pkey] = { key: pkey, project: pLabel, minutes: 0, cost: 0 };
       }
       projMap[pkey].minutes += wm;
       projMap[pkey].cost += lc;
-      projMap[pkey].shifts += 1;
     }
     const byEmployee = Object.values(empMap).sort((a, b) => String(a.name).localeCompare(String(b.name)));
     const byProject = Object.values(projMap).sort((a, b) => String(a.project).localeCompare(String(b.project)));
     return {
       totalMinutes,
       totalCost,
-      totalShifts: rows.length,
       missingOut,
       byEmployee,
       byProject,
@@ -6777,7 +6770,16 @@ const handlePhotoCapture = async (event) => {
                       className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
                       value={reportsGroupBy}
                       onChange={(e) => {
-                        setReportsGroupBy(e.target.value);
+                        const next = e.target.value;
+                        setReportsGroupBy(next);
+                        setReportsSplitBy((prev) => {
+                          if (next === "project" && prev === "project") return "none";
+                          if (next === "employee" && prev === "employee") return "none";
+                          // Also drop invalid options when switching
+                          if (next === "project" && prev === "project") return "none";
+                          if (next === "employee" && prev === "employee") return "none";
+                          return prev;
+                        });
                         setReportsExpandedGroups({});
                       }}
                     >
@@ -6796,9 +6798,17 @@ const handlePhotoCapture = async (event) => {
                       }}
                     >
                       <option value="none">None</option>
-                      <option value="employee">Employee</option>
-                      <option value="project">Project</option>
-                      <option value="cost_center">Cost Centre</option>
+                      {reportsGroupBy === "project" ? (
+                        <>
+                          <option value="employee">Employee</option>
+                          <option value="cost_center">Cost Centre</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="project">Project</option>
+                          <option value="cost_center">Cost Centre</option>
+                        </>
+                      )}
                     </select>
                   </label>
                   <div className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
@@ -6921,10 +6931,6 @@ const handlePhotoCapture = async (event) => {
                         </p>
                       </div>
                       <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Shifts</p>
-                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">{reportsAggregates.totalShifts}</p>
-                      </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Missing clock-out</p>
                         <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">{reportsAggregates.missingOut}</p>
                       </div>
@@ -6974,9 +6980,6 @@ const handlePhotoCapture = async (event) => {
                                           {expanded ? "▾" : "▸"}
                                         </span>
                                         {m.label}
-                                      </p>
-                                      <p className="text-xs text-slate-600 leading-snug mt-0.5">
-                                        Shifts <span className="font-semibold text-slate-900 tabular-nums">{m.shifts}</span>
                                       </p>
                                     </div>
                                     <div className="shrink-0 text-right">
@@ -7029,9 +7032,6 @@ const handlePhotoCapture = async (event) => {
                                     <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
                                   </div>
                                 </div>
-                                <p className="text-xs text-slate-600 leading-snug mt-0.5">
-                                  Shifts <span className="font-semibold text-slate-900 tabular-nums">{row.shifts}</span>
-                                </p>
                               </div>
                             ))}
                           </div>
@@ -7051,9 +7051,6 @@ const handlePhotoCapture = async (event) => {
                                   <p className="text-sm font-semibold text-slate-900 leading-snug">{formatMoney(row.cost)}</p>
                                 </div>
                               </div>
-                              <p className="text-xs text-slate-600 leading-snug mt-0.5">
-                                Shifts <span className="font-semibold text-slate-900 tabular-nums">{row.shifts}</span>
-                              </p>
                             </div>
                           ))}
                         </div>
