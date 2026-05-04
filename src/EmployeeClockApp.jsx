@@ -948,6 +948,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [dashboardError, setDashboardError] = useState("");
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
   const [dashboardClockPick, setDashboardClockPick] = useState({});
+  /** user_id -> project_id[] for active project_assignments (Dashboard manual clock-in only). */
+  const [dashboardAssignmentsByUserId, setDashboardAssignmentsByUserId] = useState({});
+  /** Bumps when Projects tab data changes; dashboard refetches assignment map for clock-in picks. */
+  const [projectsScreenRefreshKey, setProjectsScreenRefreshKey] = useState(0);
   const [dashboardActionFeedback, setDashboardActionFeedback] = useState(null);
   const [dashboardSavingUserId, setDashboardSavingUserId] = useState(null);
 
@@ -1111,12 +1115,26 @@ const [uploadProgress, setUploadProgress] = useState(null);
           };
         });
 
+        const { data: paData, error: paErr } = await supabase
+          .from("project_assignments")
+          .select("user_id, project_id")
+          .eq("company_id", userCompany.id)
+          .eq("status", "active");
+        if (paErr) throw paErr;
+        const assignByUser = {};
+        for (const r of paData || []) {
+          const u = String(r.user_id);
+          if (!assignByUser[u]) assignByUser[u] = [];
+          assignByUser[u].push(r.project_id);
+        }
+
         const dayStartIso = wallDateTimeToUtcIso(dashboardViewDate, "00:00:00", companyTimeZone);
         const dayEndIso = wallDateTimeToUtcIso(dashboardViewDate, "23:59:59", companyTimeZone);
         if (!dayStartIso || !dayEndIso) {
           if (!cancelled) {
             setDashboardRows(rows);
             setDashboardDaySheets([]);
+            setDashboardAssignmentsByUserId(assignByUser);
           }
           return;
         }
@@ -1136,12 +1154,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (!cancelled) {
           setDashboardRows(rows);
           setDashboardDaySheets(dateFiltered);
+          setDashboardAssignmentsByUserId(assignByUser);
         }
       } catch (err) {
         if (!cancelled) {
           setDashboardError(getErrorMessage(err));
           setDashboardRows([]);
           setDashboardDaySheets([]);
+          setDashboardAssignmentsByUserId({});
         }
       } finally {
         if (!cancelled) setDashboardLoading(false);
@@ -1150,7 +1170,16 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, dashboardViewDate, companyTimeZone, dashboardRefreshKey]);
+  }, [
+    activeTab,
+    isAdmin,
+    userCompany?.id,
+    authUser?.id,
+    dashboardViewDate,
+    companyTimeZone,
+    dashboardRefreshKey,
+    projectsScreenRefreshKey,
+  ]);
 
   useEffect(() => {
     setDashboardActionFeedback(null);
@@ -1233,7 +1262,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [projectsScreenRows, setProjectsScreenRows] = useState([]);
   const [projectsScreenLoading, setProjectsScreenLoading] = useState(false);
   const [projectsScreenError, setProjectsScreenError] = useState("");
-  const [projectsScreenRefreshKey, setProjectsScreenRefreshKey] = useState(0);
   const [companyProjectsRefreshKey, setCompanyProjectsRefreshKey] = useState(0);
   /** Active project_ids from project_assignments for the signed-in employee (Clock filter only). */
   const [employeeClockAssignedProjectIds, setEmployeeClockAssignedProjectIds] = useState([]);
@@ -1320,21 +1348,45 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (activeTab !== "dashboard" || !isAdmin) return;
     setDashboardClockPick((prev) => {
       const next = { ...prev };
-      const fp = effectiveProjects[0];
-      const defPid = fp ? String(fp.id) : "";
-      const centres = defPid
-        ? effectiveCostCentresByProjectId[defPid] ||
-          effectiveCostCentresByProjectId[Number(defPid)] ||
-          []
-        : [];
-      const defCc = centres[0] || "";
+      const ccFor = (pid) =>
+        effectiveCostCentresByProjectId[String(pid)] ||
+        effectiveCostCentresByProjectId[Number(pid)] ||
+        [];
       for (const r of dashboardRowsForAttendance) {
         const uid = String(r.userId);
-        if (!next[uid]) next[uid] = { projectId: defPid, costCenter: defCc };
+        const assignedIds = new Set((dashboardAssignmentsByUserId[uid] || []).map((id) => String(id)));
+        const options = effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
+        const defPid = options[0] ? String(options[0].id) : "";
+        const defCc = defPid ? ccFor(defPid)[0] || "" : "";
+        if (!options.length) {
+          next[uid] = { projectId: "", costCenter: "" };
+          continue;
+        }
+        const existing = next[uid];
+        if (
+          !existing ||
+          !options.some((p) => String(p.id) === String(existing.projectId))
+        ) {
+          next[uid] = { projectId: defPid, costCenter: defCc };
+        } else {
+          const ccList = ccFor(existing.projectId);
+          const cc =
+            existing.costCenter && ccList.includes(existing.costCenter)
+              ? existing.costCenter
+              : ccList[0] || "";
+          next[uid] = { projectId: String(existing.projectId), costCenter: cc };
+        }
       }
       return next;
     });
-  }, [activeTab, isAdmin, dashboardRowsForAttendance, effectiveProjects, effectiveCostCentresByProjectId]);
+  }, [
+    activeTab,
+    isAdmin,
+    dashboardRowsForAttendance,
+    effectiveProjects,
+    effectiveCostCentresByProjectId,
+    dashboardAssignmentsByUserId,
+  ]);
 
   const getWorkedMinutes = (record) => {
     const total = minutesBetween(record.clockIn, record.clockOut || new Date());
@@ -3459,14 +3511,26 @@ const handlePhotoCapture = async (event) => {
     }
     if (!window.confirm("Clock in this employee now?")) return;
     const uid = String(row.userId);
+    const assignedIds = new Set((dashboardAssignmentsByUserId[uid] || []).map((id) => String(id)));
+    const rowProjects = effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
+    if (rowProjects.length === 0) {
+      setDashboardActionFeedback({
+        type: "error",
+        text: "No projects assigned to this employee.",
+      });
+      return;
+    }
     const rawPick =
       dashboardClockPick[uid] || {
-        projectId: String(effectiveProjects[0]?.id ?? ""),
-        costCenter: costCentresForEditProject(effectiveProjects[0]?.id)[0] || "",
+        projectId: String(rowProjects[0]?.id ?? ""),
+        costCenter: costCentresForEditProject(rowProjects[0]?.id)[0] || "",
       };
-    const proj = effectiveProjects.find((p) => String(p.id) === String(rawPick.projectId));
+    const proj = rowProjects.find((p) => String(p.id) === String(rawPick.projectId));
     if (!proj) {
-      setDashboardActionFeedback({ type: "error", text: "No project available. Add a company project first." });
+      setDashboardActionFeedback({
+        type: "error",
+        text: "No projects assigned to this employee.",
+      });
       return;
     }
     let cc = rawPick.costCenter || "";
@@ -5525,17 +5589,33 @@ const handlePhotoCapture = async (event) => {
                         );
                         const { inDisp, outDisp, totalDisp, labourDisp, projectDisp, costDisp } = dayMetrics;
                         const uid = String(row.userId);
-                        const pick =
+                        const dashAssignedIds = new Set(
+                          (dashboardAssignmentsByUserId[uid] || []).map((id) => String(id))
+                        );
+                        const dashProjectsForRow = effectiveProjects.filter((p) =>
+                          dashAssignedIds.has(String(p.id))
+                        );
+                        const pickRaw =
                           dashboardClockPick[uid] || {
-                            projectId: String(effectiveProjects[0]?.id ?? ""),
-                            costCenter: costCentresForEditProject(effectiveProjects[0]?.id)[0] || "",
+                            projectId: String(dashProjectsForRow[0]?.id ?? ""),
+                            costCenter: costCentresForEditProject(dashProjectsForRow[0]?.id)[0] || "",
                           };
-                        const centresForPick = costCentresForEditProject(pick.projectId);
+                        const pickProjectId =
+                          dashProjectsForRow.some((p) => String(p.id) === String(pickRaw.projectId))
+                            ? String(pickRaw.projectId)
+                            : String(dashProjectsForRow[0]?.id ?? "");
+                        const centresForPick = costCentresForEditProject(pickProjectId);
+                        const pickCost =
+                          pickRaw.costCenter && centresForPick.includes(pickRaw.costCenter)
+                            ? pickRaw.costCenter
+                            : centresForPick[0] || "";
+                        const pick = { projectId: pickProjectId, costCenter: pickCost };
                         const showDashClockIn =
                           att.code === "none" || att.code === "clocked_out";
                         const showDashClockOut = att.code === "clocked_in";
                         const showDashFixOut = att.code === "missing_out";
                         const dashRowSaving = dashboardSavingUserId === uid;
+                        const dashClockInBlocked = dashProjectsForRow.length === 0;
                         return (
                           <div
                             key={row.memberRowId}
@@ -5594,7 +5674,7 @@ const handlePhotoCapture = async (event) => {
                                       <select
                                         className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
                                         value={pick.projectId}
-                                        disabled={dashRowSaving || effectiveProjects.length === 0}
+                                        disabled={dashRowSaving || dashClockInBlocked}
                                         onChange={(e) => {
                                           const pid = e.target.value;
                                           const cents = costCentresForEditProject(pid);
@@ -5604,7 +5684,7 @@ const handlePhotoCapture = async (event) => {
                                           }));
                                         }}
                                       >
-                                        {effectiveProjects.map((p) => (
+                                        {dashProjectsForRow.map((p) => (
                                           <option key={p.id} value={String(p.id)}>
                                             {p.name}
                                           </option>
@@ -5615,12 +5695,8 @@ const handlePhotoCapture = async (event) => {
                                       Cost centre
                                       <select
                                         className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                        value={
-                                          centresForPick.includes(pick.costCenter)
-                                            ? pick.costCenter
-                                            : centresForPick[0] || ""
-                                        }
-                                        disabled={dashRowSaving}
+                                        value={pick.costCenter}
+                                        disabled={dashRowSaving || dashClockInBlocked}
                                         onChange={(e) =>
                                           setDashboardClockPick((prev) => ({
                                             ...prev,
@@ -5646,10 +5722,15 @@ const handlePhotoCapture = async (event) => {
                                   {effectiveProjects.length === 0 && (
                                     <p className="text-[10px] text-amber-800">Add a company project to clock in.</p>
                                   )}
+                                  {effectiveProjects.length > 0 && dashClockInBlocked && (
+                                    <p className="text-[10px] text-amber-900 leading-snug">
+                                      No projects assigned to this employee.
+                                    </p>
+                                  )}
                                   <Button
                                     type="button"
                                     className="w-full rounded-lg h-9 text-xs font-semibold"
-                                    disabled={dashRowSaving || effectiveProjects.length === 0}
+                                    disabled={dashRowSaving || dashClockInBlocked}
                                     onClick={() => void handleDashboardEmployeeClockIn(row)}
                                   >
                                     {dashRowSaving ? "…" : "Clock In"}
