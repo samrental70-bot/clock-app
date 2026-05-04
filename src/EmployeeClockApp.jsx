@@ -743,6 +743,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [mobileNotifPermissionUi, setMobileNotifPermissionUi] = useState("unknown");
   const [backgroundPushUi, setBackgroundPushUi] = useState("unknown");
   const [backgroundPushError, setBackgroundPushError] = useState("");
+  const [backgroundPushSaveMessage, setBackgroundPushSaveMessage] = useState("");
   const notifPollBootstrappedRef = useRef(false);
   const notifLastUnreadIdsRef = useRef(new Set());
   const systemNotifShownIdsRef = useRef(new Set());
@@ -1133,6 +1134,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (!isAdmin) {
       setBackgroundPushUi("unknown");
       setBackgroundPushError("");
+      setBackgroundPushSaveMessage("");
       return;
     }
     if (typeof window === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
@@ -2715,6 +2717,9 @@ const handlePhotoCapture = async (event) => {
 
   const handleEnableBackgroundPush = async () => {
     setBackgroundPushError("");
+    setBackgroundPushSaveMessage("");
+    const permAtStart = typeof Notification !== "undefined" ? Notification.permission : "denied";
+
     const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY;
     if (typeof vapid !== "string" || !vapid.trim()) {
       setBackgroundPushUi("error");
@@ -2754,29 +2759,72 @@ const handlePhotoCapture = async (event) => {
         return;
       }
 
-      const sub = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
-      });
-      const json = sub.toJSON();
-      const keys = json.keys || {};
+      const subAtStart = await registration.pushManager.getSubscription();
+      let sub = subAtStart;
+      if (!sub) {
+        sub = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
+        });
+      }
 
-      const row = {
+      const subJson = sub.toJSON();
+      const keys = subJson.keys || {};
+
+      const payload = {
         company_id: userCompany.id,
         user_id: authUser.id,
         endpoint: sub.endpoint,
-        p256dh: keys.p256dh || "",
-        auth: keys.auth || "",
-        user_agent: typeof navigator.userAgent === "string" ? navigator.userAgent.slice(0, 500) : "",
+        p256dh: keys.p256dh ?? "",
+        auth: keys.auth ?? "",
+        user_agent: typeof navigator.userAgent === "string" ? navigator.userAgent : "",
         is_active: true,
+        updated_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from("push_subscriptions").upsert(row, {
-        onConflict: "endpoint",
-      });
-      if (error) throw error;
+      console.log("[PUSH SUB] save payload", payload);
+
+      const { data: existing, error: selErr } = await supabase
+        .from("push_subscriptions")
+        .select("id")
+        .eq("user_id", authUser.id)
+        .eq("endpoint", sub.endpoint)
+        .maybeSingle();
+
+      if (selErr) {
+        console.error("[PUSH SUB] save error", selErr);
+        throw selErr;
+      }
+
+      console.log("[PUSH SUB] existing row", existing);
+
+      if (existing?.id != null) {
+        const { error: upErr } = await supabase
+          .from("push_subscriptions")
+          .update(payload)
+          .eq("id", existing.id);
+        if (upErr) {
+          console.error("[PUSH SUB] save error", upErr);
+          throw upErr;
+        }
+        console.log("[PUSH SUB] update success");
+      } else {
+        const { error: insErr } = await supabase.from("push_subscriptions").insert(payload);
+        if (insErr) {
+          console.error("[PUSH SUB] save error", insErr);
+          throw insErr;
+        }
+        console.log("[PUSH SUB] insert success");
+      }
+
+      const repeatEnable =
+        permAtStart === "granted" && subAtStart != null;
+      setBackgroundPushSaveMessage(
+        repeatEnable ? "Already enabled / Subscription saved" : "Subscription saved"
+      );
       setBackgroundPushUi("enabled");
     } catch (e) {
+      console.error("[PUSH SUB] save error", e);
       setBackgroundPushUi("error");
       setBackgroundPushError(getErrorMessage(e));
     }
@@ -3976,6 +4024,9 @@ const handlePhotoCapture = async (event) => {
                   </p>
                   {backgroundPushError && (
                     <p className="text-[11px] text-red-700 leading-snug break-words">{backgroundPushError}</p>
+                  )}
+                  {backgroundPushSaveMessage && !backgroundPushError && (
+                    <p className="text-[11px] text-emerald-800 leading-snug break-words">{backgroundPushSaveMessage}</p>
                   )}
                   <p className="text-[10px] text-slate-500 leading-snug">
                     Uses Web Push when the app or PWA is closed (requires deploy with push API and env keys).
