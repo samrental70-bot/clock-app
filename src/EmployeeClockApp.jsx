@@ -112,6 +112,39 @@ const SCHEDULE_FORM_EMPTY = {
   status: "scheduled",
 };
 
+/** Day timeline: first labeled hour (inclusive) and last (exclusive) for grid height. */
+const SCHEDULE_GRID_HOUR_START = 6;
+const SCHEDULE_GRID_HOUR_END = 22;
+const SCHEDULE_GRID_TOTAL_MINUTES = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * 60;
+/** Pixel height per hour in schedule day columns (readability on mobile). */
+const SCHEDULE_GRID_PX_PER_HOUR = 56;
+const SCHEDULE_MONTH_CHIP_MAX = 3;
+const SCHEDULE_TIMELINE_DRAG_THRESHOLD_PX = 12;
+
+function scheduleTimelineAdminTone(task) {
+  const s = String(task?.status ?? "scheduled").trim().toLowerCase();
+  if (s === "cancelled") return "neutral";
+  if (s === "completed") return "accepted";
+  return "scheduled";
+}
+
+function scheduleTimelineEmployeeTone(task, linkByTaskId) {
+  const row = task?.id != null ? linkByTaskId?.[String(task.id)] : undefined;
+  const rs = normalizeScheduleAssigneeResponseStatus(row?.response_status);
+  if (rs === "accepted") return "accepted";
+  if (rs === "declined") return "declined";
+  return "scheduled";
+}
+
+function scheduleTimelineBlockClasses(tone, compact) {
+  const pad = compact ? "rounded-md px-1 py-0.5" : "rounded-xl px-2 py-1.5";
+  const type = compact ? "text-[12px] leading-tight" : "text-[15px] leading-snug";
+  if (tone === "accepted") return `${pad} ${type} bg-emerald-600 text-white shadow-sm`;
+  if (tone === "declined") return `${pad} ${type} bg-rose-600 text-white shadow-sm`;
+  if (tone === "neutral") return `${pad} ${type} bg-slate-500 text-white shadow-sm`;
+  return `${pad} ${type} bg-[#1a73e8] text-white shadow-sm`;
+}
+
 /** V2a.2 scheduled_task_assignees.response_status */
 function normalizeScheduleAssigneeResponseStatus(raw) {
   const s = String(raw ?? "pending").trim().toLowerCase();
@@ -364,6 +397,151 @@ function addWallDaysInTimeZone(dateKey, deltaDays, timeZone) {
   if (!iso) return "";
   const t = new Date(iso).getTime() + Number(deltaDays) * 86400000;
   return calendarDateKeyInTimeZone(new Date(t), tz);
+}
+
+/** Inclusive list of YYYY-MM-DD keys from startKey through endKey (wall calendar in `timeZone`). */
+function enumerateScheduleDayKeys(startKey, endKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  if (!startKey || !endKey) return [];
+  const out = [];
+  let k = startKey;
+  for (let guard = 0; guard < 400; guard += 1) {
+    out.push(k);
+    if (k === endKey) break;
+    const next = addWallDaysInTimeZone(k, 1, tz);
+    if (!next || next === k) break;
+    k = next;
+  }
+  return out;
+}
+
+function compareScheduleTaskStart(a, b) {
+  const ta = parseStoredInstant(a?.start_time).getTime();
+  const tb = parseStoredInstant(b?.start_time).getTime();
+  const va = Number.isNaN(ta) ? 0 : ta;
+  const vb = Number.isNaN(tb) ? 0 : tb;
+  return va - vb;
+}
+
+function filterScheduledTasksByWallDateRange(tasks, rangeStartKey, rangeEndKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  if (!rangeStartKey || !rangeEndKey) return [];
+  return (Array.isArray(tasks) ? tasks : []).filter((t) => {
+    const dk = calendarDateKeyInTimeZone(t?.start_time, tz);
+    if (!dk || dk === "") return false;
+    return dk >= rangeStartKey && dk <= rangeEndKey;
+  });
+}
+
+function wallMinutesFromScheduleGridStart(taskInstant, dayKey, timeZone, gridStartHour = SCHEDULE_GRID_HOUR_START) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const parts = wallClockPartsInTimeZone(taskInstant, tz);
+  if (!parts.dateStr || parts.dateStr !== dayKey) return null;
+  const [h, mi] = parts.timeStr.split(":").map((v) => Number(v));
+  if (!Number.isFinite(h)) return null;
+  const m = Number.isFinite(mi) ? mi : 0;
+  const mm = (h - gridStartHour) * 60 + m;
+  return Math.max(0, Math.min(SCHEDULE_GRID_TOTAL_MINUTES, mm));
+}
+
+function scheduleTaskDurationMinutes(task, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const startMs = parseStoredInstant(task?.start_time).getTime();
+  const endMs = task?.end_time ? parseStoredInstant(task.end_time).getTime() : NaN;
+  if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+    return Math.max(15, Math.round((endMs - startMs) / 60000));
+  }
+  const dm = task?.duration_minutes;
+  if (dm != null && String(dm).trim() !== "" && Number.isFinite(Number(dm))) {
+    return Math.max(15, Math.round(Number(dm)));
+  }
+  return 60;
+}
+
+function addOneHourToWallStart(dateKey, timeHHmm, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const parts = String(timeHHmm || "09:00").trim().split(":");
+  let H = Number(parts[0]);
+  let M = Number(parts[1] ?? 0);
+  if (!Number.isFinite(H)) H = 9;
+  if (!Number.isFinite(M)) M = 0;
+  H += 1;
+  let endDate = dateKey;
+  if (H >= 24) {
+    H -= 24;
+    endDate = addWallDaysInTimeZone(dateKey, 1, tz) || dateKey;
+  }
+  const endTime = `${String(Math.min(23, H)).padStart(2, "0")}:${String(Math.min(59, M)).padStart(2, "0")}`;
+  return { endDate, endTime };
+}
+
+function addWallMonthsSafe(dateKey, deltaMonths, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const seg = String(dateKey || "").split("-");
+  let y = Number(seg[0]);
+  let m = Number(seg[1]);
+  let d = Number(seg[2]);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) return dateKey;
+  if (!Number.isFinite(d)) d = 1;
+  m += deltaMonths;
+  while (m > 12) {
+    m -= 12;
+    y += 1;
+  }
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  const last = lastWallDayOfMonthInTimeZone(y, m, tz);
+  const lastD = Number(last.split("-")[2]);
+  const day = Math.min(d, lastD);
+  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Sunday-first month grid: 6 rows × 7 cols; cells may be outside anchor month (greyed). */
+function buildMonthGridCells(anchorKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const seg = String(anchorKey || "").split("-");
+  const y0 = Number(seg[0]);
+  const m0 = Number(seg[1]);
+  if (!Number.isFinite(y0) || !Number.isFinite(m0)) return { cells: [], monthYearLabel: "", firstOfMonth: "", lastOfMonth: "" };
+  const firstOfMonth = `${y0}-${String(m0).padStart(2, "0")}-01`;
+  const lastOfMonth = lastWallDayOfMonthInTimeZone(y0, m0, tz);
+  let k = firstOfMonth;
+  for (let guard = 0; guard < 14; guard += 1) {
+    if (wallWeekdayLongInTimeZone(k, tz) === "Sunday") break;
+    const prev = addWallDaysInTimeZone(k, -1, tz);
+    if (!prev || prev === k) break;
+    k = prev;
+  }
+  const cells = [];
+  let cursor = k;
+  for (let i = 0; i < 42; i += 1) {
+    const inMonth = cursor >= firstOfMonth && cursor <= lastOfMonth;
+    const dn = Number(cursor.split("-")[2]);
+    cells.push({ dayKey: cursor, inMonth, dayNum: Number.isFinite(dn) ? dn : 0 });
+    const next = addWallDaysInTimeZone(cursor, 1, tz);
+    if (!next) break;
+    cursor = next;
+  }
+  const isoMid = wallDateTimeToUtcIso(firstOfMonth, "12:00:00", tz);
+  const monthYearLabel = isoMid
+    ? new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "long", year: "numeric" }).format(new Date(isoMid))
+    : `${y0}-${String(m0).padStart(2, "0")}`;
+  return { cells, monthYearLabel, firstOfMonth, lastOfMonth };
+}
+
+function formatHourLabel12(h24) {
+  if (!Number.isFinite(h24)) return "";
+  const h = Math.max(0, Math.min(23, Math.floor(h24)));
+  const am = h < 12;
+  const hr12 = h % 12 === 0 ? 12 : h % 12;
+  return `${hr12} ${am ? "AM" : "PM"}`;
+}
+
+function wallWeekdayShort(dateKey, timeZone) {
+  const long = wallWeekdayLongInTimeZone(dateKey, timeZone);
+  return long ? long.slice(0, 3) : "";
 }
 
 function mondayStartOfWallWeekContaining(todayKey, timeZone) {
@@ -1331,6 +1509,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
+  /** list | cal1 | cal3 | cal7 | cal30 — Schedule tab list vs rolling calendar windows (company TZ). */
+  const [scheduleViewMode, setScheduleViewMode] = useState("list");
+  /** First day (YYYY-MM-DD) of the visible calendar range in company TZ. */
+  const [scheduleCalendarAnchor, setScheduleCalendarAnchor] = useState("");
+  /** List/compact: which task id is expanded for full detail (accept/decline) below the grid. */
+  const [scheduleCalendarFocusTaskId, setScheduleCalendarFocusTaskId] = useState(null);
+  /** Selected wall day for calendar headers / month highlighting (timeline + month). */
+  const [scheduleCalendarSelectedDayKey, setScheduleCalendarSelectedDayKey] = useState("");
+  const [scheduleCalDraggingTaskId, setScheduleCalDraggingTaskId] = useState(null);
+  const [scheduleRescheduleSavingId, setScheduleRescheduleSavingId] = useState(null);
+  const [scheduleCalendarMoveError, setScheduleCalendarMoveError] = useState("");
+  const scheduleTimelineColRefs = useRef({});
   const [scheduleFormOpen, setScheduleFormOpen] = useState(false);
   const [scheduleDraft, setScheduleDraft] = useState(() => ({ ...SCHEDULE_FORM_EMPTY }));
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -1378,6 +1568,20 @@ const [uploadProgress, setUploadProgress] = useState(null);
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
   }, [userCompany?.id, userCompany?.time_zone]);
+
+  useEffect(() => {
+    if (!companyChecked) return;
+    setScheduleCalendarAnchor((prev) => prev || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+  }, [companyChecked, companyTimeZone]);
+
+  useEffect(() => {
+    setScheduleCalendarFocusTaskId(null);
+  }, [scheduleViewMode, activeTab, scheduleCalendarAnchor]);
+
+  const scheduleWallTodayKey = useMemo(
+    () => calendarDateKeyInTimeZone(now, companyTimeZone),
+    [now, companyTimeZone]
+  );
 
   useEffect(() => {
     if (!userCompany?.id) return;
@@ -2011,6 +2215,155 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
   }, [employeeScheduledTasks, companyTimeZone]);
+
+  const scheduleCalendarDaySpan = useMemo(() => {
+    if (scheduleViewMode === "cal1") return 1;
+    if (scheduleViewMode === "cal3") return 3;
+    if (scheduleViewMode === "cal7") return 7;
+    if (scheduleViewMode === "cal30") return 30;
+    return 0;
+  }, [scheduleViewMode]);
+
+  const scheduleCalendarRangeEndKey = useMemo(() => {
+    if (scheduleCalendarDaySpan < 1) return "";
+    const tz = companyTimeZone;
+    const start = scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+    if (!start) return "";
+    if (scheduleViewMode === "cal30") {
+      const [y, m] = start.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m)) return "";
+      return lastWallDayOfMonthInTimeZone(y, m, tz);
+    }
+    return addWallDaysInTimeZone(start, scheduleCalendarDaySpan - 1, tz);
+  }, [scheduleCalendarDaySpan, scheduleCalendarAnchor, companyTimeZone, scheduleViewMode]);
+
+  const scheduleCalendarVisibleDayKeys = useMemo(() => {
+    if (scheduleViewMode === "list" || scheduleCalendarDaySpan < 1 || scheduleViewMode === "cal30") return [];
+    const tz = companyTimeZone;
+    const start = scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+    const end = scheduleCalendarRangeEndKey;
+    if (!start || !end) return [];
+    return enumerateScheduleDayKeys(start, end, tz);
+  }, [
+    scheduleViewMode,
+    scheduleCalendarDaySpan,
+    scheduleCalendarAnchor,
+    scheduleCalendarRangeEndKey,
+    companyTimeZone,
+  ]);
+
+  const scheduleMonthGridInfo = useMemo(() => {
+    if (scheduleViewMode !== "cal30") {
+      return { cells: [], monthYearLabel: "", firstOfMonth: "", lastOfMonth: "" };
+    }
+    return buildMonthGridCells(
+      scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+      companyTimeZone
+    );
+  }, [scheduleViewMode, scheduleCalendarAnchor, companyTimeZone]);
+
+  const scheduleAdminTasksInCalendarRange = useMemo(() => {
+    if (scheduleViewMode === "list" || scheduleCalendarDaySpan < 1) return [];
+    const tz = companyTimeZone;
+    const start = scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+    if (!start) return [];
+    if (scheduleViewMode === "cal30") {
+      const [y, m] = start.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m)) return [];
+      const fromKey = `${y}-${String(m).padStart(2, "0")}-01`;
+      const toKey = lastWallDayOfMonthInTimeZone(y, m, tz);
+      return filterScheduledTasksByWallDateRange(scheduledTasks, fromKey, toKey, tz);
+    }
+    const end = scheduleCalendarRangeEndKey;
+    if (!end) return [];
+    return filterScheduledTasksByWallDateRange(scheduledTasks, start, end, tz);
+  }, [
+    scheduleViewMode,
+    scheduleCalendarDaySpan,
+    scheduleCalendarAnchor,
+    scheduleCalendarRangeEndKey,
+    scheduledTasks,
+    companyTimeZone,
+  ]);
+
+  const scheduleEmployeeTasksInCalendarRange = useMemo(() => {
+    if (scheduleViewMode === "list" || scheduleCalendarDaySpan < 1) return [];
+    const tz = companyTimeZone;
+    const start = scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+    if (!start) return [];
+    if (scheduleViewMode === "cal30") {
+      const [y, m] = start.split("-").map(Number);
+      if (!Number.isFinite(y) || !Number.isFinite(m)) return [];
+      const fromKey = `${y}-${String(m).padStart(2, "0")}-01`;
+      const toKey = lastWallDayOfMonthInTimeZone(y, m, tz);
+      return filterScheduledTasksByWallDateRange(employeeScheduledTasks, fromKey, toKey, tz);
+    }
+    const end = scheduleCalendarRangeEndKey;
+    if (!end) return [];
+    return filterScheduledTasksByWallDateRange(employeeScheduledTasks, start, end, tz);
+  }, [
+    scheduleViewMode,
+    scheduleCalendarDaySpan,
+    scheduleCalendarAnchor,
+    scheduleCalendarRangeEndKey,
+    employeeScheduledTasks,
+    companyTimeZone,
+  ]);
+
+  const adminScheduleTasksByDay = useMemo(() => {
+    const map = {};
+    for (const t of scheduleAdminTasksInCalendarRange) {
+      const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone);
+      if (!dk) continue;
+      if (!map[dk]) map[dk] = [];
+      map[dk].push(t);
+    }
+    for (const k of Object.keys(map)) {
+      map[k].sort(compareScheduleTaskStart);
+    }
+    return map;
+  }, [scheduleAdminTasksInCalendarRange, companyTimeZone]);
+
+  const employeeScheduleTasksByDay = useMemo(() => {
+    const map = {};
+    for (const t of scheduleEmployeeTasksInCalendarRange) {
+      const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone);
+      if (!dk) continue;
+      if (!map[dk]) map[dk] = [];
+      map[dk].push(t);
+    }
+    for (const k of Object.keys(map)) {
+      map[k].sort(compareScheduleTaskStart);
+    }
+    return map;
+  }, [scheduleEmployeeTasksInCalendarRange, companyTimeZone]);
+
+  useEffect(() => {
+    if (scheduleViewMode !== "cal1" && scheduleViewMode !== "cal3" && scheduleViewMode !== "cal7") return;
+    const keys = scheduleCalendarVisibleDayKeys;
+    if (!Array.isArray(keys) || keys.length === 0) return;
+    const t = calendarDateKeyInTimeZone(now, companyTimeZone);
+    setScheduleCalendarSelectedDayKey((prev) => {
+      if (prev && keys.includes(prev)) return prev;
+      return keys.includes(t) ? t : keys[0];
+    });
+  }, [scheduleViewMode, scheduleCalendarVisibleDayKeys, now, companyTimeZone]);
+
+  useEffect(() => {
+    if (scheduleViewMode !== "cal30") return;
+    const tz = companyTimeZone;
+    const anchor = scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+    const t = calendarDateKeyInTimeZone(now, tz);
+    const cells = Array.isArray(scheduleMonthGridInfo?.cells) ? scheduleMonthGridInfo.cells : [];
+    const keySet = new Set(cells.map((c) => c?.dayKey).filter(Boolean));
+    setScheduleCalendarSelectedDayKey((prev) => {
+      if (prev && keySet.has(prev)) return prev;
+      if (t && keySet.has(t)) return t;
+      if (anchor && keySet.has(anchor)) return anchor;
+      const first = cells[0]?.dayKey;
+      return first && keySet.has(first) ? first : "";
+    });
+  }, [scheduleViewMode, scheduleMonthGridInfo, scheduleCalendarAnchor, now, companyTimeZone]);
 
   const teamProfileFullNameByUserId = useMemo(() => {
     const m = {};
@@ -5319,6 +5672,69 @@ const handlePhotoCapture = async (event) => {
     [authUser?.id, userCompany?.id]
   );
 
+  const openScheduleCreateFromSlot = useCallback(
+    (dateKey, timeHHmm = "09:00") => {
+      setScheduleSaveError("");
+      setScheduleEditingTaskId(null);
+      setScheduleEditDraft(null);
+      setScheduleEditError("");
+      const tm = String(timeHHmm ?? "09:00").trim();
+      const safeTime = tm.length >= 5 ? tm.slice(0, 5) : "09:00";
+      const { endDate, endTime } = addOneHourToWallStart(dateKey, safeTime, companyTimeZone);
+      setScheduleDraft({
+        ...SCHEDULE_FORM_EMPTY,
+        assignedUserIds: [],
+        startDate: dateKey,
+        startTime: safeTime,
+        endDate: endDate,
+        endTime: endTime,
+        durationMinutes: "",
+      });
+      setScheduleFormOpen(true);
+    },
+    [companyTimeZone]
+  );
+
+  const openAdminScheduleEditFromCalendar = useCallback(
+    (task) => {
+      const tidKey = task?.id != null ? String(task.id) : "";
+      const rawAssignList = tidKey ? scheduleAssigneesByTaskId?.[tidKey] : undefined;
+      const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
+      setScheduleViewMode("list");
+      setScheduleFormOpen(false);
+      setScheduleSaveError("");
+      setScheduleEditError("");
+      setScheduleEditDraft(buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone));
+      setScheduleEditingTaskId(tidKey);
+    },
+    [scheduleAssigneesByTaskId, companyTimeZone]
+  );
+
+  const handleAdminScheduleDayBackgroundClick = useCallback(
+    (e, dayKey) => {
+      const t = e.target;
+      if (
+        t instanceof Element &&
+        (t.closest(".sched-day-task-block") || t.closest("[data-sched-task-chip]") || t.closest("button"))
+      ) {
+        return;
+      }
+      const colH = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * SCHEDULE_GRID_PX_PER_HOUR;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      const pct = colH > 0 ? Math.max(0, Math.min(1, y / colH)) : 0;
+      const minsRaw = pct * SCHEDULE_GRID_TOTAL_MINUTES;
+      const snapped = Math.round(minsRaw / 15) * 15;
+      const totalMin = Math.max(0, Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 1, snapped));
+      const h0 = SCHEDULE_GRID_HOUR_START + Math.floor(totalMin / 60);
+      const m0 = totalMin % 60;
+      const hh = String(Math.min(23, Math.max(0, h0))).padStart(2, "0");
+      const mm = String(Math.min(59, m0)).padStart(2, "0");
+      openScheduleCreateFromSlot(dayKey, `${hh}:${mm}`);
+    },
+    [openScheduleCreateFromSlot]
+  );
+
   const handleScheduleSubmit = useCallback(
     async (event) => {
       event?.preventDefault?.();
@@ -5638,6 +6054,65 @@ const handlePhotoCapture = async (event) => {
       }
     },
     [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId]
+  );
+
+  const handleAdminScheduleTaskReschedule = useCallback(
+    async (task, targetDayKey, minutesFromGridStart) => {
+      if (!isAdmin || !userCompany?.id || !task?.id || !targetDayKey) return;
+      const tid = String(task.id);
+      const snapped = Math.round(Number(minutesFromGridStart) / 15) * 15;
+      const totalMin = Math.max(0, Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 15, snapped));
+      const h0 = SCHEDULE_GRID_HOUR_START + Math.floor(totalMin / 60);
+      const m0 = totalMin % 60;
+      const hh = String(Math.min(23, Math.max(0, h0))).padStart(2, "0");
+      const mm = String(Math.min(59, m0)).padStart(2, "0");
+      const wallTime = `${hh}:${mm}`;
+      const newStartIso = wallDateTimeToUtcIso(targetDayKey, normalizeTimeInputForWallClock(wallTime), companyTimeZone);
+      if (!newStartIso) {
+        setScheduleCalendarMoveError("Could not compute the new start time.");
+        return;
+      }
+
+      const oldStartMs = parseStoredInstant(task?.start_time).getTime();
+      const oldEndMs = task?.end_time ? parseStoredInstant(task.end_time).getTime() : NaN;
+      const hadValidEnd =
+        Number.isFinite(oldStartMs) && Number.isFinite(oldEndMs) && oldEndMs > oldStartMs;
+      const durMinFallback = scheduleTaskDurationMinutes(task, companyTimeZone);
+      const newStartMs = parseStoredInstant(newStartIso).getTime();
+
+      const origDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
+      const origM = wallMinutesFromScheduleGridStart(task?.start_time, origDay, companyTimeZone);
+      const origSnap = origM != null ? Math.round(Number(origM) / 15) * 15 : null;
+      if (origDay === targetDayKey && origSnap === totalMin) return;
+
+      let updatePayload;
+      if (hadValidEnd) {
+        const newEndIso = new Date(newStartMs + (oldEndMs - oldStartMs)).toISOString();
+        updatePayload = { start_time: newStartIso, end_time: newEndIso, duration_minutes: null };
+      } else {
+        updatePayload = { start_time: newStartIso, end_time: null, duration_minutes: durMinFallback };
+      }
+
+      setScheduleCalendarMoveError("");
+      setScheduleRescheduleSavingId(tid);
+      try {
+        const { error } = await supabase
+          .from("scheduled_tasks")
+          .update(updatePayload)
+          .eq("id", tid)
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        setScheduleCalendarMoveError(msg);
+        alert(msg);
+        setScheduleRefreshKey((k) => k + 1);
+      } finally {
+        setScheduleRescheduleSavingId(null);
+      }
+    },
+    [isAdmin, userCompany?.id, companyTimeZone]
   );
 
   const handleEnableMobileNotifications = async () => {
@@ -6827,6 +7302,158 @@ const handlePhotoCapture = async (event) => {
   }
 
   if (!hasOpenedAppRef.current) hasOpenedAppRef.current = true;
+
+  const renderEmployeeScheduleTaskCard = (task, dateKey) => {
+    const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
+    const proj = String(task?.project_name ?? "").trim();
+    const projLine = proj.length > 0 ? proj : "No project selected";
+    const cc = String(task?.cost_centre ?? "").trim();
+    const ccLine = cc.length > 0 ? cc : "No cost centre";
+    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+    const endRaw = task?.end_time;
+    const durRaw = task?.duration_minutes;
+    let windowLabel = "—";
+    if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
+    else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
+      windowLabel = `${Number(durRaw)} min`;
+    const linkRow =
+      task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
+    const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
+    const declineReasonOwn = String(linkRow?.decline_reason ?? "").trim();
+    const respondedAt = linkRow?.responded_at;
+    const respondedDisp =
+      respondedAt != null && respondedAt !== ""
+        ? `${formatDate(respondedAt, companyTimeZone)} · ${formatTime(respondedAt, companyTimeZone)}`
+        : null;
+    const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
+    const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
+    const tidStr = task?.id != null ? String(task.id) : "";
+    const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
+    const at = String(task?.assigned_team ?? "").trim();
+    const notesDisp = String(task?.notes ?? "").trim();
+    const st = String(task?.status ?? "").trim() || "—";
+    return (
+      <div
+        key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
+        className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm min-w-0"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
+          <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+            {st}
+          </span>
+        </div>
+        <p className="text-[12px] text-slate-700">
+          <span className="font-semibold text-slate-600">Project: </span>
+          {projLine}
+        </p>
+        <p className="text-[12px] text-slate-700">
+          <span className="font-semibold text-slate-600">Cost centre: </span>
+          {ccLine}
+        </p>
+        <p className="text-[12px] text-slate-800">
+          <span className="font-semibold text-slate-600">Time: </span>
+          {startDisp}
+          {" → "}
+          {windowLabel}
+        </p>
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="font-semibold text-slate-600">Your response:</span>
+          <span
+            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(respStatus)}`}
+          >
+            {scheduleAssigneeResponseLabel(respStatus)}
+          </span>
+        </div>
+        {respondedDisp ? (
+          <p className="text-[11px] text-slate-500">
+            Responded: {respondedDisp}
+          </p>
+        ) : null}
+        {respStatus === "declined" && declineReasonOwn ? (
+          <p className="text-[11px] text-slate-700 leading-snug">
+            <span className="font-semibold text-slate-600">Your decline reason: </span>
+            {declineReasonOwn}
+          </p>
+        ) : null}
+        {respStatus === "pending" && assigneeRowId ? (
+          <div className="space-y-2 pt-0.5">
+            {!declineOpen ? (
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(savingThis)}
+                  onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
+                  className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                >
+                  {savingThis ? "Saving…" : "Accept"}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(savingThis)}
+                  onClick={() => {
+                    setScheduleEmployeeResponseInlineError("");
+                    setScheduleEmployeeDeclineTaskId(tidStr);
+                    setScheduleEmployeeDeclineReason("");
+                  }}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
+                >
+                  Decline
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <label className="block text-[10px] font-medium text-slate-600" htmlFor={`decl-reason-${tidStr}`}>
+                  Reason for declining <span className="text-red-600">*</span>
+                </label>
+                <textarea
+                  id={`decl-reason-${tidStr}`}
+                  rows={3}
+                  value={scheduleEmployeeDeclineReason}
+                  onChange={(e) => setScheduleEmployeeDeclineReason(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-[11px] resize-y min-h-[3rem]"
+                  placeholder="Required"
+                  disabled={Boolean(savingThis)}
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={Boolean(savingThis)}
+                    onClick={() =>
+                      void handleEmployeeScheduleDecline(assigneeRowId, scheduleEmployeeDeclineReason)
+                    }
+                    className="rounded-lg bg-rose-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                  >
+                    {savingThis ? "Saving…" : "Confirm decline"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(savingThis)}
+                    onClick={() => {
+                      setScheduleEmployeeDeclineTaskId(null);
+                      setScheduleEmployeeDeclineReason("");
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+        {at ? (
+          <p className="text-[12px] text-slate-700">
+            <span className="font-semibold text-slate-600">Team: </span>
+            {at}
+          </p>
+        ) : null}
+        {notesDisp ? (
+          <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
@@ -8354,9 +8981,75 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "schedule" && !isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
-                <div>
-                  <h2 className="font-bold text-lg">Schedule</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Your assignments · Times: {companyTimeZone}</p>
+                <div className="space-y-3">
+                  <div>
+                    <h2 className="font-bold text-[clamp(24px,5.5vw,28px)] leading-tight tracking-tight">Schedule</h2>
+                    <p className="text-[15px] text-slate-500 mt-0.5">Your assignments · Times: {companyTimeZone}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[15px] font-medium text-slate-800" htmlFor="sched-employee-view">
+                      View
+                    </label>
+                    <select
+                      id="sched-employee-view"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[16px] h-12 font-medium"
+                      value={scheduleViewMode}
+                      onChange={(e) => setScheduleViewMode(e.target.value)}
+                    >
+                      <option value="list">List View</option>
+                      <option value="cal1">1 Day Calendar</option>
+                      <option value="cal3">3 Day Calendar</option>
+                      <option value="cal7">7 Day Calendar</option>
+                      <option value="cal30">30 Day Calendar</option>
+                    </select>
+                  </div>
+                  {scheduleViewMode !== "list" ? (
+                    <div className="flex flex-wrap items-center gap-2 justify-between rounded-2xl border border-slate-100 bg-slate-50/90 px-2.5 py-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[15px] font-semibold text-slate-800"
+                        onClick={() => {
+                          const tz = companyTimeZone;
+                          const anchor =
+                            scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+                          if (scheduleViewMode === "cal30") {
+                            setScheduleCalendarAnchor(addWallMonthsSafe(anchor, -1, tz));
+                            return;
+                          }
+                          const step = scheduleCalendarDaySpan || 1;
+                          setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
+                        }}
+                      >
+                        ← Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-900 px-3 py-2 text-[15px] font-semibold text-white"
+                        onClick={() =>
+                          setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
+                        }
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[15px] font-semibold text-slate-800"
+                        onClick={() => {
+                          const tz = companyTimeZone;
+                          const anchor =
+                            scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+                          if (scheduleViewMode === "cal30") {
+                            setScheduleCalendarAnchor(addWallMonthsSafe(anchor, 1, tz));
+                            return;
+                          }
+                          const step = scheduleCalendarDaySpan || 1;
+                          setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 {scheduleEmployeeResponseInlineError ? (
                   <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
@@ -8367,6 +9060,267 @@ const handlePhotoCapture = async (event) => {
                   <p className="text-sm text-slate-600 py-4 text-center">Loading your schedule…</p>
                 ) : employeeScheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{employeeScheduleError}</div>
+                ) : scheduleViewMode !== "list" ? (
+                  scheduleViewMode === "cal30" ? (
+                    <div className="w-full min-w-0 space-y-3">
+                      <p className="text-center text-[clamp(22px,5vw,26px)] font-bold text-slate-900">
+                        {scheduleMonthGridInfo.monthYearLabel}
+                      </p>
+                      <div className="grid grid-cols-7 gap-px border border-slate-200 bg-slate-200 text-[clamp(13px,3vw,15px)] font-semibold text-slate-600">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                          <div key={d} className="bg-white py-2 text-center">
+                            {d}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-px border-x border-b border-slate-200 bg-slate-200">
+                        {(scheduleMonthGridInfo.cells || []).map((cell) => {
+                          const taskArr = employeeScheduleTasksByDay[cell.dayKey];
+                          const tasks = Array.isArray(taskArr) ? taskArr : [];
+                          const chips = tasks.slice(0, SCHEDULE_MONTH_CHIP_MAX);
+                          const more = tasks.length - chips.length;
+                          const isToday = cell.dayKey === scheduleWallTodayKey;
+                          const isSel =
+                            !!scheduleCalendarSelectedDayKey && cell.dayKey === scheduleCalendarSelectedDayKey;
+                          return (
+                            <div
+                              key={cell.dayKey}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => cell.inMonth && setScheduleCalendarSelectedDayKey(cell.dayKey)}
+                              onKeyDown={(e) => {
+                                if (!cell.inMonth) return;
+                                if (e.key === "Enter" || e.key === " ") setScheduleCalendarSelectedDayKey(cell.dayKey);
+                              }}
+                              className={`relative flex min-h-[6.5rem] flex-col gap-1.5 px-2 py-2 text-left outline-none ring-inset ${
+                                cell.inMonth ? "bg-white" : "bg-slate-50/95 opacity-80"
+                              } ${isSel ? "ring-2 ring-[#174ea6]/40" : ""}`}
+                            >
+                              <div className="flex items-start gap-2">
+                                <span
+                                  className={`flex h-[1.875rem] min-w-[1.875rem] items-center justify-center text-[clamp(17px,4.2vw,20px)] font-bold tabular-nums leading-none ${
+                                    isToday
+                                      ? "rounded-full bg-[#1a73e8] text-white"
+                                      : cell.inMonth
+                                        ? "text-slate-900"
+                                        : "text-slate-400"
+                                  }`}
+                                >
+                                  {cell.dayNum}
+                                </span>
+                              </div>
+                              <div className="flex min-h-0 flex-1 flex-col gap-1">
+                                {chips.map((task) => (
+                                  <button
+                                    key={String(task.id)}
+                                    type="button"
+                                    data-sched-task-chip="1"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setScheduleCalendarFocusTaskId(String(task.id));
+                                    }}
+                                    className="truncate rounded-md bg-[#1a73e8] px-1.5 py-1 text-left text-[13px] font-semibold text-white shadow-sm"
+                                  >
+                                    {String(task?.task_title ?? "").trim() || "Task"}
+                                  </button>
+                                ))}
+                                {more > 0 ? (
+                                  <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
+                                    +{more} more
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {scheduleCalendarFocusTaskId ? (
+                        (() => {
+                          const t = (scheduleEmployeeTasksInCalendarRange || []).find(
+                            (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
+                          );
+                          if (!t) return null;
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
+                          return (
+                            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
+                              {renderEmployeeScheduleTaskCard(t, dk)}
+                            </div>
+                          );
+                        })()
+                      ) : null}
+                    </div>
+                  ) : scheduleCalendarVisibleDayKeys.length === 0 ? (
+                    <p className="text-sm text-slate-600 py-3 text-center">Unable to build calendar range.</p>
+                  ) : (
+                    <div className="w-full min-w-0 space-y-2 pb-24 sm:pb-6">
+                      {(() => {
+                        const colH =
+                          (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * SCHEDULE_GRID_PX_PER_HOUR;
+                        const compact = scheduleViewMode === "cal7";
+                        return (
+                          <>
+                            <div className="sticky top-0 z-30 rounded-t-2xl border border-slate-200 border-b-slate-100 bg-white shadow-sm">
+                              <div className="flex min-w-0">
+                                <div className="w-[3.5rem] shrink-0 border-r border-slate-100 sm:w-[3.75rem]" aria-hidden />
+                                <div className="flex min-w-0 flex-1 divide-x divide-slate-100">
+                                  {scheduleCalendarVisibleDayKeys.map((dayKey) => {
+                                    const dn = Number(String(dayKey).split("-")[2]) || 0;
+                                    const dayIsToday = dayKey === scheduleWallTodayKey;
+                                    const daySel =
+                                      !!scheduleCalendarSelectedDayKey &&
+                                      dayKey === scheduleCalendarSelectedDayKey;
+                                    const labelAccent = dayIsToday || daySel;
+                                    return (
+                                      <button
+                                        key={`hdr-${dayKey}`}
+                                        type="button"
+                                        onClick={() => setScheduleCalendarSelectedDayKey(dayKey)}
+                                        className="min-w-0 flex-1 px-0.5 py-2.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
+                                      >
+                                        <span
+                                          className={`block text-[13px] font-bold uppercase tracking-wide ${
+                                            labelAccent ? "text-[#174ea6]" : "text-slate-500"
+                                          }`}
+                                        >
+                                          {wallWeekdayShort(dayKey, companyTimeZone)}
+                                        </span>
+                                        <span
+                                          className={`mx-auto mt-1 flex h-11 min-w-[2.75rem] max-w-[2.75rem] items-center justify-center rounded-full text-[clamp(17px,4.8vw,20px)] font-bold tabular-nums leading-none ${
+                                            dayIsToday
+                                              ? "bg-[#1a73e8] text-white shadow-sm"
+                                              : daySel
+                                                ? "bg-blue-100 text-[#174ea6]"
+                                                : "text-slate-900"
+                                          }`}
+                                        >
+                                          {dn}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="overflow-hidden rounded-b-2xl border border-t-0 border-slate-200 bg-white shadow-sm">
+                              <div className="flex min-h-0 w-full">
+                                <div
+                                  className="w-[3.5rem] shrink-0 border-r border-slate-200 bg-white py-2 pr-2 text-right text-[clamp(13px,3.8vw,15px)] tabular-nums leading-none text-slate-500 sm:w-[3.75rem]"
+                                  style={{ minHeight: colH }}
+                                >
+                                  {Array.from(
+                                    { length: SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START },
+                                    (_, i) => SCHEDULE_GRID_HOUR_START + i
+                                  ).map((h) => (
+                                    <div
+                                      key={`egl-${h}`}
+                                      className="relative -translate-y-[0.65rem]"
+                                      style={{ height: SCHEDULE_GRID_PX_PER_HOUR }}
+                                    >
+                                      {formatHourLabel12(h)}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex min-w-0 flex-1 divide-x divide-slate-200 bg-white">
+                                  {scheduleCalendarVisibleDayKeys.map((dayKey) => {
+                                    const colTasks = employeeScheduleTasksByDay[dayKey];
+                                    const taskList = Array.isArray(colTasks) ? colTasks : [];
+                                    return (
+                                      <div
+                                        key={dayKey}
+                                        className="relative min-w-0 flex-1"
+                                        style={{ height: colH }}
+                                      >
+                                        {Array.from(
+                                          { length: SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START },
+                                          (_, i) => SCHEDULE_GRID_HOUR_START + i
+                                        ).map((hr) => (
+                                          <div
+                                            key={`${dayKey}-ln-${hr}`}
+                                            className="pointer-events-none border-b border-slate-100"
+                                            style={{ height: SCHEDULE_GRID_PX_PER_HOUR }}
+                                          />
+                                        ))}
+                                        {taskList.map((task) => {
+                                          const topM = wallMinutesFromScheduleGridStart(
+                                            task?.start_time,
+                                            dayKey,
+                                            companyTimeZone
+                                          );
+                                          if (topM == null) return null;
+                                          const dur = scheduleTaskDurationMinutes(task, companyTimeZone);
+                                          const topPx = (topM / 60) * SCHEDULE_GRID_PX_PER_HOUR;
+                                          const hPx = Math.min(
+                                            Math.max(compact ? 30 : 38, (dur / 60) * SCHEDULE_GRID_PX_PER_HOUR),
+                                            Math.max(compact ? 30 : 38, colH - topPx)
+                                          );
+                                          const tone = scheduleTimelineEmployeeTone(
+                                            task,
+                                            employeeScheduleLinkByTaskId
+                                          );
+                                          const blockCls = `${scheduleTimelineBlockClasses(
+                                            tone,
+                                            compact
+                                          )} absolute left-[3px] right-[3px] z-[5] overflow-hidden text-left shadow-sm touch-manipulation`;
+                                          const title = String(task?.task_title ?? "").trim() || "Task";
+                                          const proj = String(task?.project_name ?? "").trim();
+                                          const startDisp = task?.start_time
+                                            ? formatTime(task.start_time, companyTimeZone)
+                                            : "";
+                                          return (
+                                            <button
+                                              key={String(task.id)}
+                                              type="button"
+                                              className={blockCls}
+                                              style={{ top: topPx, height: hPx, minHeight: compact ? 30 : 38 }}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setScheduleCalendarFocusTaskId(String(task.id));
+                                              }}
+                                            >
+                                              <p
+                                                className={`text-left font-semibold ${
+                                                  compact ? "truncate" : "line-clamp-2"
+                                                }`}
+                                                title={title}
+                                              >
+                                                {title}
+                                              </p>
+                                              {!compact ? (
+                                                <p className="mt-0.5 text-[13px] font-medium text-white/95">
+                                                  {startDisp}
+                                                </p>
+                                              ) : null}
+                                              {!compact && proj && hPx > 48 ? (
+                                                <p className="truncate text-[13px] text-white/85">{proj}</p>
+                                              ) : null}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                      {scheduleCalendarFocusTaskId ? (
+                        (() => {
+                          const t = (scheduleEmployeeTasksInCalendarRange || []).find(
+                            (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
+                          );
+                          if (!t) return null;
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
+                          return (
+                            <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
+                              {renderEmployeeScheduleTaskCard(t, dk)}
+                            </div>
+                          );
+                        })()
+                      ) : null}
+                    </div>
+                  )
                 ) : (employeeScheduleTasksGroupedByDate || []).length === 0 ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-center">
                     <p className="text-sm text-slate-700 leading-snug">Your assigned tasks will appear here.</p>
@@ -8385,159 +9339,9 @@ const handlePhotoCapture = async (event) => {
                       const taskList = Array.isArray(tasks) ? tasks : [];
                       return (
                         <div key={dateKey} className="space-y-2">
-                          <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
+                          <p className="text-[14px] font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
                           <div className="space-y-2">
-                            {taskList.map((task) => {
-                              const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
-                              const proj = String(task?.project_name ?? "").trim();
-                              const projLine = proj.length > 0 ? proj : "No project selected";
-                              const cc = String(task?.cost_centre ?? "").trim();
-                              const ccLine = cc.length > 0 ? cc : "No cost centre";
-                              const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
-                              const endRaw = task?.end_time;
-                              const durRaw = task?.duration_minutes;
-                              let windowLabel = "—";
-                              if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
-                              else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
-                                windowLabel = `${Number(durRaw)} min`;
-                              const linkRow =
-                                task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
-                              const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
-                              const declineReasonOwn = String(linkRow?.decline_reason ?? "").trim();
-                              const respondedAt = linkRow?.responded_at;
-                              const respondedDisp =
-                                respondedAt != null && respondedAt !== ""
-                                  ? `${formatDate(respondedAt, companyTimeZone)} · ${formatTime(respondedAt, companyTimeZone)}`
-                                  : null;
-                              const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
-                              const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
-                              const tidStr = task?.id != null ? String(task.id) : "";
-                              const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
-                              const at = String(task?.assigned_team ?? "").trim();
-                              const notesDisp = String(task?.notes ?? "").trim();
-                              const st = String(task?.status ?? "").trim() || "—";
-                              return (
-                                <div
-                                  key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm min-w-0"
-                                >
-                                  <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
-                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                                      {st}
-                                    </span>
-                                  </div>
-                                  <p className="text-[12px] text-slate-700">
-                                    <span className="font-semibold text-slate-600">Project: </span>
-                                    {projLine}
-                                  </p>
-                                  <p className="text-[12px] text-slate-700">
-                                    <span className="font-semibold text-slate-600">Cost centre: </span>
-                                    {ccLine}
-                                  </p>
-                                  <p className="text-[12px] text-slate-800">
-                                    <span className="font-semibold text-slate-600">Time: </span>
-                                    {startDisp}
-                                    {" → "}
-                                    {windowLabel}
-                                  </p>
-                                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
-                                    <span className="font-semibold text-slate-600">Your response:</span>
-                                    <span
-                                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(respStatus)}`}
-                                    >
-                                      {scheduleAssigneeResponseLabel(respStatus)}
-                                    </span>
-                                  </div>
-                                  {respondedDisp ? (
-                                    <p className="text-[11px] text-slate-500">
-                                      Responded: {respondedDisp}
-                                    </p>
-                                  ) : null}
-                                  {respStatus === "declined" && declineReasonOwn ? (
-                                    <p className="text-[11px] text-slate-700 leading-snug">
-                                      <span className="font-semibold text-slate-600">Your decline reason: </span>
-                                      {declineReasonOwn}
-                                    </p>
-                                  ) : null}
-                                  {respStatus === "pending" && assigneeRowId ? (
-                                    <div className="space-y-2 pt-0.5">
-                                      {!declineOpen ? (
-                                        <div className="flex flex-wrap gap-2">
-                                          <button
-                                            type="button"
-                                            disabled={Boolean(savingThis)}
-                                            onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
-                                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
-                                          >
-                                            {savingThis ? "Saving…" : "Accept"}
-                                          </button>
-                                          <button
-                                            type="button"
-                                            disabled={Boolean(savingThis)}
-                                            onClick={() => {
-                                              setScheduleEmployeeResponseInlineError("");
-                                              setScheduleEmployeeDeclineTaskId(tidStr);
-                                              setScheduleEmployeeDeclineReason("");
-                                            }}
-                                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
-                                          >
-                                            Decline
-                                          </button>
-                                        </div>
-                                      ) : (
-                                        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
-                                          <label className="block text-[10px] font-medium text-slate-600" htmlFor={`decl-reason-${tidStr}`}>
-                                            Reason for declining <span className="text-red-600">*</span>
-                                          </label>
-                                          <textarea
-                                            id={`decl-reason-${tidStr}`}
-                                            rows={3}
-                                            value={scheduleEmployeeDeclineReason}
-                                            onChange={(e) => setScheduleEmployeeDeclineReason(e.target.value)}
-                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-[11px] resize-y min-h-[3rem]"
-                                            placeholder="Required"
-                                            disabled={Boolean(savingThis)}
-                                          />
-                                          <div className="flex flex-wrap gap-2">
-                                            <button
-                                              type="button"
-                                              disabled={Boolean(savingThis)}
-                                              onClick={() =>
-                                                void handleEmployeeScheduleDecline(assigneeRowId, scheduleEmployeeDeclineReason)
-                                              }
-                                              className="rounded-lg bg-rose-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
-                                            >
-                                              {savingThis ? "Saving…" : "Confirm decline"}
-                                            </button>
-                                            <button
-                                              type="button"
-                                              disabled={Boolean(savingThis)}
-                                              onClick={() => {
-                                                setScheduleEmployeeDeclineTaskId(null);
-                                                setScheduleEmployeeDeclineReason("");
-                                              }}
-                                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
-                                            >
-                                              Cancel
-                                            </button>
-                                          </div>
-                                        </div>
-                                      )}
-                                    </div>
-                                  ) : null}
-                                  {at ? (
-                                    <p className="text-[12px] text-slate-700">
-                                      <span className="font-semibold text-slate-600">Team: </span>
-                                      {at}
-                                    </p>
-                                  ) : null}
-                                  {notesDisp ? (
-                                    <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
+                            {taskList.map((task) => renderEmployeeScheduleTaskCard(task, dateKey))}
                           </div>
                         </div>
                       );
@@ -8551,28 +9355,96 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "schedule" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <h2 className="font-bold text-lg">Schedule</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">Team tasks · Times: {companyTimeZone}</p>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 className="font-bold text-[clamp(24px,5.5vw,28px)] leading-tight tracking-tight">
+                        Schedule
+                      </h2>
+                      <p className="text-[15px] text-slate-500 mt-0.5">Team tasks · Times: {companyTimeZone}</p>
+                    </div>
+                    {!scheduleFormOpen && (
+                      <Button
+                        type="button"
+                        className="shrink-0 rounded-xl h-11 px-4 text-[15px] font-semibold"
+                        onClick={() => {
+                          setScheduleSaveError("");
+                          setScheduleEditingTaskId(null);
+                          setScheduleEditDraft(null);
+                          setScheduleEditError("");
+                          const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+                          setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
+                          setScheduleFormOpen(true);
+                        }}
+                      >
+                        New task
+                      </Button>
+                    )}
                   </div>
-                  {!scheduleFormOpen && (
-                    <Button
-                      type="button"
-                      className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
-                      onClick={() => {
-                        setScheduleSaveError("");
-                        setScheduleEditingTaskId(null);
-                        setScheduleEditDraft(null);
-                        setScheduleEditError("");
-                        const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
-                        setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
-                        setScheduleFormOpen(true);
-                      }}
+                  <div className="space-y-1">
+                    <label className="text-[15px] font-medium text-slate-800" htmlFor="sched-admin-view">
+                      View
+                    </label>
+                    <select
+                      id="sched-admin-view"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[16px] h-12 font-medium"
+                      value={scheduleViewMode}
+                      onChange={(e) => setScheduleViewMode(e.target.value)}
                     >
-                      New task
-                    </Button>
-                  )}
+                      <option value="list">List View</option>
+                      <option value="cal1">1 Day Calendar</option>
+                      <option value="cal3">3 Day Calendar</option>
+                      <option value="cal7">7 Day Calendar</option>
+                      <option value="cal30">30 Day Calendar</option>
+                    </select>
+                  </div>
+                  {scheduleViewMode !== "list" ? (
+                    <div className="flex flex-wrap items-center gap-2 justify-between rounded-2xl border border-slate-100 bg-slate-50/90 px-2.5 py-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[15px] font-semibold text-slate-800"
+                        onClick={() => {
+                          const tz = companyTimeZone;
+                          const anchor =
+                            scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+                          if (scheduleViewMode === "cal30") {
+                            setScheduleCalendarAnchor(addWallMonthsSafe(anchor, -1, tz));
+                            return;
+                          }
+                          const step = scheduleCalendarDaySpan || 1;
+                          setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
+                        }}
+                      >
+                        ← Prev
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-900 px-3 py-2 text-[15px] font-semibold text-white"
+                        onClick={() =>
+                          setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
+                        }
+                      >
+                        Today
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-[15px] font-semibold text-slate-800"
+                        onClick={() => {
+                          const tz = companyTimeZone;
+                          const anchor =
+                            scheduleCalendarAnchor || calendarDateKeyInTimeZone(new Date(), tz);
+                          if (scheduleViewMode === "cal30") {
+                            setScheduleCalendarAnchor(addWallMonthsSafe(anchor, 1, tz));
+                            return;
+                          }
+                          const step = scheduleCalendarDaySpan || 1;
+                          setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
 
                 {scheduleFormOpen && (
@@ -8860,6 +9732,351 @@ const handlePhotoCapture = async (event) => {
                   <p className="text-sm text-slate-600 py-4 text-center">Loading schedule…</p>
                 ) : scheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{scheduleError}</div>
+                ) : scheduleViewMode !== "list" ? (
+                  <>
+                    {scheduleCalendarMoveError ? (
+                      <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] leading-snug text-red-900">
+                        {scheduleCalendarMoveError}
+                      </div>
+                    ) : null}
+                    {scheduleViewMode === "cal30" ? (
+                    <div className="w-full min-w-0 space-y-3">
+                      <p className="text-center text-[clamp(22px,5vw,26px)] font-bold text-slate-900">
+                        {scheduleMonthGridInfo.monthYearLabel}
+                      </p>
+                      <div className="grid grid-cols-7 gap-px border border-slate-200 bg-slate-200 text-[clamp(13px,3vw,15px)] font-semibold text-slate-600">
+                        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+                          <div key={d} className="bg-white py-2 text-center">
+                            {d}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-7 gap-px border-x border-b border-slate-200 bg-slate-200">
+                        {(scheduleMonthGridInfo.cells || []).map((cell) => {
+                          const rawArr = adminScheduleTasksByDay[cell.dayKey];
+                          const tasks = Array.isArray(rawArr) ? rawArr : [];
+                          const chips = tasks.slice(0, SCHEDULE_MONTH_CHIP_MAX);
+                          const more = tasks.length - chips.length;
+                          const isToday = cell.dayKey === scheduleWallTodayKey;
+                          const isSel =
+                            !!scheduleCalendarSelectedDayKey && cell.dayKey === scheduleCalendarSelectedDayKey;
+                          return (
+                            <div
+                              key={cell.dayKey}
+                              role="presentation"
+                              onClick={(e) => {
+                                if (e.target.closest("[data-sched-task-chip]")) return;
+                                if (!cell.inMonth) return;
+                                setScheduleCalendarSelectedDayKey(cell.dayKey);
+                                openScheduleCreateFromSlot(cell.dayKey, "09:00");
+                              }}
+                              className={`relative flex min-h-[6.5rem] flex-col gap-1.5 px-2 py-2 transition-colors active:bg-slate-50 ${
+                                cell.inMonth ? "cursor-pointer bg-white" : "bg-slate-50/95 opacity-80"
+                              } ${isSel ? "ring-2 ring-inset ring-[#174ea6]/35" : ""}`}
+                            >
+                              <span
+                                className={`flex h-[1.875rem] min-w-[1.875rem] max-w-fit items-center justify-center text-[clamp(17px,4.2vw,20px)] font-bold tabular-nums leading-none ${
+                                  isToday
+                                    ? "rounded-full bg-[#1a73e8] px-2 text-white"
+                                    : cell.inMonth
+                                      ? "text-slate-900"
+                                      : "text-slate-400"
+                                }`}
+                              >
+                                {cell.dayNum}
+                              </span>
+                              <div className="flex min-h-0 flex-1 flex-col gap-1">
+                                {chips.map((task) => (
+                                  <button
+                                    key={String(task.id)}
+                                    type="button"
+                                    data-sched-task-chip="1"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAdminScheduleEditFromCalendar(task);
+                                    }}
+                                    className="truncate rounded-md bg-[#1a73e8] px-1.5 py-1 text-left text-[13px] font-semibold text-white shadow-sm"
+                                  >
+                                    {String(task?.task_title ?? "").trim() || "Task"}
+                                  </button>
+                                ))}
+                                {more > 0 ? (
+                                  <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
+                                    +{more} more
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : scheduleCalendarVisibleDayKeys.length === 0 ? (
+                    <p className="text-sm text-slate-600 py-3 text-center">Unable to build calendar range.</p>
+                  ) : (
+                    <div className="w-full min-w-0 space-y-2 pb-24 sm:pb-6">
+                      {(() => {
+                        const colH =
+                          (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * SCHEDULE_GRID_PX_PER_HOUR;
+                        const compact = scheduleViewMode === "cal7";
+                        const anchorKeys = scheduleCalendarVisibleDayKeys;
+                        return (
+                          <>
+                            <div className="sticky top-0 z-30 rounded-t-2xl border border-slate-200 border-b-slate-100 bg-white shadow-sm">
+                              <div className="flex min-w-0">
+                                <div className="w-[3.5rem] shrink-0 border-r border-slate-100 sm:w-[3.75rem]" aria-hidden />
+                                <div className="flex min-w-0 flex-1 divide-x divide-slate-100">
+                                  {(anchorKeys || []).map((dayKey) => {
+                                    const dn = Number(String(dayKey).split("-")[2]) || 0;
+                                    const dayIsToday = dayKey === scheduleWallTodayKey;
+                                    const daySel =
+                                      !!scheduleCalendarSelectedDayKey &&
+                                      dayKey === scheduleCalendarSelectedDayKey;
+                                    const labelAccent = dayIsToday || daySel;
+                                    return (
+                                      <button
+                                        key={`adm-hdr-${dayKey}`}
+                                        type="button"
+                                        onClick={() => setScheduleCalendarSelectedDayKey(dayKey)}
+                                        className="min-w-0 flex-1 px-0.5 py-2.5 text-center outline-none focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
+                                      >
+                                        <span
+                                          className={`block text-[13px] font-bold uppercase tracking-wide ${
+                                            labelAccent ? "text-[#174ea6]" : "text-slate-500"
+                                          }`}
+                                        >
+                                          {wallWeekdayShort(dayKey, companyTimeZone)}
+                                        </span>
+                                        <span
+                                          className={`mx-auto mt-1 flex h-11 min-w-[2.75rem] max-w-[2.75rem] items-center justify-center rounded-full text-[clamp(17px,4.8vw,20px)] font-bold tabular-nums leading-none ${
+                                            dayIsToday
+                                              ? "bg-[#1a73e8] text-white shadow-sm"
+                                              : daySel
+                                                ? "bg-blue-100 text-[#174ea6]"
+                                                : "text-slate-900"
+                                          }`}
+                                        >
+                                          {dn}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="overflow-hidden rounded-b-2xl border border-t-0 border-slate-200 bg-white shadow-sm">
+                              <div className="flex min-h-0 w-full">
+                                <div
+                                  className="w-[3.5rem] shrink-0 border-r border-slate-200 bg-white py-2 pr-2 text-right text-[clamp(13px,3.8vw,15px)] tabular-nums leading-none text-slate-500 sm:w-[3.75rem]"
+                                  style={{ minHeight: colH }}
+                                >
+                                  {Array.from(
+                                    { length: SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START },
+                                    (_, i) => SCHEDULE_GRID_HOUR_START + i
+                                  ).map((h) => (
+                                    <div
+                                      key={`agl-${h}`}
+                                      className="relative -translate-y-[0.65rem]"
+                                      style={{ height: SCHEDULE_GRID_PX_PER_HOUR }}
+                                    >
+                                      {formatHourLabel12(h)}
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="flex min-w-0 flex-1 divide-x divide-slate-200 bg-white">
+                                  {(anchorKeys || []).map((dayKey) => {
+                                    const colTasks = adminScheduleTasksByDay[dayKey];
+                                    const taskList = Array.isArray(colTasks) ? colTasks : [];
+                                    return (
+                                      <div
+                                        key={dayKey}
+                                        role="presentation"
+                                        ref={(el) => {
+                                          if (el) scheduleTimelineColRefs.current[dayKey] = el;
+                                        }}
+                                        className="relative min-w-0 flex-1"
+                                        style={{ height: colH }}
+                                        onClick={(e) => handleAdminScheduleDayBackgroundClick(e, dayKey)}
+                                      >
+                                        {Array.from(
+                                          { length: SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START },
+                                          (_, i) => SCHEDULE_GRID_HOUR_START + i
+                                        ).map((hr) => (
+                                          <div
+                                            key={`${dayKey}-aln-${hr}`}
+                                            className="pointer-events-none border-b border-slate-100"
+                                            style={{ height: SCHEDULE_GRID_PX_PER_HOUR }}
+                                          />
+                                        ))}
+                                        {taskList.map((task) => {
+                                          const topM = wallMinutesFromScheduleGridStart(
+                                            task?.start_time,
+                                            dayKey,
+                                            companyTimeZone
+                                          );
+                                          if (topM == null) return null;
+                                          const dur = scheduleTaskDurationMinutes(task, companyTimeZone);
+                                          const topPx = (topM / 60) * SCHEDULE_GRID_PX_PER_HOUR;
+                                          const hPx = Math.min(
+                                            Math.max(compact ? 32 : 40, (dur / 60) * SCHEDULE_GRID_PX_PER_HOUR),
+                                            Math.max(compact ? 32 : 40, colH - topPx)
+                                          );
+                                          const title = String(task?.task_title ?? "").trim() || "Task";
+                                          const proj = String(task?.project_name ?? "").trim();
+                                          const startDisp = task?.start_time
+                                            ? formatTime(task.start_time, companyTimeZone)
+                                            : "";
+                                          const tidKey = task?.id != null ? String(task.id) : "";
+                                          const tone = scheduleTimelineAdminTone(task);
+                                          const dragging =
+                                            scheduleCalDraggingTaskId === tidKey ||
+                                            scheduleRescheduleSavingId === tidKey;
+                                          const blockCls = `${scheduleTimelineBlockClasses(
+                                            tone,
+                                            compact
+                                          )} sched-day-task-block absolute left-[3px] right-[3px] z-[8] overflow-hidden shadow-sm touch-manipulation select-none`;
+                                          return (
+                                            <div
+                                              key={String(task.id)}
+                                              className={blockCls}
+                                              style={{
+                                                top: topPx,
+                                                height: hPx,
+                                                minHeight: compact ? 32 : 40,
+                                                opacity: dragging ? 0.55 : 1,
+                                              }}
+                                              onPointerDown={(e) => {
+                                                const te = e.target;
+                                                if (
+                                                  te instanceof Element &&
+                                                  te.closest("button")
+                                                ) {
+                                                  return;
+                                                }
+                                                if (
+                                                  scheduleEditSaving ||
+                                                  scheduleDeleteSavingId === tidKey ||
+                                                  scheduleRescheduleSavingId
+                                                ) {
+                                                  return;
+                                                }
+                                                e.stopPropagation();
+                                                const sx = e.clientX;
+                                                const sy = e.clientY;
+                                                let moved = false;
+                                                setScheduleCalDraggingTaskId(tidKey);
+                                                const onMove = (ev) => {
+                                                  if (
+                                                    Math.hypot(ev.clientX - sx, ev.clientY - sy) >
+                                                    SCHEDULE_TIMELINE_DRAG_THRESHOLD_PX
+                                                  ) {
+                                                    moved = true;
+                                                  }
+                                                };
+                                                const onUp = async (ev) => {
+                                                  window.removeEventListener("pointermove", onMove);
+                                                  window.removeEventListener("pointerup", onUp);
+                                                  setScheduleCalDraggingTaskId(null);
+                                                  if (moved) {
+                                                    let hit = null;
+                                                    for (const dk of anchorKeys) {
+                                                      const node = scheduleTimelineColRefs.current?.[dk];
+                                                      if (!node) continue;
+                                                      const r = node.getBoundingClientRect();
+                                                      if (
+                                                        ev.clientX >= r.left &&
+                                                        ev.clientX <= r.right &&
+                                                        ev.clientY >= r.top &&
+                                                        ev.clientY <= r.bottom
+                                                      ) {
+                                                        const y = ev.clientY - r.top;
+                                                        const pct = r.height > 0 ? y / r.height : 0;
+                                                        const minsRaw = pct * SCHEDULE_GRID_TOTAL_MINUTES;
+                                                        const snapped = Math.round(minsRaw / 15) * 15;
+                                                        const totalMin = Math.max(
+                                                          0,
+                                                          Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 15, snapped)
+                                                        );
+                                                        hit = { dayKey: dk, mins: totalMin };
+                                                        break;
+                                                      }
+                                                    }
+                                                    if (hit) {
+                                                      await handleAdminScheduleTaskReschedule(
+                                                        task,
+                                                        hit.dayKey,
+                                                        hit.mins
+                                                      );
+                                                    }
+                                                  } else {
+                                                    openAdminScheduleEditFromCalendar(task);
+                                                  }
+                                                };
+                                                window.addEventListener("pointermove", onMove);
+                                                window.addEventListener("pointerup", onUp);
+                                              }}
+                                            >
+                                              <p
+                                                className={`text-left font-semibold ${
+                                                  compact ? "truncate" : "line-clamp-2"
+                                                }`}
+                                                title={title}
+                                              >
+                                                {title}
+                                              </p>
+                                              {!compact ? (
+                                                <p className="mt-0.5 text-[13px] font-semibold text-white/95">{startDisp}</p>
+                                              ) : null}
+                                              {!compact && proj && hPx > 52 ? (
+                                                <p className="truncate text-[13px] text-white/85">{proj}</p>
+                                              ) : null}
+                                              <div className="mt-1 flex flex-wrap gap-1">
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    Boolean(scheduleEditSaving) ||
+                                                    scheduleDeleteSavingId === tidKey ||
+                                                    scheduleRescheduleSavingId === tidKey
+                                                  }
+                                                  onClick={(ev) => {
+                                                    ev.stopPropagation();
+                                                    openAdminScheduleEditFromCalendar(task);
+                                                  }}
+                                                  className="rounded-md border border-white/50 bg-white/20 px-2 py-0.5 text-[12px] font-semibold text-white backdrop-blur-sm disabled:opacity-50"
+                                                >
+                                                  Edit
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    Boolean(scheduleEditSaving) ||
+                                                    scheduleDeleteSavingId === tidKey ||
+                                                    scheduleRescheduleSavingId === tidKey
+                                                  }
+                                                  onClick={(ev) => {
+                                                    ev.stopPropagation();
+                                                    void handleScheduleDeleteTask(task?.id);
+                                                  }}
+                                                  className="rounded-md border border-white/40 bg-red-500/35 px-2 py-0.5 text-[12px] font-semibold text-white disabled:opacity-50"
+                                                >
+                                                  {scheduleDeleteSavingId === tidKey ? "…" : "Delete"}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </>
                 ) : (scheduleTasksGroupedByDate || []).length === 0 ? (
                   <p className="text-sm text-slate-600 py-4 text-center">No scheduled tasks.</p>
                 ) : (
