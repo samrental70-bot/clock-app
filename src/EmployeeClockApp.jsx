@@ -1467,6 +1467,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [activeAssignNotif, setActiveAssignNotif] = useState(null);
   const [assignNotifSaving, setAssignNotifSaving] = useState(false);
   const shownAssignNotifIdsRef = useRef(new Set());
+  const [employeeNotifPermMessage, setEmployeeNotifPermMessage] = useState("");
 
   const photoNotifyBatchRef = useRef({
     timer: null,
@@ -2173,7 +2174,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
   /** Employee Schedule: only tasks where user appears in scheduled_task_assignees (same company). */
   useEffect(() => {
-    if (activeTab !== "schedule" || isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) {
+    // Run in background for employees so assignments appear without tab switching.
+    if (isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) {
       return;
     }
     let cancelled = false;
@@ -2228,7 +2230,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, isEmployeeRole, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
+  }, [isAdmin, isEmployeeRole, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
 
   /** Clock tab: fetch current user's assignee-linked tasks for today + next calendar day (company TZ); any role. */
   useEffect(() => {
@@ -3151,6 +3153,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const nid = String(first.id);
     shownAssignNotifIdsRef.current.add(nid);
     setActiveAssignNotif(first);
+    // Trigger background refresh so the Schedule tab updates even if user stays on another tab.
+    setScheduleRefreshKey((k) => k + 1);
 
     // Optional system notification if permission already granted.
     if (typeof window !== "undefined" && window.Notification && window.Notification.permission === "granted") {
@@ -6651,9 +6655,15 @@ const handlePhotoCapture = async (event) => {
       return;
     }
     try {
-      await Notification.requestPermission();
+      const p = await Notification.requestPermission();
+      if (p === "granted") setEmployeeNotifPermMessage("Phone notifications enabled.");
+      else if (p === "denied") setEmployeeNotifPermMessage("Notifications blocked. Enable them in browser settings.");
+      else setEmployeeNotifPermMessage("Notifications not enabled yet.");
+      setTimeout(() => setEmployeeNotifPermMessage(""), 4000);
     } catch (e) {
       console.warn("[NOTIFY] permission request failed", e);
+      setEmployeeNotifPermMessage("Could not request permission.");
+      setTimeout(() => setEmployeeNotifPermMessage(""), 4000);
     }
   }, []);
 
@@ -9425,11 +9435,16 @@ const handlePhotoCapture = async (event) => {
                   </div>
                   <button
                     type="button"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[14px] font-semibold text-slate-800"
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[14px] font-semibold text-slate-800 relative z-[1] pointer-events-auto"
                     onClick={() => void handleEmployeeRequestNotificationPermission()}
                   >
                     Enable phone notifications
                   </button>
+                  {employeeNotifPermMessage ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-[12px] font-semibold text-slate-700">
+                      {employeeNotifPermMessage}
+                    </div>
+                  ) : null}
                   <div className="space-y-1">
                     <label className="text-[15px] font-medium text-slate-800" htmlFor="sched-employee-view">
                       View
