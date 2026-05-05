@@ -1255,6 +1255,69 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
 }
 
 /** Insert one in-app row per recipient. Failures are logged only — never throws. */
+function scheduleAssignmentMessageSignature(row) {
+  const title = String(row?.title ?? "").trim();
+  const message = String(row?.message ?? "").trim();
+  const taskId = String(row?.scheduledTaskId ?? row?.scheduled_task_id ?? "").trim();
+  return `${taskId}|${title}|${message}`;
+}
+
+function buildScheduleAssignmentDisplay(task, companyTimeZone) {
+  const taskTitle = String(task?.task_title ?? "").trim() || "Scheduled task";
+  const wallKey = task?.start_time ? calendarDateKeyInTimeZone(task.start_time, companyTimeZone) : "";
+  const wallParts = task?.start_time ? wallClockPartsInTimeZone(task.start_time, companyTimeZone) : {};
+  const whenDisp =
+    wallKey && wallParts.timeStr
+      ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} - ${wallParts.timeStr}`
+      : "";
+  const projectName = String(task?.project_name ?? "").trim();
+  const costCentre = String(task?.cost_centre ?? "").trim();
+  const notes = String(task?.notes ?? "").trim();
+  const msgParts = [
+    `Task: ${taskTitle}`,
+    whenDisp ? `When: ${whenDisp}` : "",
+    projectName ? `Project: ${projectName}` : "",
+    costCentre ? `Cost centre: ${costCentre}` : "",
+    notes ? `Notes: ${notes}` : "",
+  ].filter(Boolean);
+  return {
+    title: "New task assigned",
+    taskTitle,
+    whenDisp,
+    projectName,
+    costCentre,
+    message: msgParts.join("\n") || "You were assigned a scheduled task.",
+    browserBody: [taskTitle, whenDisp].filter(Boolean).join(" - ") || "Open the app to view your assignment.",
+  };
+}
+
+function tryShowScheduleBrowserNotification(notificationRow, shownIdsRef) {
+  const id = String(notificationRow?.id ?? notificationRow?.assignmentId ?? "");
+  if (!id || shownIdsRef.current.has(id)) return;
+  if (typeof window === "undefined" || !window.Notification) return;
+  if (window.Notification.permission !== "granted") return;
+  try {
+    shownIdsRef.current.add(id);
+    const n = new window.Notification("New task assigned", {
+      body: String(notificationRow?.browserBody || notificationRow?.message || "").trim(),
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag: `schedule-${id}`,
+      data: { url: "/" },
+    });
+    n.onclick = () => {
+      try {
+        window.focus();
+      } catch {
+        // ignore
+      }
+    };
+  } catch (e) {
+    console.warn("[NOTIFY] schedule system Notification failed", e);
+    shownIdsRef.current.delete(id);
+  }
+}
+
 async function createCompanyNotifications(supabase, params) {
   const {
     companyId,
@@ -1467,6 +1530,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [activeAssignNotif, setActiveAssignNotif] = useState(null);
   const [assignNotifSaving, setAssignNotifSaving] = useState(false);
   const shownAssignNotifIdsRef = useRef(new Set());
+  const shownAssignMessageSignaturesRef = useRef(new Set());
   const [employeeNotifPermMessage, setEmployeeNotifPermMessage] = useState("");
 
   const photoNotifyBatchRef = useRef({
@@ -1641,6 +1705,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [employeeScheduleError, setEmployeeScheduleError] = useState("");
   /** task id string → current user's assignee row (for accept/decline + display). */
   const [employeeScheduleLinkByTaskId, setEmployeeScheduleLinkByTaskId] = useState({});
+  const employeeScheduleKnownAssignmentIdsRef = useRef(new Set());
+  const employeeScheduleBootstrappedRef = useRef(false);
+  const employeeScheduleRefreshInFlightRef = useRef(false);
+  const shownAssignmentRowIdsRef = useRef(new Set());
   /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow — Scheduled Task dropdown. */
   const [clockEmployeeScheduledTasks, setClockEmployeeScheduledTasks] = useState([]);
   const [clockEmployeeScheduleLoading, setClockEmployeeScheduleLoading] = useState(false);
@@ -2172,21 +2240,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
     };
   }, [activeTab, isAdmin, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
 
-  /** Employee Schedule: only tasks where user appears in scheduled_task_assignees (same company). */
-  useEffect(() => {
-    // Run in background for employees so assignments appear without tab switching.
-    if (isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) {
-      return;
-    }
-    let cancelled = false;
-    setEmployeeScheduleLoading(true);
-    setEmployeeScheduleError("");
-    (async () => {
+  const refreshEmployeeAssignedSchedule = useCallback(
+    async ({ detectNew = false, showLoading = false } = {}) => {
+      if (isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) return;
+      if (employeeScheduleRefreshInFlightRef.current) return;
+      employeeScheduleRefreshInFlightRef.current = true;
+      if (showLoading) setEmployeeScheduleLoading(true);
+      setEmployeeScheduleError("");
       try {
         const { data: links, error: linkErr } = await supabase
           .from("scheduled_task_assignees")
           .select(
-            "id, scheduled_task_id, user_id, response_status, decline_reason, responded_at, updated_at, employee_name"
+            "id, scheduled_task_id, user_id, response_status, decline_reason, responded_at, updated_at, created_at, employee_name"
           )
           .eq("company_id", userCompany.id)
           .eq("user_id", authUser.id);
@@ -2198,39 +2263,117 @@ const [uploadProgress, setUploadProgress] = useState(null);
           if (tid == null) continue;
           linkByTaskId[String(tid)] = row;
         }
-        const idSet = [...new Set(rawLinks.map((r) => r?.scheduled_task_id).filter(Boolean))];
-        if (idSet.length === 0) {
-          if (!cancelled) {
-            setEmployeeScheduledTasks([]);
-            setEmployeeScheduleLinkByTaskId({});
-          }
+        const taskIds = [...new Set(rawLinks.map((r) => r?.scheduled_task_id).filter(Boolean))];
+        let taskRows = [];
+        if (taskIds.length > 0) {
+          const { data, error: tErr } = await supabase
+            .from("scheduled_tasks")
+            .select("*")
+            .eq("company_id", userCompany.id)
+            .in("id", taskIds)
+            .order("start_time", { ascending: true });
+          if (tErr) throw tErr;
+          taskRows = Array.isArray(data) ? data : [];
+        }
+
+        setEmployeeScheduledTasks(taskRows);
+        setEmployeeScheduleLinkByTaskId(linkByTaskId);
+
+        const assignmentIds = new Set(rawLinks.map((r) => String(r?.id ?? "")).filter(Boolean));
+        if (!employeeScheduleBootstrappedRef.current) {
+          employeeScheduleBootstrappedRef.current = true;
+          employeeScheduleKnownAssignmentIdsRef.current = assignmentIds;
           return;
         }
-        const { data: taskRows, error: tErr } = await supabase
-          .from("scheduled_tasks")
-          .select("*")
-          .eq("company_id", userCompany.id)
-          .in("id", idSet)
-          .order("start_time", { ascending: true });
-        if (tErr) throw tErr;
-        if (!cancelled) {
-          setEmployeeScheduledTasks(Array.isArray(taskRows) ? taskRows : []);
-          setEmployeeScheduleLinkByTaskId(linkByTaskId);
+
+        const previousIds = employeeScheduleKnownAssignmentIdsRef.current;
+        const newLinks = rawLinks
+          .filter((r) => {
+            const id = String(r?.id ?? "");
+            return id && !previousIds.has(id) && !shownAssignmentRowIdsRef.current.has(id);
+          })
+          .sort((a, b) => String(a?.created_at || "").localeCompare(String(b?.created_at || "")));
+        employeeScheduleKnownAssignmentIdsRef.current = assignmentIds;
+        if (!detectNew || newLinks.length === 0 || activeAssignNotif || assignNotifSaving) return;
+
+        const link = newLinks[0];
+        const assignmentId = String(link.id);
+        const task = taskRows.find((t) => String(t?.id) === String(link.scheduled_task_id)) || {};
+        const display = buildScheduleAssignmentDisplay(task, companyTimeZone);
+        let linkedNotification = null;
+        try {
+          const { data: notifRows } = await supabase
+            .from("notifications")
+            .select("*")
+            .eq("recipient_user_id", authUser.id)
+            .eq("company_id", userCompany.id)
+            .eq("type", "schedule_assigned")
+            .is("read_at", null)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          linkedNotification = Array.isArray(notifRows) && notifRows.length > 0 ? notifRows[0] : null;
+        } catch {
+          linkedNotification = null;
         }
+
+        const popupRow = {
+          ...(linkedNotification || {}),
+          assignmentId,
+          scheduledTaskId: link.scheduled_task_id,
+          id: linkedNotification?.id ?? null,
+          type: "schedule_assigned",
+          title: "New task assigned",
+          message: linkedNotification?.message || display.message,
+          browserBody: display.browserBody,
+          taskTitle: display.taskTitle,
+          whenDisp: display.whenDisp,
+          projectName: display.projectName,
+          costCentre: display.costCentre,
+        };
+        shownAssignmentRowIdsRef.current.add(assignmentId);
+        if (popupRow.id) shownAssignNotifIdsRef.current.add(String(popupRow.id));
+        shownAssignMessageSignaturesRef.current.add(scheduleAssignmentMessageSignature(popupRow));
+        setActiveAssignNotif(popupRow);
+        tryShowScheduleBrowserNotification(popupRow, systemNotifShownIdsRef);
       } catch (err) {
-        if (!cancelled) {
-          setEmployeeScheduleError(getErrorMessage(err));
-          setEmployeeScheduledTasks([]);
-          setEmployeeScheduleLinkByTaskId({});
-        }
+        setEmployeeScheduleError(getErrorMessage(err));
+        setEmployeeScheduledTasks([]);
+        setEmployeeScheduleLinkByTaskId({});
       } finally {
-        if (!cancelled) setEmployeeScheduleLoading(false);
+        employeeScheduleRefreshInFlightRef.current = false;
+        if (showLoading) setEmployeeScheduleLoading(false);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [isAdmin, isEmployeeRole, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
+    },
+    [
+      isAdmin,
+      isEmployeeRole,
+      userCompany?.id,
+      companyChecked,
+      authUser?.id,
+      companyTimeZone,
+      activeAssignNotif,
+      assignNotifSaving,
+    ]
+  );
+
+  /** Employee Schedule: only tasks where user appears in scheduled_task_assignees (same company). */
+  useEffect(() => {
+    if (isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) {
+      employeeScheduleKnownAssignmentIdsRef.current = new Set();
+      employeeScheduleBootstrappedRef.current = false;
+      shownAssignmentRowIdsRef.current = new Set();
+      return;
+    }
+    void refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
+  }, [
+    isAdmin,
+    isEmployeeRole,
+    userCompany?.id,
+    companyChecked,
+    authUser?.id,
+    scheduleRefreshKey,
+    refreshEmployeeAssignedSchedule,
+  ]);
 
   /** Clock tab: fetch current user's assignee-linked tasks for today + next calendar day (company TZ); any role. */
   useEffect(() => {
@@ -3144,6 +3287,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       const id = String(n?.id ?? "");
       if (!id) return false;
       if (shownAssignNotifIdsRef.current.has(id)) return false;
+      if (shownAssignMessageSignaturesRef.current.has(scheduleAssignmentMessageSignature(n))) return false;
       const unread = n?.read_at == null && n?.is_read !== true;
       if (!unread) return false;
       const t = String(n?.type ?? "").trim().toLowerCase();
@@ -3152,25 +3296,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
     if (!first) return;
     const nid = String(first.id);
     shownAssignNotifIdsRef.current.add(nid);
-    setActiveAssignNotif(first);
+    const popupRow = { ...first, title: "New task assigned" };
+    shownAssignMessageSignaturesRef.current.add(scheduleAssignmentMessageSignature(popupRow));
+    setActiveAssignNotif(popupRow);
     // Trigger background refresh so the Schedule tab updates even if user stays on another tab.
     setScheduleRefreshKey((k) => k + 1);
 
     // Optional system notification if permission already granted.
-    if (typeof window !== "undefined" && window.Notification && window.Notification.permission === "granted") {
-      try {
-        const title = "New scheduled task assigned";
-        const body = String(first?.message ?? "").trim().split("\n")[0] || String(first?.title ?? "").trim();
-        new window.Notification(title, {
-          body: body || "Open the app to confirm.",
-          icon: "/icon-192.png",
-          badge: "/icon-192.png",
-          tag: `assign-${nid}`,
-        });
-      } catch {
-        // ignore
-      }
-    }
+    tryShowScheduleBrowserNotification(popupRow, systemNotifShownIdsRef);
   }, [isAdmin, authUser?.id, userCompany?.id, inAppNotifications, activeAssignNotif, assignNotifSaving]);
 
   useEffect(() => {
@@ -3181,12 +3314,43 @@ const [uploadProgress, setUploadProgress] = useState(null);
       notifPollBootstrappedRef.current = false;
       notifLastUnreadIdsRef.current = new Set();
       systemNotifShownIdsRef.current = new Set();
+      shownAssignNotifIdsRef.current = new Set();
+      shownAssignMessageSignaturesRef.current = new Set();
       return;
     }
     void pollInAppNotifications();
     const interval = setInterval(() => void pollInAppNotifications(), 15000);
     return () => clearInterval(interval);
   }, [authUser?.id, userCompany?.id, pollInAppNotifications]);
+
+  useEffect(() => {
+    if (isAdmin || !isEmployeeRole || !authUser?.id || !userCompany?.id || !companyChecked) return;
+
+    const refresh = () => {
+      void refreshEmployeeAssignedSchedule({ detectNew: true, showLoading: false });
+    };
+
+    refresh();
+    const interval = setInterval(refresh, 7000);
+    const onFocus = () => refresh();
+    const onVisibility = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [
+    isAdmin,
+    isEmployeeRole,
+    authUser?.id,
+    userCompany?.id,
+    companyChecked,
+    refreshEmployeeAssignedSchedule,
+  ]);
 
   useEffect(() => {
     if (!isAdmin && activeTab === "notifications") setActiveTab("schedule");
@@ -6237,7 +6401,7 @@ const handlePhotoCapture = async (event) => {
                 ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
                 : "";
             const msgParts = [
-              `You were assigned: ${taskTitle}`,
+              `Task: ${taskTitle}`,
               whenDisp ? `When: ${whenDisp}` : "",
               projectNameVal ? `Project: ${projectNameVal}` : "",
               costCentreVal ? `Cost centre: ${costCentreVal}` : "",
@@ -6247,7 +6411,7 @@ const handlePhotoCapture = async (event) => {
               companyId: userCompany.id,
               actorUserId: authUser.id,
               type: "schedule_assigned",
-              title: "New scheduled task assigned",
+              title: "New task assigned",
               message: msgParts.join("\n"),
               projectId: projectIdVal,
               projectName: projectNameVal,
@@ -6338,6 +6502,11 @@ const handlePhotoCapture = async (event) => {
       const namesCsv = nameParts.length > 0 ? nameParts.join(", ") : null;
       const statusVal = String(d?.status ?? "scheduled").trim() || "scheduled";
       const taskId = String(scheduleEditingTaskId);
+      const prevAssignedUserIds = new Set(
+        (Array.isArray(scheduleAssigneesByTaskId?.[taskId]) ? scheduleAssigneesByTaskId[taskId] : [])
+          .map((row) => String(row?.user_id ?? "").trim())
+          .filter(Boolean)
+      );
 
       const updatePayload = {
         task_title: taskTitle,
@@ -6398,7 +6567,7 @@ const handlePhotoCapture = async (event) => {
                   ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
                   : "";
               const msgParts = [
-                `You were assigned: ${taskTitle}`,
+                `Task: ${taskTitle}`,
                 whenDisp ? `When: ${whenDisp}` : "",
                 projectNameVal ? `Project: ${projectNameVal}` : "",
                 costCentreVal ? `Cost centre: ${costCentreVal}` : "",
@@ -6408,7 +6577,7 @@ const handlePhotoCapture = async (event) => {
                 companyId: userCompany.id,
                 actorUserId: authUser.id,
                 type: "schedule_assigned",
-                title: "New scheduled task assigned",
+                title: "New task assigned",
                 message: msgParts.join("\n"),
                 projectId: projectIdVal,
                 projectName: projectNameVal,
@@ -6621,24 +6790,27 @@ const handlePhotoCapture = async (event) => {
   };
 
   const handleEmployeeConfirmAssignmentNotification = useCallback(async (goToSchedule) => {
-    if (!activeAssignNotif?.id || !authUser?.id || !userCompany?.id) return;
+    if (!activeAssignNotif || !authUser?.id || !userCompany?.id) return;
     setAssignNotifSaving(true);
     try {
-      const ts = new Date().toISOString();
-      const { error } = await supabase
-        .from("notifications")
-        .update({ read_at: ts, is_read: true })
-        .eq("id", activeAssignNotif.id)
-        .eq("recipient_user_id", authUser.id);
-      if (error) throw error;
-      setInAppNotifications((prev) =>
-        (Array.isArray(prev) ? prev : []).map((x) =>
-          String(x?.id) === String(activeAssignNotif.id) ? { ...x, read_at: ts, is_read: true } : x
-        )
-      );
+      if (activeAssignNotif?.id) {
+        const ts = new Date().toISOString();
+        const { error } = await supabase
+          .from("notifications")
+          .update({ read_at: ts, is_read: true })
+          .eq("id", activeAssignNotif.id)
+          .eq("recipient_user_id", authUser.id);
+        if (error) throw error;
+        setInAppNotifications((prev) =>
+          (Array.isArray(prev) ? prev : []).map((x) =>
+            String(x?.id) === String(activeAssignNotif.id) ? { ...x, read_at: ts, is_read: true } : x
+          )
+        );
+      }
       setActiveAssignNotif(null);
       if (goToSchedule) {
         setActiveTab("schedule");
+        await refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
         setScheduleRefreshKey((k) => k + 1);
       }
       await pollInAppNotifications();
@@ -6647,7 +6819,7 @@ const handlePhotoCapture = async (event) => {
     } finally {
       setAssignNotifSaving(false);
     }
-  }, [activeAssignNotif, authUser?.id, userCompany?.id, pollInAppNotifications]);
+  }, [activeAssignNotif, authUser?.id, userCompany?.id, pollInAppNotifications, refreshEmployeeAssignedSchedule]);
 
   const handleEmployeeRequestNotificationPermission = useCallback(async () => {
     if (typeof window === "undefined" || !("Notification" in window)) {
@@ -7898,14 +8070,9 @@ const handlePhotoCapture = async (event) => {
               <div className="mx-auto w-full max-w-md">
                 <div className="rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
                   <div className="p-4 border-b border-slate-100 bg-slate-50/60">
-                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">New task assigned</p>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Schedule update</p>
                     <p className="mt-1 text-[18px] font-bold text-slate-900 leading-snug break-words">
-                      {(() => {
-                        const msg = String(activeAssignNotif?.message ?? "");
-                        const firstLine = msg.split("\n").find((x) => String(x).trim()) || "";
-                        const title = String(activeAssignNotif?.title ?? "").trim();
-                        return firstLine || title || "You have a new scheduled task.";
-                      })()}
+                      New task assigned
                     </p>
                   </div>
                   <div className="p-4 space-y-3">
