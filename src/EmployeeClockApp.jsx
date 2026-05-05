@@ -1551,6 +1551,19 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [scheduleCalendarSelectedDayKey, setScheduleCalendarSelectedDayKey] = useState("");
   /** Admin calendar Move Mode: task id string being repositioned via tap-on-slot (supervisor/owner only). */
   const [scheduleMoveModeTaskId, setScheduleMoveModeTaskId] = useState(null);
+  /** Admin calendar drag state (timeline views only). */
+  const [scheduleDragTaskId, setScheduleDragTaskId] = useState(null);
+  const scheduleTimelineColsRef = useRef(null);
+  const scheduleAdminDragRef = useRef({
+    pointerId: null,
+    task: null,
+    anchorKeys: [],
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    dragging: false,
+  });
   const [scheduleRescheduleSavingId, setScheduleRescheduleSavingId] = useState(null);
   const [scheduleCalendarMoveError, setScheduleCalendarMoveError] = useState("");
   const [scheduleFormOpen, setScheduleFormOpen] = useState(false);
@@ -5793,6 +5806,133 @@ const handlePhotoCapture = async (event) => {
     [isAdmin, userCompany?.id, companyTimeZone]
   );
 
+  const handleAdminTimelineTaskPointerDown = useCallback(
+    (e, task, anchorKeys) => {
+      if (!isAdmin || !task?.id) return;
+      const tid = String(task.id);
+      const te = e.target;
+      const el =
+        te instanceof Element ? te : te?.parentNode instanceof Element ? te.parentNode : null;
+      if (el instanceof Element && el.closest("button, a[href], input, select, textarea, label")) return;
+      if (scheduleEditSaving || scheduleDeleteSavingId === tid || scheduleRescheduleSavingId === tid) return;
+      if (scheduleMoveModeTaskId) setScheduleMoveModeTaskId(null);
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const pid = e.pointerId;
+      scheduleAdminDragRef.current = {
+        pointerId: pid,
+        task,
+        anchorKeys: Array.isArray(anchorKeys) ? anchorKeys : [],
+        startX: e.clientX,
+        startY: e.clientY,
+        lastX: e.clientX,
+        lastY: e.clientY,
+        dragging: false,
+      };
+      setScheduleDragTaskId(tid);
+
+      try {
+        e.currentTarget?.setPointerCapture?.(pid);
+      } catch {
+        // ignore
+      }
+    },
+    [
+      isAdmin,
+      scheduleEditSaving,
+      scheduleDeleteSavingId,
+      scheduleRescheduleSavingId,
+      scheduleMoveModeTaskId,
+    ]
+  );
+
+  const handleAdminTimelineTaskPointerMove = useCallback((e) => {
+    const st = scheduleAdminDragRef.current;
+    if (!st?.pointerId || e.pointerId !== st.pointerId) return;
+    e.preventDefault();
+    st.lastX = e.clientX;
+    st.lastY = e.clientY;
+    if (!st.dragging) {
+      if (Math.hypot(st.lastX - st.startX, st.lastY - st.startY) > 8) st.dragging = true;
+    }
+  }, []);
+
+  const handleAdminTimelineTaskPointerUp = useCallback(
+    (e) => {
+      const st = scheduleAdminDragRef.current;
+      if (!st?.pointerId || e.pointerId !== st.pointerId) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const task = st.task;
+      const tid = task?.id != null ? String(task.id) : "";
+      const anchorKeys = Array.isArray(st.anchorKeys) ? st.anchorKeys : [];
+      const wasDragging = Boolean(st.dragging);
+      const dropX = st.lastX;
+      const dropY = st.lastY;
+
+      scheduleAdminDragRef.current = {
+        pointerId: null,
+        task: null,
+        anchorKeys: [],
+        startX: 0,
+        startY: 0,
+        lastX: 0,
+        lastY: 0,
+        dragging: false,
+      };
+      setScheduleDragTaskId(null);
+
+      if (!task || !tid) return;
+
+      if (!wasDragging) {
+        openAdminScheduleEditFromCalendar(task);
+        return;
+      }
+
+      const colsNode = scheduleTimelineColsRef.current;
+      if (!(colsNode instanceof Element)) {
+        setScheduleCalendarMoveError("Unable to determine drop target. Try again.");
+        return;
+      }
+      const rect = colsNode.getBoundingClientRect();
+      const colCount = anchorKeys.length || 1;
+      const w = rect.width > 0 ? rect.width : 1;
+      const x = Math.min(Math.max(0, dropX - rect.left), w - 1);
+      const dayIndex = Math.min(colCount - 1, Math.max(0, Math.floor((x / w) * colCount)));
+      const dayKey = anchorKeys[dayIndex];
+      if (!dayKey) return;
+
+      const h = rect.height > 0 ? rect.height : 1;
+      const y = Math.min(Math.max(0, dropY - rect.top), h - 1);
+      const pct = Math.max(0, Math.min(1, y / h));
+      const minsRaw = pct * SCHEDULE_GRID_TOTAL_MINUTES;
+      const snapped = Math.round(minsRaw / 15) * 15;
+      const totalMin = Math.max(0, Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 15, snapped));
+      const h0 = SCHEDULE_GRID_HOUR_START + Math.floor(totalMin / 60);
+      const m0 = totalMin % 60;
+      const hh = String(Math.min(23, Math.max(0, h0))).padStart(2, "0");
+      const mm = String(Math.min(59, m0)).padStart(2, "0");
+      const wallTime = `${hh}:${mm}`;
+
+      const newStartIso = wallDateTimeToUtcIso(dayKey, normalizeTimeInputForWallClock(wallTime), companyTimeZone);
+      if (!newStartIso) {
+        setScheduleCalendarMoveError("Could not compute the new start time.");
+        return;
+      }
+
+      const origDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
+      const origM = wallMinutesFromScheduleGridStart(task?.start_time, origDay, companyTimeZone);
+      const origSnap = origM != null ? Math.round(Number(origM) / 15) * 15 : null;
+      if (origDay === dayKey && origSnap === totalMin) return;
+
+      void persistAdminScheduledTaskClockMove(task, newStartIso);
+    },
+    [companyTimeZone, openAdminScheduleEditFromCalendar, persistAdminScheduledTaskClockMove]
+  );
+
   const handleAdminScheduleDayBackgroundClick = useCallback(
     (e, dayKey) => {
       if (isAdminScheduleCalendarBackgroundIgnored(e)) return;
@@ -9310,10 +9450,6 @@ const handlePhotoCapture = async (event) => {
                                             compact
                                           )} absolute left-[3px] right-[3px] z-[5] overflow-hidden text-left shadow-sm touch-manipulation`;
                                           const title = String(task?.task_title ?? "").trim() || "Task";
-                                          const proj = String(task?.project_name ?? "").trim();
-                                          const startDisp = task?.start_time
-                                            ? formatTime(task.start_time, companyTimeZone)
-                                            : "";
                                           return (
                                             <button
                                               key={String(task.id)}
@@ -9326,21 +9462,13 @@ const handlePhotoCapture = async (event) => {
                                               }}
                                             >
                                               <p
-                                                className={`text-left font-semibold ${
-                                                  compact ? "truncate" : "line-clamp-2"
+                                                className={`text-left font-bold leading-snug ${
+                                                  compact ? "truncate text-[14px]" : "line-clamp-2 text-[15px]"
                                                 }`}
                                                 title={title}
                                               >
                                                 {title}
                                               </p>
-                                              {!compact ? (
-                                                <p className="mt-0.5 text-[13px] font-medium text-white/95">
-                                                  {startDisp}
-                                                </p>
-                                              ) : null}
-                                              {!compact && proj && hPx > 48 ? (
-                                                <p className="truncate text-[13px] text-white/85">{proj}</p>
-                                              ) : null}
                                             </button>
                                           );
                                         })}
@@ -9878,38 +10006,24 @@ const handlePhotoCapture = async (event) => {
                                 {cell.dayNum}
                               </span>
                               <div className="flex min-h-0 flex-1 flex-col gap-1">
-                                {chips.map((task) => {
-                                  const tidKey = task?.id != null ? String(task.id) : "";
-                                  const moveHl = scheduleMoveModeTaskId === tidKey;
-                                  return (
-                                    <div key={String(task.id)} className="flex min-w-0 items-stretch gap-0.5">
-                                      <button
-                                        type="button"
-                                        data-sched-task-chip="1"
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          openAdminScheduleEditFromCalendar(task);
-                                        }}
-                                        className={`min-w-0 flex-1 truncate rounded-md bg-[#1a73e8] px-1.5 py-1 text-left text-[13px] font-semibold text-white shadow-sm ${
-                                          moveHl ? "ring-2 ring-amber-300 ring-offset-1" : ""
-                                        }`}
-                                      >
-                                        {String(task?.task_title ?? "").trim() || "Task"}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={Boolean(scheduleRescheduleSavingId) || Boolean(scheduleEditSaving)}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          beginScheduleMoveMode(task);
-                                        }}
-                                        className="shrink-0 rounded-md border border-amber-200 bg-amber-100 px-1 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-900 disabled:opacity-50"
-                                      >
-                                        Move
-                                      </button>
-                                    </div>
-                                  );
-                                })}
+                                {chips.map((task) => (
+                                  <button
+                                    key={String(task.id)}
+                                    type="button"
+                                    data-sched-task-chip="1"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openAdminScheduleEditFromCalendar(task);
+                                    }}
+                                    className={`truncate rounded-md bg-[#1a73e8] px-2 py-1.5 text-left text-[14px] font-bold text-white shadow-sm ${
+                                      scheduleMoveModeTaskId === String(task?.id ?? "")
+                                        ? "ring-2 ring-amber-300 ring-offset-1"
+                                        : ""
+                                    }`}
+                                  >
+                                    {String(task?.task_title ?? "").trim() || "Task"}
+                                  </button>
+                                ))}
                                 {more > 0 ? (
                                   <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
                                     +{more} more
@@ -9993,7 +10107,7 @@ const handlePhotoCapture = async (event) => {
                                     </div>
                                   ))}
                                 </div>
-                                <div className="flex min-w-0 flex-1 divide-x divide-slate-200 bg-white">
+                                <div ref={scheduleTimelineColsRef} className="flex min-w-0 flex-1 divide-x divide-slate-200 bg-white">
                                   {(anchorKeys || []).map((dayKey) => {
                                     const colTasks = adminScheduleTasksByDay[dayKey];
                                     const taskList = Array.isArray(colTasks) ? colTasks : [];
@@ -10028,11 +10142,6 @@ const handlePhotoCapture = async (event) => {
                                             Math.max(compact ? 32 : 40, (dur / 60) * SCHEDULE_GRID_PX_PER_HOUR),
                                             Math.max(compact ? 32 : 40, colH - topPx)
                                           );
-                                          const title = String(task?.task_title ?? "").trim() || "Task";
-                                          const proj = String(task?.project_name ?? "").trim();
-                                          const startDisp = task?.start_time
-                                            ? formatTime(task.start_time, companyTimeZone)
-                                            : "";
                                           const tidKey = task?.id != null ? String(task.id) : "";
                                           const tone = scheduleTimelineAdminTone(task);
                                           const isMoveHighlighted = scheduleMoveModeTaskId === tidKey;
@@ -10040,9 +10149,9 @@ const handlePhotoCapture = async (event) => {
                                           const blockCls = `${scheduleTimelineBlockClasses(
                                             tone,
                                             compact
-                                          )} sched-day-task-block absolute left-[3px] right-[3px] z-[8] overflow-hidden shadow-sm touch-manipulation select-none${
+                                          )} sched-day-task-block absolute left-[3px] right-[3px] z-[8] overflow-hidden shadow-sm select-none touch-none cursor-grab${
                                             isMoveHighlighted ? " ring-[3px] ring-amber-300 ring-offset-1 ring-offset-white" : ""
-                                          }`;
+                                          }${scheduleDragTaskId === tidKey ? " cursor-grabbing opacity-75" : ""}`;
                                           return (
                                             <div
                                               key={String(task.id)}
@@ -10053,86 +10162,19 @@ const handlePhotoCapture = async (event) => {
                                                 minHeight: compact ? 32 : 40,
                                                 opacity: dragging ? 0.55 : 1,
                                               }}
-                                              onClick={(ev) => {
-                                                const te = ev.target;
-                                                const el =
-                                                  te instanceof Element ? te : te?.parentNode instanceof Element
-                                                    ? te.parentNode
-                                                    : null;
-                                                if (!(el instanceof Element)) return;
-                                                if (el.closest("button")) return;
-                                                if (
-                                                  scheduleEditSaving ||
-                                                  scheduleDeleteSavingId === tidKey ||
-                                                  scheduleRescheduleSavingId
-                                                ) {
-                                                  return;
-                                                }
-                                                ev.stopPropagation();
-                                                openAdminScheduleEditFromCalendar(task);
-                                              }}
+                                              onPointerDown={(e) => handleAdminTimelineTaskPointerDown(e, task, anchorKeys)}
+                                              onPointerMove={handleAdminTimelineTaskPointerMove}
+                                              onPointerUp={handleAdminTimelineTaskPointerUp}
+                                              onPointerCancel={handleAdminTimelineTaskPointerUp}
                                             >
                                               <p
-                                                className={`text-left font-semibold ${
-                                                  compact ? "truncate" : "line-clamp-2"
+                                                className={`text-left font-bold leading-snug ${
+                                                  compact ? "truncate text-[14px]" : "line-clamp-2 text-[15px]"
                                                 }`}
-                                                title={title}
+                                                title={String(task?.task_title ?? "").trim() || "Task"}
                                               >
-                                                {title}
+                                                {String(task?.task_title ?? "").trim() || "Task"}
                                               </p>
-                                              {!compact ? (
-                                                <p className="mt-0.5 text-[13px] font-semibold text-white/95">{startDisp}</p>
-                                              ) : null}
-                                              {!compact && proj && hPx > 52 ? (
-                                                <p className="truncate text-[13px] text-white/85">{proj}</p>
-                                              ) : null}
-                                              <div className="mt-1 flex flex-wrap gap-1">
-                                                <button
-                                                  type="button"
-                                                  disabled={
-                                                    Boolean(scheduleEditSaving) ||
-                                                    scheduleDeleteSavingId === tidKey ||
-                                                    scheduleRescheduleSavingId === tidKey
-                                                  }
-                                                  onClick={(ev) => {
-                                                    ev.stopPropagation();
-                                                    openAdminScheduleEditFromCalendar(task);
-                                                  }}
-                                                  className="rounded-md border border-white/50 bg-white/20 px-2 py-0.5 text-[12px] font-semibold text-white backdrop-blur-sm disabled:opacity-50"
-                                                >
-                                                  Edit
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  disabled={
-                                                    Boolean(scheduleEditSaving) ||
-                                                    scheduleDeleteSavingId === tidKey ||
-                                                    scheduleRescheduleSavingId === tidKey
-                                                  }
-                                                  onClick={(ev) => {
-                                                    ev.stopPropagation();
-                                                    beginScheduleMoveMode(task);
-                                                  }}
-                                                  className="rounded-md border border-amber-200/90 bg-amber-500/35 px-2 py-0.5 text-[12px] font-semibold text-white disabled:opacity-50"
-                                                >
-                                                  Move
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  disabled={
-                                                    Boolean(scheduleEditSaving) ||
-                                                    scheduleDeleteSavingId === tidKey ||
-                                                    scheduleRescheduleSavingId === tidKey
-                                                  }
-                                                  onClick={(ev) => {
-                                                    ev.stopPropagation();
-                                                    void handleScheduleDeleteTask(task?.id);
-                                                  }}
-                                                  className="rounded-md border border-white/40 bg-red-500/35 px-2 py-0.5 text-[12px] font-semibold text-white disabled:opacity-50"
-                                                >
-                                                  {scheduleDeleteSavingId === tidKey ? "…" : "Delete"}
-                                                </button>
-                                              </div>
                                             </div>
                                           );
                                         })}
