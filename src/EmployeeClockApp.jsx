@@ -1489,6 +1489,125 @@ async function createDirectNotificationsForRecipients(supabase, params) {
   return createdNotificationIds;
 }
 
+async function createScheduleAssignmentNotificationForUser({
+  supabase,
+  companyId,
+  recipientUserId,
+  actorUserId,
+  taskTitle,
+  startTime,
+  projectName,
+  costCentre,
+  notes,
+  projectId,
+  companyTimeZone,
+}) {
+  const recipient = String(recipientUserId || "").trim();
+  const company = String(companyId || "").trim();
+  const actor = String(actorUserId || "").trim();
+  console.log("[SCHEDULE_NOTIFY] starting for user", recipient);
+  if (!supabase || !company || !recipient || !actor) {
+    console.warn("[SCHEDULE_NOTIFY] missing required values", {
+      companyId: company,
+      recipientUserId: recipient,
+      actorUserId: actor,
+    });
+    return [];
+  }
+
+  const tz = companyTimeZone || "America/Toronto";
+  const wallKey = startTime ? calendarDateKeyInTimeZone(startTime, tz) : "";
+  const wallParts = startTime ? wallClockPartsInTimeZone(startTime, tz) : {};
+  const whenDisp =
+    wallKey && wallParts.timeStr
+      ? `${wallWeekdayShort(wallKey, tz)} ${wallKey} - ${wallParts.timeStr}`
+      : startTime
+        ? String(startTime)
+        : "";
+  const task = String(taskTitle || "").trim() || "Scheduled task";
+  const project = String(projectName || "").trim();
+  const centre = String(costCentre || "").trim();
+  const noteText = String(notes || "").trim();
+  const message = [
+    `Task: ${task}`,
+    whenDisp ? `When: ${whenDisp}` : "",
+    project ? `Project: ${project}` : "",
+    centre ? `Cost centre: ${centre}` : "",
+    noteText ? `Notes: ${noteText}` : "",
+  ].filter(Boolean).join("\n");
+
+  const notificationRow = {
+    company_id: company,
+    recipient_user_id: recipient,
+    actor_user_id: actor,
+    type: "schedule_assigned",
+    title: "New task assigned",
+    message,
+    read_at: null,
+    is_read: false,
+    project_id: projectId != null && projectId !== "" ? String(projectId) : null,
+    project_name: project || null,
+    cost_centre: centre || null,
+    related_timesheet_id: null,
+    related_folder: null,
+    item_count: null,
+  };
+  const rpcPayload = {
+    p_company_id: company,
+    p_recipient_user_id: recipient,
+    p_actor_user_id: actor,
+    p_type: notificationRow.type,
+    p_title: notificationRow.title,
+    p_message: notificationRow.message,
+    p_project_id: notificationRow.project_id,
+    p_project_name: notificationRow.project_name,
+    p_cost_centre: notificationRow.cost_centre,
+    p_related_timesheet_id: null,
+    p_related_folder: null,
+    p_item_count: null,
+  };
+
+  try {
+    const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
+    if (error) {
+      console.warn("[SCHEDULE_NOTIFY] rpc result", error);
+    } else {
+      const nid = rpcReturnedNotificationId(data);
+      console.log("[SCHEDULE_NOTIFY] rpc result", nid || data);
+      if (nid) {
+        console.log("[SCHEDULE_NOTIFY] send push ids", [nid]);
+        void requestSendPushForNotificationIds([nid]);
+        return [nid];
+      }
+    }
+  } catch (e) {
+    console.warn("[SCHEDULE_NOTIFY] rpc result", e);
+  }
+
+  try {
+    const { data: inserted, error: insertError } = await supabase
+      .from("notifications")
+      .insert([notificationRow])
+      .select("id")
+      .maybeSingle();
+    if (insertError) {
+      console.warn("[SCHEDULE_NOTIFY] fallback insert result", insertError);
+      return [];
+    }
+    const nid = inserted?.id != null ? String(inserted.id) : null;
+    console.log("[SCHEDULE_NOTIFY] fallback insert result", nid || inserted);
+    if (nid) {
+      console.log("[SCHEDULE_NOTIFY] send push ids", [nid]);
+      void requestSendPushForNotificationIds([nid]);
+      return [nid];
+    }
+    console.warn("[SCHEDULE_NOTIFY] fallback insert result", inserted);
+  } catch (e) {
+    console.warn("[SCHEDULE_NOTIFY] fallback insert result", e);
+  }
+  return [];
+}
+
 async function sendPhotoBatchNotifications(supabase, payload, count) {
   if (!payload?.companyId || !payload?.actorUserId || !count) return;
   const c = count;
@@ -6512,30 +6631,21 @@ const handlePhotoCapture = async (event) => {
 
           // Assignment notifications (direct to employees).
           try {
-            const wallKey = calendarDateKeyInTimeZone(startIso, companyTimeZone);
-            const wallParts = wallClockPartsInTimeZone(startIso, companyTimeZone);
-            const whenDisp =
-              wallKey && wallParts.timeStr
-                ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
-                : "";
-            const msgParts = [
-              `Task: ${taskTitle}`,
-              whenDisp ? `When: ${whenDisp}` : "",
-              projectNameVal ? `Project: ${projectNameVal}` : "",
-              costCentreVal ? `Cost centre: ${costCentreVal}` : "",
-              notesVal ? `Notes: ${String(notesVal)}` : "",
-            ].filter(Boolean);
-            await createDirectNotificationsForRecipients(supabase, {
-              companyId: userCompany.id,
-              actorUserId: authUser.id,
-              type: "schedule_assigned",
-              title: "New task assigned",
-              message: msgParts.join("\n"),
-              projectId: projectIdVal,
-              projectName: projectNameVal,
-              costCentre: costCentreVal,
-              recipientUserIds: selectedIds,
-            });
+            for (const uid of selectedIds) {
+              await createScheduleAssignmentNotificationForUser({
+                supabase,
+                companyId: userCompany.id,
+                recipientUserId: uid,
+                actorUserId: authUser.id,
+                taskTitle,
+                startTime: startIso,
+                projectName: projectNameVal,
+                costCentre: costCentreVal,
+                notes: notesVal,
+                projectId: projectIdVal,
+                companyTimeZone,
+              });
+            }
           } catch (e) {
             console.warn("[SCHEDULE] assignment notification failed", e);
           }
@@ -6678,30 +6788,21 @@ const handlePhotoCapture = async (event) => {
           const notifyUserIds = selectedIds.filter((uid) => !prevAssignedUserIds.has(String(uid)));
           if (notifyUserIds.length > 0) {
             try {
-              const wallKey = calendarDateKeyInTimeZone(startIso, companyTimeZone);
-              const wallParts = wallClockPartsInTimeZone(startIso, companyTimeZone);
-              const whenDisp =
-                wallKey && wallParts.timeStr
-                  ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
-                  : "";
-              const msgParts = [
-                `Task: ${taskTitle}`,
-                whenDisp ? `When: ${whenDisp}` : "",
-                projectNameVal ? `Project: ${projectNameVal}` : "",
-                costCentreVal ? `Cost centre: ${costCentreVal}` : "",
-                notesVal ? `Notes: ${String(notesVal)}` : "",
-              ].filter(Boolean);
-              await createDirectNotificationsForRecipients(supabase, {
-                companyId: userCompany.id,
-                actorUserId: authUser.id,
-                type: "schedule_assigned",
-                title: "New task assigned",
-                message: msgParts.join("\n"),
-                projectId: projectIdVal,
-                projectName: projectNameVal,
-                costCentre: costCentreVal,
-                recipientUserIds: notifyUserIds,
-              });
+              for (const uid of notifyUserIds) {
+                await createScheduleAssignmentNotificationForUser({
+                  supabase,
+                  companyId: userCompany.id,
+                  recipientUserId: uid,
+                  actorUserId: authUser.id,
+                  taskTitle,
+                  startTime: startIso,
+                  projectName: projectNameVal,
+                  costCentre: costCentreVal,
+                  notes: notesVal,
+                  projectId: projectIdVal,
+                  companyTimeZone,
+                });
+              }
             } catch (e) {
               console.warn("[SCHEDULE] assignment notification failed", e);
             }
