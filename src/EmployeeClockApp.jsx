@@ -6133,12 +6133,6 @@ const handlePhotoCapture = async (event) => {
       const assignTeamVal = String(scheduleDraft?.assignedTeamPlaceholder ?? "").trim() || null;
       const selectedIdsRaw = Array.isArray(scheduleDraft?.assignedUserIds) ? scheduleDraft.assignedUserIds : [];
       const selectedIds = [...new Set(selectedIdsRaw.map((id) => String(id)).filter(Boolean))];
-      const prevAssignRows = Array.isArray(scheduleAssigneesByTaskId?.[taskId])
-        ? scheduleAssigneesByTaskId[taskId]
-        : [];
-      const prevAssignedUserIds = new Set(
-        prevAssignRows.map((r) => r?.user_id).filter(Boolean).map((x) => String(x))
-      );
       const nameParts = selectedIds
         .map((uid) => {
           const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
