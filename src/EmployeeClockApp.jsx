@@ -1219,16 +1219,24 @@ function rpcReturnedNotificationId(data) {
 }
 
 async function requestSendPushForNotificationIds(ids) {
-  if (!ids.length) return;
+  if (!ids.length) return { ok: true, skipped: true, sent: 0 };
   try {
     const res = await fetch("/api/send-push", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ notification_ids: ids }),
     });
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
     if (!res.ok) console.warn("[NOTIFY] send-push HTTP", res.status);
+    return { ok: res.ok, status: res.status, data };
   } catch (e) {
     console.warn("[NOTIFY] send-push fetch failed", e);
+    return { ok: false, error: e };
   }
 }
 
@@ -1370,215 +1378,62 @@ async function createCompanyNotifications(supabase, params) {
   }
 }
 
-/** Direct notification to specific recipients (e.g. scheduled task assignment). */
-async function createDirectNotificationsForRecipients(supabase, params) {
-  const {
-    companyId,
-    actorUserId,
-    type,
-    title,
-    message,
-    projectId,
-    projectName,
-    costCentre,
-    relatedFolder,
-    itemCount,
-    recipientUserIds,
-  } = params || {};
-  if (!companyId || !actorUserId) return [];
-  const ids = (Array.isArray(recipientUserIds) ? recipientUserIds : [])
-    .map((x) => String(x || "").trim())
-    .filter(Boolean);
-  if (ids.length === 0) return [];
-
-  const createdNotificationIds = [];
-  for (const recipient_user_id of ids) {
-    const notificationRow = {
-      company_id: companyId,
-      recipient_user_id,
-      actor_user_id: actorUserId,
-      type: String(type || ""),
-      title: String(title || ""),
-      message: String(message || ""),
-      read_at: null,
-      is_read: false,
-      project_id: projectId != null && projectId !== "" ? String(projectId) : null,
-      project_name: projectName != null ? String(projectName) : null,
-      cost_centre: costCentre != null ? String(costCentre) : null,
-      related_timesheet_id: null,
-      related_folder: relatedFolder != null ? String(relatedFolder) : null,
-      item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
-    };
-    const rpcPayload = {
-      p_company_id: companyId,
-      p_recipient_user_id: recipient_user_id,
-      p_actor_user_id: actorUserId,
-      p_type: notificationRow.type,
-      p_title: notificationRow.title,
-      p_message: notificationRow.message,
-      p_project_id: notificationRow.project_id,
-      p_project_name: notificationRow.project_name,
-      p_cost_centre: notificationRow.cost_centre,
-      p_related_timesheet_id: null,
-      p_related_folder: notificationRow.related_folder,
-      p_item_count: notificationRow.item_count,
-    };
-    try {
-      const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
-      if (error) {
-        console.warn("[NOTIFY] direct rpc error", error);
-      } else {
-        const nid = rpcReturnedNotificationId(data);
-        if (nid) {
-          createdNotificationIds.push(nid);
-          continue;
-        }
-        console.warn("[NOTIFY] direct rpc returned no notification id", data);
-      }
-    } catch (e) {
-      console.warn("[NOTIFY] direct rpc exception", e);
-    }
-
-    try {
-      const { data: inserted, error: insertError } = await supabase
-        .from("notifications")
-        .insert([notificationRow])
-        .select("id")
-        .maybeSingle();
-      if (insertError) {
-        console.warn("[NOTIFY] direct table insert error", insertError);
-        continue;
-      }
-      const nid = inserted?.id != null ? String(inserted.id) : null;
-      if (nid) createdNotificationIds.push(nid);
-      else console.warn("[NOTIFY] direct table insert returned no notification id", inserted);
-    } catch (e) {
-      console.warn("[NOTIFY] direct table insert exception", e);
-    }
-  }
-  if (createdNotificationIds.length > 0) {
-    void requestSendPushForNotificationIds(createdNotificationIds);
-  }
-  return createdNotificationIds;
+function waitMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function createScheduleAssignmentNotificationForUser({
-  supabase,
-  companyId,
-  recipientUserId,
-  actorUserId,
-  taskTitle,
-  startTime,
-  projectName,
-  costCentre,
-  notes,
-  projectId,
-  companyTimeZone,
-}) {
-  const recipient = String(recipientUserId || "").trim();
+async function sendPushForRecentScheduleAssignmentNotifications(supabase, params) {
+  const { companyId, recipientUserIds, sinceIso } = params || {};
   const company = String(companyId || "").trim();
-  const actor = String(actorUserId || "").trim();
-  console.log("[SCHEDULE_NOTIFY] starting for user", recipient);
-  if (!supabase || !company || !recipient || !actor) {
-    console.warn("[SCHEDULE_NOTIFY] missing required values", {
-      companyId: company,
-      recipientUserId: recipient,
-      actorUserId: actor,
-    });
-    return [];
-  }
+  const userIds = [...new Set((Array.isArray(recipientUserIds) ? recipientUserIds : [])
+    .map((id) => String(id || "").trim())
+    .filter(Boolean))];
+  if (!supabase || !company || userIds.length === 0) return [];
 
-  const tz = companyTimeZone || "America/Toronto";
-  const wallKey = startTime ? calendarDateKeyInTimeZone(startTime, tz) : "";
-  const wallParts = startTime ? wallClockPartsInTimeZone(startTime, tz) : {};
-  const whenDisp =
-    wallKey && wallParts.timeStr
-      ? `${wallWeekdayShort(wallKey, tz)} ${wallKey} - ${wallParts.timeStr}`
-      : startTime
-        ? String(startTime)
-        : "";
-  const task = String(taskTitle || "").trim() || "Scheduled task";
-  const project = String(projectName || "").trim();
-  const centre = String(costCentre || "").trim();
-  const noteText = String(notes || "").trim();
-  const message = [
-    `Task: ${task}`,
-    whenDisp ? `When: ${whenDisp}` : "",
-    project ? `Project: ${project}` : "",
-    centre ? `Cost centre: ${centre}` : "",
-    noteText ? `Notes: ${noteText}` : "",
-  ].filter(Boolean).join("\n");
+  const recentSince =
+    sinceIso || new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  console.log("[SCHEDULE_PUSH] looking for notification ids for users", userIds);
 
-  const notificationRow = {
-    company_id: company,
-    recipient_user_id: recipient,
-    actor_user_id: actor,
-    type: "schedule_assigned",
-    title: "New task assigned",
-    message,
-    read_at: null,
-    is_read: false,
-    project_id: projectId != null && projectId !== "" ? String(projectId) : null,
-    project_name: project || null,
-    cost_centre: centre || null,
-    related_timesheet_id: null,
-    related_folder: null,
-    item_count: null,
-  };
-  const rpcPayload = {
-    p_company_id: company,
-    p_recipient_user_id: recipient,
-    p_actor_user_id: actor,
-    p_type: notificationRow.type,
-    p_title: notificationRow.title,
-    p_message: notificationRow.message,
-    p_project_id: notificationRow.project_id,
-    p_project_name: notificationRow.project_name,
-    p_cost_centre: notificationRow.cost_centre,
-    p_related_timesheet_id: null,
-    p_related_folder: null,
-    p_item_count: null,
-  };
-
-  try {
-    const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
-    if (error) {
-      console.warn("[SCHEDULE_NOTIFY] rpc result", error);
-    } else {
-      const nid = rpcReturnedNotificationId(data);
-      console.log("[SCHEDULE_NOTIFY] rpc result", nid || data);
-      if (nid) {
-        console.log("[SCHEDULE_NOTIFY] sending push ids", [nid]);
-        void requestSendPushForNotificationIds([nid]);
-        return [nid];
+  let notificationIds = [];
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (attempt > 0) await waitMs(attempt === 1 ? 400 : 900);
+    try {
+      const { data, error } = await supabase
+        .from("notifications")
+        .select("id, recipient_user_id, created_at")
+        .eq("company_id", company)
+        .eq("type", "schedule_assigned")
+        .in("recipient_user_id", userIds)
+        .gte("created_at", recentSince)
+        .order("created_at", { ascending: false })
+        .limit(Math.max(10, userIds.length * 3));
+      if (error) {
+        console.warn("[SCHEDULE_PUSH] notification id lookup error", error);
+        return [];
       }
-    }
-  } catch (e) {
-    console.warn("[SCHEDULE_NOTIFY] rpc result", e);
-  }
-
-  try {
-    const { data: inserted, error: insertError } = await supabase
-      .from("notifications")
-      .insert([notificationRow])
-      .select("id")
-      .maybeSingle();
-    if (insertError) {
-      console.warn("[SCHEDULE_NOTIFY] fallback insert result", insertError);
+      const seenRecipients = new Set();
+      notificationIds = [];
+      for (const row of Array.isArray(data) ? data : []) {
+        const id = String(row?.id || "").trim();
+        const recipient = String(row?.recipient_user_id || "").trim();
+        if (!id || !recipient || seenRecipients.has(recipient)) continue;
+        seenRecipients.add(recipient);
+        notificationIds.push(id);
+      }
+      if (notificationIds.length > 0 || attempt === 2) break;
+    } catch (e) {
+      console.warn("[SCHEDULE_PUSH] notification id lookup exception", e);
       return [];
     }
-    const nid = inserted?.id != null ? String(inserted.id) : null;
-    console.log("[SCHEDULE_NOTIFY] fallback insert result", nid || inserted);
-    if (nid) {
-      console.log("[SCHEDULE_NOTIFY] sending push ids", [nid]);
-      void requestSendPushForNotificationIds([nid]);
-      return [nid];
-    }
-    console.warn("[SCHEDULE_NOTIFY] fallback insert result", inserted);
-  } catch (e) {
-    console.warn("[SCHEDULE_NOTIFY] fallback insert result", e);
   }
-  return [];
+
+  console.log("[SCHEDULE_PUSH] found ids", notificationIds);
+  if (notificationIds.length === 0) return [];
+
+  const result = await requestSendPushForNotificationIds(notificationIds);
+  if (result?.ok) console.log("[SCHEDULE_PUSH] send-push result", result);
+  else console.warn("[SCHEDULE_PUSH] send-push error", result);
+  return notificationIds;
 }
 
 async function sendPhotoBatchNotifications(supabase, payload, count) {
@@ -6585,6 +6440,7 @@ const handlePhotoCapture = async (event) => {
               response_status: "pending",
             };
           });
+          const schedulePushSinceIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
           const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
           if (assignInsErr) {
             setScheduleSaveError(
@@ -6599,26 +6455,11 @@ const handlePhotoCapture = async (event) => {
             return;
           }
 
-          // Assignment notifications (direct to employees).
-          try {
-            for (const uid of selectedIds) {
-              await createScheduleAssignmentNotificationForUser({
-                supabase,
-                companyId: userCompany.id,
-                recipientUserId: uid,
-                actorUserId: authUser.id,
-                taskTitle,
-                startTime: startIso,
-                projectName: projectNameVal,
-                costCentre: costCentreVal,
-                notes: notesVal,
-                projectId: projectIdVal,
-                companyTimeZone,
-              });
-            }
-          } catch (e) {
-            console.warn("[SCHEDULE] assignment notification failed", e);
-          }
+          void sendPushForRecentScheduleAssignmentNotifications(supabase, {
+            companyId: userCompany.id,
+            recipientUserIds: selectedIds,
+            sinceIso: schedulePushSinceIso,
+          });
         }
 
         setScheduleSaveError("");
@@ -6729,15 +6570,21 @@ const handlePhotoCapture = async (event) => {
           .eq("company_id", userCompany.id);
         if (upErr) throw upErr;
 
-        const { error: delErr } = await supabase
-          .from("scheduled_task_assignees")
-          .delete()
-          .eq("scheduled_task_id", taskId)
-          .eq("company_id", userCompany.id);
-        if (delErr) throw delErr;
+        const selectedIdSet = new Set(selectedIds);
+        const removedUserIds = [...prevAssignedUserIds].filter((uid) => !selectedIdSet.has(String(uid)));
+        if (removedUserIds.length > 0) {
+          const { error: delErr } = await supabase
+            .from("scheduled_task_assignees")
+            .delete()
+            .eq("scheduled_task_id", taskId)
+            .eq("company_id", userCompany.id)
+            .in("user_id", removedUserIds);
+          if (delErr) throw delErr;
+        }
 
-        if (selectedIds.length > 0) {
-          const assignRows = selectedIds.map((uid) => {
+        const notifyUserIds = selectedIds.filter((uid) => !prevAssignedUserIds.has(String(uid)));
+        if (notifyUserIds.length > 0) {
+          const assignRows = notifyUserIds.map((uid) => {
             const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
             const display = m?.displayName ? String(m.displayName).trim() : shortUserLabel(uid);
             const em = m?.profileEmailRaw ? String(m.profileEmailRaw).trim() : "";
@@ -6751,32 +6598,15 @@ const handlePhotoCapture = async (event) => {
               response_status: "pending",
             };
           });
+          const schedulePushSinceIso = new Date(Date.now() - 2 * 60 * 1000).toISOString();
           const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
           if (assignInsErr) throw assignInsErr;
 
-          // Notify only newly assigned employees (avoid duplicates on edits).
-          const notifyUserIds = selectedIds.filter((uid) => !prevAssignedUserIds.has(String(uid)));
-          if (notifyUserIds.length > 0) {
-            try {
-              for (const uid of notifyUserIds) {
-                await createScheduleAssignmentNotificationForUser({
-                  supabase,
-                  companyId: userCompany.id,
-                  recipientUserId: uid,
-                  actorUserId: authUser.id,
-                  taskTitle,
-                  startTime: startIso,
-                  projectName: projectNameVal,
-                  costCentre: costCentreVal,
-                  notes: notesVal,
-                  projectId: projectIdVal,
-                  companyTimeZone,
-                });
-              }
-            } catch (e) {
-              console.warn("[SCHEDULE] assignment notification failed", e);
-            }
-          }
+          void sendPushForRecentScheduleAssignmentNotifications(supabase, {
+            companyId: userCompany.id,
+            recipientUserIds: notifyUserIds,
+            sinceIso: schedulePushSinceIso,
+          });
         }
 
         setScheduleEditingTaskId(null);
