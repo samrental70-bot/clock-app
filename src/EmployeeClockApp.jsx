@@ -6616,7 +6616,7 @@ const handlePhotoCapture = async (event) => {
     }
   };
 
-  const handleEmployeeConfirmAssignmentNotification = useCallback(async () => {
+  const handleEmployeeConfirmAssignmentNotification = useCallback(async (goToSchedule) => {
     if (!activeAssignNotif?.id || !authUser?.id || !userCompany?.id) return;
     setAssignNotifSaving(true);
     try {
@@ -6633,6 +6633,10 @@ const handlePhotoCapture = async (event) => {
         )
       );
       setActiveAssignNotif(null);
+      if (goToSchedule) {
+        setActiveTab("schedule");
+        setScheduleRefreshKey((k) => k + 1);
+      }
       await pollInAppNotifications();
     } catch (e) {
       alert(getErrorMessage(e));
@@ -7878,6 +7882,54 @@ const handlePhotoCapture = async (event) => {
               </div>
             </div>
           </div>
+
+          {!isAdmin && activeAssignNotif ? (
+            <div className="fixed inset-0 z-[72] bg-black/40 px-3 py-6" role="dialog" aria-modal="true">
+              <div className="mx-auto w-full max-w-md">
+                <div className="rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+                  <div className="p-4 border-b border-slate-100 bg-slate-50/60">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">New task assigned</p>
+                    <p className="mt-1 text-[18px] font-bold text-slate-900 leading-snug break-words">
+                      {(() => {
+                        const msg = String(activeAssignNotif?.message ?? "");
+                        const firstLine = msg.split("\n").find((x) => String(x).trim()) || "";
+                        const title = String(activeAssignNotif?.title ?? "").trim();
+                        return firstLine || title || "You have a new scheduled task.";
+                      })()}
+                    </p>
+                  </div>
+                  <div className="p-4 space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <p className="text-[13px] text-slate-800 leading-snug whitespace-pre-wrap break-words">
+                        {String(activeAssignNotif?.message ?? "").trim() || "You were assigned a scheduled task."}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={assignNotifSaving}
+                        onClick={() => void handleEmployeeConfirmAssignmentNotification(true)}
+                        className="flex-1 rounded-xl bg-[#1a73e8] px-4 py-3 text-[14px] font-bold text-white disabled:opacity-50"
+                      >
+                        View Schedule
+                      </button>
+                      <button
+                        type="button"
+                        disabled={assignNotifSaving}
+                        onClick={() => void handleEmployeeConfirmAssignmentNotification(false)}
+                        className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-[14px] font-bold text-slate-800 disabled:opacity-50"
+                      >
+                        {assignNotifSaving ? "Saving…" : "OK"}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-snug">
+                      “OK” confirms you saw the assignment. Accept/decline is separate inside Schedule.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {activeTab === "clock" && !visibleCurrentShift && isProfileArchived && (
             <Card className="rounded-3xl border border-slate-300 bg-slate-100 shadow-sm">
@@ -9366,41 +9418,6 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "schedule" && !isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
-                {activeAssignNotif ? (
-                  <div className="fixed inset-0 z-[72] bg-black/40 px-3 py-6" role="dialog" aria-modal="true">
-                    <div className="mx-auto w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">New assignment</p>
-                          <p className="text-[16px] font-bold text-slate-900 leading-snug break-words">
-                            {String(activeAssignNotif?.title ?? "").trim() || "Scheduled task assigned"}
-                          </p>
-                        </div>
-                        <span className="shrink-0 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ring-1 bg-blue-50 text-blue-900 ring-blue-200">
-                          Confirm
-                        </span>
-                      </div>
-                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                        <p className="text-[13px] text-slate-800 leading-snug whitespace-pre-wrap break-words">
-                          {String(activeAssignNotif?.message ?? "").trim() || "You were assigned a scheduled task."}
-                        </p>
-                      </div>
-                      <div className="flex gap-2 pt-1">
-                        <button
-                          type="button"
-                          disabled={assignNotifSaving}
-                          onClick={() => void handleEmployeeConfirmAssignmentNotification()}
-                          className="flex-1 rounded-xl bg-[#1a73e8] px-4 py-3 text-[14px] font-bold text-white disabled:opacity-50"
-                        >
-                          {assignNotifSaving ? "Saving…" : "OK"}
-                        </button>
-                      </div>
-                      <p className="text-[11px] text-slate-500 leading-snug">
-                        This confirms you saw the assignment notification. It does not accept/decline the task.
-                      </p>
-                    </div>
-                  </div>
-                ) : null}
                 <div className="space-y-3">
                   <div>
                     <h2 className="font-bold text-[clamp(24px,5.5vw,28px)] leading-tight tracking-tight">Schedule</h2>
