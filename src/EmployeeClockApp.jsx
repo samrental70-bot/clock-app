@@ -96,6 +96,22 @@ const TEAM_ADD_INITIAL_DRAFT = {
   joiningDate: "",
 };
 
+const SCHEDULE_FORM_EMPTY = {
+  title: "",
+  notes: "",
+  projectId: "",
+  costCentre: "",
+  startDate: "",
+  startTime: "09:00",
+  endDate: "",
+  endTime: "",
+  durationMinutes: "",
+  /** `user_id` strings from company_members for scheduled_task_assignees */
+  assignedUserIds: [],
+  assignedTeamPlaceholder: "",
+  status: "scheduled",
+};
+
 function looksLikeEmail(value) {
   const s = String(value || "").trim();
   if (!s.includes("@")) return false;
@@ -218,6 +234,19 @@ function wallClockPartsInTimeZone(instant, timeZone) {
 }
 
 /** Wall date YYYY-MM-DD + time HH:mm in `timeZone` → UTC ISO string. */
+/** Normalize user time input (e.g. "9:00" or "09:00") to HH:mm:ss for wall clock helpers. */
+function normalizeTimeInputForWallClock(timeInput) {
+  const s = String(timeInput ?? "").trim();
+  if (!s) return "09:00:00";
+  const parts = s.split(":");
+  const h = Number(parts[0]);
+  const m = Number(parts[1] ?? 0);
+  const sec = Number(parts[2] ?? 0);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "09:00:00";
+  const ss = Number.isFinite(sec) ? sec : 0;
+  return `${String(Math.max(0, Math.min(23, h))).padStart(2, "0")}:${String(Math.max(0, Math.min(59, m))).padStart(2, "0")}:${String(Math.max(0, Math.min(59, ss))).padStart(2, "0")}`;
+}
+
 function wallDateTimeToUtcIso(dateStr, timeStr, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   if (!dateStr || !timeStr) return null;
@@ -1127,6 +1156,8 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const authUserRef = useRef(null);
   const userCompanyRef = useRef(null);
   const companyCheckedRef = useRef(false);
+  /** Once per login session: land employees on Schedule after company/role resolve (no repeated overrides). */
+  const employeeScheduleLandingAppliedRef = useRef(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1157,6 +1188,17 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const isAdmin = isOwner || isSupervisor;
   const isProfileArchived = normalizeEmploymentStatus(profileEmploymentStatus) === "archived";
   const companyTimeZone = userCompany?.time_zone || "America/Toronto";
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      employeeScheduleLandingAppliedRef.current = false;
+      return;
+    }
+    if (!companyChecked || !userCompany?.id || !isEmployeeRole) return;
+    if (employeeScheduleLandingAppliedRef.current) return;
+    employeeScheduleLandingAppliedRef.current = true;
+    setActiveTab("schedule");
+  }, [authUser?.id, companyChecked, userCompany?.id, isEmployeeRole]);
 
   const scopedProjectPhotos = useMemo(() => {
     if (!isEmployeeRole || !authUser?.id) return projectPhotos;
@@ -1219,6 +1261,25 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [dashboardLiveLocations, setDashboardLiveLocations] = useState([]);
   const [dashboardLiveLocationsLoading, setDashboardLiveLocationsLoading] = useState(false);
   const [dashboardLiveLocationsError, setDashboardLiveLocationsError] = useState("");
+
+  /** V2a.1 Schedule: company-scoped scheduled_tasks (supervisor/owner only for team view). */
+  const [scheduledTasks, setScheduledTasks] = useState([]);
+  const [scheduleAssigneesByTaskId, setScheduleAssigneesByTaskId] = useState({});
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleError, setScheduleError] = useState("");
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
+  const [scheduleFormOpen, setScheduleFormOpen] = useState(false);
+  const [scheduleDraft, setScheduleDraft] = useState(() => ({ ...SCHEDULE_FORM_EMPTY }));
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleSaveError, setScheduleSaveError] = useState("");
+  /** Members for Schedule assignee checkboxes (company_members + profiles; loaded on Schedule tab). */
+  const [schedulePickMembers, setSchedulePickMembers] = useState([]);
+  const [schedulePickMembersLoading, setSchedulePickMembersLoading] = useState(false);
+  const [schedulePickMembersError, setSchedulePickMembersError] = useState("");
+  /** Employee role: tasks linked via scheduled_task_assignees only. */
+  const [employeeScheduledTasks, setEmployeeScheduledTasks] = useState([]);
+  const [employeeScheduleLoading, setEmployeeScheduleLoading] = useState(false);
+  const [employeeScheduleError, setEmployeeScheduleError] = useState("");
 
   /** Reports tab (owner/supervisor): date range + timesheet rows loaded only when tab is active. */
   const [reportsDateFrom, setReportsDateFrom] = useState("");
@@ -1619,6 +1680,186 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setDashboardActionFeedback(null);
   }, [dashboardViewDate]);
 
+  useEffect(() => {
+    if (activeTab !== "schedule" || !isAdmin || !userCompany?.id || !companyChecked || !authUser?.id) {
+      return;
+    }
+    let cancelled = false;
+    setScheduleLoading(true);
+    setScheduleError("");
+    setSchedulePickMembersLoading(true);
+    setSchedulePickMembersError("");
+    (async () => {
+      try {
+        const tasksPromise = supabase
+          .from("scheduled_tasks")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .order("start_time", { ascending: true });
+        const assigneesPromise = supabase
+          .from("scheduled_task_assignees")
+          .select("scheduled_task_id, user_id, employee_name, employee_email")
+          .eq("company_id", userCompany.id);
+        const membersPromise = supabase
+          .from("company_members")
+          .select("id, user_id, role, created_at")
+          .eq("company_id", userCompany.id)
+          .order("created_at", { ascending: true });
+
+        const [{ data: taskData, error: taskErr }, { data: assignData, error: assignErr }, { data: membersRaw, error: memErr }] =
+          await Promise.all([tasksPromise, assigneesPromise, membersPromise]);
+
+        if (taskErr) throw taskErr;
+        if (assignErr) throw assignErr;
+        if (memErr) throw memErr;
+
+        const byTask = {};
+        for (const row of Array.isArray(assignData) ? assignData : []) {
+          const tid = row?.scheduled_task_id;
+          if (tid == null) continue;
+          const k = String(tid);
+          if (!byTask[k]) byTask[k] = [];
+          byTask[k].push(row);
+        }
+
+        const list = Array.isArray(membersRaw) ? membersRaw : [];
+        const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
+        const profilesMap = {};
+        if (ids.length > 0) {
+          let { data: profs, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email, employment_status")
+            .in("id", ids);
+          if (pErr) {
+            const retry = await supabase.from("profiles").select("id, full_name, email").in("id", ids);
+            if (retry.error) throw retry.error;
+            profs = retry.data || [];
+          }
+          for (const p of profs || []) {
+            profilesMap[p.id] = p;
+          }
+        }
+
+        const pickRows = [];
+        for (const m of list) {
+          const p = profilesMap[m.user_id] || {};
+          const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
+          if (empRaw === "archived") continue;
+          const profileFull = (p.full_name && String(p.full_name).trim()) || "";
+          const profileEmailRaw = (p.email && String(p.email).trim()) || "";
+          const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
+          pickRows.push({
+            userId: m.user_id,
+            displayName: displayName || shortUserLabel(m.user_id),
+            profileEmailRaw,
+            role: (m.role || "employee").trim(),
+          });
+        }
+        pickRows.sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
+
+        if (!cancelled) {
+          setScheduledTasks(Array.isArray(taskData) ? taskData : []);
+          setScheduleAssigneesByTaskId(byTask);
+          setSchedulePickMembers(pickRows);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setScheduleError(getErrorMessage(err));
+          setScheduledTasks([]);
+          setScheduleAssigneesByTaskId({});
+          setSchedulePickMembersError(getErrorMessage(err));
+          setSchedulePickMembers([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setScheduleLoading(false);
+          setSchedulePickMembersLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
+
+  /** Employee Schedule: only tasks where user appears in scheduled_task_assignees (same company). */
+  useEffect(() => {
+    if (activeTab !== "schedule" || isAdmin || !isEmployeeRole || !userCompany?.id || !companyChecked || !authUser?.id) {
+      return;
+    }
+    let cancelled = false;
+    setEmployeeScheduleLoading(true);
+    setEmployeeScheduleError("");
+    (async () => {
+      try {
+        const { data: links, error: linkErr } = await supabase
+          .from("scheduled_task_assignees")
+          .select("scheduled_task_id")
+          .eq("company_id", userCompany.id)
+          .eq("user_id", authUser.id);
+        if (linkErr) throw linkErr;
+        const rawIds = Array.isArray(links) ? links : [];
+        const idSet = [...new Set(rawIds.map((r) => r?.scheduled_task_id).filter(Boolean))];
+        if (idSet.length === 0) {
+          if (!cancelled) setEmployeeScheduledTasks([]);
+          return;
+        }
+        const { data: taskRows, error: tErr } = await supabase
+          .from("scheduled_tasks")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .in("id", idSet)
+          .order("start_time", { ascending: true });
+        if (tErr) throw tErr;
+        if (!cancelled) setEmployeeScheduledTasks(Array.isArray(taskRows) ? taskRows : []);
+      } catch (err) {
+        if (!cancelled) {
+          setEmployeeScheduleError(getErrorMessage(err));
+          setEmployeeScheduledTasks([]);
+        }
+      } finally {
+        if (!cancelled) setEmployeeScheduleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isAdmin, isEmployeeRole, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
+
+  const scheduleTasksGroupedByDate = useMemo(() => {
+    const rows = Array.isArray(scheduledTasks) ? scheduledTasks : [];
+    const groups = {};
+    for (const task of rows) {
+      const rawStart = task?.start_time;
+      let dateKey = "—";
+      if (rawStart != null && rawStart !== "") {
+        const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
+        dateKey = k && String(k).trim() !== "" ? k : "—";
+      }
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(task);
+    }
+    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
+  }, [scheduledTasks, companyTimeZone]);
+
+  const employeeScheduleTasksGroupedByDate = useMemo(() => {
+    const rows = Array.isArray(employeeScheduledTasks) ? employeeScheduledTasks : [];
+    const groups = {};
+    for (const task of rows) {
+      const rawStart = task?.start_time;
+      let dateKey = "—";
+      if (rawStart != null && rawStart !== "") {
+        const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
+        dateKey = k && String(k).trim() !== "" ? k : "—";
+      }
+      if (!groups[dateKey]) groups[dateKey] = [];
+      groups[dateKey].push(task);
+    }
+    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
+  }, [employeeScheduledTasks, companyTimeZone]);
+
   const teamProfileFullNameByUserId = useMemo(() => {
     const m = {};
     teamRows.forEach((r) => {
@@ -1774,6 +2015,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
     },
     [isAdmin, effectiveCostCentresByProjectId, employeeClockAssignedCostNamesByProjectId]
   );
+
+  const scheduleCostCentreOptions = useMemo(() => {
+    const pid = scheduleDraft?.projectId;
+    if (pid == null || String(pid).trim() === "") return [];
+    const list =
+      effectiveCostCentresByProjectId[String(pid)] || effectiveCostCentresByProjectId[Number(pid)] || [];
+    return Array.isArray(list) ? list : [];
+  }, [scheduleDraft?.projectId, effectiveCostCentresByProjectId]);
 
   /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
   const clockSelectableProjects = useMemo(() => {
@@ -2273,19 +2522,19 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [authUser?.id, userCompany?.id, pollInAppNotifications]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "notifications") setActiveTab("clock");
+    if (!isAdmin && activeTab === "notifications") setActiveTab("schedule");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "dashboard") setActiveTab("clock");
+    if (!isAdmin && activeTab === "dashboard") setActiveTab("schedule");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "projects") setActiveTab("clock");
+    if (!isAdmin && activeTab === "projects") setActiveTab("schedule");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
+    if (isEmployeeRole && activeTab === "team") setActiveTab("schedule");
   }, [isEmployeeRole, activeTab]);
 
   useEffect(() => {
@@ -2802,7 +3051,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
   }, [photoNotificationCount]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "reports") setActiveTab("clock");
+    if (!isAdmin && activeTab === "reports") setActiveTab("schedule");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
@@ -4832,16 +5081,152 @@ const handlePhotoCapture = async (event) => {
   };
 
   const openMenuTab = (tabName) => {
-    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings"]);
+    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule"]);
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setIsMenuOpen(false);
-      setActiveTab("clock");
+      setActiveTab("schedule");
       return;
     }
     setActiveTab(tabName);
     if (tabName === "photos") setPhotoNotificationCount(0);
     setIsMenuOpen(false);
   };
+
+  const handleScheduleSubmit = useCallback(
+    async (event) => {
+      event?.preventDefault?.();
+      if (!isAdmin || !userCompany?.id || !authUser?.id) return;
+      setScheduleSaveError("");
+      const taskTitle = String(scheduleDraft?.title ?? "").trim();
+      const startDate = String(scheduleDraft?.startDate ?? "").trim();
+      if (!taskTitle || !startDate) {
+        setScheduleSaveError("Task title and start date are required.");
+        return;
+      }
+      const startIso = wallDateTimeToUtcIso(startDate, normalizeTimeInputForWallClock(scheduleDraft?.startTime), companyTimeZone);
+      if (!startIso) {
+        setScheduleSaveError("Invalid start date or time.");
+        return;
+      }
+      let endTimeVal = null;
+      let durationMinutesVal = null;
+      const endDateRaw = String(scheduleDraft?.endDate ?? "").trim();
+      const endTimeRaw = String(scheduleDraft?.endTime ?? "").trim();
+      if (endDateRaw && endTimeRaw) {
+        const endIso = wallDateTimeToUtcIso(endDateRaw, normalizeTimeInputForWallClock(endTimeRaw), companyTimeZone);
+        if (!endIso) {
+          setScheduleSaveError("Invalid end date or time.");
+          return;
+        }
+        endTimeVal = endIso;
+      } else {
+        const dmRaw = String(scheduleDraft?.durationMinutes ?? "").trim();
+        if (dmRaw !== "") {
+          const n = Number(dmRaw);
+          if (!Number.isFinite(n) || n <= 0) {
+            setScheduleSaveError("Duration must be a positive number of minutes.");
+            return;
+          }
+          durationMinutesVal = Math.round(n);
+        }
+      }
+
+      const pidRaw = String(scheduleDraft?.projectId ?? "").trim();
+      const projectIdVal = pidRaw === "" ? null : pidRaw;
+      let projectNameVal = null;
+      if (projectIdVal) {
+        const proj = (companyProjects || []).find((p) => String(p?.id) === String(projectIdVal));
+        const nm = proj?.name != null ? String(proj.name).trim() : "";
+        projectNameVal = nm || null;
+      }
+
+      const costCentreVal = projectIdVal
+        ? String(scheduleDraft?.costCentre ?? "").trim() || null
+        : null;
+      const notesVal = String(scheduleDraft?.notes ?? "").trim() || null;
+      const assignTeamVal = String(scheduleDraft?.assignedTeamPlaceholder ?? "").trim() || null;
+      const selectedIdsRaw = Array.isArray(scheduleDraft?.assignedUserIds) ? scheduleDraft.assignedUserIds : [];
+      const selectedIds = [...new Set(selectedIdsRaw.map((id) => String(id)).filter(Boolean))];
+      const nameParts = selectedIds
+        .map((uid) => {
+          const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
+          return m?.displayName ? String(m.displayName).trim() : "";
+        })
+        .filter(Boolean);
+      const namesCsv = nameParts.length > 0 ? nameParts.join(", ") : null;
+
+      const statusVal = String(scheduleDraft?.status ?? "scheduled").trim() || "scheduled";
+
+      const payload = {
+        company_id: userCompany.id,
+        task_title: taskTitle,
+        notes: notesVal,
+        start_time: startIso,
+        end_time: endTimeVal,
+        duration_minutes: durationMinutesVal,
+        project_id: projectIdVal,
+        project_name: projectNameVal,
+        cost_centre: costCentreVal,
+        status: statusVal,
+        created_by: authUser.id,
+        assigned_employee_name: namesCsv,
+        assigned_team: assignTeamVal,
+      };
+
+      setScheduleSaving(true);
+      try {
+        const { data: insertedRows, error: insertErr } = await supabase
+          .from("scheduled_tasks")
+          .insert([payload])
+          .select("id");
+        if (insertErr) throw insertErr;
+        const ins = Array.isArray(insertedRows) ? insertedRows : [];
+        const newTaskId = ins[0]?.id ?? null;
+
+        if (selectedIds.length > 0 && newTaskId != null) {
+          const assignRows = selectedIds.map((uid) => {
+            const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
+            const display = m?.displayName ? String(m.displayName).trim() : shortUserLabel(uid);
+            const em = m?.profileEmailRaw ? String(m.profileEmailRaw).trim() : "";
+            return {
+              scheduled_task_id: newTaskId,
+              company_id: userCompany.id,
+              user_id: uid,
+              employee_name: display,
+              employee_email: em || null,
+              created_by: authUser.id,
+            };
+          });
+          const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
+          if (assignInsErr) {
+            setScheduleSaveError(
+              `The task was saved, but employee assignments failed: ${getErrorMessage(assignInsErr)}`
+            );
+            setScheduleDraft({
+              ...SCHEDULE_FORM_EMPTY,
+              startDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+            });
+            setScheduleFormOpen(false);
+            setScheduleRefreshKey((k) => k + 1);
+            return;
+          }
+        }
+
+        setScheduleSaveError("");
+        setScheduleDraft({
+          ...SCHEDULE_FORM_EMPTY,
+          startDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+        });
+        setScheduleFormOpen(false);
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        setScheduleSaveError(getErrorMessage(err));
+      } finally {
+        setScheduleSaving(false);
+      }
+    },
+    [isAdmin, userCompany?.id, authUser?.id, scheduleDraft, companyTimeZone, companyProjects, schedulePickMembers]
+  );
 
   const handleEnableMobileNotifications = async () => {
     if (typeof window === "undefined" || !("Notification" in window)) {
@@ -7504,6 +7889,511 @@ const handlePhotoCapture = async (event) => {
             </Card>
           )}
 
+          {activeTab === "schedule" && !isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 sm:p-5 space-y-3">
+                <div>
+                  <h2 className="font-bold text-lg">Schedule</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Your assignments · Times: {companyTimeZone}</p>
+                </div>
+                {employeeScheduleLoading ? (
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading your schedule…</p>
+                ) : employeeScheduleError ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{employeeScheduleError}</div>
+                ) : (employeeScheduleTasksGroupedByDate || []).length === 0 ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-center">
+                    <p className="text-sm text-slate-700 leading-snug">Your assigned tasks will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-5">
+                    {(employeeScheduleTasksGroupedByDate || []).map(({ dateKey, tasks }) => {
+                      const labelIso =
+                        dateKey && dateKey !== "—"
+                          ? wallDateTimeToUtcIso(dateKey, "12:00:00", companyTimeZone)
+                          : null;
+                      const dateHeading =
+                        labelIso && dateKey !== "—"
+                          ? `${wallWeekdayLongInTimeZone(dateKey, companyTimeZone)} · ${formatDate(labelIso, companyTimeZone)}`
+                          : "Date unknown";
+                      const taskList = Array.isArray(tasks) ? tasks : [];
+                      return (
+                        <div key={dateKey} className="space-y-2">
+                          <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
+                          <div className="space-y-2">
+                            {taskList.map((task) => {
+                              const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
+                              const proj = String(task?.project_name ?? "").trim();
+                              const projLine = proj.length > 0 ? proj : "No project selected";
+                              const cc = String(task?.cost_centre ?? "").trim();
+                              const ccLine = cc.length > 0 ? cc : "No cost centre";
+                              const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+                              const endRaw = task?.end_time;
+                              const durRaw = task?.duration_minutes;
+                              let windowLabel = "—";
+                              if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
+                              else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
+                                windowLabel = `${Number(durRaw)} min`;
+                              const empCsv = String(task?.assigned_employee_name ?? "").trim();
+                              const assigneeLine = empCsv.length > 0 ? empCsv : "No employee assigned";
+                              const at = String(task?.assigned_team ?? "").trim();
+                              const notesDisp = String(task?.notes ?? "").trim();
+                              const st = String(task?.status ?? "").trim() || "—";
+                              return (
+                                <div
+                                  key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
+                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-1.5 shadow-sm"
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
+                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                      {st}
+                                    </span>
+                                  </div>
+                                  <p className="text-[12px] text-slate-700">
+                                    <span className="font-semibold text-slate-600">Project: </span>
+                                    {projLine}
+                                  </p>
+                                  <p className="text-[12px] text-slate-700">
+                                    <span className="font-semibold text-slate-600">Cost centre: </span>
+                                    {ccLine}
+                                  </p>
+                                  <p className="text-[12px] text-slate-800">
+                                    <span className="font-semibold text-slate-600">Time: </span>
+                                    {startDisp}
+                                    {" → "}
+                                    {windowLabel}
+                                  </p>
+                                  <p className="text-[12px] text-slate-800">
+                                    <span className="font-semibold text-slate-600">Assignees: </span>
+                                    {assigneeLine}
+                                  </p>
+                                  {at ? (
+                                    <p className="text-[12px] text-slate-700">
+                                      <span className="font-semibold text-slate-600">Team: </span>
+                                      {at}
+                                    </p>
+                                  ) : null}
+                                  {notesDisp ? (
+                                    <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === "schedule" && isAdmin && (
+            <Card className="rounded-3xl shadow-sm">
+              <CardContent className="p-4 sm:p-5 space-y-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <h2 className="font-bold text-lg">Schedule</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">Team tasks · Times: {companyTimeZone}</p>
+                  </div>
+                  {!scheduleFormOpen && (
+                    <Button
+                      type="button"
+                      className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
+                      onClick={() => {
+                        setScheduleSaveError("");
+                        const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+                        setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
+                        setScheduleFormOpen(true);
+                      }}
+                    >
+                      New task
+                    </Button>
+                  )}
+                </div>
+
+                {scheduleFormOpen && (
+                  <form
+                    onSubmit={(e) => void handleScheduleSubmit(e)}
+                    className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 space-y-2.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold text-slate-800">Create scheduled task</p>
+                      <button
+                        type="button"
+                        className="text-[11px] font-semibold text-slate-600 underline"
+                        disabled={scheduleSaving}
+                        onClick={() => {
+                          setScheduleFormOpen(false);
+                          setScheduleSaveError("");
+                        }}
+                      >
+                        Close
+                      </button>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-title">
+                        Task title
+                      </label>
+                      <input
+                        id="sched-title"
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={scheduleDraft.title}
+                        onChange={(e) => setScheduleDraft((d) => ({ ...d, title: e.target.value }))}
+                        placeholder="e.g. Rough-in inspection"
+                        disabled={scheduleSaving}
+                        required
+                      />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-project">
+                          Project
+                        </label>
+                        <select
+                          id="sched-project"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.projectId}
+                          onChange={(e) =>
+                            setScheduleDraft((d) => ({
+                              ...d,
+                              projectId: e.target.value,
+                              costCentre: "",
+                            }))
+                          }
+                          disabled={scheduleSaving}
+                        >
+                          <option value="">— Optional —</option>
+                          {(effectiveProjects || []).map((p) => (
+                            <option key={String(p.id)} value={String(p.id)}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                        {scheduleDraft.projectId ? (
+                          <p className="text-[10px] text-slate-500">Project id: {scheduleDraft.projectId}</p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-cc">
+                          Cost centre / task
+                        </label>
+                        <select
+                          id="sched-cc"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.costCentre}
+                          onChange={(e) => setScheduleDraft((d) => ({ ...d, costCentre: e.target.value }))}
+                          disabled={scheduleSaving || !scheduleDraft.projectId}
+                        >
+                          <option value="">
+                            {scheduleDraft.projectId ? "— Select cost centre —" : "Pick a project first"}
+                          </option>
+                          {(scheduleCostCentreOptions || []).map((name) => (
+                            <option key={String(name)} value={String(name)}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-start-date">
+                          Start date
+                        </label>
+                        <input
+                          id="sched-start-date"
+                          type="date"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.startDate}
+                          onChange={(e) => setScheduleDraft((d) => ({ ...d, startDate: e.target.value }))}
+                          disabled={scheduleSaving}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-start-time">
+                          Start time
+                        </label>
+                        <input
+                          id="sched-start-time"
+                          type="time"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.startTime}
+                          onChange={(e) => setScheduleDraft((d) => ({ ...d, startTime: e.target.value }))}
+                          disabled={scheduleSaving}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-end-date">
+                          End date
+                        </label>
+                        <input
+                          id="sched-end-date"
+                          type="date"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.endDate}
+                          onChange={(e) => setScheduleDraft((d) => ({ ...d, endDate: e.target.value }))}
+                          disabled={scheduleSaving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-end-time">
+                          End time
+                        </label>
+                        <input
+                          id="sched-end-time"
+                          type="time"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={scheduleDraft.endTime}
+                          onChange={(e) => setScheduleDraft((d) => ({ ...d, endTime: e.target.value }))}
+                          disabled={scheduleSaving}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-dur">
+                        Duration (minutes) — if end time is not used
+                      </label>
+                      <input
+                        id="sched-dur"
+                        type="number"
+                        min={1}
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={scheduleDraft.durationMinutes}
+                        onChange={(e) => setScheduleDraft((d) => ({ ...d, durationMinutes: e.target.value }))}
+                        placeholder="e.g. 120"
+                        disabled={scheduleSaving}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="block text-[11px] font-medium text-slate-600">Assign employees</p>
+                      {schedulePickMembersLoading ? (
+                        <p className="text-[11px] text-slate-500">Loading team members…</p>
+                      ) : schedulePickMembersError ? (
+                        <p className="text-[11px] text-red-700 leading-snug">{schedulePickMembersError}</p>
+                      ) : (schedulePickMembers || []).length === 0 ? (
+                        <p className="text-[11px] text-slate-600">No employees found.</p>
+                      ) : (
+                        <div className="rounded-lg border border-slate-200 bg-white p-2 max-h-40 overflow-y-auto space-y-1.5">
+                          {(schedulePickMembers || []).map((m, pickIdx) => {
+                            const uid = String(m?.userId ?? "");
+                            const picked = (Array.isArray(scheduleDraft?.assignedUserIds)
+                              ? scheduleDraft.assignedUserIds
+                              : []
+                            ).some((x) => String(x) === uid);
+                            return (
+                              <label
+                                key={uid || `sched-member-${pickIdx}`}
+                                className="flex items-start gap-2 cursor-pointer text-xs text-slate-800"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 rounded border-slate-300"
+                                  checked={picked}
+                                  disabled={scheduleSaving}
+                                  onChange={() => {
+                                    setScheduleDraft((d) => {
+                                      const prev = Array.isArray(d?.assignedUserIds) ? d.assignedUserIds : [];
+                                      const set = new Set(prev.map((x) => String(x)));
+                                      if (set.has(uid)) set.delete(uid);
+                                      else set.add(uid);
+                                      return { ...d, assignedUserIds: [...set] };
+                                    });
+                                  }}
+                                />
+                                <span className="leading-snug">
+                                  <span className="font-semibold">{m?.displayName ?? uid}</span>
+                                  {m?.profileEmailRaw ? (
+                                    <span className="block text-[10px] text-slate-500 font-normal">{m.profileEmailRaw}</span>
+                                  ) : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {(() => {
+                        const ids = Array.isArray(scheduleDraft?.assignedUserIds) ? scheduleDraft.assignedUserIds : [];
+                        if (ids.length === 0) return null;
+                        const labels = ids
+                          .map((id) => {
+                            const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(id));
+                            return m?.displayName ? String(m.displayName).trim() : "";
+                          })
+                          .filter(Boolean);
+                        if (labels.length === 0) return null;
+                        return (
+                          <p className="text-[11px] text-slate-700">
+                            <span className="font-semibold text-slate-600">Selected: </span>
+                            {labels.join(", ")}
+                          </p>
+                        );
+                      })()}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-assign-team">
+                        Assigned team (optional)
+                      </label>
+                      <input
+                        id="sched-assign-team"
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={scheduleDraft.assignedTeamPlaceholder}
+                        onChange={(e) =>
+                          setScheduleDraft((d) => ({ ...d, assignedTeamPlaceholder: e.target.value }))
+                        }
+                        placeholder="Crew or group"
+                        disabled={scheduleSaving}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-notes">
+                        Notes / instructions
+                      </label>
+                      <textarea
+                        id="sched-notes"
+                        rows={3}
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs resize-y min-h-[4rem]"
+                        value={scheduleDraft.notes}
+                        onChange={(e) => setScheduleDraft((d) => ({ ...d, notes: e.target.value }))}
+                        disabled={scheduleSaving}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-status">
+                        Status
+                      </label>
+                      <select
+                        id="sched-status"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={scheduleDraft.status}
+                        onChange={(e) => setScheduleDraft((d) => ({ ...d, status: e.target.value }))}
+                        disabled={scheduleSaving}
+                      >
+                        <option value="scheduled">scheduled</option>
+                        <option value="in_progress">in_progress</option>
+                        <option value="completed">completed</option>
+                        <option value="cancelled">cancelled</option>
+                      </select>
+                    </div>
+                    {scheduleSaveError ? (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                        {scheduleSaveError}
+                      </div>
+                    ) : null}
+                    <div className="flex gap-2 pt-0.5">
+                      <Button type="submit" className="flex-1 rounded-lg h-9 text-xs font-semibold" disabled={scheduleSaving}>
+                        {scheduleSaving ? "Saving…" : "Save task"}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {scheduleLoading ? (
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading schedule…</p>
+                ) : scheduleError ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{scheduleError}</div>
+                ) : (scheduleTasksGroupedByDate || []).length === 0 ? (
+                  <p className="text-sm text-slate-600 py-4 text-center">No scheduled tasks.</p>
+                ) : (
+                  <div className="space-y-5">
+                    {(scheduleTasksGroupedByDate || []).map(({ dateKey, tasks }) => {
+                      const labelIso =
+                        dateKey && dateKey !== "—"
+                          ? wallDateTimeToUtcIso(dateKey, "12:00:00", companyTimeZone)
+                          : null;
+                      const dateHeading =
+                        labelIso && dateKey !== "—"
+                          ? `${wallWeekdayLongInTimeZone(dateKey, companyTimeZone)} · ${formatDate(labelIso, companyTimeZone)}`
+                          : "Date unknown";
+                      const taskList = Array.isArray(tasks) ? tasks : [];
+                      return (
+                        <div key={dateKey} className="space-y-2">
+                          <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
+                          <div className="space-y-2">
+                            {taskList.map((task) => {
+                              const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
+                              const proj = String(task?.project_name ?? "").trim();
+                              const projLine = proj.length > 0 ? proj : "No project selected";
+                              const cc = String(task?.cost_centre ?? "").trim();
+                              const ccLine = cc.length > 0 ? cc : "No cost centre";
+                              const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+                              const endRaw = task?.end_time;
+                              const durRaw = task?.duration_minutes;
+                              let windowLabel = "—";
+                              if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
+                              else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
+                                windowLabel = `${Number(durRaw)} min`;
+                              const rawAssignList =
+                                task?.id != null ? scheduleAssigneesByTaskId?.[String(task.id)] : undefined;
+                              const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
+                              const namesFromAssignees = assignRowsForTask
+                                .map((r) => String(r?.employee_name ?? "").trim())
+                                .filter(Boolean);
+                              const legacyNames = String(task?.assigned_employee_name ?? "").trim();
+                              const assigneeSummary =
+                                namesFromAssignees.length > 0 ? namesFromAssignees.join(", ") : legacyNames || "";
+                              const assigneeLine =
+                                assigneeSummary.length > 0 ? assigneeSummary : "No employee assigned";
+                              const at = String(task?.assigned_team ?? "").trim();
+                              const notesDisp = String(task?.notes ?? "").trim();
+                              const st = String(task?.status ?? "").trim() || "—";
+                              return (
+                                <div
+                                  key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
+                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-1.5 shadow-sm"
+                                >
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
+                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                      {st}
+                                    </span>
+                                  </div>
+                                  <p className="text-[12px] text-slate-700">
+                                    <span className="font-semibold text-slate-600">Project: </span>
+                                    {projLine}
+                                  </p>
+                                  <p className="text-[12px] text-slate-700">
+                                    <span className="font-semibold text-slate-600">Cost centre: </span>
+                                    {ccLine}
+                                  </p>
+                                  <p className="text-[12px] text-slate-800">
+                                    <span className="font-semibold text-slate-600">Time: </span>
+                                    {startDisp}
+                                    {" → "}
+                                    {windowLabel}
+                                  </p>
+                                  <p className="text-[12px] text-slate-800">
+                                    <span className="font-semibold text-slate-600">Assignees: </span>
+                                    {assigneeLine}
+                                  </p>
+                                  {at ? (
+                                    <p className="text-[12px] text-slate-700">
+                                      <span className="font-semibold text-slate-600">Team: </span>
+                                      {at}
+                                    </p>
+                                  ) : null}
+                                  {notesDisp ? (
+                                    <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "projects" && isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
@@ -8726,6 +9616,7 @@ const handlePhotoCapture = async (event) => {
                 <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
               </div>
               <div className="space-y-2">
+                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("schedule")}>📅 Schedule</button>
                 <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
                 {isAdmin && (
                   <button
@@ -8781,7 +9672,16 @@ const handlePhotoCapture = async (event) => {
         <div
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className={`grid gap-1.5 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+          <div className={`grid gap-1.5 grid-cols-3`}>
+            {!isAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("schedule")}
+                className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "schedule" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                📅 Schedule
+              </button>
+            )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
             {isAdmin && (
               <button
