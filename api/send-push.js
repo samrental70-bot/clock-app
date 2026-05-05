@@ -96,6 +96,10 @@ export default async function handler(req, res) {
   let deactivated = 0;
 
   for (const n of rows) {
+    const isScheduleAssigned = n.type === "schedule_assigned";
+    if (isScheduleAssigned) {
+      console.log("[SEND_PUSH] loaded schedule_assigned notification", n.id);
+    }
     const recipientId = n.recipient_user_id;
     if (!recipientId) continue;
 
@@ -104,6 +108,11 @@ export default async function handler(req, res) {
       .select("id, endpoint, p256dh, auth")
       .eq("user_id", recipientId)
       .eq("is_active", true);
+
+    if (isScheduleAssigned) {
+      if (sErr) console.log("[SEND_PUSH] subscriptions found", 0, sErr);
+      else console.log("[SEND_PUSH] subscriptions found", Array.isArray(subs) ? subs.length : 0);
+    }
 
     if (sErr || !subs?.length) continue;
 
@@ -120,8 +129,10 @@ export default async function handler(req, res) {
 
       try {
         await webpush.sendNotification(pushSub, payload);
+        if (isScheduleAssigned) console.log("[SEND_PUSH] webpush success", n.id, sub.id);
         sent += 1;
       } catch (err) {
+        if (isScheduleAssigned) console.log("[SEND_PUSH] webpush fail", n.id, sub.id, err?.message || err);
         errors += 1;
         const sc = Number(err?.statusCode);
         if (sc === 404 || sc === 410) {

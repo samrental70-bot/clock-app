@@ -30,6 +30,9 @@ self.addEventListener("push", (event) => {
   const body = data.body || "";
   const notificationId = data.notificationId || data.id || "";
   const type = typeof data.type === "string" ? data.type : "";
+  if (type === "schedule_assigned") {
+    console.log("[SW] push received type schedule_assigned", notificationId);
+  }
   const tag =
     typeof data.tag === "string" && data.tag.length > 0
       ? data.tag
@@ -57,6 +60,9 @@ self.addEventListener("notificationclick", (event) => {
     notificationId: notificationData.notificationId || "",
     notificationType: notificationData.type || "",
   };
+  if (notificationData.type === "schedule_assigned") {
+    console.log("[SW] notification click schedule_assigned", notificationData.notificationId || "");
+  }
 
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUnfocused: true }).then((clientList) => {

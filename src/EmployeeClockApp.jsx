@@ -1291,33 +1291,6 @@ function buildScheduleAssignmentDisplay(task, companyTimeZone) {
   };
 }
 
-function tryShowScheduleBrowserNotification(notificationRow, shownIdsRef) {
-  const id = String(notificationRow?.id ?? notificationRow?.assignmentId ?? "");
-  if (!id || shownIdsRef.current.has(id)) return;
-  if (typeof window === "undefined" || !window.Notification) return;
-  if (window.Notification.permission !== "granted") return;
-  try {
-    shownIdsRef.current.add(id);
-    const n = new window.Notification("New task assigned", {
-      body: String(notificationRow?.browserBody || notificationRow?.message || "").trim(),
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
-      tag: `schedule-${id}`,
-      data: { url: "/" },
-    });
-    n.onclick = () => {
-      try {
-        window.focus();
-      } catch {
-        // ignore
-      }
-    };
-  } catch (e) {
-    console.warn("[NOTIFY] schedule system Notification failed", e);
-    shownIdsRef.current.delete(id);
-  }
-}
-
 async function createCompanyNotifications(supabase, params) {
   const {
     companyId,
@@ -1575,7 +1548,7 @@ async function createScheduleAssignmentNotificationForUser({
       const nid = rpcReturnedNotificationId(data);
       console.log("[SCHEDULE_NOTIFY] rpc result", nid || data);
       if (nid) {
-        console.log("[SCHEDULE_NOTIFY] send push ids", [nid]);
+        console.log("[SCHEDULE_NOTIFY] sending push ids", [nid]);
         void requestSendPushForNotificationIds([nid]);
         return [nid];
       }
@@ -1597,7 +1570,7 @@ async function createScheduleAssignmentNotificationForUser({
     const nid = inserted?.id != null ? String(inserted.id) : null;
     console.log("[SCHEDULE_NOTIFY] fallback insert result", nid || inserted);
     if (nid) {
-      console.log("[SCHEDULE_NOTIFY] send push ids", [nid]);
+      console.log("[SCHEDULE_NOTIFY] sending push ids", [nid]);
       void requestSendPushForNotificationIds([nid]);
       return [nid];
     }
@@ -2499,7 +2472,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (popupRow.id) shownAssignNotifIdsRef.current.add(String(popupRow.id));
         shownAssignMessageSignaturesRef.current.add(scheduleAssignmentMessageSignature(popupRow));
         setActiveAssignNotif(popupRow);
-        tryShowScheduleBrowserNotification(popupRow, systemNotifShownIdsRef);
       } catch (err) {
         setEmployeeScheduleError(getErrorMessage(err));
         setEmployeeScheduledTasks([]);
@@ -3467,8 +3439,6 @@ const [uploadProgress, setUploadProgress] = useState(null);
     // Trigger background refresh so the Schedule tab updates even if user stays on another tab.
     setScheduleRefreshKey((k) => k + 1);
 
-    // Optional system notification if permission already granted.
-    tryShowScheduleBrowserNotification(popupRow, systemNotifShownIdsRef);
   }, [isAdmin, authUser?.id, userCompany?.id, inAppNotifications, activeAssignNotif, assignNotifSaving]);
 
   useEffect(() => {
