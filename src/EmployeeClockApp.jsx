@@ -1334,6 +1334,61 @@ async function createCompanyNotifications(supabase, params) {
   }
 }
 
+/** Direct notification to specific recipients (e.g. scheduled task assignment). */
+async function createDirectNotificationsForRecipients(supabase, params) {
+  const {
+    companyId,
+    actorUserId,
+    type,
+    title,
+    message,
+    projectId,
+    projectName,
+    costCentre,
+    relatedFolder,
+    itemCount,
+    recipientUserIds,
+  } = params || {};
+  if (!companyId || !actorUserId) return [];
+  const ids = (Array.isArray(recipientUserIds) ? recipientUserIds : [])
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  if (ids.length === 0) return [];
+
+  const createdNotificationIds = [];
+  for (const recipient_user_id of ids) {
+    const rpcPayload = {
+      p_company_id: companyId,
+      p_recipient_user_id: recipient_user_id,
+      p_actor_user_id: actorUserId,
+      p_type: String(type || ""),
+      p_title: String(title || ""),
+      p_message: String(message || ""),
+      p_project_id: projectId != null && projectId !== "" ? String(projectId) : null,
+      p_project_name: projectName != null ? String(projectName) : null,
+      p_cost_centre: costCentre != null ? String(costCentre) : null,
+      p_related_timesheet_id: null,
+      p_related_folder: relatedFolder != null ? String(relatedFolder) : null,
+      p_item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
+    };
+    try {
+      const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
+      if (error) {
+        console.warn("[NOTIFY] direct rpc error", error);
+        continue;
+      }
+      const nid = rpcReturnedNotificationId(data);
+      if (nid) createdNotificationIds.push(nid);
+    } catch (e) {
+      console.warn("[NOTIFY] direct rpc exception", e);
+    }
+  }
+  if (createdNotificationIds.length > 0) {
+    void requestSendPushForNotificationIds(createdNotificationIds);
+  }
+  return createdNotificationIds;
+}
+
 async function sendPhotoBatchNotifications(supabase, payload, count) {
   if (!payload?.companyId || !payload?.actorUserId || !count) return;
   const c = count;
@@ -1407,6 +1462,11 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const notifPollBootstrappedRef = useRef(false);
   const notifLastUnreadIdsRef = useRef(new Set());
   const systemNotifShownIdsRef = useRef(new Set());
+
+  // Employee assignment notification pop-up (confirm/OK)
+  const [activeAssignNotif, setActiveAssignNotif] = useState(null);
+  const [assignNotifSaving, setAssignNotifSaving] = useState(false);
+  const shownAssignNotifIdsRef = useRef(new Set());
 
   const photoNotifyBatchRef = useRef({
     timer: null,
@@ -3071,6 +3131,43 @@ const [uploadProgress, setUploadProgress] = useState(null);
       setInAppNotifError(getErrorMessage(e));
     }
   }, [authUser?.id, userCompany?.id, isAdmin]);
+
+  // Employee pop-up for new unread assignment notifications (WhatsApp-style confirm).
+  useEffect(() => {
+    if (isAdmin) return; // employees only
+    if (!authUser?.id || !userCompany?.id) return;
+    if (activeAssignNotif || assignNotifSaving) return;
+    const rows = Array.isArray(inAppNotifications) ? inAppNotifications : [];
+    const first = rows.find((n) => {
+      const id = String(n?.id ?? "");
+      if (!id) return false;
+      if (shownAssignNotifIdsRef.current.has(id)) return false;
+      const unread = n?.read_at == null && n?.is_read !== true;
+      if (!unread) return false;
+      const t = String(n?.type ?? "").trim().toLowerCase();
+      return t === "schedule_assigned" || t === "scheduled_task_assigned" || t === "task_assigned";
+    });
+    if (!first) return;
+    const nid = String(first.id);
+    shownAssignNotifIdsRef.current.add(nid);
+    setActiveAssignNotif(first);
+
+    // Optional system notification if permission already granted.
+    if (typeof window !== "undefined" && window.Notification && window.Notification.permission === "granted") {
+      try {
+        const title = "New scheduled task assigned";
+        const body = String(first?.message ?? "").trim().split("\n")[0] || String(first?.title ?? "").trim();
+        new window.Notification(title, {
+          body: body || "Open the app to confirm.",
+          icon: "/icon-192.png",
+          badge: "/icon-192.png",
+          tag: `assign-${nid}`,
+        });
+      } catch {
+        // ignore
+      }
+    }
+  }, [isAdmin, authUser?.id, userCompany?.id, inAppNotifications, activeAssignNotif, assignNotifSaving]);
 
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id) {
@@ -6036,6 +6133,12 @@ const handlePhotoCapture = async (event) => {
       const assignTeamVal = String(scheduleDraft?.assignedTeamPlaceholder ?? "").trim() || null;
       const selectedIdsRaw = Array.isArray(scheduleDraft?.assignedUserIds) ? scheduleDraft.assignedUserIds : [];
       const selectedIds = [...new Set(selectedIdsRaw.map((id) => String(id)).filter(Boolean))];
+      const prevAssignRows = Array.isArray(scheduleAssigneesByTaskId?.[taskId])
+        ? scheduleAssigneesByTaskId[taskId]
+        : [];
+      const prevAssignedUserIds = new Set(
+        prevAssignRows.map((r) => r?.user_id).filter(Boolean).map((x) => String(x))
+      );
       const nameParts = selectedIds
         .map((uid) => {
           const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
@@ -6125,6 +6228,36 @@ const handlePhotoCapture = async (event) => {
             setScheduleFormOpen(false);
             setScheduleRefreshKey((k) => k + 1);
             return;
+          }
+
+          // Assignment notifications (direct to employees).
+          try {
+            const wallKey = calendarDateKeyInTimeZone(startIso, companyTimeZone);
+            const wallParts = wallClockPartsInTimeZone(startIso, companyTimeZone);
+            const whenDisp =
+              wallKey && wallParts.timeStr
+                ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
+                : "";
+            const msgParts = [
+              `You were assigned: ${taskTitle}`,
+              whenDisp ? `When: ${whenDisp}` : "",
+              projectNameVal ? `Project: ${projectNameVal}` : "",
+              costCentreVal ? `Cost centre: ${costCentreVal}` : "",
+              notesVal ? `Notes: ${String(notesVal)}` : "",
+            ].filter(Boolean);
+            await createDirectNotificationsForRecipients(supabase, {
+              companyId: userCompany.id,
+              actorUserId: authUser.id,
+              type: "schedule_assigned",
+              title: "New scheduled task assigned",
+              message: msgParts.join("\n"),
+              projectId: projectIdVal,
+              projectName: projectNameVal,
+              costCentre: costCentreVal,
+              recipientUserIds: selectedIds,
+            });
+          } catch (e) {
+            console.warn("[SCHEDULE] assignment notification failed", e);
           }
         }
 
@@ -6255,6 +6388,39 @@ const handlePhotoCapture = async (event) => {
           });
           const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
           if (assignInsErr) throw assignInsErr;
+
+          // Notify only newly assigned employees (avoid duplicates on edits).
+          const notifyUserIds = selectedIds.filter((uid) => !prevAssignedUserIds.has(String(uid)));
+          if (notifyUserIds.length > 0) {
+            try {
+              const wallKey = calendarDateKeyInTimeZone(startIso, companyTimeZone);
+              const wallParts = wallClockPartsInTimeZone(startIso, companyTimeZone);
+              const whenDisp =
+                wallKey && wallParts.timeStr
+                  ? `${wallWeekdayShort(wallKey, companyTimeZone)} ${wallKey} · ${wallParts.timeStr}`
+                  : "";
+              const msgParts = [
+                `You were assigned: ${taskTitle}`,
+                whenDisp ? `When: ${whenDisp}` : "",
+                projectNameVal ? `Project: ${projectNameVal}` : "",
+                costCentreVal ? `Cost centre: ${costCentreVal}` : "",
+                notesVal ? `Notes: ${String(notesVal)}` : "",
+              ].filter(Boolean);
+              await createDirectNotificationsForRecipients(supabase, {
+                companyId: userCompany.id,
+                actorUserId: authUser.id,
+                type: "schedule_assigned",
+                title: "New scheduled task assigned",
+                message: msgParts.join("\n"),
+                projectId: projectIdVal,
+                projectName: projectNameVal,
+                costCentre: costCentreVal,
+                recipientUserIds: notifyUserIds,
+              });
+            } catch (e) {
+              console.warn("[SCHEDULE] assignment notification failed", e);
+            }
+          }
         }
 
         setScheduleEditingTaskId(null);
@@ -6266,7 +6432,7 @@ const handlePhotoCapture = async (event) => {
         setScheduleEditSaving(false);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, companyTimeZone, companyProjects, schedulePickMembers]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
   );
 
   const handleScheduleDeleteTask = useCallback(
@@ -6455,6 +6621,43 @@ const handlePhotoCapture = async (event) => {
       setMarkingNotifId(null);
     }
   };
+
+  const handleEmployeeConfirmAssignmentNotification = useCallback(async () => {
+    if (!activeAssignNotif?.id || !authUser?.id || !userCompany?.id) return;
+    setAssignNotifSaving(true);
+    try {
+      const ts = new Date().toISOString();
+      const { error } = await supabase
+        .from("notifications")
+        .update({ read_at: ts, is_read: true })
+        .eq("id", activeAssignNotif.id)
+        .eq("recipient_user_id", authUser.id);
+      if (error) throw error;
+      setInAppNotifications((prev) =>
+        (Array.isArray(prev) ? prev : []).map((x) =>
+          String(x?.id) === String(activeAssignNotif.id) ? { ...x, read_at: ts, is_read: true } : x
+        )
+      );
+      setActiveAssignNotif(null);
+      await pollInAppNotifications();
+    } catch (e) {
+      alert(getErrorMessage(e));
+    } finally {
+      setAssignNotifSaving(false);
+    }
+  }, [activeAssignNotif, authUser?.id, userCompany?.id, pollInAppNotifications]);
+
+  const handleEmployeeRequestNotificationPermission = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      alert("Notifications are not supported on this device/browser.");
+      return;
+    }
+    try {
+      await Notification.requestPermission();
+    } catch (e) {
+      console.warn("[NOTIFY] permission request failed", e);
+    }
+  }, []);
 
   const handleMarkAllNotificationsRead = async () => {
     if (!isAdmin || !authUser?.id) return;
@@ -9169,11 +9372,53 @@ const handlePhotoCapture = async (event) => {
           {activeTab === "schedule" && !isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-3">
+                {activeAssignNotif ? (
+                  <div className="fixed inset-0 z-[72] bg-black/40 px-3 py-6" role="dialog" aria-modal="true">
+                    <div className="mx-auto w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">New assignment</p>
+                          <p className="text-[16px] font-bold text-slate-900 leading-snug break-words">
+                            {String(activeAssignNotif?.title ?? "").trim() || "Scheduled task assigned"}
+                          </p>
+                        </div>
+                        <span className="shrink-0 inline-flex rounded-full px-2 py-1 text-[11px] font-bold ring-1 bg-blue-50 text-blue-900 ring-blue-200">
+                          Confirm
+                        </span>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                        <p className="text-[13px] text-slate-800 leading-snug whitespace-pre-wrap break-words">
+                          {String(activeAssignNotif?.message ?? "").trim() || "You were assigned a scheduled task."}
+                        </p>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          type="button"
+                          disabled={assignNotifSaving}
+                          onClick={() => void handleEmployeeConfirmAssignmentNotification()}
+                          className="flex-1 rounded-xl bg-[#1a73e8] px-4 py-3 text-[14px] font-bold text-white disabled:opacity-50"
+                        >
+                          {assignNotifSaving ? "Saving…" : "OK"}
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-500 leading-snug">
+                        This confirms you saw the assignment notification. It does not accept/decline the task.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="space-y-3">
                   <div>
                     <h2 className="font-bold text-[clamp(24px,5.5vw,28px)] leading-tight tracking-tight">Schedule</h2>
                     <p className="text-[15px] text-slate-500 mt-0.5">Your assignments · Times: {companyTimeZone}</p>
                   </div>
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[14px] font-semibold text-slate-800"
+                    onClick={() => void handleEmployeeRequestNotificationPermission()}
+                  >
+                    Enable phone notifications
+                  </button>
                   <div className="space-y-1">
                     <label className="text-[15px] font-medium text-slate-800" htmlFor="sched-employee-view">
                       View
