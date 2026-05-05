@@ -112,6 +112,27 @@ const SCHEDULE_FORM_EMPTY = {
   status: "scheduled",
 };
 
+/** V2a.2 scheduled_task_assignees.response_status */
+function normalizeScheduleAssigneeResponseStatus(raw) {
+  const s = String(raw ?? "pending").trim().toLowerCase();
+  if (s === "accepted" || s === "declined") return s;
+  return "pending";
+}
+
+function scheduleAssigneeResponseLabel(status) {
+  const s = normalizeScheduleAssigneeResponseStatus(status);
+  if (s === "accepted") return "Accepted";
+  if (s === "declined") return "Declined";
+  return "Pending";
+}
+
+function scheduleAssigneeResponseBadgeClass(status) {
+  const s = normalizeScheduleAssigneeResponseStatus(status);
+  if (s === "accepted") return "bg-emerald-100 text-emerald-900 ring-emerald-200";
+  if (s === "declined") return "bg-rose-100 text-rose-900 ring-rose-200";
+  return "bg-amber-100 text-amber-900 ring-amber-200";
+}
+
 function looksLikeEmail(value) {
   const s = String(value || "").trim();
   if (!s.includes("@")) return false;
@@ -231,6 +252,48 @@ function wallClockPartsInTimeZone(instant, timeZone) {
     dateStr: `${parts.year}-${parts.month}-${parts.day}`,
     timeStr: `${parts.hour}:${parts.minute}`,
   };
+}
+
+/** Populate schedule edit form from a scheduled_tasks row + assignee rows. */
+function buildScheduleEditDraftFromTask(task, assigneeRows, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const startParts = wallClockPartsInTimeZone(task?.start_time, tz);
+  const endParts = task?.end_time ? wallClockPartsInTimeZone(task.end_time, tz) : { dateStr: "", timeStr: "" };
+  const ar = Array.isArray(assigneeRows) ? assigneeRows : [];
+  const ids = ar.map((r) => r?.user_id).filter((x) => x != null).map((x) => String(x));
+  const dmRaw = task?.duration_minutes;
+  const dm =
+    dmRaw != null && dmRaw !== "" && Number.isFinite(Number(dmRaw)) ? String(Math.round(Number(dmRaw))) : "";
+  return {
+    title: String(task?.task_title ?? ""),
+    notes: String(task?.notes ?? ""),
+    projectId: task?.project_id != null ? String(task.project_id) : "",
+    costCentre: String(task?.cost_centre ?? ""),
+    startDate: startParts.dateStr,
+    startTime: startParts.timeStr || "09:00",
+    endDate: endParts.dateStr,
+    endTime: endParts.timeStr,
+    durationMinutes: dm,
+    assignedUserIds: ids,
+    assignedTeamPlaceholder: String(task?.assigned_team ?? ""),
+    status: String(task?.status ?? "scheduled"),
+  };
+}
+
+/** Clock Start Shift: dropdown label for a scheduled task (title + day + time in company TZ). */
+function formatClockScheduledTaskOptionLabel(task, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const title = String(task?.task_title ?? "").trim() || "Task";
+  const st = task?.start_time;
+  if (st == null || st === "") return title;
+  const todayKey = calendarDateKeyInTimeZone(new Date(), tz);
+  const nextKey = addWallDaysInTimeZone(todayKey, 1, tz);
+  const dk = calendarDateKeyInTimeZone(st, tz);
+  let dayPart = formatDate(st, tz);
+  if (dk === todayKey) dayPart = "Today";
+  else if (dk === nextKey) dayPart = "Tomorrow";
+  const tm = formatTime(st, tz);
+  return `${title} · ${dayPart} · ${tm}`;
 }
 
 /** Wall date YYYY-MM-DD + time HH:mm in `timeZone` → UTC ISO string. */
@@ -1280,6 +1343,21 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [employeeScheduledTasks, setEmployeeScheduledTasks] = useState([]);
   const [employeeScheduleLoading, setEmployeeScheduleLoading] = useState(false);
   const [employeeScheduleError, setEmployeeScheduleError] = useState("");
+  /** task id string → current user's assignee row (for accept/decline + display). */
+  const [employeeScheduleLinkByTaskId, setEmployeeScheduleLinkByTaskId] = useState({});
+  /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow — Scheduled Task dropdown. */
+  const [clockEmployeeScheduledTasks, setClockEmployeeScheduledTasks] = useState([]);
+  const [clockEmployeeScheduleLoading, setClockEmployeeScheduleLoading] = useState(false);
+  const [clockSelectedScheduledTaskId, setClockSelectedScheduledTaskId] = useState("");
+  const [scheduleResponseSavingAssigneeId, setScheduleResponseSavingAssigneeId] = useState(null);
+  const [scheduleEmployeeDeclineTaskId, setScheduleEmployeeDeclineTaskId] = useState(null);
+  const [scheduleEmployeeDeclineReason, setScheduleEmployeeDeclineReason] = useState("");
+  const [scheduleEmployeeResponseInlineError, setScheduleEmployeeResponseInlineError] = useState("");
+  const [scheduleEditingTaskId, setScheduleEditingTaskId] = useState(null);
+  const [scheduleEditDraft, setScheduleEditDraft] = useState(null);
+  const [scheduleEditSaving, setScheduleEditSaving] = useState(false);
+  const [scheduleEditError, setScheduleEditError] = useState("");
+  const [scheduleDeleteSavingId, setScheduleDeleteSavingId] = useState(null);
 
   /** Reports tab (owner/supervisor): date range + timesheet rows loaded only when tab is active. */
   const [reportsDateFrom, setReportsDateFrom] = useState("");
@@ -1698,7 +1776,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
           .order("start_time", { ascending: true });
         const assigneesPromise = supabase
           .from("scheduled_task_assignees")
-          .select("scheduled_task_id, user_id, employee_name, employee_email")
+          .select(
+            "id, scheduled_task_id, user_id, employee_name, employee_email, response_status, decline_reason, responded_at, updated_at"
+          )
           .eq("company_id", userCompany.id);
         const membersPromise = supabase
           .from("company_members")
@@ -1794,14 +1874,25 @@ const [uploadProgress, setUploadProgress] = useState(null);
       try {
         const { data: links, error: linkErr } = await supabase
           .from("scheduled_task_assignees")
-          .select("scheduled_task_id")
+          .select(
+            "id, scheduled_task_id, user_id, response_status, decline_reason, responded_at, updated_at, employee_name"
+          )
           .eq("company_id", userCompany.id)
           .eq("user_id", authUser.id);
         if (linkErr) throw linkErr;
-        const rawIds = Array.isArray(links) ? links : [];
-        const idSet = [...new Set(rawIds.map((r) => r?.scheduled_task_id).filter(Boolean))];
+        const rawLinks = Array.isArray(links) ? links : [];
+        const linkByTaskId = {};
+        for (const row of rawLinks) {
+          const tid = row?.scheduled_task_id;
+          if (tid == null) continue;
+          linkByTaskId[String(tid)] = row;
+        }
+        const idSet = [...new Set(rawLinks.map((r) => r?.scheduled_task_id).filter(Boolean))];
         if (idSet.length === 0) {
-          if (!cancelled) setEmployeeScheduledTasks([]);
+          if (!cancelled) {
+            setEmployeeScheduledTasks([]);
+            setEmployeeScheduleLinkByTaskId({});
+          }
           return;
         }
         const { data: taskRows, error: tErr } = await supabase
@@ -1811,11 +1902,15 @@ const [uploadProgress, setUploadProgress] = useState(null);
           .in("id", idSet)
           .order("start_time", { ascending: true });
         if (tErr) throw tErr;
-        if (!cancelled) setEmployeeScheduledTasks(Array.isArray(taskRows) ? taskRows : []);
+        if (!cancelled) {
+          setEmployeeScheduledTasks(Array.isArray(taskRows) ? taskRows : []);
+          setEmployeeScheduleLinkByTaskId(linkByTaskId);
+        }
       } catch (err) {
         if (!cancelled) {
           setEmployeeScheduleError(getErrorMessage(err));
           setEmployeeScheduledTasks([]);
+          setEmployeeScheduleLinkByTaskId({});
         }
       } finally {
         if (!cancelled) setEmployeeScheduleLoading(false);
@@ -1825,6 +1920,63 @@ const [uploadProgress, setUploadProgress] = useState(null);
       cancelled = true;
     };
   }, [activeTab, isAdmin, isEmployeeRole, userCompany?.id, companyChecked, authUser?.id, scheduleRefreshKey]);
+
+  /** Clock tab: fetch current user's assignee-linked tasks for today + next calendar day (company TZ); any role. */
+  useEffect(() => {
+    if (activeTab !== "clock" || !userCompany?.id || !companyChecked || !authUser?.id) {
+      return;
+    }
+    let cancelled = false;
+    setClockEmployeeScheduleLoading(true);
+    (async () => {
+      try {
+        const { data: links, error: linkErr } = await supabase
+          .from("scheduled_task_assignees")
+          .select("scheduled_task_id")
+          .eq("company_id", userCompany.id)
+          .eq("user_id", authUser.id);
+        if (linkErr) throw linkErr;
+        const rawLinks = Array.isArray(links) ? links : [];
+        const idSet = [...new Set(rawLinks.map((r) => r?.scheduled_task_id).filter(Boolean))];
+        if (idSet.length === 0) {
+          if (!cancelled) setClockEmployeeScheduledTasks([]);
+          return;
+        }
+        const { data: taskRows, error: tErr } = await supabase
+          .from("scheduled_tasks")
+          .select("id, task_title, start_time, project_id, project_name, cost_centre")
+          .eq("company_id", userCompany.id)
+          .in("id", idSet)
+          .order("start_time", { ascending: true });
+        if (tErr) throw tErr;
+        const tz = companyTimeZone;
+        const todayKey = calendarDateKeyInTimeZone(new Date(), tz);
+        const nextKey = addWallDaysInTimeZone(todayKey, 1, tz);
+        const rows = Array.isArray(taskRows) ? taskRows : [];
+        const filtered = rows.filter((t) => {
+          const dk = calendarDateKeyInTimeZone(t?.start_time, tz);
+          return dk === todayKey || dk === nextKey;
+        });
+        if (!cancelled) setClockEmployeeScheduledTasks(filtered);
+      } catch {
+        if (!cancelled) setClockEmployeeScheduledTasks([]);
+      } finally {
+        if (!cancelled) setClockEmployeeScheduleLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, userCompany?.id, companyChecked, authUser?.id, companyTimeZone, scheduleRefreshKey]);
+
+  /** Drop clock scheduled-task selection if that task is no longer in the filtered list. */
+  useEffect(() => {
+    if (!clockSelectedScheduledTaskId) return;
+    const ok = (clockEmployeeScheduledTasks || []).some(
+      (t) => String(t?.id) === String(clockSelectedScheduledTaskId)
+    );
+    if (!ok) setClockSelectedScheduledTaskId("");
+  }, [clockEmployeeScheduledTasks, clockSelectedScheduledTaskId]);
 
   const scheduleTasksGroupedByDate = useMemo(() => {
     const rows = Array.isArray(scheduledTasks) ? scheduledTasks : [];
@@ -2023,6 +2175,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
       effectiveCostCentresByProjectId[String(pid)] || effectiveCostCentresByProjectId[Number(pid)] || [];
     return Array.isArray(list) ? list : [];
   }, [scheduleDraft?.projectId, effectiveCostCentresByProjectId]);
+
+  const scheduleEditCostCentreOptions = useMemo(() => {
+    const pid = scheduleEditDraft?.projectId;
+    if (pid == null || String(pid).trim() === "") return [];
+    const list =
+      effectiveCostCentresByProjectId[String(pid)] || effectiveCostCentresByProjectId[Number(pid)] || [];
+    return Array.isArray(list) ? list : [];
+  }, [scheduleEditDraft?.projectId, effectiveCostCentresByProjectId]);
 
   /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
   const clockSelectableProjects = useMemo(() => {
@@ -5092,6 +5252,73 @@ const handlePhotoCapture = async (event) => {
     setIsMenuOpen(false);
   };
 
+  const handleEmployeeScheduleAccept = useCallback(
+    async (assigneeRowId) => {
+      const aid = assigneeRowId != null ? String(assigneeRowId).trim() : "";
+      if (!aid || !authUser?.id || !userCompany?.id) return;
+      setScheduleEmployeeResponseInlineError("");
+      setScheduleResponseSavingAssigneeId(aid);
+      try {
+        const nowIso = new Date().toISOString();
+        const { error } = await supabase
+          .from("scheduled_task_assignees")
+          .update({
+            response_status: "accepted",
+            decline_reason: null,
+            responded_at: nowIso,
+          })
+          .eq("id", aid)
+          .eq("user_id", authUser.id)
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        setScheduleEmployeeDeclineTaskId(null);
+        setScheduleEmployeeDeclineReason("");
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        setScheduleEmployeeResponseInlineError(getErrorMessage(err));
+      } finally {
+        setScheduleResponseSavingAssigneeId(null);
+      }
+    },
+    [authUser?.id, userCompany?.id]
+  );
+
+  const handleEmployeeScheduleDecline = useCallback(
+    async (assigneeRowId, reasonRaw) => {
+      const aid = assigneeRowId != null ? String(assigneeRowId).trim() : "";
+      const reason = String(reasonRaw ?? "").trim();
+      if (!aid || !authUser?.id || !userCompany?.id) return;
+      if (!reason) {
+        setScheduleEmployeeResponseInlineError("Please enter a reason for declining.");
+        return;
+      }
+      setScheduleEmployeeResponseInlineError("");
+      setScheduleResponseSavingAssigneeId(aid);
+      try {
+        const nowIso = new Date().toISOString();
+        const { error } = await supabase
+          .from("scheduled_task_assignees")
+          .update({
+            response_status: "declined",
+            decline_reason: reason,
+            responded_at: nowIso,
+          })
+          .eq("id", aid)
+          .eq("user_id", authUser.id)
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        setScheduleEmployeeDeclineTaskId(null);
+        setScheduleEmployeeDeclineReason("");
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        setScheduleEmployeeResponseInlineError(getErrorMessage(err));
+      } finally {
+        setScheduleResponseSavingAssigneeId(null);
+      }
+    },
+    [authUser?.id, userCompany?.id]
+  );
+
   const handleScheduleSubmit = useCallback(
     async (event) => {
       event?.preventDefault?.();
@@ -5175,13 +5402,39 @@ const handlePhotoCapture = async (event) => {
 
       setScheduleSaving(true);
       try {
-        const { data: insertedRows, error: insertErr } = await supabase
+        const { data: createdRow, error: insertErr } = await supabase
           .from("scheduled_tasks")
           .insert([payload])
-          .select("id");
+          .select("id")
+          .maybeSingle();
         if (insertErr) throw insertErr;
-        const ins = Array.isArray(insertedRows) ? insertedRows : [];
-        const newTaskId = ins[0]?.id ?? null;
+        let newTaskId = createdRow?.id != null ? String(createdRow.id) : null;
+        if (!newTaskId && selectedIds.length > 0) {
+          const { data: fbRow } = await supabase
+            .from("scheduled_tasks")
+            .select("id")
+            .eq("company_id", userCompany.id)
+            .eq("created_by", authUser.id)
+            .eq("task_title", taskTitle)
+            .eq("start_time", startIso)
+            .order("id", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          newTaskId = fbRow?.id != null ? String(fbRow.id) : null;
+        }
+
+        if (selectedIds.length > 0 && newTaskId == null) {
+          setScheduleSaveError(
+            "The task was saved, but employees could not be assigned because the new task id was not returned. Check RLS (scheduled_tasks insert must allow returning id, or run a fresh sync)."
+          );
+          setScheduleDraft({
+            ...SCHEDULE_FORM_EMPTY,
+            startDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+          });
+          setScheduleFormOpen(false);
+          setScheduleRefreshKey((k) => k + 1);
+          return;
+        }
 
         if (selectedIds.length > 0 && newTaskId != null) {
           const assignRows = selectedIds.map((uid) => {
@@ -5195,6 +5448,7 @@ const handlePhotoCapture = async (event) => {
               employee_name: display,
               employee_email: em || null,
               created_by: authUser.id,
+              response_status: "pending",
             };
           });
           const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
@@ -5226,6 +5480,164 @@ const handlePhotoCapture = async (event) => {
       }
     },
     [isAdmin, userCompany?.id, authUser?.id, scheduleDraft, companyTimeZone, companyProjects, schedulePickMembers]
+  );
+
+  const handleScheduleUpdateTask = useCallback(
+    async (event) => {
+      event?.preventDefault?.();
+      if (!isAdmin || !userCompany?.id || !authUser?.id || !scheduleEditingTaskId || !scheduleEditDraft) return;
+      setScheduleEditError("");
+      const d = scheduleEditDraft;
+      const taskTitle = String(d?.title ?? "").trim();
+      const startDate = String(d?.startDate ?? "").trim();
+      if (!taskTitle || !startDate) {
+        setScheduleEditError("Task title and start date are required.");
+        return;
+      }
+      const startIso = wallDateTimeToUtcIso(startDate, normalizeTimeInputForWallClock(d?.startTime), companyTimeZone);
+      if (!startIso) {
+        setScheduleEditError("Invalid start date or time.");
+        return;
+      }
+      let endTimeVal = null;
+      let durationMinutesVal = null;
+      const endDateRaw = String(d?.endDate ?? "").trim();
+      const endTimeRaw = String(d?.endTime ?? "").trim();
+      if (endDateRaw && endTimeRaw) {
+        const endIso = wallDateTimeToUtcIso(endDateRaw, normalizeTimeInputForWallClock(endTimeRaw), companyTimeZone);
+        if (!endIso) {
+          setScheduleEditError("Invalid end date or time.");
+          return;
+        }
+        endTimeVal = endIso;
+      } else {
+        const dmRaw = String(d?.durationMinutes ?? "").trim();
+        if (dmRaw !== "") {
+          const n = Number(dmRaw);
+          if (!Number.isFinite(n) || n <= 0) {
+            setScheduleEditError("Duration must be a positive number of minutes.");
+            return;
+          }
+          durationMinutesVal = Math.round(n);
+        }
+      }
+
+      const pidRaw = String(d?.projectId ?? "").trim();
+      const projectIdVal = pidRaw === "" ? null : pidRaw;
+      let projectNameVal = null;
+      if (projectIdVal) {
+        const proj = (companyProjects || []).find((p) => String(p?.id) === String(projectIdVal));
+        const nm = proj?.name != null ? String(proj.name).trim() : "";
+        projectNameVal = nm || null;
+      }
+
+      const costCentreVal = projectIdVal ? String(d?.costCentre ?? "").trim() || null : null;
+      const notesVal = String(d?.notes ?? "").trim() || null;
+      const assignTeamVal = String(d?.assignedTeamPlaceholder ?? "").trim() || null;
+      const selectedIdsRaw = Array.isArray(d?.assignedUserIds) ? d.assignedUserIds : [];
+      const selectedIds = [...new Set(selectedIdsRaw.map((id) => String(id)).filter(Boolean))];
+      const nameParts = selectedIds
+        .map((uid) => {
+          const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
+          return m?.displayName ? String(m.displayName).trim() : "";
+        })
+        .filter(Boolean);
+      const namesCsv = nameParts.length > 0 ? nameParts.join(", ") : null;
+      const statusVal = String(d?.status ?? "scheduled").trim() || "scheduled";
+      const taskId = String(scheduleEditingTaskId);
+
+      const updatePayload = {
+        task_title: taskTitle,
+        notes: notesVal,
+        start_time: startIso,
+        end_time: endTimeVal,
+        duration_minutes: durationMinutesVal,
+        project_id: projectIdVal,
+        project_name: projectNameVal,
+        cost_centre: costCentreVal,
+        status: statusVal,
+        assigned_employee_name: namesCsv,
+        assigned_team: assignTeamVal,
+      };
+
+      setScheduleEditSaving(true);
+      try {
+        const { error: upErr } = await supabase
+          .from("scheduled_tasks")
+          .update(updatePayload)
+          .eq("id", taskId)
+          .eq("company_id", userCompany.id);
+        if (upErr) throw upErr;
+
+        const { error: delErr } = await supabase
+          .from("scheduled_task_assignees")
+          .delete()
+          .eq("scheduled_task_id", taskId)
+          .eq("company_id", userCompany.id);
+        if (delErr) throw delErr;
+
+        if (selectedIds.length > 0) {
+          const assignRows = selectedIds.map((uid) => {
+            const m = (schedulePickMembers || []).find((x) => String(x.userId) === String(uid));
+            const display = m?.displayName ? String(m.displayName).trim() : shortUserLabel(uid);
+            const em = m?.profileEmailRaw ? String(m.profileEmailRaw).trim() : "";
+            return {
+              scheduled_task_id: taskId,
+              company_id: userCompany.id,
+              user_id: uid,
+              employee_name: display,
+              employee_email: em || null,
+              created_by: authUser.id,
+              response_status: "pending",
+            };
+          });
+          const { error: assignInsErr } = await supabase.from("scheduled_task_assignees").insert(assignRows);
+          if (assignInsErr) throw assignInsErr;
+        }
+
+        setScheduleEditingTaskId(null);
+        setScheduleEditDraft(null);
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        setScheduleEditError(getErrorMessage(err));
+      } finally {
+        setScheduleEditSaving(false);
+      }
+    },
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, companyTimeZone, companyProjects, schedulePickMembers]
+  );
+
+  const handleScheduleDeleteTask = useCallback(
+    async (taskIdRaw) => {
+      const tid = taskIdRaw != null ? String(taskIdRaw).trim() : "";
+      if (!tid || !isAdmin || !userCompany?.id || !authUser?.id) return;
+      if (
+        typeof window !== "undefined" &&
+        !window.confirm("Delete this scheduled task? This cannot be undone.")
+      ) {
+        return;
+      }
+      setScheduleDeleteSavingId(tid);
+      try {
+        const { error } = await supabase
+          .from("scheduled_tasks")
+          .delete()
+          .eq("id", tid)
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        if (String(scheduleEditingTaskId) === tid) {
+          setScheduleEditingTaskId(null);
+          setScheduleEditDraft(null);
+          setScheduleEditError("");
+        }
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        alert(getErrorMessage(err));
+      } finally {
+        setScheduleDeleteSavingId(null);
+      }
+    },
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId]
   );
 
   const handleEnableMobileNotifications = async () => {
@@ -6564,12 +6976,59 @@ const handlePhotoCapture = async (event) => {
                 )}
 
                 <div className="space-y-1">
+                  <label className="text-xs sm:text-sm font-medium">Scheduled Task</label>
+                  <select
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    disabled={clockEmployeeScheduleLoading}
+                    value={clockSelectedScheduledTaskId}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setClockSelectedScheduledTaskId(v);
+                      if (!v) return;
+                      const task = (clockEmployeeScheduledTasks || []).find(
+                        (t) => String(t?.id) === String(v)
+                      );
+                      if (!task) return;
+                      const pid = task.project_id != null ? String(task.project_id) : "";
+                      const nameFromRow = String(task.project_name ?? "").trim();
+                      const ccRaw = String(task.cost_centre ?? "").trim();
+                      let project =
+                        pid &&
+                        clockSelectableProjects.find((p) => String(p.id) === pid);
+                      if (!project && nameFromRow) {
+                        const lower = nameFromRow.toLowerCase();
+                        project = clockSelectableProjects.find(
+                          (p) => String(p.name).trim().toLowerCase() === lower
+                        );
+                      }
+                      if (project) {
+                        handleProjectChange(String(project.id));
+                        const centres = clockCostCentreOptionsForProject(project.id);
+                        if (ccRaw && centres.includes(ccRaw)) {
+                          setCostCenter(ccRaw);
+                        }
+                      }
+                    }}
+                  >
+                    <option value="">No scheduled task / Manual clock-in</option>
+                    {(clockEmployeeScheduledTasks || []).map((t) => (
+                      <option key={String(t.id)} value={String(t.id)}>
+                        {formatClockScheduledTaskOptionLabel(t, companyTimeZone)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
                   <label className="text-xs sm:text-sm font-medium">Project / Job Site</label>
                   <select
                     className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
                     value={projectId}
                     disabled={clockSelectableProjects.length === 0}
-                    onChange={(event) => handleProjectChange(event.target.value)}
+                    onChange={(event) => {
+                      setClockSelectedScheduledTaskId("");
+                      handleProjectChange(event.target.value);
+                    }}
                   >
                     {clockSelectableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
@@ -6589,7 +7048,10 @@ const handlePhotoCapture = async (event) => {
                       clockSelectableProjects.length === 0 ||
                       clockCostCentresActive.length === 0
                     }
-                    onChange={(event) => setCostCenter(event.target.value)}
+                    onChange={(event) => {
+                      setClockSelectedScheduledTaskId("");
+                      setCostCenter(event.target.value);
+                    }}
                   >
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
@@ -7896,6 +8358,11 @@ const handlePhotoCapture = async (event) => {
                   <h2 className="font-bold text-lg">Schedule</h2>
                   <p className="text-xs text-slate-500 mt-0.5">Your assignments · Times: {companyTimeZone}</p>
                 </div>
+                {scheduleEmployeeResponseInlineError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                    {scheduleEmployeeResponseInlineError}
+                  </div>
+                ) : null}
                 {employeeScheduleLoading ? (
                   <p className="text-sm text-slate-600 py-4 text-center">Loading your schedule…</p>
                 ) : employeeScheduleError ? (
@@ -7933,15 +8400,26 @@ const handlePhotoCapture = async (event) => {
                               if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
                               else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
                                 windowLabel = `${Number(durRaw)} min`;
-                              const empCsv = String(task?.assigned_employee_name ?? "").trim();
-                              const assigneeLine = empCsv.length > 0 ? empCsv : "No employee assigned";
+                              const linkRow =
+                                task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
+                              const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
+                              const declineReasonOwn = String(linkRow?.decline_reason ?? "").trim();
+                              const respondedAt = linkRow?.responded_at;
+                              const respondedDisp =
+                                respondedAt != null && respondedAt !== ""
+                                  ? `${formatDate(respondedAt, companyTimeZone)} · ${formatTime(respondedAt, companyTimeZone)}`
+                                  : null;
+                              const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
+                              const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
+                              const tidStr = task?.id != null ? String(task.id) : "";
+                              const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
                               const at = String(task?.assigned_team ?? "").trim();
                               const notesDisp = String(task?.notes ?? "").trim();
                               const st = String(task?.status ?? "").trim() || "—";
                               return (
                                 <div
                                   key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-1.5 shadow-sm"
+                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm min-w-0"
                                 >
                                   <div className="flex flex-wrap items-start justify-between gap-2">
                                     <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
@@ -7963,10 +8441,91 @@ const handlePhotoCapture = async (event) => {
                                     {" → "}
                                     {windowLabel}
                                   </p>
-                                  <p className="text-[12px] text-slate-800">
-                                    <span className="font-semibold text-slate-600">Assignees: </span>
-                                    {assigneeLine}
-                                  </p>
+                                  <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                                    <span className="font-semibold text-slate-600">Your response:</span>
+                                    <span
+                                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(respStatus)}`}
+                                    >
+                                      {scheduleAssigneeResponseLabel(respStatus)}
+                                    </span>
+                                  </div>
+                                  {respondedDisp ? (
+                                    <p className="text-[11px] text-slate-500">
+                                      Responded: {respondedDisp}
+                                    </p>
+                                  ) : null}
+                                  {respStatus === "declined" && declineReasonOwn ? (
+                                    <p className="text-[11px] text-slate-700 leading-snug">
+                                      <span className="font-semibold text-slate-600">Your decline reason: </span>
+                                      {declineReasonOwn}
+                                    </p>
+                                  ) : null}
+                                  {respStatus === "pending" && assigneeRowId ? (
+                                    <div className="space-y-2 pt-0.5">
+                                      {!declineOpen ? (
+                                        <div className="flex flex-wrap gap-2">
+                                          <button
+                                            type="button"
+                                            disabled={Boolean(savingThis)}
+                                            onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
+                                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                                          >
+                                            {savingThis ? "Saving…" : "Accept"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={Boolean(savingThis)}
+                                            onClick={() => {
+                                              setScheduleEmployeeResponseInlineError("");
+                                              setScheduleEmployeeDeclineTaskId(tidStr);
+                                              setScheduleEmployeeDeclineReason("");
+                                            }}
+                                            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
+                                          >
+                                            Decline
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                          <label className="block text-[10px] font-medium text-slate-600" htmlFor={`decl-reason-${tidStr}`}>
+                                            Reason for declining <span className="text-red-600">*</span>
+                                          </label>
+                                          <textarea
+                                            id={`decl-reason-${tidStr}`}
+                                            rows={3}
+                                            value={scheduleEmployeeDeclineReason}
+                                            onChange={(e) => setScheduleEmployeeDeclineReason(e.target.value)}
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-[11px] resize-y min-h-[3rem]"
+                                            placeholder="Required"
+                                            disabled={Boolean(savingThis)}
+                                          />
+                                          <div className="flex flex-wrap gap-2">
+                                            <button
+                                              type="button"
+                                              disabled={Boolean(savingThis)}
+                                              onClick={() =>
+                                                void handleEmployeeScheduleDecline(assigneeRowId, scheduleEmployeeDeclineReason)
+                                              }
+                                              className="rounded-lg bg-rose-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                                            >
+                                              {savingThis ? "Saving…" : "Confirm decline"}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              disabled={Boolean(savingThis)}
+                                              onClick={() => {
+                                                setScheduleEmployeeDeclineTaskId(null);
+                                                setScheduleEmployeeDeclineReason("");
+                                              }}
+                                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-800 disabled:opacity-50"
+                                            >
+                                              Cancel
+                                            </button>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : null}
                                   {at ? (
                                     <p className="text-[12px] text-slate-700">
                                       <span className="font-semibold text-slate-600">Team: </span>
@@ -8003,6 +8562,9 @@ const handlePhotoCapture = async (event) => {
                       className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
                       onClick={() => {
                         setScheduleSaveError("");
+                        setScheduleEditingTaskId(null);
+                        setScheduleEditDraft(null);
+                        setScheduleEditError("");
                         const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
                         setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
                         setScheduleFormOpen(true);
@@ -8332,55 +8894,418 @@ const handlePhotoCapture = async (event) => {
                               const rawAssignList =
                                 task?.id != null ? scheduleAssigneesByTaskId?.[String(task.id)] : undefined;
                               const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
-                              const namesFromAssignees = assignRowsForTask
-                                .map((r) => String(r?.employee_name ?? "").trim())
-                                .filter(Boolean);
-                              const legacyNames = String(task?.assigned_employee_name ?? "").trim();
-                              const assigneeSummary =
-                                namesFromAssignees.length > 0 ? namesFromAssignees.join(", ") : legacyNames || "";
-                              const assigneeLine =
-                                assigneeSummary.length > 0 ? assigneeSummary : "No employee assigned";
+                              const sortedAssignees = [...assignRowsForTask].sort((a, b) =>
+                                String(a?.employee_name ?? "").localeCompare(String(b?.employee_name ?? ""))
+                              );
                               const at = String(task?.assigned_team ?? "").trim();
                               const notesDisp = String(task?.notes ?? "").trim();
                               const st = String(task?.status ?? "").trim() || "—";
+                              const tidKey = task?.id != null ? String(task.id) : "";
+                              const isEditingThis =
+                                tidKey && scheduleEditingTaskId === tidKey && scheduleEditDraft != null;
                               return (
                                 <div
                                   key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-1.5 shadow-sm"
+                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm min-w-0"
                                 >
                                   <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0">{ttitle}</p>
-                                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                                      {st}
-                                    </span>
+                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0 flex-1">{ttitle}</p>
+                                    <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                                        {st}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        disabled={Boolean(scheduleEditSaving) || scheduleDeleteSavingId === tidKey}
+                                        onClick={() => {
+                                          setScheduleFormOpen(false);
+                                          setScheduleSaveError("");
+                                          setScheduleEditError("");
+                                          setScheduleEditDraft(
+                                            buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone)
+                                          );
+                                          setScheduleEditingTaskId(tidKey);
+                                        }}
+                                        className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 disabled:opacity-50"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={Boolean(scheduleEditSaving) || scheduleDeleteSavingId === tidKey}
+                                        onClick={() => void handleScheduleDeleteTask(task?.id)}
+                                        className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-800 disabled:opacity-50"
+                                      >
+                                        {scheduleDeleteSavingId === tidKey ? "…" : "Delete"}
+                                      </button>
+                                    </div>
                                   </div>
-                                  <p className="text-[12px] text-slate-700">
-                                    <span className="font-semibold text-slate-600">Project: </span>
-                                    {projLine}
-                                  </p>
-                                  <p className="text-[12px] text-slate-700">
-                                    <span className="font-semibold text-slate-600">Cost centre: </span>
-                                    {ccLine}
-                                  </p>
-                                  <p className="text-[12px] text-slate-800">
-                                    <span className="font-semibold text-slate-600">Time: </span>
-                                    {startDisp}
-                                    {" → "}
-                                    {windowLabel}
-                                  </p>
-                                  <p className="text-[12px] text-slate-800">
-                                    <span className="font-semibold text-slate-600">Assignees: </span>
-                                    {assigneeLine}
-                                  </p>
-                                  {at ? (
-                                    <p className="text-[12px] text-slate-700">
-                                      <span className="font-semibold text-slate-600">Team: </span>
-                                      {at}
-                                    </p>
-                                  ) : null}
-                                  {notesDisp ? (
-                                    <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
-                                  ) : null}
+                                  {isEditingThis ? (
+                                    <form
+                                      onSubmit={(e) => void handleScheduleUpdateTask(e)}
+                                      className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/90 p-2.5"
+                                    >
+                                      <p className="text-[11px] font-semibold text-slate-800">Edit task</p>
+                                      <div className="space-y-1">
+                                        <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-title-${tidKey}`}>
+                                          Task title
+                                        </label>
+                                        <input
+                                          id={`sched-edit-title-${tidKey}`}
+                                          type="text"
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                          value={scheduleEditDraft.title}
+                                          onChange={(e) =>
+                                            setScheduleEditDraft((prev) =>
+                                              prev ? { ...prev, title: e.target.value } : prev
+                                            )
+                                          }
+                                          disabled={scheduleEditSaving}
+                                          required
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-2">
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-proj-${tidKey}`}>
+                                            Project
+                                          </label>
+                                          <select
+                                            id={`sched-edit-proj-${tidKey}`}
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.projectId}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, projectId: e.target.value, costCentre: "" } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving}
+                                          >
+                                            <option value="">— Optional —</option>
+                                            {(effectiveProjects || []).map((p) => (
+                                              <option key={String(p.id)} value={String(p.id)}>
+                                                {p.name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-cc-${tidKey}`}>
+                                            Cost centre / task
+                                          </label>
+                                          <select
+                                            id={`sched-edit-cc-${tidKey}`}
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.costCentre}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, costCentre: e.target.value } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving || !scheduleEditDraft.projectId}
+                                          >
+                                            <option value="">
+                                              {scheduleEditDraft.projectId ? "— Select —" : "Pick a project first"}
+                                            </option>
+                                            {(scheduleEditCostCentreOptions || []).map((name) => (
+                                              <option key={String(name)} value={String(name)}>
+                                                {name}
+                                              </option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-sd-${tidKey}`}>
+                                            Start date
+                                          </label>
+                                          <input
+                                            id={`sched-edit-sd-${tidKey}`}
+                                            type="date"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.startDate}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, startDate: e.target.value } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving}
+                                            required
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-st-${tidKey}`}>
+                                            Start time
+                                          </label>
+                                          <input
+                                            id={`sched-edit-st-${tidKey}`}
+                                            type="time"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.startTime}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, startTime: e.target.value } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-ed-${tidKey}`}>
+                                            End date
+                                          </label>
+                                          <input
+                                            id={`sched-edit-ed-${tidKey}`}
+                                            type="date"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.endDate}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, endDate: e.target.value } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving}
+                                          />
+                                        </div>
+                                        <div className="space-y-1">
+                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-et-${tidKey}`}>
+                                            End time
+                                          </label>
+                                          <input
+                                            id={`sched-edit-et-${tidKey}`}
+                                            type="time"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                            value={scheduleEditDraft.endTime}
+                                            onChange={(e) =>
+                                              setScheduleEditDraft((prev) =>
+                                                prev ? { ...prev, endTime: e.target.value } : prev
+                                              )
+                                            }
+                                            disabled={scheduleEditSaving}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-dur-${tidKey}`}>
+                                          Duration (minutes) if no end time
+                                        </label>
+                                        <input
+                                          id={`sched-edit-dur-${tidKey}`}
+                                          type="number"
+                                          min={1}
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                          value={scheduleEditDraft.durationMinutes}
+                                          onChange={(e) =>
+                                            setScheduleEditDraft((prev) =>
+                                              prev ? { ...prev, durationMinutes: e.target.value } : prev
+                                            )
+                                          }
+                                          disabled={scheduleEditSaving}
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <p className="text-[11px] font-medium text-slate-600">Assign employees</p>
+                                        {schedulePickMembersLoading ? (
+                                          <p className="text-[11px] text-slate-500">Loading…</p>
+                                        ) : (schedulePickMembers || []).length === 0 ? (
+                                          <p className="text-[11px] text-slate-600">No employees found.</p>
+                                        ) : (
+                                          <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 space-y-1.5">
+                                            {(schedulePickMembers || []).map((m, pickIdx) => {
+                                              const uid = String(m?.userId ?? "");
+                                              const picked = (
+                                                Array.isArray(scheduleEditDraft?.assignedUserIds)
+                                                  ? scheduleEditDraft.assignedUserIds
+                                                  : []
+                                              ).some((x) => String(x) === uid);
+                                              return (
+                                                <label
+                                                  key={uid || `sched-edit-m-${pickIdx}`}
+                                                  className="flex items-start gap-2 cursor-pointer text-xs text-slate-800"
+                                                >
+                                                  <input
+                                                    type="checkbox"
+                                                    className="mt-0.5 rounded border-slate-300"
+                                                    checked={picked}
+                                                    disabled={scheduleEditSaving}
+                                                    onChange={() => {
+                                                      setScheduleEditDraft((prev) => {
+                                                        if (!prev) return prev;
+                                                        const pr = Array.isArray(prev.assignedUserIds)
+                                                          ? prev.assignedUserIds
+                                                          : [];
+                                                        const set = new Set(pr.map((x) => String(x)));
+                                                        if (set.has(uid)) set.delete(uid);
+                                                        else set.add(uid);
+                                                        return { ...prev, assignedUserIds: [...set] };
+                                                      });
+                                                    }}
+                                                  />
+                                                  <span className="leading-snug">
+                                                    <span className="font-semibold">{m?.displayName ?? uid}</span>
+                                                  </span>
+                                                </label>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-team-${tidKey}`}>
+                                          Assigned team (optional)
+                                        </label>
+                                        <input
+                                          id={`sched-edit-team-${tidKey}`}
+                                          type="text"
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                          value={scheduleEditDraft.assignedTeamPlaceholder}
+                                          onChange={(e) =>
+                                            setScheduleEditDraft((prev) =>
+                                              prev ? { ...prev, assignedTeamPlaceholder: e.target.value } : prev
+                                            )
+                                          }
+                                          disabled={scheduleEditSaving}
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-notes-${tidKey}`}>
+                                          Notes
+                                        </label>
+                                        <textarea
+                                          id={`sched-edit-notes-${tidKey}`}
+                                          rows={2}
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs resize-y min-h-[3rem]"
+                                          value={scheduleEditDraft.notes}
+                                          onChange={(e) =>
+                                            setScheduleEditDraft((prev) =>
+                                              prev ? { ...prev, notes: e.target.value } : prev
+                                            )
+                                          }
+                                          disabled={scheduleEditSaving}
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-status-${tidKey}`}>
+                                          Status
+                                        </label>
+                                        <select
+                                          id={`sched-edit-status-${tidKey}`}
+                                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                          value={scheduleEditDraft.status}
+                                          onChange={(e) =>
+                                            setScheduleEditDraft((prev) =>
+                                              prev ? { ...prev, status: e.target.value } : prev
+                                            )
+                                          }
+                                          disabled={scheduleEditSaving}
+                                        >
+                                          <option value="scheduled">scheduled</option>
+                                          <option value="in_progress">in_progress</option>
+                                          <option value="completed">completed</option>
+                                          <option value="cancelled">cancelled</option>
+                                        </select>
+                                      </div>
+                                      {scheduleEditError ? (
+                                        <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900">
+                                          {scheduleEditError}
+                                        </div>
+                                      ) : null}
+                                      <div className="flex flex-wrap gap-2 pt-0.5">
+                                        <Button
+                                          type="submit"
+                                          className="flex-1 min-w-[8rem] rounded-lg h-9 text-xs font-semibold"
+                                          disabled={scheduleEditSaving}
+                                        >
+                                          {scheduleEditSaving ? "Saving…" : "Save changes"}
+                                        </Button>
+                                        <button
+                                          type="button"
+                                          disabled={scheduleEditSaving}
+                                          onClick={() => {
+                                            setScheduleEditingTaskId(null);
+                                            setScheduleEditDraft(null);
+                                            setScheduleEditError("");
+                                          }}
+                                          className="flex-1 min-w-[8rem] rounded-lg h-9 text-xs font-semibold border border-slate-300 bg-white text-slate-800"
+                                        >
+                                          Cancel
+                                        </button>
+                                      </div>
+                                    </form>
+                                  ) : (
+                                    <>
+                                      <p className="text-[12px] text-slate-700">
+                                        <span className="font-semibold text-slate-600">Project: </span>
+                                        {projLine}
+                                      </p>
+                                      <p className="text-[12px] text-slate-700">
+                                        <span className="font-semibold text-slate-600">Cost centre: </span>
+                                        {ccLine}
+                                      </p>
+                                      <p className="text-[12px] text-slate-800">
+                                        <span className="font-semibold text-slate-600">Time: </span>
+                                        {startDisp}
+                                        {" → "}
+                                        {windowLabel}
+                                      </p>
+                                      <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-2.5 space-y-1.5 min-w-0">
+                                        <p className="text-[11px] font-semibold text-slate-700">
+                                          Assigned employees and responses
+                                        </p>
+                                        {sortedAssignees.length === 0 ? (
+                                          <p className="text-[11px] text-slate-600">No employees assigned.</p>
+                                        ) : (
+                                          <ul className="space-y-2 list-none p-0 m-0">
+                                            {sortedAssignees.map((ar) => {
+                                              const aname = String(ar?.employee_name ?? "").trim() || "—";
+                                              const rs = normalizeScheduleAssigneeResponseStatus(ar?.response_status);
+                                              const rreason = String(ar?.decline_reason ?? "").trim();
+                                              const rAt = ar?.responded_at;
+                                              const rDisp =
+                                                rAt != null && rAt !== ""
+                                                  ? `${formatDate(rAt, companyTimeZone)} · ${formatTime(rAt, companyTimeZone)}`
+                                                  : null;
+                                              return (
+                                                <li
+                                                  key={String(ar?.id ?? `${task?.id}-${aname}`)}
+                                                  className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] min-w-0"
+                                                >
+                                                  <div className="flex flex-wrap items-center gap-2 min-w-0">
+                                                    <span className="font-semibold text-slate-800 break-words min-w-0 flex-1">{aname}</span>
+                                                    <span
+                                                      className={`shrink-0 inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(rs)}`}
+                                                    >
+                                                      {scheduleAssigneeResponseLabel(rs)}
+                                                    </span>
+                                                  </div>
+                                                  {rDisp ? (
+                                                    <p className="text-[10px] text-slate-500 mt-0.5">Response time: {rDisp}</p>
+                                                  ) : null}
+                                                  {rs === "declined" && rreason ? (
+                                                    <p className="text-[10px] text-slate-700 mt-0.5 leading-snug break-words">
+                                                      <span className="font-semibold text-slate-600">Decline reason: </span>
+                                                      {rreason}
+                                                    </p>
+                                                  ) : null}
+                                                </li>
+                                              );
+                                            })}
+                                          </ul>
+                                        )}
+                                      </div>
+                                      {at ? (
+                                        <p className="text-[12px] text-slate-700">
+                                          <span className="font-semibold text-slate-600">Team: </span>
+                                          {at}
+                                        </p>
+                                      ) : null}
+                                      {notesDisp ? (
+                                        <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
+                                      ) : null}
+                                    </>
+                                  )}
                                 </div>
                               );
                             })}
