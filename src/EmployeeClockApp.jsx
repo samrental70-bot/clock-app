@@ -1420,30 +1420,67 @@ async function createDirectNotificationsForRecipients(supabase, params) {
 
   const createdNotificationIds = [];
   for (const recipient_user_id of ids) {
+    const notificationRow = {
+      company_id: companyId,
+      recipient_user_id,
+      actor_user_id: actorUserId,
+      type: String(type || ""),
+      title: String(title || ""),
+      message: String(message || ""),
+      read_at: null,
+      is_read: false,
+      project_id: projectId != null && projectId !== "" ? String(projectId) : null,
+      project_name: projectName != null ? String(projectName) : null,
+      cost_centre: costCentre != null ? String(costCentre) : null,
+      related_timesheet_id: null,
+      related_folder: relatedFolder != null ? String(relatedFolder) : null,
+      item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
+    };
     const rpcPayload = {
       p_company_id: companyId,
       p_recipient_user_id: recipient_user_id,
       p_actor_user_id: actorUserId,
-      p_type: String(type || ""),
-      p_title: String(title || ""),
-      p_message: String(message || ""),
-      p_project_id: projectId != null && projectId !== "" ? String(projectId) : null,
-      p_project_name: projectName != null ? String(projectName) : null,
-      p_cost_centre: costCentre != null ? String(costCentre) : null,
+      p_type: notificationRow.type,
+      p_title: notificationRow.title,
+      p_message: notificationRow.message,
+      p_project_id: notificationRow.project_id,
+      p_project_name: notificationRow.project_name,
+      p_cost_centre: notificationRow.cost_centre,
       p_related_timesheet_id: null,
-      p_related_folder: relatedFolder != null ? String(relatedFolder) : null,
-      p_item_count: itemCount != null && Number.isFinite(Number(itemCount)) ? Number(itemCount) : null,
+      p_related_folder: notificationRow.related_folder,
+      p_item_count: notificationRow.item_count,
     };
     try {
       const { data, error } = await supabase.rpc("create_company_notification", rpcPayload);
       if (error) {
         console.warn("[NOTIFY] direct rpc error", error);
-        continue;
+      } else {
+        const nid = rpcReturnedNotificationId(data);
+        if (nid) {
+          createdNotificationIds.push(nid);
+          continue;
+        }
+        console.warn("[NOTIFY] direct rpc returned no notification id", data);
       }
-      const nid = rpcReturnedNotificationId(data);
-      if (nid) createdNotificationIds.push(nid);
     } catch (e) {
       console.warn("[NOTIFY] direct rpc exception", e);
+    }
+
+    try {
+      const { data: inserted, error: insertError } = await supabase
+        .from("notifications")
+        .insert([notificationRow])
+        .select("id")
+        .maybeSingle();
+      if (insertError) {
+        console.warn("[NOTIFY] direct table insert error", insertError);
+        continue;
+      }
+      const nid = inserted?.id != null ? String(inserted.id) : null;
+      if (nid) createdNotificationIds.push(nid);
+      else console.warn("[NOTIFY] direct table insert returned no notification id", inserted);
+    } catch (e) {
+      console.warn("[NOTIFY] direct table insert exception", e);
     }
   }
   if (createdNotificationIds.length > 0) {
