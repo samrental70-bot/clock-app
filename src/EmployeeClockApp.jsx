@@ -119,7 +119,23 @@ const SCHEDULE_GRID_TOTAL_MINUTES = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR
 /** Pixel height per hour in schedule day columns (readability on mobile). */
 const SCHEDULE_GRID_PX_PER_HOUR = 56;
 const SCHEDULE_MONTH_CHIP_MAX = 3;
-const SCHEDULE_TIMELINE_DRAG_THRESHOLD_PX = 12;
+
+/** Ignore taps meant for chips/cards/dialogs—not empty calendar background. Handles non-Element targets safely. */
+function isAdminScheduleCalendarBackgroundIgnored(ev) {
+  const te = ev?.target;
+  const el =
+    te instanceof Element ? te : te?.parentNode instanceof Element ? te.parentNode : null;
+  if (!(el instanceof Element)) return true;
+  if (
+    el.closest(
+      ".sched-day-task-block, [data-sched-task-chip], button, a[href], input, select, textarea, label"
+    )
+  )
+    return true;
+  if (el.closest('[role="dialog"]')) return true;
+  if (el.closest("form")) return true;
+  return false;
+}
 
 function scheduleTimelineAdminTone(task) {
   const s = String(task?.status ?? "scheduled").trim().toLowerCase();
@@ -456,6 +472,22 @@ function scheduleTaskDurationMinutes(task, timeZone) {
     return Math.max(15, Math.round(Number(dm)));
   }
   return 60;
+}
+
+/** Move/reschedule: only start_time, end_time, duration_minutes — preserves wall duration or uses duration_minutes / 60. */
+function buildScheduledTaskClockMovePayload(task, newStartIso, companyTimeZone) {
+  const tz = companyTimeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const oldStartMs = parseStoredInstant(task?.start_time).getTime();
+  const oldEndMs = task?.end_time ? parseStoredInstant(task.end_time).getTime() : NaN;
+  const newStartMs = parseStoredInstant(newStartIso).getTime();
+  if (!Number.isFinite(oldStartMs) || !Number.isFinite(newStartMs)) return null;
+  const hadValidEnd = Number.isFinite(oldEndMs) && oldEndMs > oldStartMs;
+  if (hadValidEnd) {
+    const newEndIso = new Date(newStartMs + (oldEndMs - oldStartMs)).toISOString();
+    return { start_time: newStartIso, end_time: newEndIso, duration_minutes: null };
+  }
+  const durMinFallback = scheduleTaskDurationMinutes(task, tz);
+  return { start_time: newStartIso, end_time: null, duration_minutes: durMinFallback };
 }
 
 function addOneHourToWallStart(dateKey, timeHHmm, timeZone) {
@@ -966,10 +998,10 @@ function getCurrentLocation() {
       (position) => {
         resolve({
           coords: {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-            capturedAt: new Date().toISOString(),
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          capturedAt: new Date().toISOString(),
           },
           error: null,
         });
@@ -1517,10 +1549,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
   const [scheduleCalendarFocusTaskId, setScheduleCalendarFocusTaskId] = useState(null);
   /** Selected wall day for calendar headers / month highlighting (timeline + month). */
   const [scheduleCalendarSelectedDayKey, setScheduleCalendarSelectedDayKey] = useState("");
-  const [scheduleCalDraggingTaskId, setScheduleCalDraggingTaskId] = useState(null);
+  /** Admin calendar Move Mode: task id string being repositioned via tap-on-slot (supervisor/owner only). */
+  const [scheduleMoveModeTaskId, setScheduleMoveModeTaskId] = useState(null);
   const [scheduleRescheduleSavingId, setScheduleRescheduleSavingId] = useState(null);
   const [scheduleCalendarMoveError, setScheduleCalendarMoveError] = useState("");
-  const scheduleTimelineColRefs = useRef({});
   const [scheduleFormOpen, setScheduleFormOpen] = useState(false);
   const [scheduleDraft, setScheduleDraft] = useState(() => ({ ...SCHEDULE_FORM_EMPTY }));
   const [scheduleSaving, setScheduleSaving] = useState(false);
@@ -2198,6 +2230,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
     const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
   }, [scheduledTasks, companyTimeZone]);
+
+  const adminScheduledTaskById = useMemo(() => {
+    const m = {};
+    for (const t of Array.isArray(scheduledTasks) ? scheduledTasks : []) {
+      if (t?.id != null) m[String(t.id)] = t;
+    }
+    return m;
+  }, [scheduledTasks]);
 
   const employeeScheduleTasksGroupedByDate = useMemo(() => {
     const rows = Array.isArray(employeeScheduledTasks) ? employeeScheduledTasks : [];
@@ -3673,9 +3713,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
       try {
         const { data: profile, error: profileError } = await withTimeout(
           supabase
-            .from("profiles")
+        .from("profiles")
             .select("role, full_name, email, employment_status")
-            .eq("id", user.id)
+        .eq("id", user.id)
             .single(),
           12000,
           "Profile fetch timed out"
@@ -3686,9 +3726,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
         if (user.email && !(profile?.email && String(profile.email).trim())) {
           const { error: patchErr } = await supabase.from("profiles").update({ email: user.email }).eq("id", user.id);
           if (patchErr) console.warn("Profile email patch:", patchErr);
-        }
+      }
 
-        setAuthRole(profile?.role || "employee");
+      setAuthRole(profile?.role || "employee");
         setProfileFullName(profile?.full_name || "");
         setProfileEmploymentStatus(normalizeEmploymentStatus(profile?.employment_status));
       } catch (err) {
@@ -3738,7 +3778,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         await ensureProfile(user);
         await loadUserContext(user, { background: false });
         setAuthStep("login");
-      } catch (err) {
+  } catch (err) {
         // Never block startup on session errors. Default to login.
         console.log("Session check failed:", err);
         if (!hasSuccessfulLoginRef.current && !loginClickedRef.current) {
@@ -3751,10 +3791,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
           setCompanyChecked(true);
           setAuthStep("login");
         }
-      } finally {
+  } finally {
         setInitialLoading(false);
-      }
-    };
+  }
+};
     loadSession();
 
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
@@ -3827,17 +3867,17 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
     try {
       console.log("LOGIN ATTEMPT", loginEmail.trim());
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: loginEmail.trim(),
-        password: loginPassword,
-      });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: loginEmail.trim(),
+      password: loginPassword,
+    });
 
-      if (error) {
+    if (error) {
         console.error("LOGIN ERROR", error);
-        setLoginError(error.message);
+      setLoginError(error.message);
         setLoginDebug(`Login error: ${error.message}`);
-        return;
-      }
+      return;
+    }
 
       // Requirement: treat signInWithPassword success as authoritative.
       const user = data.user;
@@ -3846,18 +3886,18 @@ const [uploadProgress, setUploadProgress] = useState(null);
       console.log("LOGIN SUCCESS user id", user.id);
       setLoginDebug(`Login success. User: ${user.id}`);
 
-      setAuthUser(user);
+    setAuthUser(user);
       setCompanyChecked(false);
 
       // Load profile (name/role) and company membership directly (do NOT rely on getSession()).
       try {
         console.log("COMPANY CHECK START");
 
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
           .select("role, full_name, email, employment_status")
-          .eq("id", user.id)
-          .single();
+        .eq("id", user.id)
+        .single();
 
         if (profileError) throw profileError;
 
@@ -3906,7 +3946,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
         setCompanyChecked(true);
       }
     } finally {
-      setLoginLoading(false);
+        setLoginLoading(false);
     }
   };
 
@@ -4748,7 +4788,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
     setWatchId(id);
   };
 
-  const handleClockIn = async () => {
+const handleClockIn = async () => {
     if (isProfileArchived) {
       setLocationStatus("Your account is archived. Please contact your supervisor.");
       return;
@@ -4805,10 +4845,10 @@ const [uploadProgress, setUploadProgress] = useState(null);
           capturedAt: gps.capturedAt,
         }
       : null;
-    const clockInTime = new Date().toISOString();
+  const clockInTime = new Date().toISOString();
     const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
 
-    const newShift = {
+  const newShift = {
       userId: authUser?.id || null,
       employee: clockInEmployeeName || authUser?.email || "Employee",
       employeeName: clockInEmployeeName || authUser?.email || "",
@@ -4820,25 +4860,25 @@ const [uploadProgress, setUploadProgress] = useState(null);
       hourlyRate: employeeHourlyRate,
       project: clockSelectedProject.name,
       projectId: clockSelectedProject.id,
-      costCenter,
-      date: clockInTime,
-      clockIn: clockInTime,
-      clockInLocation,
-      breakStart: null,
-      breakEnd: null,
-      status: "Active",
-      photosTaken: 0,
-      lastPhotoAt: null,
+    costCenter,
+    date: clockInTime,
+    clockIn: clockInTime,
+    clockInLocation,
+    breakStart: null,
+    breakEnd: null,
+    status: "Active",
+    photosTaken: 0,
+    lastPhotoAt: null,
       projectFolder: getProjectFolderName(clockSelectedProject.name),
-      liveLocation: null,
-      locationTrail: [],
-    };
+    liveLocation: null,
+    locationTrail: [],
+  };
 
-    setCurrentShift(newShift);
+  setCurrentShift(newShift);
     setLocationStatus("Saving clock-in…");
 
     const clockInInsertBase = {
-      user_id: authUser.id,
+        user_id: authUser.id,
       employee_email: authUser.email || null,
       employee_name: clockInEmployeeName,
       company_id: userCompany?.id || null,
@@ -4846,9 +4886,9 @@ const [uploadProgress, setUploadProgress] = useState(null);
       project_id: clockSelectedProject.id,
       project_name: clockSelectedProject.name,
       hourly_rate: employeeHourlyRate,
-      cost_centre: costCenter,
-      clock_in: clockInTime,
-      status: "Active",
+        cost_centre: costCenter,
+        clock_in: clockInTime,
+        status: "Active",
       clock_in_latitude: gps?.latitude ?? null,
       clock_in_longitude: gps?.longitude ?? null,
       ...(gps != null && gps.accuracy != null ? { clock_in_accuracy: gps.accuracy } : {}),
@@ -4856,7 +4896,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
 
     const { data, error } = await supabaseInsertTimesheetRow(supabase, clockInInsertBase);
 
-    if (error) {
+  if (error) {
       // Backward compatibility if DB columns aren't added yet
       const msg = error?.message || "";
       const missingColumn = msg.includes("column") && (msg.includes("employee_email") || msg.includes("company_id") || msg.includes("company_name"));
@@ -4914,13 +4954,13 @@ const [uploadProgress, setUploadProgress] = useState(null);
         return;
       }
 
-      console.log("Supabase clock-in error:", error);
+    console.log("Supabase clock-in error:", error);
       setLocationStatus("Database save failed. Your shift is still active locally.");
-      alert("Clock-in saved locally, but database save failed.");
-      return;
-    }
+    alert("Clock-in saved locally, but database save failed.");
+    return;
+  }
 
-    setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
+  setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
     setLocationStatus(
       gps
         ? "Clock-in saved. Location captured."
@@ -4949,7 +4989,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
       relatedFolder: getProjectFolderName(clockSelectedProject.name),
       itemCount: null,
     });
-  };
+};
   const handleChangeTask = () => {
     if (!visibleCurrentShift) return;
     setIsChangingTask(true);
@@ -5700,6 +5740,7 @@ const handlePhotoCapture = async (event) => {
       const tidKey = task?.id != null ? String(task.id) : "";
       const rawAssignList = tidKey ? scheduleAssigneesByTaskId?.[tidKey] : undefined;
       const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
+      setScheduleMoveModeTaskId(null);
       setScheduleViewMode("list");
       setScheduleFormOpen(false);
       setScheduleSaveError("");
@@ -5710,15 +5751,51 @@ const handlePhotoCapture = async (event) => {
     [scheduleAssigneesByTaskId, companyTimeZone]
   );
 
-  const handleAdminScheduleDayBackgroundClick = useCallback(
-    (e, dayKey) => {
-      const t = e.target;
-      if (
-        t instanceof Element &&
-        (t.closest(".sched-day-task-block") || t.closest("[data-sched-task-chip]") || t.closest("button"))
-      ) {
+  const beginScheduleMoveMode = useCallback((task) => {
+    if (!isAdmin || !task?.id) return;
+    setScheduleCalendarMoveError("");
+    setScheduleFormOpen(false);
+    setScheduleSaveError("");
+    setScheduleEditingTaskId(null);
+    setScheduleEditDraft(null);
+    setScheduleEditError("");
+    setScheduleMoveModeTaskId(String(task.id));
+  }, [isAdmin]);
+
+  const persistAdminScheduledTaskClockMove = useCallback(
+    async (task, newStartIso) => {
+      if (!isAdmin || !userCompany?.id || !task?.id || !newStartIso) return;
+      const tid = String(task.id);
+      const payload = buildScheduledTaskClockMovePayload(task, newStartIso, companyTimeZone);
+      if (!payload) {
+        setScheduleCalendarMoveError("Could not compute the new schedule.");
         return;
       }
+      setScheduleCalendarMoveError("");
+      setScheduleRescheduleSavingId(tid);
+      try {
+        const { error } = await supabase
+          .from("scheduled_tasks")
+          .update(payload)
+          .eq("id", tid)
+          .eq("company_id", userCompany.id);
+        if (error) throw error;
+        setScheduleMoveModeTaskId(null);
+        setScheduleRefreshKey((k) => k + 1);
+      } catch (err) {
+        const msg = getErrorMessage(err);
+        setScheduleCalendarMoveError(msg);
+        setScheduleRefreshKey((k) => k + 1);
+      } finally {
+        setScheduleRescheduleSavingId(null);
+      }
+    },
+    [isAdmin, userCompany?.id, companyTimeZone]
+  );
+
+  const handleAdminScheduleDayBackgroundClick = useCallback(
+    (e, dayKey) => {
+      if (isAdminScheduleCalendarBackgroundIgnored(e)) return;
       const colH = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * SCHEDULE_GRID_PX_PER_HOUR;
       const rect = e.currentTarget.getBoundingClientRect();
       const y = e.clientY - rect.top;
@@ -5730,9 +5807,38 @@ const handlePhotoCapture = async (event) => {
       const m0 = totalMin % 60;
       const hh = String(Math.min(23, Math.max(0, h0))).padStart(2, "0");
       const mm = String(Math.min(59, m0)).padStart(2, "0");
-      openScheduleCreateFromSlot(dayKey, `${hh}:${mm}`);
+      const wallTime = `${hh}:${mm}`;
+      if (scheduleMoveModeTaskId) {
+        const task = adminScheduledTaskById[String(scheduleMoveModeTaskId)];
+        if (!task) {
+          setScheduleCalendarMoveError("Could not find that task. Cancel Move and refresh.");
+          return;
+        }
+        const newStartIso = wallDateTimeToUtcIso(
+          dayKey,
+          normalizeTimeInputForWallClock(wallTime),
+          companyTimeZone
+        );
+        if (!newStartIso) {
+          setScheduleCalendarMoveError("Could not compute the new start time.");
+          return;
+        }
+        const origDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
+        const origM = wallMinutesFromScheduleGridStart(task?.start_time, origDay, companyTimeZone);
+        const origSnap = origM != null ? Math.round(Number(origM) / 15) * 15 : null;
+        if (origDay === dayKey && origSnap === totalMin) return;
+        void persistAdminScheduledTaskClockMove(task, newStartIso);
+        return;
+      }
+      openScheduleCreateFromSlot(dayKey, wallTime);
     },
-    [openScheduleCreateFromSlot]
+    [
+      openScheduleCreateFromSlot,
+      scheduleMoveModeTaskId,
+      adminScheduledTaskById,
+      persistAdminScheduledTaskClockMove,
+      companyTimeZone,
+    ]
   );
 
   const handleScheduleSubmit = useCallback(
@@ -6046,6 +6152,7 @@ const handlePhotoCapture = async (event) => {
           setScheduleEditDraft(null);
           setScheduleEditError("");
         }
+        if (String(scheduleMoveModeTaskId) === tid) setScheduleMoveModeTaskId(null);
         setScheduleRefreshKey((k) => k + 1);
       } catch (err) {
         alert(getErrorMessage(err));
@@ -6053,66 +6160,7 @@ const handlePhotoCapture = async (event) => {
         setScheduleDeleteSavingId(null);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId]
-  );
-
-  const handleAdminScheduleTaskReschedule = useCallback(
-    async (task, targetDayKey, minutesFromGridStart) => {
-      if (!isAdmin || !userCompany?.id || !task?.id || !targetDayKey) return;
-      const tid = String(task.id);
-      const snapped = Math.round(Number(minutesFromGridStart) / 15) * 15;
-      const totalMin = Math.max(0, Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 15, snapped));
-      const h0 = SCHEDULE_GRID_HOUR_START + Math.floor(totalMin / 60);
-      const m0 = totalMin % 60;
-      const hh = String(Math.min(23, Math.max(0, h0))).padStart(2, "0");
-      const mm = String(Math.min(59, m0)).padStart(2, "0");
-      const wallTime = `${hh}:${mm}`;
-      const newStartIso = wallDateTimeToUtcIso(targetDayKey, normalizeTimeInputForWallClock(wallTime), companyTimeZone);
-      if (!newStartIso) {
-        setScheduleCalendarMoveError("Could not compute the new start time.");
-        return;
-      }
-
-      const oldStartMs = parseStoredInstant(task?.start_time).getTime();
-      const oldEndMs = task?.end_time ? parseStoredInstant(task.end_time).getTime() : NaN;
-      const hadValidEnd =
-        Number.isFinite(oldStartMs) && Number.isFinite(oldEndMs) && oldEndMs > oldStartMs;
-      const durMinFallback = scheduleTaskDurationMinutes(task, companyTimeZone);
-      const newStartMs = parseStoredInstant(newStartIso).getTime();
-
-      const origDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
-      const origM = wallMinutesFromScheduleGridStart(task?.start_time, origDay, companyTimeZone);
-      const origSnap = origM != null ? Math.round(Number(origM) / 15) * 15 : null;
-      if (origDay === targetDayKey && origSnap === totalMin) return;
-
-      let updatePayload;
-      if (hadValidEnd) {
-        const newEndIso = new Date(newStartMs + (oldEndMs - oldStartMs)).toISOString();
-        updatePayload = { start_time: newStartIso, end_time: newEndIso, duration_minutes: null };
-      } else {
-        updatePayload = { start_time: newStartIso, end_time: null, duration_minutes: durMinFallback };
-      }
-
-      setScheduleCalendarMoveError("");
-      setScheduleRescheduleSavingId(tid);
-      try {
-        const { error } = await supabase
-          .from("scheduled_tasks")
-          .update(updatePayload)
-          .eq("id", tid)
-          .eq("company_id", userCompany.id);
-        if (error) throw error;
-        setScheduleRefreshKey((k) => k + 1);
-      } catch (err) {
-        const msg = getErrorMessage(err);
-        setScheduleCalendarMoveError(msg);
-        alert(msg);
-        setScheduleRefreshKey((k) => k + 1);
-      } finally {
-        setScheduleRescheduleSavingId(null);
-      }
-    },
-    [isAdmin, userCompany?.id, companyTimeZone]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleMoveModeTaskId]
   );
 
   const handleEnableMobileNotifications = async () => {
@@ -6761,7 +6809,7 @@ const handlePhotoCapture = async (event) => {
                 onChange={(e) => setEditClockInTime(e.target.value)}
               />
             </div>
-          </div>
+            </div>
           <div className="space-y-1">
             <label className="text-[10px] text-slate-500">Clock out</label>
             <div className="flex gap-1">
@@ -6777,7 +6825,7 @@ const handlePhotoCapture = async (event) => {
                 value={editClockOutTime}
                 onChange={(e) => setEditClockOutTime(e.target.value)}
               />
-            </div>
+          </div>
           </div>
           <div className="space-y-1">
             <label className="text-[10px] text-slate-500">Project</label>
@@ -6919,7 +6967,7 @@ const handlePhotoCapture = async (event) => {
         </>
       )}
     </div>
-    );
+  );
   };
 
   if (initialLoading) {
@@ -7100,7 +7148,7 @@ const handlePhotoCapture = async (event) => {
   if (!companyChecked) {
     // Inline (non-blocking) loader: do not take over the whole app once opened.
     if (hasOpenedAppRef.current) {
-      return (
+  return (
         <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
           <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
             <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
@@ -7562,10 +7610,10 @@ const handlePhotoCapture = async (event) => {
 
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
                   <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
-                    <div>
+                  <div>
                       <p className="font-semibold">Add Project</p>
                       <p className="text-xs text-slate-500">Add a project and cost centres (comma-separated).</p>
-                    </div>
+                  </div>
 
                     <div className="space-y-1">
                       <label className="text-xs sm:text-sm font-medium">Project name</label>
@@ -7577,7 +7625,7 @@ const handlePhotoCapture = async (event) => {
                         placeholder="Example: Basement Renovation"
                         required
                       />
-                    </div>
+                </div>
 
                     <div className="space-y-1">
                       <label className="text-xs sm:text-sm font-medium">Cost centres</label>
@@ -7969,7 +8017,7 @@ const handlePhotoCapture = async (event) => {
                   <div>
                     <h2 className="font-bold text-lg">Notifications</h2>
                     <p className="text-xs text-slate-500">{inAppNotifUnread} unread</p>
-                  </div>
+        </div>
                   <Button
                     type="button"
                     className="rounded-xl h-9 px-3 text-xs font-semibold shrink-0"
@@ -9372,6 +9420,8 @@ const handlePhotoCapture = async (event) => {
                           setScheduleEditingTaskId(null);
                           setScheduleEditDraft(null);
                           setScheduleEditError("");
+                          setScheduleMoveModeTaskId(null);
+                          setScheduleCalendarMoveError("");
                           const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
                           setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
                           setScheduleFormOpen(true);
@@ -9446,6 +9496,24 @@ const handlePhotoCapture = async (event) => {
                     </div>
                   ) : null}
                 </div>
+
+                {scheduleMoveModeTaskId ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <p className="text-[14px] font-semibold text-amber-950 leading-snug min-w-0 flex-1">
+                      Move mode active — tap a new slot or date on the calendar, or cancel.
+                    </p>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-[13px] font-semibold text-amber-900"
+                      onClick={() => {
+                        setScheduleMoveModeTaskId(null);
+                        setScheduleCalendarMoveError("");
+                      }}
+                    >
+                      Cancel Move
+                    </button>
+                  </div>
+                ) : null}
 
                 {scheduleFormOpen && (
                   <form
@@ -9765,14 +9833,38 @@ const handlePhotoCapture = async (event) => {
                               key={cell.dayKey}
                               role="presentation"
                               onClick={(e) => {
-                                if (e.target.closest("[data-sched-task-chip]")) return;
+                                if (isAdminScheduleCalendarBackgroundIgnored(e)) return;
                                 if (!cell.inMonth) return;
                                 setScheduleCalendarSelectedDayKey(cell.dayKey);
+                                if (scheduleMoveModeTaskId) {
+                                  const task = adminScheduledTaskById[String(scheduleMoveModeTaskId)];
+                                  if (!task) {
+                                    setScheduleCalendarMoveError(
+                                      "Could not find that task. Cancel Move and try again."
+                                    );
+                                    return;
+                                  }
+                                  const parts = wallClockPartsInTimeZone(task?.start_time, companyTimeZone);
+                                  const wallTime = parts.timeStr || "09:00";
+                                  const newStartIso = wallDateTimeToUtcIso(
+                                    cell.dayKey,
+                                    normalizeTimeInputForWallClock(wallTime),
+                                    companyTimeZone
+                                  );
+                                  if (!newStartIso) {
+                                    setScheduleCalendarMoveError("Could not compute the new start time.");
+                                    return;
+                                  }
+                                  const oldDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
+                                  if (oldDay === cell.dayKey) return;
+                                  void persistAdminScheduledTaskClockMove(task, newStartIso);
+                                  return;
+                                }
                                 openScheduleCreateFromSlot(cell.dayKey, "09:00");
                               }}
                               className={`relative flex min-h-[6.5rem] flex-col gap-1.5 px-2 py-2 transition-colors active:bg-slate-50 ${
                                 cell.inMonth ? "cursor-pointer bg-white" : "bg-slate-50/95 opacity-80"
-                              } ${isSel ? "ring-2 ring-inset ring-[#174ea6]/35" : ""}`}
+                              } ${isSel ? "ring-2 ring-inset ring-[#174ea6]/35" : ""} touch-manipulation`}
                             >
                               <span
                                 className={`flex h-[1.875rem] min-w-[1.875rem] max-w-fit items-center justify-center text-[clamp(17px,4.2vw,20px)] font-bold tabular-nums leading-none ${
@@ -9786,20 +9878,38 @@ const handlePhotoCapture = async (event) => {
                                 {cell.dayNum}
                               </span>
                               <div className="flex min-h-0 flex-1 flex-col gap-1">
-                                {chips.map((task) => (
-                                  <button
-                                    key={String(task.id)}
-                                    type="button"
-                                    data-sched-task-chip="1"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openAdminScheduleEditFromCalendar(task);
-                                    }}
-                                    className="truncate rounded-md bg-[#1a73e8] px-1.5 py-1 text-left text-[13px] font-semibold text-white shadow-sm"
-                                  >
-                                    {String(task?.task_title ?? "").trim() || "Task"}
-                                  </button>
-                                ))}
+                                {chips.map((task) => {
+                                  const tidKey = task?.id != null ? String(task.id) : "";
+                                  const moveHl = scheduleMoveModeTaskId === tidKey;
+                                  return (
+                                    <div key={String(task.id)} className="flex min-w-0 items-stretch gap-0.5">
+                                      <button
+                                        type="button"
+                                        data-sched-task-chip="1"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          openAdminScheduleEditFromCalendar(task);
+                                        }}
+                                        className={`min-w-0 flex-1 truncate rounded-md bg-[#1a73e8] px-1.5 py-1 text-left text-[13px] font-semibold text-white shadow-sm ${
+                                          moveHl ? "ring-2 ring-amber-300 ring-offset-1" : ""
+                                        }`}
+                                      >
+                                        {String(task?.task_title ?? "").trim() || "Task"}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={Boolean(scheduleRescheduleSavingId) || Boolean(scheduleEditSaving)}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          beginScheduleMoveMode(task);
+                                        }}
+                                        className="shrink-0 rounded-md border border-amber-200 bg-amber-100 px-1 py-1 text-[10px] font-bold uppercase tracking-wide text-amber-900 disabled:opacity-50"
+                                      >
+                                        Move
+                                      </button>
+                                    </div>
+                                  );
+                                })}
                                 {more > 0 ? (
                                   <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
                                     +{more} more
@@ -9891,10 +10001,7 @@ const handlePhotoCapture = async (event) => {
                                       <div
                                         key={dayKey}
                                         role="presentation"
-                                        ref={(el) => {
-                                          if (el) scheduleTimelineColRefs.current[dayKey] = el;
-                                        }}
-                                        className="relative min-w-0 flex-1"
+                                        className="relative min-w-0 flex-1 cursor-pointer touch-manipulation"
                                         style={{ height: colH }}
                                         onClick={(e) => handleAdminScheduleDayBackgroundClick(e, dayKey)}
                                       >
@@ -9928,13 +10035,14 @@ const handlePhotoCapture = async (event) => {
                                             : "";
                                           const tidKey = task?.id != null ? String(task.id) : "";
                                           const tone = scheduleTimelineAdminTone(task);
-                                          const dragging =
-                                            scheduleCalDraggingTaskId === tidKey ||
-                                            scheduleRescheduleSavingId === tidKey;
+                                          const isMoveHighlighted = scheduleMoveModeTaskId === tidKey;
+                                          const dragging = scheduleRescheduleSavingId === tidKey;
                                           const blockCls = `${scheduleTimelineBlockClasses(
                                             tone,
                                             compact
-                                          )} sched-day-task-block absolute left-[3px] right-[3px] z-[8] overflow-hidden shadow-sm touch-manipulation select-none`;
+                                          )} sched-day-task-block absolute left-[3px] right-[3px] z-[8] overflow-hidden shadow-sm touch-manipulation select-none${
+                                            isMoveHighlighted ? " ring-[3px] ring-amber-300 ring-offset-1 ring-offset-white" : ""
+                                          }`;
                                           return (
                                             <div
                                               key={String(task.id)}
@@ -9945,14 +10053,14 @@ const handlePhotoCapture = async (event) => {
                                                 minHeight: compact ? 32 : 40,
                                                 opacity: dragging ? 0.55 : 1,
                                               }}
-                                              onPointerDown={(e) => {
-                                                const te = e.target;
-                                                if (
-                                                  te instanceof Element &&
-                                                  te.closest("button")
-                                                ) {
-                                                  return;
-                                                }
+                                              onClick={(ev) => {
+                                                const te = ev.target;
+                                                const el =
+                                                  te instanceof Element ? te : te?.parentNode instanceof Element
+                                                    ? te.parentNode
+                                                    : null;
+                                                if (!(el instanceof Element)) return;
+                                                if (el.closest("button")) return;
                                                 if (
                                                   scheduleEditSaving ||
                                                   scheduleDeleteSavingId === tidKey ||
@@ -9960,60 +10068,8 @@ const handlePhotoCapture = async (event) => {
                                                 ) {
                                                   return;
                                                 }
-                                                e.stopPropagation();
-                                                const sx = e.clientX;
-                                                const sy = e.clientY;
-                                                let moved = false;
-                                                setScheduleCalDraggingTaskId(tidKey);
-                                                const onMove = (ev) => {
-                                                  if (
-                                                    Math.hypot(ev.clientX - sx, ev.clientY - sy) >
-                                                    SCHEDULE_TIMELINE_DRAG_THRESHOLD_PX
-                                                  ) {
-                                                    moved = true;
-                                                  }
-                                                };
-                                                const onUp = async (ev) => {
-                                                  window.removeEventListener("pointermove", onMove);
-                                                  window.removeEventListener("pointerup", onUp);
-                                                  setScheduleCalDraggingTaskId(null);
-                                                  if (moved) {
-                                                    let hit = null;
-                                                    for (const dk of anchorKeys) {
-                                                      const node = scheduleTimelineColRefs.current?.[dk];
-                                                      if (!node) continue;
-                                                      const r = node.getBoundingClientRect();
-                                                      if (
-                                                        ev.clientX >= r.left &&
-                                                        ev.clientX <= r.right &&
-                                                        ev.clientY >= r.top &&
-                                                        ev.clientY <= r.bottom
-                                                      ) {
-                                                        const y = ev.clientY - r.top;
-                                                        const pct = r.height > 0 ? y / r.height : 0;
-                                                        const minsRaw = pct * SCHEDULE_GRID_TOTAL_MINUTES;
-                                                        const snapped = Math.round(minsRaw / 15) * 15;
-                                                        const totalMin = Math.max(
-                                                          0,
-                                                          Math.min(SCHEDULE_GRID_TOTAL_MINUTES - 15, snapped)
-                                                        );
-                                                        hit = { dayKey: dk, mins: totalMin };
-                                                        break;
-                                                      }
-                                                    }
-                                                    if (hit) {
-                                                      await handleAdminScheduleTaskReschedule(
-                                                        task,
-                                                        hit.dayKey,
-                                                        hit.mins
-                                                      );
-                                                    }
-                                                  } else {
-                                                    openAdminScheduleEditFromCalendar(task);
-                                                  }
-                                                };
-                                                window.addEventListener("pointermove", onMove);
-                                                window.addEventListener("pointerup", onUp);
+                                                ev.stopPropagation();
+                                                openAdminScheduleEditFromCalendar(task);
                                               }}
                                             >
                                               <p
@@ -10045,6 +10101,21 @@ const handlePhotoCapture = async (event) => {
                                                   className="rounded-md border border-white/50 bg-white/20 px-2 py-0.5 text-[12px] font-semibold text-white backdrop-blur-sm disabled:opacity-50"
                                                 >
                                                   Edit
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    Boolean(scheduleEditSaving) ||
+                                                    scheduleDeleteSavingId === tidKey ||
+                                                    scheduleRescheduleSavingId === tidKey
+                                                  }
+                                                  onClick={(ev) => {
+                                                    ev.stopPropagation();
+                                                    beginScheduleMoveMode(task);
+                                                  }}
+                                                  className="rounded-md border border-amber-200/90 bg-amber-500/35 px-2 py-0.5 text-[12px] font-semibold text-white disabled:opacity-50"
+                                                >
+                                                  Move
                                                 </button>
                                                 <button
                                                   type="button"
@@ -10133,7 +10204,11 @@ const handlePhotoCapture = async (event) => {
                                       </span>
                                       <button
                                         type="button"
-                                        disabled={Boolean(scheduleEditSaving) || scheduleDeleteSavingId === tidKey}
+                                        disabled={
+                                          Boolean(scheduleEditSaving) ||
+                                          scheduleDeleteSavingId === tidKey ||
+                                          Boolean(scheduleRescheduleSavingId)
+                                        }
                                         onClick={() => {
                                           setScheduleFormOpen(false);
                                           setScheduleSaveError("");
@@ -10149,7 +10224,23 @@ const handlePhotoCapture = async (event) => {
                                       </button>
                                       <button
                                         type="button"
-                                        disabled={Boolean(scheduleEditSaving) || scheduleDeleteSavingId === tidKey}
+                                        disabled={
+                                          Boolean(scheduleEditSaving) ||
+                                          scheduleDeleteSavingId === tidKey ||
+                                          Boolean(scheduleRescheduleSavingId)
+                                        }
+                                        onClick={() => beginScheduleMoveMode(task)}
+                                        className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-900 disabled:opacity-50"
+                                      >
+                                        Move
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          Boolean(scheduleEditSaving) ||
+                                          scheduleDeleteSavingId === tidKey ||
+                                          Boolean(scheduleRescheduleSavingId)
+                                        }
                                         onClick={() => void handleScheduleDeleteTask(task?.id)}
                                         className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-800 disabled:opacity-50"
                                       >
@@ -10433,10 +10524,18 @@ const handlePhotoCapture = async (event) => {
                                         <Button
                                           type="submit"
                                           className="flex-1 min-w-[8rem] rounded-lg h-9 text-xs font-semibold"
-                                          disabled={scheduleEditSaving}
+                                          disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
                                         >
                                           {scheduleEditSaving ? "Saving…" : "Save changes"}
                                         </Button>
+                                        <button
+                                          type="button"
+                                          disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
+                                          onClick={() => beginScheduleMoveMode(task)}
+                                          className="flex-1 min-w-[7rem] rounded-lg h-9 text-xs font-semibold border border-amber-300 bg-amber-50 text-amber-900"
+                                        >
+                                          Move
+                                        </button>
                                         <button
                                           type="button"
                                           disabled={scheduleEditSaving}
