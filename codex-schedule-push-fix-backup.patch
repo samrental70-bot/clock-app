@@ -1,0 +1,484 @@
+diff --git a/api/send-push.js b/api/send-push.js
+index 2519ad0..15d3b14 100644
+--- a/api/send-push.js
++++ b/api/send-push.js
+@@ -10,6 +10,39 @@ function getSupabaseUrl() {
+   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+ }
+ 
++function firstMessageValue(message, prefix) {
++  const lines = String(message || "").split(/\r?\n/);
++  const row = lines.find((line) => String(line || "").toLowerCase().startsWith(prefix.toLowerCase()));
++  if (!row) return "";
++  return String(row).slice(prefix.length).trim();
++}
++
++function buildPushPayload(notification) {
++  const type = notification.type || "";
++  if (type === "schedule_assigned") {
++    const taskTitle = firstMessageValue(notification.message, "Task:") || notification.title || "Scheduled task";
++    const when = firstMessageValue(notification.message, "When:");
++    const body = [taskTitle, when].filter(Boolean).join(" - ");
++    return {
++      title: "New task assigned",
++      body: body || "Open the app to view your assignment.",
++      id: notification.id,
++      notificationId: notification.id,
++      type,
++      url: `/?tab=schedule&notificationId=${encodeURIComponent(notification.id)}`,
++      tag: `schedule-assigned-${notification.id}`,
++    };
++  }
++  return {
++    title: notification.title || "Clock App",
++    body: notification.message || "",
++    id: notification.id,
++    notificationId: notification.id,
++    type,
++    url: "/",
++  };
++}
++
+ export default async function handler(req, res) {
+   if (req.method !== "POST") {
+     res.status(405).json({ error: "Method not allowed" });
+@@ -74,13 +107,7 @@ export default async function handler(req, res) {
+ 
+     if (sErr || !subs?.length) continue;
+ 
+-    const payload = JSON.stringify({
+-      title: n.title || "Clock App",
+-      body: n.message || "",
+-      id: n.id,
+-      type: n.type || "",
+-      url: "/",
+-    });
++    const payload = JSON.stringify(buildPushPayload(n));
+ 
+     for (const sub of subs) {
+       const pushSub = {
+diff --git a/public/service-worker.js b/public/service-worker.js
+index 4b067bb..aab19bf 100644
+--- a/public/service-worker.js
++++ b/public/service-worker.js
+@@ -28,28 +28,48 @@ self.addEventListener("push", (event) => {
+   }
+   const title = data.title || "Clock App";
+   const body = data.body || "";
+-  const tag = data.id != null && data.id !== "" ? String(data.id) : "clock-app";
++  const notificationId = data.notificationId || data.id || "";
++  const type = typeof data.type === "string" ? data.type : "";
++  const tag =
++    typeof data.tag === "string" && data.tag.length > 0
++      ? data.tag
++      : notificationId
++        ? String(notificationId)
++        : "clock-app";
+   const targetUrl = typeof data.url === "string" && data.url.length > 0 ? data.url : "/";
+   const options = {
+     body,
+     icon: "/icon-192.png",
+     badge: "/icon-192.png",
+     tag,
+-    data: { url: targetUrl },
++    data: { url: targetUrl, notificationId, type },
+   };
+   event.waitUntil(self.registration.showNotification(title, options));
+ });
+ 
+ self.addEventListener("notificationclick", (event) => {
+   event.notification.close();
+-  const rawUrl = event.notification.data && event.notification.data.url;
++  const notificationData = event.notification.data || {};
++  const rawUrl = notificationData.url;
+   const urlToOpen = typeof rawUrl === "string" && rawUrl.length > 0 ? rawUrl : "/";
++  const message = {
++    type: notificationData.type === "schedule_assigned" ? "OPEN_SCHEDULE" : "NOTIFICATION_CLICK",
++    notificationId: notificationData.notificationId || "",
++    notificationType: notificationData.type || "",
++  };
+ 
+   event.waitUntil(
+     self.clients.matchAll({ type: "window", includeUnfocused: true }).then((clientList) => {
+       for (let i = 0; i < clientList.length; i++) {
+         const client = clientList[i];
+         if ("focus" in client && client.focus) {
++          if (client.postMessage) client.postMessage(message);
++          if (urlToOpen !== "/" && "navigate" in client && client.navigate) {
++            return client.navigate(urlToOpen).then((navigatedClient) => {
++              if (navigatedClient && "focus" in navigatedClient) return navigatedClient.focus();
++              return client.focus();
++            });
++          }
+           return client.focus();
+         }
+       }
+@@ -59,4 +79,4 @@ self.addEventListener("notificationclick", (event) => {
+       return Promise.resolve();
+     })
+   );
+-});
+\ No newline at end of file
++});
+diff --git a/src/EmployeeClockApp.jsx b/src/EmployeeClockApp.jsx
+index ef0ec95..b6f5469 100644
+--- a/src/EmployeeClockApp.jsx
++++ b/src/EmployeeClockApp.jsx
+@@ -1554,6 +1554,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
+   const authUserRef = useRef(null);
+   const userCompanyRef = useRef(null);
+   const companyCheckedRef = useRef(false);
++  const scheduleRouteHandledRef = useRef(false);
+   /** Once per login session: land employees on Schedule after company/role resolve (no repeated overrides). */
+   const employeeScheduleLandingAppliedRef = useRef(false);
+   const [loginEmail, setLoginEmail] = useState("");
+@@ -2278,6 +2279,14 @@ const [uploadProgress, setUploadProgress] = useState(null);
+ 
+         setEmployeeScheduledTasks(taskRows);
+         setEmployeeScheduleLinkByTaskId(linkByTaskId);
++        const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
++        const nextKey = addWallDaysInTimeZone(todayKey, 1, companyTimeZone);
++        setClockEmployeeScheduledTasks(
++          taskRows.filter((t) => {
++            const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone);
++            return dk === todayKey || dk === nextKey;
++          })
++        );
+ 
+         const assignmentIds = new Set(rawLinks.map((r) => String(r?.id ?? "")).filter(Boolean));
+         if (!employeeScheduleBootstrappedRef.current) {
+@@ -3316,6 +3325,7 @@ const [uploadProgress, setUploadProgress] = useState(null);
+       systemNotifShownIdsRef.current = new Set();
+       shownAssignNotifIdsRef.current = new Set();
+       shownAssignMessageSignaturesRef.current = new Set();
++      scheduleRouteHandledRef.current = false;
+       return;
+     }
+     void pollInAppNotifications();
+@@ -3352,6 +3362,77 @@ const [uploadProgress, setUploadProgress] = useState(null);
+     refreshEmployeeAssignedSchedule,
+   ]);
+ 
++  useEffect(() => {
++    if (!authUser?.id || !userCompany?.id || !companyChecked || scheduleRouteHandledRef.current) return;
++    if (typeof window === "undefined") return;
++    const params = new URLSearchParams(window.location.search || "");
++    if (params.get("tab") !== "schedule") return;
++    scheduleRouteHandledRef.current = true;
++    setActiveTab("schedule");
++    if (!isAdmin && isEmployeeRole) {
++      void refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
++    }
++    const notificationId = String(params.get("notificationId") || "").trim();
++    if (notificationId) {
++      const ts = new Date().toISOString();
++      void supabase
++        .from("notifications")
++        .update({ read_at: ts, is_read: true })
++        .eq("id", notificationId)
++        .eq("recipient_user_id", authUser.id)
++        .then(({ error }) => {
++          if (error) console.warn("[NOTIFY] mark schedule URL read failed", error);
++          else {
++            setInAppNotifications((prev) =>
++              (Array.isArray(prev) ? prev : []).map((x) =>
++                String(x?.id) === notificationId ? { ...x, read_at: ts, is_read: true } : x
++              )
++            );
++          }
++        });
++    }
++  }, [
++    authUser?.id,
++    userCompany?.id,
++    companyChecked,
++    isAdmin,
++    isEmployeeRole,
++    refreshEmployeeAssignedSchedule,
++  ]);
++
++  useEffect(() => {
++    if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
++    const onMessage = (event) => {
++      const data = event?.data || {};
++      if (data.type !== "OPEN_SCHEDULE") return;
++      setActiveTab("schedule");
++      if (!isAdmin && isEmployeeRole) {
++        void refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
++      }
++      const notificationId = String(data.notificationId || "").trim();
++      if (notificationId && authUser?.id) {
++        const ts = new Date().toISOString();
++        void supabase
++          .from("notifications")
++          .update({ read_at: ts, is_read: true })
++          .eq("id", notificationId)
++          .eq("recipient_user_id", authUser.id)
++          .then(({ error }) => {
++            if (error) console.warn("[NOTIFY] mark schedule click read failed", error);
++            else {
++              setInAppNotifications((prev) =>
++                (Array.isArray(prev) ? prev : []).map((x) =>
++                  String(x?.id) === notificationId ? { ...x, read_at: ts, is_read: true } : x
++                )
++              );
++            }
++          });
++      }
++    };
++    navigator.serviceWorker.addEventListener("message", onMessage);
++    return () => navigator.serviceWorker.removeEventListener("message", onMessage);
++  }, [authUser?.id, isAdmin, isEmployeeRole, refreshEmployeeAssignedSchedule]);
++
+   useEffect(() => {
+     if (!isAdmin && activeTab === "notifications") setActiveTab("schedule");
+   }, [isAdmin, activeTab]);
+@@ -6636,6 +6717,101 @@ const handlePhotoCapture = async (event) => {
+     [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleMoveModeTaskId]
+   );
+ 
++  const ensurePushSubscription = useCallback(async () => {
++    const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY;
++    if (typeof vapid !== "string" || !vapid.trim()) {
++      throw new Error("Missing VITE_VAPID_PUBLIC_KEY");
++    }
++    if (typeof window === "undefined" || !("Notification" in window)) {
++      throw new Error("Notifications are not supported on this device/browser.");
++    }
++    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
++      throw new Error("Background push is not supported on this device/browser.");
++    }
++    if (!authUser?.id || !userCompany?.id) {
++      throw new Error("Sign in and select a company first.");
++    }
++
++    const permAtStart = Notification.permission;
++    const perm = await Notification.requestPermission();
++    if (perm !== "granted") {
++      return { permission: perm, subscribed: false, repeatEnable: false };
++    }
++
++    let reg = await navigator.serviceWorker.getRegistration();
++    if (!reg) {
++      reg = await navigator.serviceWorker.register("/service-worker.js");
++    }
++    await navigator.serviceWorker.ready;
++
++    const registration = (await navigator.serviceWorker.getRegistration()) || reg;
++    if (!registration?.pushManager) {
++      throw new Error("Background push is not supported on this device/browser.");
++    }
++
++    const subAtStart = await registration.pushManager.getSubscription();
++    let sub = subAtStart;
++    if (!sub) {
++      sub = await registration.pushManager.subscribe({
++        userVisibleOnly: true,
++        applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
++      });
++    }
++
++    const subJson = sub.toJSON();
++    const keys = subJson.keys || {};
++    const payload = {
++      company_id: userCompany.id,
++      user_id: authUser.id,
++      endpoint: sub.endpoint,
++      p256dh: keys.p256dh ?? "",
++      auth: keys.auth ?? "",
++      user_agent: typeof navigator.userAgent === "string" ? navigator.userAgent : "",
++      is_active: true,
++      updated_at: new Date().toISOString(),
++    };
++
++    console.log("[PUSH SUB] save payload", payload);
++
++    const { data: existing, error: selErr } = await supabase
++      .from("push_subscriptions")
++      .select("id")
++      .eq("user_id", authUser.id)
++      .eq("endpoint", sub.endpoint)
++      .maybeSingle();
++    if (selErr) {
++      console.error("[PUSH SUB] save error", selErr);
++      throw selErr;
++    }
++
++    console.log("[PUSH SUB] existing row", existing);
++
++    if (existing?.id != null) {
++      const { error: upErr } = await supabase
++        .from("push_subscriptions")
++        .update(payload)
++        .eq("id", existing.id);
++      if (upErr) {
++        console.error("[PUSH SUB] save error", upErr);
++        throw upErr;
++      }
++      console.log("[PUSH SUB] update success");
++    } else {
++      const { error: insErr } = await supabase.from("push_subscriptions").insert(payload);
++      if (insErr) {
++        console.error("[PUSH SUB] save error", insErr);
++        throw insErr;
++      }
++      console.log("[PUSH SUB] insert success");
++    }
++
++    return {
++      permission: perm,
++      subscribed: true,
++      repeatEnable: permAtStart === "granted" && subAtStart != null,
++    };
++  }, [authUser?.id, userCompany?.id]);
++
+   const handleEnableMobileNotifications = async () => {
+     if (typeof window === "undefined" || !("Notification" in window)) {
+       setMobileNotifPermissionUi("not_supported");
+@@ -6654,14 +6830,6 @@ const handlePhotoCapture = async (event) => {
+   const handleEnableBackgroundPush = async () => {
+     setBackgroundPushError("");
+     setBackgroundPushSaveMessage("");
+-    const permAtStart = typeof Notification !== "undefined" ? Notification.permission : "denied";
+-
+-    const vapid = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+-    if (typeof vapid !== "string" || !vapid.trim()) {
+-      setBackgroundPushUi("error");
+-      setBackgroundPushError("Missing VITE_VAPID_PUBLIC_KEY");
+-      return;
+-    }
+     if (typeof window === "undefined" || !("Notification" in window)) {
+       setBackgroundPushUi("not_supported");
+       return;
+@@ -6676,87 +6844,13 @@ const handlePhotoCapture = async (event) => {
+       return;
+     }
+     try {
+-      const perm = await Notification.requestPermission();
+-      if (perm !== "granted") {
+-        setBackgroundPushUi(perm === "denied" ? "blocked" : "default");
++      const result = await ensurePushSubscription();
++      if (result.permission !== "granted") {
++        setBackgroundPushUi(result.permission === "denied" ? "blocked" : "default");
+         return;
+       }
+-
+-      let reg = await navigator.serviceWorker.getRegistration();
+-      if (!reg) {
+-        reg = await navigator.serviceWorker.register("/service-worker.js");
+-      }
+-      await navigator.serviceWorker.ready;
+-
+-      const registration =
+-        (await navigator.serviceWorker.getRegistration()) || reg;
+-      if (!registration?.pushManager) {
+-        setBackgroundPushUi("not_supported");
+-        return;
+-      }
+-
+-      const subAtStart = await registration.pushManager.getSubscription();
+-      let sub = subAtStart;
+-      if (!sub) {
+-        sub = await registration.pushManager.subscribe({
+-          userVisibleOnly: true,
+-          applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
+-        });
+-      }
+-
+-      const subJson = sub.toJSON();
+-      const keys = subJson.keys || {};
+-
+-      const payload = {
+-        company_id: userCompany.id,
+-        user_id: authUser.id,
+-        endpoint: sub.endpoint,
+-        p256dh: keys.p256dh ?? "",
+-        auth: keys.auth ?? "",
+-        user_agent: typeof navigator.userAgent === "string" ? navigator.userAgent : "",
+-        is_active: true,
+-        updated_at: new Date().toISOString(),
+-      };
+-
+-      console.log("[PUSH SUB] save payload", payload);
+-
+-      const { data: existing, error: selErr } = await supabase
+-        .from("push_subscriptions")
+-        .select("id")
+-        .eq("user_id", authUser.id)
+-        .eq("endpoint", sub.endpoint)
+-        .maybeSingle();
+-
+-      if (selErr) {
+-        console.error("[PUSH SUB] save error", selErr);
+-        throw selErr;
+-      }
+-
+-      console.log("[PUSH SUB] existing row", existing);
+-
+-      if (existing?.id != null) {
+-        const { error: upErr } = await supabase
+-          .from("push_subscriptions")
+-          .update(payload)
+-          .eq("id", existing.id);
+-        if (upErr) {
+-          console.error("[PUSH SUB] save error", upErr);
+-          throw upErr;
+-        }
+-        console.log("[PUSH SUB] update success");
+-      } else {
+-        const { error: insErr } = await supabase.from("push_subscriptions").insert(payload);
+-        if (insErr) {
+-          console.error("[PUSH SUB] save error", insErr);
+-          throw insErr;
+-        }
+-        console.log("[PUSH SUB] insert success");
+-      }
+-
+-      const repeatEnable =
+-        permAtStart === "granted" && subAtStart != null;
+       setBackgroundPushSaveMessage(
+-        repeatEnable ? "Already enabled / Subscription saved" : "Subscription saved"
++        result.repeatEnable ? "Already enabled / Subscription saved" : "Subscription saved"
+       );
+       setBackgroundPushUi("enabled");
+     } catch (e) {
+@@ -6823,21 +6917,32 @@ const handlePhotoCapture = async (event) => {
+ 
+   const handleEmployeeRequestNotificationPermission = useCallback(async () => {
+     if (typeof window === "undefined" || !("Notification" in window)) {
+-      alert("Notifications are not supported on this device/browser.");
++      setEmployeeNotifPermMessage("Notifications are not supported on this device/browser.");
++      setTimeout(() => setEmployeeNotifPermMessage(""), 7000);
++      return;
++    }
++    const isiPhone =
++      typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(String(navigator.userAgent || ""));
++    if (isiPhone && !isInstalled) {
++      setEmployeeNotifPermMessage(
++        "On iPhone, open in Safari -> Share -> Add to Home Screen, then open the installed app and enable notifications."
++      );
++      setTimeout(() => setEmployeeNotifPermMessage(""), 9000);
+       return;
+     }
+     try {
+-      const p = await Notification.requestPermission();
++      const result = await ensurePushSubscription();
++      const p = result.permission;
+       if (p === "granted") setEmployeeNotifPermMessage("Phone notifications enabled.");
+-      else if (p === "denied") setEmployeeNotifPermMessage("Notifications blocked. Enable them in browser settings.");
++      else if (p === "denied") setEmployeeNotifPermMessage("Notifications blocked in browser settings.");
+       else setEmployeeNotifPermMessage("Notifications not enabled yet.");
+-      setTimeout(() => setEmployeeNotifPermMessage(""), 4000);
++      setTimeout(() => setEmployeeNotifPermMessage(""), 7000);
+     } catch (e) {
+       console.warn("[NOTIFY] permission request failed", e);
+-      setEmployeeNotifPermMessage("Could not request permission.");
+-      setTimeout(() => setEmployeeNotifPermMessage(""), 4000);
++      setEmployeeNotifPermMessage(getErrorMessage(e) || "Could not enable phone notifications.");
++      setTimeout(() => setEmployeeNotifPermMessage(""), 7000);
+     }
+-  }, []);
++  }, [ensurePushSubscription, isInstalled]);
+ 
+   const handleMarkAllNotificationsRead = async () => {
+     if (!isAdmin || !authUser?.id) return;

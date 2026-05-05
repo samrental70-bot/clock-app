@@ -10,6 +10,39 @@ function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
 }
 
+function firstMessageValue(message, prefix) {
+  const lines = String(message || "").split(/\r?\n/);
+  const row = lines.find((line) => String(line || "").toLowerCase().startsWith(prefix.toLowerCase()));
+  if (!row) return "";
+  return String(row).slice(prefix.length).trim();
+}
+
+function buildPushPayload(notification) {
+  const type = notification.type || "";
+  if (type === "schedule_assigned") {
+    const taskTitle = firstMessageValue(notification.message, "Task:") || notification.title || "Scheduled task";
+    const when = firstMessageValue(notification.message, "When:");
+    const body = [taskTitle, when].filter(Boolean).join(" - ");
+    return {
+      title: "New task assigned",
+      body: body || "Open the app to view your assignment.",
+      id: notification.id,
+      notificationId: notification.id,
+      type,
+      url: `/?tab=schedule&notificationId=${encodeURIComponent(notification.id)}`,
+      tag: `schedule-assigned-${notification.id}`,
+    };
+  }
+  return {
+    title: notification.title || "Clock App",
+    body: notification.message || "",
+    id: notification.id,
+    notificationId: notification.id,
+    type,
+    url: "/",
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -74,13 +107,7 @@ export default async function handler(req, res) {
 
     if (sErr || !subs?.length) continue;
 
-    const payload = JSON.stringify({
-      title: n.title || "Clock App",
-      body: n.message || "",
-      id: n.id,
-      type: n.type || "",
-      url: "/",
-    });
+    const payload = JSON.stringify(buildPushPayload(n));
 
     for (const sub of subs) {
       const pushSub = {
