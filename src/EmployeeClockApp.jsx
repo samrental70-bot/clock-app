@@ -1649,8 +1649,8 @@ function PublicPhotoShareView({ share, index, setIndex }) {
 
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
-  const [projectId, setProjectId] = useState(adminProjects[0].id);
-  const [costCenter, setCostCenter] = useState(adminProjects[0].costCenters[0]);
+  const [projectId, setProjectId] = useState("");
+  const [costCenter, setCostCenter] = useState("");
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
   const [records, setRecords] = useState(() => []);
   const localTimesheetBackupRef = useRef(safeRead("orp_timesheet_records", sampleRecords));
@@ -3075,7 +3075,7 @@ export default function EmployeeClockApp() {
     const list = clockSelectableProjects;
     if (!list || list.length === 0) return null;
     const found = list.find((p) => String(p.id) === String(projectId));
-    return found || list[0];
+    return found || null;
   }, [clockSelectableProjects, projectId]);
 
   const clockCostCentresActive = useMemo(
@@ -3083,6 +3083,45 @@ export default function EmployeeClockApp() {
       clockSelectedProject?.id != null ? clockCostCentreOptionsForProject(clockSelectedProject.id) : [],
     [clockSelectedProject?.id, clockCostCentreOptionsForProject]
   );
+
+  const clockProjectSelected = Boolean(
+    projectId && clockSelectedProject && String(clockSelectedProject.id) === String(projectId)
+  );
+  const clockCostCentreSelected = Boolean(
+    clockProjectSelected && costCenter && clockCostCentresActive.includes(costCenter)
+  );
+  const clockSetupReady = Boolean(clockProjectSelected && clockCostCentreSelected);
+  const clockMediaContext = useMemo(() => {
+    if (visibleCurrentShift) return visibleCurrentShift;
+    if (!clockSetupReady || !authUser?.id || !clockSelectedProject) return null;
+    const employeeName = (profileFullName || "").trim() || authUser?.email || "Employee";
+    return {
+      userId: authUser.id,
+      employee: employeeName,
+      employeeName,
+      employeeEmail: authUser?.email || null,
+      companyId: userCompany?.id || null,
+      companyName: userCompany?.name || null,
+      project: clockSelectedProject.name,
+      projectId: clockSelectedProject.id,
+      costCenter,
+      employeeId: authUser.id,
+      projectFolder: getProjectFolderName(clockSelectedProject.name),
+      clockInLocation: null,
+      liveLocation: null,
+      supabaseTimesheetId: null,
+    };
+  }, [
+    authUser?.email,
+    authUser?.id,
+    clockSelectedProject,
+    clockSetupReady,
+    costCenter,
+    profileFullName,
+    userCompany?.id,
+    userCompany?.name,
+    visibleCurrentShift,
+  ]);
 
   const dashboardRowsForAttendance = useMemo(() => {
     const rows = Array.isArray(dashboardRows) ? dashboardRows : [];
@@ -3774,7 +3813,7 @@ export default function EmployeeClockApp() {
   const schedulePhotoNotificationAfterUpload = useCallback(() => {
     const uid = authUser?.id;
     const cid = userCompany?.id;
-    const vs = visibleCurrentShift;
+    const vs = clockMediaContext;
     if (!uid || !cid || !vs) return;
     const actorName = (profileFullName || "").trim() || authUser?.email || "Someone";
     const batchKey = `${cid}|${uid}|${String(vs.projectId ?? "")}|${vs.project}|${vs.costCenter}`;
@@ -3816,7 +3855,7 @@ export default function EmployeeClockApp() {
       r.timer = null;
       if (p && c > 0) void sendPhotoBatchNotifications(supabase, p, c);
     }, 45000);
-  }, [authUser, userCompany, resolvedCompanyRole, visibleCurrentShift, profileFullName]);
+  }, [authUser, userCompany, resolvedCompanyRole, clockMediaContext, profileFullName]);
 
   const canEditTimesheetRecord = (record) => {
     const st = normalizeStatus(record.status);
@@ -4189,29 +4228,25 @@ export default function EmployeeClockApp() {
   }, [activeTab, isAdmin, userCompany?.id, projectsScreenRefreshKey]);
 
   useEffect(() => {
-    // When projects load/switch, ensure we have a valid project + cost centre selected (Clock uses clockSelectableProjects).
-    if (!clockSelectableProjects || clockSelectableProjects.length === 0) return;
-
-    const hasProject = clockSelectableProjects.some((p) => String(p.id) === String(projectId));
-    const nextProject = hasProject
-      ? clockSelectableProjects.find((p) => String(p.id) === String(projectId))
-      : clockSelectableProjects[0];
-
-    if (nextProject && String(nextProject.id) !== String(projectId)) {
-      setProjectId(nextProject.id);
-      return;
-    }
-
-    const pid = nextProject?.id;
-    const centres = clockCostCentreOptionsForProject(pid);
-
-    if (centres.length === 0) {
+    // Keep manual Clock selections valid without auto-selecting a job for the user.
+    if (!clockSelectableProjects || clockSelectableProjects.length === 0) {
+      if (projectId !== "") setProjectId("");
       if (costCenter !== "") setCostCenter("");
       return;
     }
-    if (!centres.includes(costCenter)) {
-      setCostCenter(centres[0]);
+    const hasProject = clockSelectableProjects.some((p) => String(p.id) === String(projectId));
+    if (projectId && !hasProject) {
+      setProjectId("");
+      if (costCenter !== "") setCostCenter("");
+      return;
     }
+    if (!projectId) {
+      if (costCenter !== "") setCostCenter("");
+      return;
+    }
+    const pid = projectId;
+    const centres = clockCostCentreOptionsForProject(pid);
+    if (!centres.includes(costCenter)) setCostCenter("");
   }, [clockSelectableProjects, clockCostCentreOptionsForProject, projectId, costCenter]);
 
   useEffect(() => {
@@ -4821,14 +4856,16 @@ export default function EmployeeClockApp() {
   })();
 
   const handleProjectChange = (newProjectId) => {
+    if (!newProjectId) {
+      setProjectId("");
+      setCostCenter("");
+      return;
+    }
     const nextProject =
-      clockSelectableProjects.find((project) => String(project.id) === String(newProjectId)) ||
-      clockSelectableProjects[0];
+      clockSelectableProjects.find((project) => String(project.id) === String(newProjectId));
     if (!nextProject) return;
     setProjectId(nextProject.id);
-    const centres = clockCostCentreOptionsForProject(nextProject.id);
-    if (centres.length > 0) setCostCenter(centres[0]);
-    else setCostCenter("");
+    setCostCenter("");
   };
 
   const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
@@ -5432,7 +5469,7 @@ const handleClockIn = async () => {
     }
 
     if (!clockSelectedProject) {
-      setLocationStatus("No projects assigned. Please contact your supervisor.");
+      setLocationStatus("Select project first.");
       return;
     }
 
@@ -5442,6 +5479,10 @@ const handleClockIn = async () => {
       [];
     const clockInCentres = clockCostCentreOptionsForProject(clockSelectedProject.id);
     if (clockInCentres.length === 0 || !costCenter || !clockInCentres.includes(costCenter)) {
+      if (!costCenter) {
+        setLocationStatus("Select cost center first.");
+        return;
+      }
       if (!isAdmin && allActiveOnProject.length > 0) {
         setLocationStatus(
           "No cost centres assigned for this project. Please contact your supervisor."
@@ -5624,6 +5665,8 @@ const handleClockIn = async () => {
 };
   const handleChangeTask = () => {
     if (!visibleCurrentShift) return;
+    setProjectId(visibleCurrentShift.projectId != null ? String(visibleCurrentShift.projectId) : "");
+    setCostCenter(visibleCurrentShift.costCenter || "");
     setIsChangingTask(true);
   };
 
@@ -5877,9 +5920,9 @@ const handlePhotoQuickUpload = async (event) => {
   }, [revokePhotoDraftPreview, stopPhotoCamera]);
 
   useEffect(() => {
-    const hasActiveShift = Boolean(visibleCurrentShift);
-    if (photoCameraOpen && (activeTab !== "clock" || !hasActiveShift)) stopPhotoCamera();
-  }, [activeTab, photoCameraOpen, stopPhotoCamera, visibleCurrentShift]);
+    const hasMediaTarget = Boolean(clockMediaContext);
+    if (photoCameraOpen && (activeTab !== "clock" || !hasMediaTarget)) stopPhotoCamera();
+  }, [activeTab, clockMediaContext, photoCameraOpen, stopPhotoCamera]);
 
   useEffect(() => {
     if (!photoCameraOpen || !photoVideoRef.current || !photoCameraStreamRef.current) return;
@@ -5972,14 +6015,18 @@ const handlePhotoQuickUpload = async (event) => {
         : nextMode === "receipt"
           ? "Receipt camera ready. Capture receipt."
           : "Camera ready. Capture photos, then upload all.";
-    if (!visibleCurrentShift || !authUser) {
-      setPhotoStatus("Clock in before taking photos.");
+    if (!authUser) {
+      setPhotoStatus("Sign in before using the camera.");
+      return false;
+    }
+    if (!clockMediaContext) {
+      setPhotoStatus("Select project and cost center first.");
       return false;
     }
     if (photoBatchUploading) return false;
     if (!navigator.mediaDevices?.getUserMedia) {
       const message = allowFallbackCameraInput
-        ? "Camera stream is not supported here. You can still upload from gallery."
+        ? "Camera stream is not supported here."
         : "In-app camera is not supported here. Use a supported browser to capture a photo before clock out.";
       setPhotoCameraError(message);
       setPhotoStatus(message);
@@ -6002,11 +6049,11 @@ const handlePhotoQuickUpload = async (event) => {
       return true;
     } catch (err) {
       console.warn("Camera start failed:", err);
-      setPhotoCameraError("Camera permission denied. You can still upload from gallery.");
-      setPhotoStatus("Camera permission denied. You can still upload from gallery.");
+      setPhotoCameraError("Camera permission denied.");
+      setPhotoStatus("Camera permission denied.");
       return false;
     }
-  }, [applyMinimumPhotoCameraZoom, authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
+  }, [applyMinimumPhotoCameraZoom, authUser, clockMediaContext, photoBatchUploading, stopPhotoCamera]);
 
   const captureCameraFrameFile = useCallback((namePrefix = "camera-photo") => {
     return new Promise((resolve, reject) => {
@@ -6050,9 +6097,12 @@ const handlePhotoQuickUpload = async (event) => {
 
   const uploadProjectPhotoFile = useCallback(
     async (file, index = 1, total = 1) => {
-      if (!file || !visibleCurrentShift || !authUser) throw new Error("Clock in before uploading photos.");
+      const mediaContext = clockMediaContext;
+      if (!file || !mediaContext || !authUser) {
+        throw new Error("Select project and cost center before uploading photos.");
+      }
 
-      const folderName = getProjectFolderName(visibleCurrentShift.project || "");
+      const folderName = getProjectFolderName(mediaContext.project || "");
       const progressBase = total > 1 ? Math.round(((index - 1) / total) * 100) : 10;
       const progressUpload = total > 1 ? Math.round(((index - 0.65) / total) * 100) : 30;
       const progressCap = total > 1 ? Math.max(progressUpload, Math.round(((index - 0.1) / total) * 100)) : 95;
@@ -6099,12 +6149,12 @@ const handlePhotoQuickUpload = async (event) => {
         id: Date.now() + index,
         companyId: userCompany?.id || null,
         userId: authUser.id,
-        project: visibleCurrentShift.project,
-        projectId: visibleCurrentShift.projectId ?? null,
+        project: mediaContext.project,
+        projectId: mediaContext.projectId ?? null,
         folderName,
-        costCenter: visibleCurrentShift.costCenter,
-        employee: visibleCurrentShift.employee,
-        employeeId: visibleCurrentShift.employeeId,
+        costCenter: mediaContext.costCenter,
+        employee: mediaContext.employee,
+        employeeId: mediaContext.employeeId ?? authUser.id,
         capturedAt,
         location: null,
         dataUrl: "",
@@ -6118,20 +6168,22 @@ const handlePhotoQuickUpload = async (event) => {
         [folderName]: [photo, ...(previous[folderName] || [])],
       }));
       setPhotoNotificationCount((count) => count + 1);
-      setCurrentShift((previousShift) =>
-        previousShift
-          ? {
-              ...previousShift,
-              photosTaken: (previousShift.photosTaken || 0) + 1,
-              lastPhotoAt: capturedAt,
-            }
-          : previousShift
-      );
+      if (visibleCurrentShift) {
+        setCurrentShift((previousShift) =>
+          previousShift
+            ? {
+                ...previousShift,
+                photosTaken: (previousShift.photosTaken || 0) + 1,
+                lastPhotoAt: capturedAt,
+              }
+            : previousShift
+        );
+      }
       void schedulePhotoNotificationAfterUpload();
       setUploadProgress(total > 1 ? Math.round((index / total) * 100) : 100);
       return photo;
     },
-    [authUser, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
+    [authUser, clockMediaContext, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
   );
 
   const uploadAllPhotoDrafts = useCallback(async () => {
@@ -6140,8 +6192,8 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoStatus("Select or capture photos before uploading.");
       return;
     }
-    if (!visibleCurrentShift || !authUser) {
-      setPhotoStatus("Clock in before uploading photos.");
+    if (!clockMediaContext || !authUser) {
+      setPhotoStatus("Select project and cost center before uploading photos.");
       return;
     }
 
@@ -6190,7 +6242,7 @@ const handlePhotoQuickUpload = async (event) => {
     } finally {
       setPhotoBatchUploading(false);
     }
-  }, [authUser, revokePhotoDraftPreview, stopPhotoCamera, uploadProjectPhotoFile, visibleCurrentShift]);
+  }, [authUser, clockMediaContext, revokePhotoDraftPreview, stopPhotoCamera, uploadProjectPhotoFile]);
 
   const revokeVideoDraftPreview = useCallback((draft) => {
     const url = String(draft?.previewUrl || "");
@@ -6263,8 +6315,8 @@ const handlePhotoQuickUpload = async (event) => {
   const prepareVideoDraftFromFile = useCallback(
     async (file, source = "gallery", knownDurationSeconds = null) => {
       if (!file) return false;
-      if (!visibleCurrentShift || !authUser) {
-        setVideoStatus("Clock in before uploading video.");
+      if (!clockMediaContext || !authUser) {
+        setVideoStatus("Select project and cost center before recording video.");
         return false;
       }
       if (!file.type?.startsWith("video/")) {
@@ -6306,7 +6358,7 @@ const handlePhotoQuickUpload = async (event) => {
         return false;
       }
     },
-    [authUser, readVideoDurationSeconds, revokeVideoDraftPreview, visibleCurrentShift]
+    [authUser, clockMediaContext, readVideoDurationSeconds, revokeVideoDraftPreview]
   );
 
   const handleMediaGallerySelection = useCallback(
@@ -6343,7 +6395,7 @@ const handlePhotoQuickUpload = async (event) => {
       return;
     }
     if (typeof MediaRecorder === "undefined") {
-      setVideoStatus("Video recording is not supported here. Use Gallery to choose a video.");
+      setVideoStatus("Video recording is not supported on this device/browser.");
       return;
     }
     if (videoUploading || videoRecording) return;
@@ -6407,7 +6459,7 @@ const handlePhotoQuickUpload = async (event) => {
     } catch (err) {
       console.warn("Video recording start failed:", err);
       setVideoRecording(false);
-      setVideoStatus("Video recording is not supported here. Use Gallery to choose a video.");
+      setVideoStatus("Video recording is not supported on this device/browser.");
     }
   }, [
     preferredVideoRecordingMimeType,
@@ -6423,8 +6475,9 @@ const handlePhotoQuickUpload = async (event) => {
       setVideoStatus("Select or record a video before uploading.");
       return;
     }
-    if (!visibleCurrentShift || !authUser) {
-      setVideoStatus("Clock in before uploading video.");
+    const mediaContext = clockMediaContext;
+    if (!mediaContext || !authUser) {
+      setVideoStatus("Select project and cost center before uploading video.");
       return;
     }
     if (videoUploading) return;
@@ -6433,7 +6486,7 @@ const handlePhotoQuickUpload = async (event) => {
     setVideoStatus("Uploading video...");
     setVideoUploadProgress(10);
 
-    const folderName = getProjectFolderName(visibleCurrentShift.project || "");
+    const folderName = getProjectFolderName(mediaContext.project || "");
     const ext = videoFileExtension(draft.file);
     const filePath = `${folderName}/videos/${authUser.id}-${Date.now()}.${ext}`;
     const uploadPromise = supabase.storage
@@ -6468,14 +6521,14 @@ const handlePhotoQuickUpload = async (event) => {
         companyId: userCompany?.id || null,
         user_id: authUser.id,
         userId: authUser.id,
-        project: visibleCurrentShift.project,
-        project_id: visibleCurrentShift.projectId ?? null,
-        projectId: visibleCurrentShift.projectId ?? null,
+        project: mediaContext.project,
+        project_id: mediaContext.projectId ?? null,
+        projectId: mediaContext.projectId ?? null,
         folderName,
-        cost_centre: visibleCurrentShift.costCenter,
-        costCenter: visibleCurrentShift.costCenter,
-        employee: visibleCurrentShift.employee,
-        employeeId: visibleCurrentShift.employeeId,
+        cost_centre: mediaContext.costCenter,
+        costCenter: mediaContext.costCenter,
+        employee: mediaContext.employee,
+        employeeId: mediaContext.employeeId ?? authUser.id,
         capturedAt,
         timestamp: capturedAt,
         location: null,
@@ -6517,16 +6570,20 @@ const handlePhotoQuickUpload = async (event) => {
     }
   }, [
     authUser,
+    clockMediaContext,
     revokeVideoDraftPreview,
     stopPhotoCamera,
     userCompany?.id,
     videoFileExtension,
     videoUploading,
-    visibleCurrentShift,
   ]);
 
   const saveReceiptFile = async (file, details = {}) => {
-    if (!file || !visibleCurrentShift) return false;
+    const mediaContext = clockMediaContext;
+    if (!file || !mediaContext) {
+      setPhotoStatus("Select project and cost center before saving receipt.");
+      return false;
+    }
     const amount = Number(details.amount || 0);
     const category = String(details.category || "").trim() || "Other";
     try {
@@ -6539,22 +6596,22 @@ const handlePhotoQuickUpload = async (event) => {
         reader.readAsDataURL(receiptFile);
       });
 
-      const folderName = getProjectFolderName(visibleCurrentShift.project);
+      const folderName = getProjectFolderName(mediaContext.project);
       const capturedAt = new Date().toISOString();
       const receipt = {
         id: Date.now(),
         companyId: userCompany?.id || null,
         userId: authUser?.id || null,
-        project: visibleCurrentShift.project,
-        projectId: visibleCurrentShift.projectId ?? null,
+        project: mediaContext.project,
+        projectId: mediaContext.projectId ?? null,
         folderName,
-        costCenter: visibleCurrentShift.costCenter,
-        employee: visibleCurrentShift.employee,
-        employeeId: visibleCurrentShift.employeeId,
+        costCenter: mediaContext.costCenter,
+        employee: mediaContext.employee,
+        employeeId: mediaContext.employeeId ?? authUser?.id,
         amount: Number.isFinite(amount) ? amount : 0,
         category,
         capturedAt,
-        location: visibleCurrentShift.liveLocation || visibleCurrentShift.clockInLocation || null,
+        location: mediaContext.liveLocation || mediaContext.clockInLocation || null,
         dataUrl: receiptDataUrl,
         type: "receipt",
       };
@@ -6573,11 +6630,11 @@ const handlePhotoQuickUpload = async (event) => {
           actorRole: resolvedCompanyRole,
           type: "receipt_uploaded",
           title: "Receipt uploaded",
-          message: `${actorLabel} uploaded a receipt for ${visibleCurrentShift.project} - ${visibleCurrentShift.costCenter}`,
-          projectId: visibleCurrentShift.projectId,
-          projectName: visibleCurrentShift.project,
-          costCentre: visibleCurrentShift.costCenter,
-          relatedTimesheetId: visibleCurrentShift.supabaseTimesheetId ?? null,
+          message: `${actorLabel} uploaded a receipt for ${mediaContext.project} - ${mediaContext.costCenter}`,
+          projectId: mediaContext.projectId,
+          projectName: mediaContext.project,
+          costCentre: mediaContext.costCenter,
+          relatedTimesheetId: mediaContext.supabaseTimesheetId ?? null,
           relatedFolder: folderName,
           itemCount: null,
         });
@@ -9520,7 +9577,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
                   <div className="min-w-0">
                     <h2 className="font-bold text-[18px] leading-tight">Start Shift</h2>
-                    <p className="text-[14px] text-slate-500 leading-snug">Choose project and cost centre</p>
+                    <p className="text-[14px] text-slate-500 leading-snug">Choose project and cost center</p>
                   </div>
                 </div>
 
@@ -9647,6 +9704,7 @@ const handlePhotoQuickUpload = async (event) => {
                       handleProjectChange(event.target.value);
                     }}
                   >
+                    <option value="">Select project</option>
                     {clockSelectableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
@@ -9656,7 +9714,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[14px] font-medium">Cost Centre</label>
+                  <label className="text-[14px] font-medium">Cost Center</label>
                   <select
                     className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     value={costCenter}
@@ -9670,6 +9728,9 @@ const handlePhotoQuickUpload = async (event) => {
                       setCostCenter(event.target.value);
                     }}
                   >
+                    <option value="">
+                      {clockSelectedProject ? "Select cost center" : "Select project first"}
+                    </option>
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
@@ -9691,12 +9752,261 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
+                <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
+                  <p className="text-[14px] font-bold text-slate-900">Camera, Pay, Receipt</p>
+                  {!clockSetupReady ? (
+                    <p className="text-[13px] font-semibold text-amber-800 leading-snug">
+                      Select project and select cost center first.
+                    </p>
+                  ) : null}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      type="button"
+                      className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                        photoCameraOpen && photoCameraMode === "photo"
+                          ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
+                          : "border-slate-900 bg-slate-900 text-white"
+                      }`}
+                      onClick={() => {
+                        if (!clockSetupReady) {
+                          setPhotoStatus("Select project and cost center first.");
+                          return;
+                        }
+                        if (photoCameraOpen && photoCameraMode === "photo") {
+                          stopPhotoCamera();
+                        } else if (photoCameraOpen) {
+                          stopVideoRecording();
+                          setPhotoCameraMode("photo");
+                          setPhotoStatus("Camera ready. Capture photos, then upload all.");
+                        } else {
+                          void startPhotoCamera({ allowFallback: false, mode: "photo" });
+                        }
+                      }}
+                      disabled={photoBatchUploading || !clockSetupReady}
+                      aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
+                    >
+                      Camera
+                    </button>
+                    <button
+                      type="button"
+                      className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
+                      onClick={() => setPhotoStatus("Pay here will be added next.")}
+                      disabled={!clockSetupReady || photoBatchUploading || videoRecording || videoUploading}
+                    >
+                      Pay here
+                    </button>
+                    <button
+                      type="button"
+                      className={`block w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                        photoCameraOpen && photoCameraMode === "receipt"
+                          ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
+                          : "border-green-700 bg-green-700 text-white"
+                      }`}
+                      onClick={() => {
+                        if (!clockSetupReady) {
+                          setPhotoStatus("Select project and cost center first.");
+                          return;
+                        }
+                        if (photoCameraOpen && photoCameraMode === "receipt") {
+                          stopPhotoCamera();
+                        } else if (photoCameraOpen) {
+                          stopVideoRecording();
+                          setPhotoCameraMode("receipt");
+                          setPhotoStatus("Receipt camera ready. Capture receipt.");
+                        } else {
+                          void startPhotoCamera({
+                            allowFallback: false,
+                            mode: "receipt",
+                            readyMessage: "Receipt camera ready. Capture receipt.",
+                          });
+                        }
+                      }}
+                      disabled={!clockSetupReady || photoBatchUploading || videoRecording || videoUploading}
+                      aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
+                    >
+                      Receipt
+                    </button>
+                  </div>
+
+                  {photoCameraError ? (
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] font-semibold text-amber-900 leading-snug">
+                      {photoCameraError}
+                    </p>
+                  ) : null}
+
+                  {photoCameraOpen ? (
+                    <div className="space-y-2">
+                      <video
+                        ref={photoVideoRef}
+                        className="w-full max-h-64 rounded-2xl bg-slate-950 object-cover"
+                        playsInline
+                        muted
+                        autoPlay
+                      />
+                      <canvas ref={photoCanvasRef} className="hidden" />
+                      {photoCameraMode === "receipt" ? (
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl h-12 bg-green-700 text-white text-[16px] font-bold disabled:opacity-50"
+                          onClick={() => void captureReceiptFromCamera()}
+                          disabled={photoBatchUploading || videoRecording}
+                        >
+                          Capture Receipt
+                        </button>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                            onClick={() => void capturePhotoFromCamera()}
+                            disabled={photoBatchUploading || videoRecording}
+                          >
+                            Capture Photo
+                          </button>
+                          <button
+                            type="button"
+                            className={`rounded-2xl h-12 text-[15px] font-bold disabled:opacity-50 ${
+                              videoRecording
+                                ? "bg-red-700 text-white"
+                                : "border border-slate-300 bg-white text-slate-800"
+                            }`}
+                            onClick={videoRecording ? stopVideoRecording : startVideoRecording}
+                            disabled={photoBatchUploading || videoUploading}
+                          >
+                            {videoRecording ? `Stop ${videoRecordSeconds}s` : "Record Video"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {photoDrafts.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[15px] font-bold text-slate-900">
+                          Ready to upload: {photoDrafts.length}
+                        </p>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-800 disabled:opacity-50"
+                          onClick={clearPhotoDrafts}
+                          disabled={photoBatchUploading}
+                        >
+                          Clear all
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {photoDrafts.map((draft, index) => (
+                          <div key={draft.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                            <img src={draft.previewUrl} alt={`Selected photo ${index + 1}`} className="h-20 w-full object-cover" />
+                            <span className="absolute left-1 top-1 rounded-full bg-slate-950/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                              {index + 1}
+                            </span>
+                            <button
+                              type="button"
+                              className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-bold text-slate-900 shadow disabled:opacity-50"
+                              onClick={() => removePhotoDraft(draft.id)}
+                              disabled={photoBatchUploading}
+                              aria-label={`Remove photo ${index + 1}`}
+                            >
+                              X
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                        onClick={() => void uploadAllPhotoDrafts()}
+                        disabled={photoBatchUploading || photoDrafts.length === 0}
+                      >
+                        {photoBatchUploading ? "Uploading..." : "Upload All Photos"}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {photoStatus && <p className="text-[15px] font-semibold text-slate-700 text-center leading-snug">{photoStatus}</p>}
+                  {photoBatchProgress ? (
+                    <p className="text-[15px] text-center font-semibold text-slate-700">{photoBatchProgress.label}</p>
+                  ) : null}
+                  {uploadProgress !== null && (
+                    <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="bg-green-600 h-3 rounded-full transition-all"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  )}
+                  {uploadProgress !== null && (
+                    <p className="text-[14px] text-center text-slate-500">{uploadProgress}%</p>
+                  )}
+
+                  <div
+                    className={`${
+                      videoDraft || videoStatus || videoUploadProgress !== null
+                        ? "rounded-2xl border border-slate-200 bg-white p-2.5 space-y-2"
+                        : "hidden"
+                    }`}
+                  >
+                    {videoDraft ? (
+                      <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2">
+                        <video
+                          src={videoDraft.previewUrl}
+                          className="w-full max-h-56 rounded-xl bg-slate-950"
+                          controls
+                          playsInline
+                          preload="metadata"
+                        />
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-[15px] font-bold text-slate-900">
+                              {videoDraft.name || "Selected video"}
+                            </p>
+                            <p className="text-[14px] font-semibold text-slate-600">
+                              Duration: {formatVideoDuration(videoDraft.durationSeconds) || "confirmed"}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-800 disabled:opacity-50"
+                            onClick={clearVideoDraft}
+                            disabled={videoUploading}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                          onClick={() => void uploadSelectedVideo()}
+                          disabled={videoUploading}
+                        >
+                          {videoUploading ? "Uploading video..." : "Upload Video"}
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {videoStatus ? (
+                      <p className="text-[15px] text-center font-semibold text-slate-700 leading-snug">{videoStatus}</p>
+                    ) : null}
+                    {videoUploadProgress !== null ? (
+                      <>
+                        <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                          <div
+                            className="bg-slate-800 h-3 rounded-full transition-all"
+                            style={{ width: `${videoUploadProgress}%` }}
+                          />
+                        </div>
+                        <p className="text-[14px] text-center text-slate-500">{videoUploadProgress}%</p>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+
                 <Button
                   className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
                   disabled={
-                    !clockSelectedProject ||
-                    clockCostCentresActive.length === 0 ||
-                    !costCenter
+                    !clockSetupReady
                   }
                   onClick={handleClockIn}
                 >
