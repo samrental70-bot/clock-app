@@ -1686,6 +1686,11 @@ export default function EmployeeClockApp() {
   const [photoCameraError, setPhotoCameraError] = useState("");
   const [photoBatchUploading, setPhotoBatchUploading] = useState(false);
   const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
+  const [receiptDraftFile, setReceiptDraftFile] = useState(null);
+  const [receiptEntryStep, setReceiptEntryStep] = useState(null);
+  const [receiptAmountDraft, setReceiptAmountDraft] = useState("");
+  const [receiptCategoryDraft, setReceiptCategoryDraft] = useState("");
+  const [receiptSaving, setReceiptSaving] = useState(false);
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
@@ -1693,6 +1698,8 @@ export default function EmployeeClockApp() {
   const photoCanvasRef = useRef(null);
   const photoGalleryInputRef = useRef(null);
   const photoFallbackCameraInputRef = useRef(null);
+  const receiptAmountInputRef = useRef(null);
+  const receiptCategoryInputRef = useRef(null);
   const [videoDraft, setVideoDraft] = useState(null);
   const [videoStatus, setVideoStatus] = useState("");
   const [videoUploadProgress, setVideoUploadProgress] = useState(null);
@@ -5882,6 +5889,24 @@ const handlePhotoQuickUpload = async (event) => {
     if (playPromise?.catch) playPromise.catch(() => {});
   }, [photoCameraOpen]);
 
+  useEffect(() => {
+    if (receiptEntryStep !== "amount") return;
+    const id = setTimeout(() => {
+      receiptAmountInputRef.current?.focus?.();
+      receiptAmountInputRef.current?.select?.();
+    }, 80);
+    return () => clearTimeout(id);
+  }, [receiptEntryStep]);
+
+  useEffect(() => {
+    if (receiptEntryStep !== "category") return;
+    const id = setTimeout(() => {
+      receiptCategoryInputRef.current?.focus?.();
+      receiptCategoryInputRef.current?.select?.();
+    }, 80);
+    return () => clearTimeout(id);
+  }, [receiptEntryStep]);
+
   const addPhotoDraftFiles = useCallback(
     (files, source = "gallery") => {
       const incoming = Array.from(files || []).filter((file) => file?.type?.startsWith("image/"));
@@ -6142,6 +6167,7 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoBatchProgress({ current: queued.length, total: queued.length, label: "Completed" });
       setPhotoStatus(`Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`);
       setUploadProgress(100);
+      stopPhotoCamera();
       setTimeout(() => {
         setUploadProgress(null);
         setPhotoBatchProgress(null);
@@ -6164,7 +6190,7 @@ const handlePhotoQuickUpload = async (event) => {
     } finally {
       setPhotoBatchUploading(false);
     }
-  }, [authUser, revokePhotoDraftPreview, uploadProjectPhotoFile, visibleCurrentShift]);
+  }, [authUser, revokePhotoDraftPreview, stopPhotoCamera, uploadProjectPhotoFile, visibleCurrentShift]);
 
   const revokeVideoDraftPreview = useCallback((draft) => {
     const url = String(draft?.previewUrl || "");
@@ -6475,6 +6501,7 @@ const handlePhotoQuickUpload = async (event) => {
         if (previous) revokeVideoDraftPreview(previous);
         return null;
       });
+      stopPhotoCamera();
       setTimeout(() => {
         setVideoUploadProgress(null);
         setVideoStatus("");
@@ -6491,18 +6518,17 @@ const handlePhotoQuickUpload = async (event) => {
   }, [
     authUser,
     revokeVideoDraftPreview,
+    stopPhotoCamera,
     userCompany?.id,
     videoFileExtension,
     videoUploading,
     visibleCurrentShift,
   ]);
 
-  const saveReceiptFile = async (file) => {
-    if (!file || !visibleCurrentShift) return;
-    const amountInput = window.prompt("Enter receipt amount:");
-    const amount = Number(amountInput || 0);
-    const category = window.prompt("Receipt category? Example: Materials, Fuel, Tools, Parking, Other") || "Other";
-
+  const saveReceiptFile = async (file, details = {}) => {
+    if (!file || !visibleCurrentShift) return false;
+    const amount = Number(details.amount || 0);
+    const category = String(details.category || "").trim() || "Other";
     try {
       setPhotoStatus("Saving receipt...");
       const receiptFile = await compressImage(file, 1000, 0.65);
@@ -6556,17 +6582,28 @@ const handlePhotoQuickUpload = async (event) => {
           itemCount: null,
         });
       }
+      return true;
     } catch (err) {
       console.warn("Receipt save failed:", err);
       setPhotoStatus("Receipt save failed.");
       showErrorPopup("Receipt save failed", err);
+      return false;
     }
+  };
+
+  const openReceiptDetailsForm = (file) => {
+    if (!file) return;
+    setReceiptDraftFile(file);
+    setReceiptAmountDraft("");
+    setReceiptCategoryDraft("");
+    setReceiptEntryStep("amount");
+    setPhotoStatus("Enter receipt amount.");
   };
 
   const handleReceiptCapture = async (event) => {
     const file = event.target.files?.[0];
     try {
-      await saveReceiptFile(file);
+      openReceiptDetailsForm(file);
     } finally {
       event.target.value = "";
     }
@@ -6576,10 +6613,39 @@ const handlePhotoQuickUpload = async (event) => {
     let file = null;
     try {
       file = await captureCameraFrameFile("receipt");
-      await saveReceiptFile(file);
+      openReceiptDetailsForm(file);
     } catch (err) {
       console.warn("Receipt capture failed:", err);
       setPhotoStatus(getErrorMessage(err));
+    }
+  };
+
+  const cancelReceiptDetailsForm = () => {
+    setReceiptDraftFile(null);
+    setReceiptEntryStep(null);
+    setReceiptAmountDraft("");
+    setReceiptCategoryDraft("");
+    setReceiptSaving(false);
+  };
+
+  const submitReceiptAmount = (event) => {
+    event.preventDefault();
+    setReceiptEntryStep("category");
+    setPhotoStatus("Enter receipt category.");
+  };
+
+  const submitReceiptCategory = async (event) => {
+    event.preventDefault();
+    if (!receiptDraftFile || receiptSaving) return;
+    setReceiptSaving(true);
+    const saved = await saveReceiptFile(receiptDraftFile, {
+      amount: receiptAmountDraft,
+      category: receiptCategoryDraft,
+    });
+    setReceiptSaving(false);
+    if (saved) {
+      cancelReceiptDetailsForm();
+      stopPhotoCamera();
     }
   };
 
@@ -9719,7 +9785,7 @@ const handlePhotoQuickUpload = async (event) => {
                               setPhotoCameraMode("photo");
                               setPhotoStatus("Camera ready. Capture photos, then upload all.");
                             } else {
-                              void startPhotoCamera({ mode: "photo" });
+                              void startPhotoCamera({ allowFallback: false, mode: "photo" });
                             }
                           }}
                           disabled={photoBatchUploading}
@@ -9727,22 +9793,14 @@ const handlePhotoQuickUpload = async (event) => {
                         >
                           Camera
                         </button>
-                        <label
-                          className={`block w-full rounded-2xl h-11 bg-blue-700 text-white text-center leading-[2.75rem] text-[15px] font-bold ${
-                            photoBatchUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
-                          }`}
+                        <button
+                          type="button"
+                          className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
+                          onClick={() => setPhotoStatus("Pay here will be added next.")}
+                          disabled={photoBatchUploading || videoRecording || videoUploading}
                         >
-                          Gallery
-                          <input
-                            ref={photoGalleryInputRef}
-                            type="file"
-                            accept="image/*,video/*"
-                            multiple
-                            className="hidden"
-                            onChange={handleMediaGallerySelection}
-                            disabled={photoBatchUploading}
-                          />
-                        </label>
+                          Pay here
+                        </button>
                         <button
                           type="button"
                           className={`block w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
@@ -13900,6 +13958,86 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
         </div>
+
+        {receiptEntryStep && (
+          <div className="fixed inset-0 z-[75] bg-black/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[19px] font-black text-slate-900">Add receipt</p>
+                  <p className="text-[14px] font-semibold text-slate-500">
+                    {receiptEntryStep === "amount" ? "Enter the receipt amount." : "Enter material or category."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="h-10 w-10 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
+                  onClick={cancelReceiptDetailsForm}
+                  disabled={receiptSaving}
+                  aria-label="Cancel receipt"
+                >
+                  X
+                </button>
+              </div>
+
+              {receiptEntryStep === "amount" ? (
+                <form onSubmit={submitReceiptAmount} className="space-y-3">
+                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                    Amount
+                    <input
+                      ref={receiptAmountInputRef}
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      autoFocus
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[22px] font-black text-slate-900"
+                      value={receiptAmountDraft}
+                      onChange={(event) => setReceiptAmountDraft(event.target.value)}
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <button type="submit" className="w-full rounded-2xl bg-slate-900 py-3 text-[16px] font-black text-white">
+                    OK
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={(event) => void submitReceiptCategory(event)} className="space-y-3">
+                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                    Material / category
+                    <input
+                      ref={receiptCategoryInputRef}
+                      type="text"
+                      inputMode="text"
+                      autoFocus
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[20px] font-black text-slate-900"
+                      value={receiptCategoryDraft}
+                      onChange={(event) => setReceiptCategoryDraft(event.target.value)}
+                      placeholder="Materials"
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-2xl border border-slate-300 bg-white py-3 text-[15px] font-black text-slate-900"
+                      onClick={() => setReceiptEntryStep("amount")}
+                      disabled={receiptSaving}
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="submit"
+                      className="rounded-2xl bg-green-700 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                      disabled={receiptSaving}
+                    >
+                      {receiptSaving ? "Saving..." : "Add receipt"}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
 
         {liveToast && isAdmin && (
           <div
