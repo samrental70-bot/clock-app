@@ -1691,6 +1691,11 @@ export default function EmployeeClockApp() {
   const [receiptAmountDraft, setReceiptAmountDraft] = useState("");
   const [receiptCategoryDraft, setReceiptCategoryDraft] = useState("");
   const [receiptSaving, setReceiptSaving] = useState(false);
+  const [materialPaymentOpen, setMaterialPaymentOpen] = useState(false);
+  const [materialPaymentStep, setMaterialPaymentStep] = useState("form");
+  const [materialPaymentCountdown, setMaterialPaymentCountdown] = useState(10);
+  const [materialSupplierDraft, setMaterialSupplierDraft] = useState("");
+  const [materialAmountDraft, setMaterialAmountDraft] = useState("");
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
@@ -1702,6 +1707,9 @@ export default function EmployeeClockApp() {
   const latestPhotoStatusRef = useRef("");
   const clockSetupWarningTimerRef = useRef(null);
   const latestLocationStatusRef = useRef("");
+  const materialPaymentCountdownTimerRef = useRef(null);
+  const materialPaymentOpenReceiptTimerRef = useRef(null);
+  const materialPaymentPendingRef = useRef(null);
   const receiptAmountInputRef = useRef(null);
   const receiptCategoryInputRef = useRef(null);
   const [videoDraft, setVideoDraft] = useState(null);
@@ -3282,7 +3290,20 @@ export default function EmployeeClockApp() {
     return () => {
       if (photoStatusClearTimerRef.current) clearTimeout(photoStatusClearTimerRef.current);
       if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
+      if (materialPaymentCountdownTimerRef.current) clearInterval(materialPaymentCountdownTimerRef.current);
+      if (materialPaymentOpenReceiptTimerRef.current) clearTimeout(materialPaymentOpenReceiptTimerRef.current);
     };
+  }, []);
+
+  const clearMaterialPaymentTimers = useCallback(() => {
+    if (materialPaymentCountdownTimerRef.current) {
+      clearInterval(materialPaymentCountdownTimerRef.current);
+      materialPaymentCountdownTimerRef.current = null;
+    }
+    if (materialPaymentOpenReceiptTimerRef.current) {
+      clearTimeout(materialPaymentOpenReceiptTimerRef.current);
+      materialPaymentOpenReceiptTimerRef.current = null;
+    }
   }, []);
 
   const schedulePhotoStatusClear = useCallback((expectedStatus, delayMs = 5000, options = {}) => {
@@ -6105,6 +6126,143 @@ const handlePhotoQuickUpload = async (event) => {
     stopPhotoCamera,
   ]);
 
+  const openMaterialPaymentFlow = useCallback(() => {
+    if (!clockMediaContext) {
+      showClockSetupRequired();
+      return;
+    }
+    clearMaterialPaymentTimers();
+    setMaterialSupplierDraft("");
+    setMaterialAmountDraft("");
+    setMaterialPaymentCountdown(10);
+    setMaterialPaymentStep("form");
+    setMaterialPaymentOpen(true);
+  }, [clearMaterialPaymentTimers, clockMediaContext, showClockSetupRequired]);
+
+  const cancelMaterialPaymentFlow = useCallback(() => {
+    clearMaterialPaymentTimers();
+    const pending = materialPaymentPendingRef.current;
+    if (pending?.id && pending?.folderName) {
+      setProjectReceipts((previous) => {
+        const folderRows = previous[pending.folderName] || [];
+        return {
+          ...previous,
+          [pending.folderName]: folderRows.map((receipt) =>
+            String(receipt.id) === String(pending.id)
+              ? { ...receipt, status: "Receipt Missing", receiptStatus: "Receipt Missing" }
+              : receipt
+          ),
+        };
+      });
+      materialPaymentPendingRef.current = null;
+    }
+    setMaterialPaymentOpen(false);
+    setMaterialPaymentStep("form");
+    setMaterialPaymentCountdown(10);
+  }, [clearMaterialPaymentTimers]);
+
+  const markPendingMaterialReceiptStatus = useCallback((status) => {
+    const pending = materialPaymentPendingRef.current;
+    if (!pending?.id || !pending?.folderName) return;
+    setProjectReceipts((previous) => {
+      const folderRows = previous[pending.folderName] || [];
+      return {
+        ...previous,
+        [pending.folderName]: folderRows.map((receipt) =>
+          String(receipt.id) === String(pending.id)
+            ? { ...receipt, status, receiptStatus: status }
+            : receipt
+        ),
+      };
+    });
+  }, []);
+
+  const startMaterialPaymentCountdown = useCallback(
+    (event) => {
+      event?.preventDefault?.();
+      const mediaContext = clockMediaContext;
+      if (!mediaContext) {
+        showClockSetupRequired();
+        return;
+      }
+      const supplier = String(materialSupplierDraft || "").trim();
+      const amountText = String(materialAmountDraft || "").trim();
+      const amount = Number(amountText);
+      if (!supplier) {
+        setPhotoStatus("Enter supplier or store name.");
+        return;
+      }
+      if (!amountText || !Number.isFinite(amount) || amount <= 0) {
+        setPhotoStatus("Enter estimated amount.");
+        return;
+      }
+
+      clearMaterialPaymentTimers();
+      const folderName = getProjectFolderName(mediaContext.project);
+      const startedAt = new Date().toISOString();
+      const pendingReceipt = {
+        id: `material-${Date.now()}`,
+        companyId: userCompany?.id || null,
+        userId: authUser?.id || null,
+        project: mediaContext.project,
+        projectId: mediaContext.projectId ?? null,
+        folderName,
+        costCenter: mediaContext.costCenter,
+        employee: mediaContext.employee,
+        employeeId: mediaContext.employeeId ?? authUser?.id,
+        amount,
+        category: supplier,
+        supplier,
+        capturedAt: startedAt,
+        paymentFlowStartedAt: startedAt,
+        payment_flow_started_at: startedAt,
+        receiptUploadedAt: null,
+        receipt_uploaded_at: null,
+        status: "Pending Receipt",
+        receiptStatus: "Pending Receipt",
+        dataUrl: "",
+        type: "receipt",
+        isMaterialPayment: true,
+      };
+      materialPaymentPendingRef.current = pendingReceipt;
+      setProjectReceipts((previous) => ({
+        ...previous,
+        [folderName]: [pendingReceipt, ...(previous[folderName] || [])],
+      }));
+      setMaterialPaymentCountdown(10);
+      setMaterialPaymentStep("countdown");
+      const payStatus = "Please complete payment using Apple Wallet / Google Wallet, then return here.";
+      setPhotoStatus(payStatus);
+      schedulePhotoStatusClear(payStatus, 5000);
+
+      materialPaymentCountdownTimerRef.current = setInterval(() => {
+        setMaterialPaymentCountdown((seconds) => Math.max(0, seconds - 1));
+      }, 1000);
+      materialPaymentOpenReceiptTimerRef.current = setTimeout(() => {
+        clearMaterialPaymentTimers();
+        setMaterialPaymentCountdown(0);
+        setMaterialPaymentOpen(false);
+        setMaterialPaymentStep("form");
+        void startPhotoCamera({
+          allowFallback: false,
+          mode: "receipt",
+          readyMessage: "Receipt camera ready. Capture receipt.",
+        });
+      }, 10000);
+    },
+    [
+      authUser?.id,
+      clearMaterialPaymentTimers,
+      clockMediaContext,
+      materialAmountDraft,
+      materialSupplierDraft,
+      schedulePhotoStatusClear,
+      showClockSetupRequired,
+      startPhotoCamera,
+      userCompany?.id,
+    ]
+  );
+
   const captureCameraFrameFile = useCallback((namePrefix = "camera-photo") => {
     return new Promise((resolve, reject) => {
       const video = photoVideoRef.current;
@@ -6644,6 +6802,8 @@ const handlePhotoQuickUpload = async (event) => {
     }
     const amount = Number(details.amount || 0);
     const category = String(details.category || "").trim() || "Other";
+    const materialPayment = details.materialPayment || null;
+    const supplier = String(details.supplier || materialPayment?.supplier || "").trim();
     try {
       setPhotoStatus("Saving receipt...");
       const receiptFile = await compressImage(file, 1000, 0.65);
@@ -6657,7 +6817,7 @@ const handlePhotoQuickUpload = async (event) => {
       const folderName = getProjectFolderName(mediaContext.project);
       const capturedAt = new Date().toISOString();
       const receipt = {
-        id: Date.now(),
+        id: materialPayment?.id || Date.now(),
         companyId: userCompany?.id || null,
         userId: authUser?.id || null,
         project: mediaContext.project,
@@ -6668,16 +6828,38 @@ const handlePhotoQuickUpload = async (event) => {
         employeeId: mediaContext.employeeId ?? authUser?.id,
         amount: Number.isFinite(amount) ? amount : 0,
         category,
+        supplier,
         capturedAt,
+        paymentFlowStartedAt: materialPayment?.paymentFlowStartedAt || materialPayment?.payment_flow_started_at || null,
+        payment_flow_started_at: materialPayment?.payment_flow_started_at || materialPayment?.paymentFlowStartedAt || null,
+        receiptUploadedAt: capturedAt,
+        receipt_uploaded_at: capturedAt,
+        status: "Receipt Uploaded",
+        receiptStatus: "Receipt Uploaded",
         location: mediaContext.liveLocation || mediaContext.clockInLocation || null,
         dataUrl: receiptDataUrl,
         type: "receipt",
+        isMaterialPayment: Boolean(materialPayment),
       };
 
-      setProjectReceipts((previous) => ({
-        ...previous,
-        [folderName]: [receipt, ...(previous[folderName] || [])],
-      }));
+      setProjectReceipts((previous) => {
+        const existingRows = previous[folderName] || [];
+        if (materialPayment?.id && existingRows.some((row) => String(row.id) === String(materialPayment.id))) {
+          return {
+            ...previous,
+            [folderName]: existingRows.map((row) =>
+              String(row.id) === String(materialPayment.id)
+                ? { ...row, ...receipt }
+                : row
+            ),
+          };
+        }
+        return {
+          ...previous,
+          [folderName]: [receipt, ...existingRows],
+        };
+      });
+      if (materialPayment?.id) materialPaymentPendingRef.current = null;
       const savedStatus = `Receipt saved: ${formatMoney(receipt.amount)}`;
       setPhotoStatus(savedStatus);
       schedulePhotoStatusClear(savedStatus, 5000);
@@ -6709,11 +6891,12 @@ const handlePhotoQuickUpload = async (event) => {
 
   const openReceiptDetailsForm = (file) => {
     if (!file) return;
+    const pendingPayment = materialPaymentPendingRef.current;
     setReceiptDraftFile(file);
-    setReceiptAmountDraft("");
-    setReceiptCategoryDraft("");
+    setReceiptAmountDraft(pendingPayment?.amount != null ? String(pendingPayment.amount) : "");
+    setReceiptCategoryDraft(pendingPayment?.supplier || "");
     setReceiptEntryStep("amount");
-    setPhotoStatus("Enter receipt amount.");
+    setPhotoStatus(pendingPayment ? "Confirm receipt amount." : "Enter receipt amount.");
   };
 
   const handleReceiptCapture = async (event) => {
@@ -6737,6 +6920,10 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const cancelReceiptDetailsForm = () => {
+    if (materialPaymentPendingRef.current?.id) {
+      markPendingMaterialReceiptStatus("Receipt Missing");
+      materialPaymentPendingRef.current = null;
+    }
     setReceiptDraftFile(null);
     setReceiptEntryStep(null);
     setReceiptAmountDraft("");
@@ -6754,9 +6941,12 @@ const handlePhotoQuickUpload = async (event) => {
     event.preventDefault();
     if (!receiptDraftFile || receiptSaving) return;
     setReceiptSaving(true);
+    const pendingPayment = materialPaymentPendingRef.current;
     const saved = await saveReceiptFile(receiptDraftFile, {
       amount: receiptAmountDraft,
       category: receiptCategoryDraft,
+      supplier: pendingPayment?.supplier || receiptCategoryDraft,
+      materialPayment: pendingPayment,
     });
     setReceiptSaving(false);
     if (saved) {
@@ -9517,6 +9707,10 @@ const handlePhotoQuickUpload = async (event) => {
     );
   };
 
+  const isClockSetupWarningStatus =
+    locationStatus === "Select project and cost center first." ||
+    locationStatus === "No projects assigned. Please contact your supervisor.";
+
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
@@ -9812,6 +10006,11 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
+                  {isClockSetupWarningStatus ? (
+                    <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
+                      {locationStatus}
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
@@ -9848,9 +10047,7 @@ const handlePhotoQuickUpload = async (event) => {
                           showClockSetupRequired();
                           return;
                         }
-                        const payStatus = "Pay here will be added next.";
-                        setPhotoStatus(payStatus);
-                        schedulePhotoStatusClear(payStatus, 5000);
+                        openMaterialPaymentFlow();
                       }}
                       disabled={photoBatchUploading || videoRecording || videoUploading}
                     >
@@ -10070,7 +10267,9 @@ const handlePhotoQuickUpload = async (event) => {
                 >
                   ✅ Clock In
                 </Button>
-                {locationStatus && <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>}
+                {locationStatus && !isClockSetupWarningStatus && (
+                  <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
+                )}
               </CardContent>
             </Card>
           )}
@@ -10164,11 +10363,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <button
                           type="button"
                           className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
-                          onClick={() => {
-                            const payStatus = "Pay here will be added next.";
-                            setPhotoStatus(payStatus);
-                            schedulePhotoStatusClear(payStatus, 5000);
-                          }}
+                          onClick={openMaterialPaymentFlow}
                           disabled={photoBatchUploading || videoRecording || videoUploading}
                         >
                           Pay here
@@ -10651,10 +10846,22 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="space-y-3">
                           {folderReceipts.map((receipt) => (
                             <div key={receipt.id} className="rounded-xl border bg-slate-50 overflow-hidden">
-                              <img src={receipt.dataUrl} alt="Receipt" className="w-full h-36 object-cover" />
+                              {receipt.dataUrl ? (
+                                <img src={receipt.dataUrl} alt="Receipt" className="w-full h-36 object-cover" />
+                              ) : (
+                                <div className="flex h-36 items-center justify-center bg-slate-100 px-4 text-center text-[14px] font-bold text-slate-500">
+                                  Receipt pending
+                                </div>
+                              )}
                               <div className="p-3 text-xs text-slate-600 space-y-1">
                                 <div className="flex justify-between"><p className="font-semibold">{receipt.category}</p><p className="font-bold text-slate-900">{formatMoney(receipt.amount)}</p></div>
+                                {receipt.supplier ? <p>Supplier: {receipt.supplier}</p> : null}
                                 <p>{receipt.employee} • {receipt.costCenter}</p>
+                                {receipt.status || receipt.receiptStatus ? (
+                                  <p className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-800">
+                                    {receipt.status || receipt.receiptStatus}
+                                  </p>
+                                ) : null}
                                 <p>{formatDate(new Date(receipt.capturedAt), companyTimeZone)}</p>
                                 {receipt.location ? (
                                   <button className="underline text-blue-700 font-semibold" onClick={() => openMap(receipt.location)}>Map</button>
@@ -14331,6 +14538,84 @@ const handlePhotoQuickUpload = async (event) => {
           )}
         </div>
 
+        {materialPaymentOpen && (
+          <div className="fixed inset-0 z-[74] bg-black/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[19px] font-black text-slate-900">Material payment</p>
+                  <p className="text-[14px] font-semibold text-slate-500">
+                    {materialPaymentStep === "countdown"
+                      ? "Please complete payment using Apple Wallet / Google Wallet, then return here."
+                      : "Confirm details before paying."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="h-10 w-10 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
+                  onClick={cancelMaterialPaymentFlow}
+                  aria-label="Cancel material payment"
+                >
+                  X
+                </button>
+              </div>
+
+              {materialPaymentStep === "countdown" ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-center">
+                    <p className="text-[42px] font-black tabular-nums text-blue-800">{materialPaymentCountdown}</p>
+                    <p className="text-[15px] font-bold text-blue-900">Receipt camera opens next</p>
+                  </div>
+                  <p className="text-[14px] font-semibold text-slate-600 leading-snug">
+                    Finish payment, then capture the receipt in this app.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={startMaterialPaymentCountdown} className="space-y-3">
+                  <div className="grid grid-cols-1 gap-2 rounded-2xl bg-slate-50 p-3 text-[13px] font-semibold text-slate-600">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Project</p>
+                      <p className="text-[15px] font-black text-slate-900">{clockMediaContext?.project || "Selected project"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Cost centre</p>
+                      <p className="text-[15px] font-black text-slate-900">{clockMediaContext?.costCenter || "Selected cost centre"}</p>
+                    </div>
+                  </div>
+                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                    Supplier / store
+                    <input
+                      type="text"
+                      inputMode="text"
+                      autoFocus
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[18px] font-black text-slate-900"
+                      value={materialSupplierDraft}
+                      onChange={(event) => setMaterialSupplierDraft(event.target.value)}
+                      placeholder="Supplier or store"
+                    />
+                  </label>
+                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                    Estimated amount
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[22px] font-black text-slate-900"
+                      value={materialAmountDraft}
+                      onChange={(event) => setMaterialAmountDraft(event.target.value)}
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <button type="submit" className="w-full rounded-2xl bg-blue-700 py-3 text-[16px] font-black text-white">
+                    Continue to payment
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
         {receiptEntryStep && (
           <div className="fixed inset-0 z-[75] bg-black/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
@@ -14338,7 +14623,13 @@ const handlePhotoQuickUpload = async (event) => {
                 <div>
                   <p className="text-[19px] font-black text-slate-900">Add receipt</p>
                   <p className="text-[14px] font-semibold text-slate-500">
-                    {receiptEntryStep === "amount" ? "Enter the receipt amount." : "Enter material or category."}
+                    {receiptEntryStep === "amount"
+                      ? materialPaymentPendingRef.current
+                        ? "Confirm the receipt amount."
+                        : "Enter the receipt amount."
+                      : materialPaymentPendingRef.current
+                        ? "Confirm supplier/store or material."
+                        : "Enter material or category."}
                   </p>
                 </div>
                 <button
@@ -14376,7 +14667,7 @@ const handlePhotoQuickUpload = async (event) => {
               ) : (
                 <form onSubmit={(event) => void submitReceiptCategory(event)} className="space-y-3">
                   <label className="block space-y-1 text-[14px] font-bold text-slate-700">
-                    Material / category
+                    {materialPaymentPendingRef.current ? "Supplier / material" : "Material / category"}
                     <input
                       ref={receiptCategoryInputRef}
                       type="text"
@@ -14385,7 +14676,7 @@ const handlePhotoQuickUpload = async (event) => {
                       className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[20px] font-black text-slate-900"
                       value={receiptCategoryDraft}
                       onChange={(event) => setReceiptCategoryDraft(event.target.value)}
-                      placeholder="Materials"
+                      placeholder={materialPaymentPendingRef.current ? "Supplier or store" : "Materials"}
                     />
                   </label>
                   <div className="grid grid-cols-2 gap-2">
