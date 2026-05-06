@@ -1682,6 +1682,7 @@ export default function EmployeeClockApp() {
   const [uploadProgress, setUploadProgress] = useState(null);
   const [photoDrafts, setPhotoDrafts] = useState([]);
   const [photoCameraOpen, setPhotoCameraOpen] = useState(false);
+  const [photoCameraMode, setPhotoCameraMode] = useState("photo");
   const [photoCameraError, setPhotoCameraError] = useState("");
   const [photoBatchUploading, setPhotoBatchUploading] = useState(false);
   const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
@@ -5838,6 +5839,7 @@ const handlePhotoQuickUpload = async (event) => {
     photoCameraStreamRef.current = null;
     if (photoVideoRef.current) photoVideoRef.current.srcObject = null;
     setPhotoCameraOpen(false);
+    setPhotoCameraMode("photo");
   }, [stopVideoRecording]);
 
   const applyMinimumPhotoCameraZoom = useCallback(async (stream) => {
@@ -5938,10 +5940,13 @@ const handlePhotoQuickUpload = async (event) => {
 
   const startPhotoCamera = useCallback(async (options = {}) => {
     const allowFallbackCameraInput = options?.allowFallback !== false;
+    const nextMode = options?.mode === "receipt" ? "receipt" : "photo";
     const readyMessage =
       typeof options?.readyMessage === "string" && options.readyMessage.trim()
         ? options.readyMessage.trim()
-        : "Camera ready. Capture photos, then upload all.";
+        : nextMode === "receipt"
+          ? "Receipt camera ready. Capture receipt."
+          : "Camera ready. Capture photos, then upload all.";
     if (!visibleCurrentShift || !authUser) {
       setPhotoStatus("Clock in before taking photos.");
       return false;
@@ -5966,6 +5971,7 @@ const handlePhotoQuickUpload = async (event) => {
       });
       await applyMinimumPhotoCameraZoom(stream);
       photoCameraStreamRef.current = stream;
+      setPhotoCameraMode(nextMode);
       setPhotoCameraOpen(true);
       setPhotoStatus(readyMessage);
       return true;
@@ -5977,33 +5983,45 @@ const handlePhotoQuickUpload = async (event) => {
     }
   }, [applyMinimumPhotoCameraZoom, authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
 
-  const capturePhotoFromCamera = useCallback(() => {
-    const video = photoVideoRef.current;
-    const canvas = photoCanvasRef.current;
-    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
-      setPhotoStatus("Camera is still starting. Try again in a moment.");
+  const captureCameraFrameFile = useCallback((namePrefix = "camera-photo") => {
+    return new Promise((resolve, reject) => {
+      const video = photoVideoRef.current;
+      const canvas = photoCanvasRef.current;
+      if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+        reject(new Error("Camera is still starting. Try again in a moment."));
+        return;
+      }
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Could not capture image. Try again."));
+            return;
+          }
+          resolve(new File([blob], `${namePrefix}-${Date.now()}.jpg`, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.92
+      );
+    });
+  }, []);
+
+  const capturePhotoFromCamera = useCallback(async () => {
+    let file = null;
+    try {
+      file = await captureCameraFrameFile("camera-photo");
+    } catch (err) {
+      setPhotoStatus(getErrorMessage(err));
       return;
     }
-
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) {
-          setPhotoStatus("Could not capture photo. Try again.");
-          return;
-        }
-        const nextCount = photoDraftsRef.current.length + 1;
-        const file = new File([blob], `camera-photo-${Date.now()}.jpg`, { type: "image/jpeg" });
-        addPhotoDraftFiles([file], "camera");
-        setPhotoStatus(`Captured ${nextCount} photo${nextCount === 1 ? "" : "s"}. Camera is still open.`);
-      },
-      "image/jpeg",
-      0.92
-    );
-  }, [addPhotoDraftFiles]);
+    const nextCount = photoDraftsRef.current.length + 1;
+    addPhotoDraftFiles([file], "camera");
+    setPhotoStatus(`Captured ${nextCount} photo${nextCount === 1 ? "" : "s"}. Camera is still open.`);
+  }, [addPhotoDraftFiles, captureCameraFrameFile]);
 
   const uploadProjectPhotoFile = useCallback(
     async (file, index = 1, total = 1) => {
@@ -6479,10 +6497,8 @@ const handlePhotoQuickUpload = async (event) => {
     visibleCurrentShift,
   ]);
 
-  const handleReceiptCapture = async (event) => {
-    const file = event.target.files?.[0];
+  const saveReceiptFile = async (file) => {
     if (!file || !visibleCurrentShift) return;
-
     const amountInput = window.prompt("Enter receipt amount:");
     const amount = Number(amountInput || 0);
     const category = window.prompt("Receipt category? Example: Materials, Fuel, Tools, Parking, Other") || "Other";
@@ -6544,8 +6560,26 @@ const handlePhotoQuickUpload = async (event) => {
       console.warn("Receipt save failed:", err);
       setPhotoStatus("Receipt save failed.");
       showErrorPopup("Receipt save failed", err);
+    }
+  };
+
+  const handleReceiptCapture = async (event) => {
+    const file = event.target.files?.[0];
+    try {
+      await saveReceiptFile(file);
     } finally {
       event.target.value = "";
+    }
+  };
+
+  const captureReceiptFromCamera = async () => {
+    let file = null;
+    try {
+      file = await captureCameraFrameFile("receipt");
+      await saveReceiptFile(file);
+    } catch (err) {
+      console.warn("Receipt capture failed:", err);
+      setPhotoStatus(getErrorMessage(err));
     }
   };
 
@@ -9673,16 +9707,23 @@ const handlePhotoQuickUpload = async (event) => {
                         <button
                           type="button"
                           className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
-                            photoCameraOpen
+                            photoCameraOpen && photoCameraMode === "photo"
                               ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                               : "border-slate-900 bg-slate-900 text-white"
                           }`}
                           onClick={() => {
-                            if (photoCameraOpen) stopPhotoCamera();
-                            else void startPhotoCamera();
+                            if (photoCameraOpen && photoCameraMode === "photo") {
+                              stopPhotoCamera();
+                            } else if (photoCameraOpen) {
+                              stopVideoRecording();
+                              setPhotoCameraMode("photo");
+                              setPhotoStatus("Camera ready. Capture photos, then upload all.");
+                            } else {
+                              void startPhotoCamera({ mode: "photo" });
+                            }
                           }}
                           disabled={photoBatchUploading}
-                          aria-pressed={photoCameraOpen}
+                          aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
                           Camera
                         </button>
@@ -9702,10 +9743,33 @@ const handlePhotoQuickUpload = async (event) => {
                             disabled={photoBatchUploading}
                           />
                         </label>
-                        <label className="block w-full rounded-2xl h-11 bg-green-700 text-white text-center leading-[2.75rem] text-[15px] font-bold cursor-pointer">
+                        <button
+                          type="button"
+                          className={`block w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                            photoCameraOpen && photoCameraMode === "receipt"
+                              ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
+                              : "border-green-700 bg-green-700 text-white"
+                          }`}
+                          onClick={() => {
+                            if (photoCameraOpen && photoCameraMode === "receipt") {
+                              stopPhotoCamera();
+                            } else if (photoCameraOpen) {
+                              stopVideoRecording();
+                              setPhotoCameraMode("receipt");
+                              setPhotoStatus("Receipt camera ready. Capture receipt.");
+                            } else {
+                              void startPhotoCamera({
+                                allowFallback: false,
+                                mode: "receipt",
+                                readyMessage: "Receipt camera ready. Capture receipt.",
+                              });
+                            }
+                          }}
+                          disabled={photoBatchUploading || videoRecording || videoUploading}
+                          aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
+                        >
                           Receipt
-                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
-                        </label>
+                        </button>
                       </div>
 
                       <input
@@ -9734,28 +9798,39 @@ const handlePhotoQuickUpload = async (event) => {
                             autoPlay
                           />
                           <canvas ref={photoCanvasRef} className="hidden" />
-                          <div className="grid grid-cols-2 gap-1.5">
+                          {photoCameraMode === "receipt" ? (
                             <button
                               type="button"
-                              className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
-                              onClick={capturePhotoFromCamera}
+                              className="w-full rounded-2xl h-12 bg-green-700 text-white text-[16px] font-bold disabled:opacity-50"
+                              onClick={() => void captureReceiptFromCamera()}
                               disabled={photoBatchUploading || videoRecording}
                             >
-                              Capture Photo
+                              Capture Receipt
                             </button>
-                            <button
-                              type="button"
-                              className={`rounded-2xl h-12 text-[15px] font-bold disabled:opacity-50 ${
-                                videoRecording
-                                  ? "bg-red-700 text-white"
-                                  : "border border-slate-300 bg-white text-slate-800"
-                              }`}
-                              onClick={videoRecording ? stopVideoRecording : startVideoRecording}
-                              disabled={photoBatchUploading || videoUploading}
-                            >
-                              {videoRecording ? `Stop ${videoRecordSeconds}s` : "Record Video"}
-                            </button>
-                          </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                type="button"
+                                className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                                onClick={() => void capturePhotoFromCamera()}
+                                disabled={photoBatchUploading || videoRecording}
+                              >
+                                Capture Photo
+                              </button>
+                              <button
+                                type="button"
+                                className={`rounded-2xl h-12 text-[15px] font-bold disabled:opacity-50 ${
+                                  videoRecording
+                                    ? "bg-red-700 text-white"
+                                    : "border border-slate-300 bg-white text-slate-800"
+                                }`}
+                                onClick={videoRecording ? stopVideoRecording : startVideoRecording}
+                                disabled={photoBatchUploading || videoUploading}
+                              >
+                                {videoRecording ? `Stop ${videoRecordSeconds}s` : "Record Video"}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : null}
 
