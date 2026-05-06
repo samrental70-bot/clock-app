@@ -3091,37 +3091,6 @@ export default function EmployeeClockApp() {
     clockProjectSelected && costCenter && clockCostCentresActive.includes(costCenter)
   );
   const clockSetupReady = Boolean(clockProjectSelected && clockCostCentreSelected);
-  const clockMediaContext = useMemo(() => {
-    if (visibleCurrentShift) return visibleCurrentShift;
-    if (!clockSetupReady || !authUser?.id || !clockSelectedProject) return null;
-    const employeeName = (profileFullName || "").trim() || authUser?.email || "Employee";
-    return {
-      userId: authUser.id,
-      employee: employeeName,
-      employeeName,
-      employeeEmail: authUser?.email || null,
-      companyId: userCompany?.id || null,
-      companyName: userCompany?.name || null,
-      project: clockSelectedProject.name,
-      projectId: clockSelectedProject.id,
-      costCenter,
-      employeeId: authUser.id,
-      projectFolder: getProjectFolderName(clockSelectedProject.name),
-      clockInLocation: null,
-      liveLocation: null,
-      supabaseTimesheetId: null,
-    };
-  }, [
-    authUser?.email,
-    authUser?.id,
-    clockSelectedProject,
-    clockSetupReady,
-    costCenter,
-    profileFullName,
-    userCompany?.id,
-    userCompany?.name,
-    visibleCurrentShift,
-  ]);
 
   const dashboardRowsForAttendance = useMemo(() => {
     const rows = Array.isArray(dashboardRows) ? dashboardRows : [];
@@ -3264,6 +3233,38 @@ export default function EmployeeClockApp() {
   const visibleCurrentShift = currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
     ? currentShift
     : null;
+
+  const clockMediaContext = useMemo(() => {
+    if (visibleCurrentShift) return visibleCurrentShift;
+    if (!clockSetupReady || !authUser?.id || !clockSelectedProject) return null;
+    const employeeName = (profileFullName || "").trim() || authUser?.email || "Employee";
+    return {
+      userId: authUser.id,
+      employee: employeeName,
+      employeeName,
+      employeeEmail: authUser?.email || null,
+      companyId: userCompany?.id || null,
+      companyName: userCompany?.name || null,
+      project: clockSelectedProject.name,
+      projectId: clockSelectedProject.id,
+      costCenter,
+      employeeId: authUser.id,
+      projectFolder: getProjectFolderName(clockSelectedProject.name),
+      clockInLocation: null,
+      liveLocation: null,
+      supabaseTimesheetId: null,
+    };
+  }, [
+    authUser?.email,
+    authUser?.id,
+    clockSelectedProject,
+    clockSetupReady,
+    costCenter,
+    profileFullName,
+    userCompany?.id,
+    userCompany?.name,
+    visibleCurrentShift,
+  ]);
 
   const timesheetRangeBounds = useMemo(() => {
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
