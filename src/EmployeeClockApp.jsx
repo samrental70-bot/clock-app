@@ -1698,6 +1698,10 @@ export default function EmployeeClockApp() {
   const photoCanvasRef = useRef(null);
   const photoGalleryInputRef = useRef(null);
   const photoFallbackCameraInputRef = useRef(null);
+  const photoStatusClearTimerRef = useRef(null);
+  const latestPhotoStatusRef = useRef("");
+  const clockSetupWarningTimerRef = useRef(null);
+  const latestLocationStatusRef = useRef("");
   const receiptAmountInputRef = useRef(null);
   const receiptCategoryInputRef = useRef(null);
   const [videoDraft, setVideoDraft] = useState(null);
@@ -3265,6 +3269,47 @@ export default function EmployeeClockApp() {
     userCompany?.name,
     visibleCurrentShift,
   ]);
+
+  useEffect(() => {
+    latestPhotoStatusRef.current = photoStatus;
+  }, [photoStatus]);
+
+  useEffect(() => {
+    latestLocationStatusRef.current = locationStatus;
+  }, [locationStatus]);
+
+  useEffect(() => {
+    return () => {
+      if (photoStatusClearTimerRef.current) clearTimeout(photoStatusClearTimerRef.current);
+      if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
+    };
+  }, []);
+
+  const schedulePhotoStatusClear = useCallback((expectedStatus, delayMs = 5000, options = {}) => {
+    if (photoStatusClearTimerRef.current) clearTimeout(photoStatusClearTimerRef.current);
+    photoStatusClearTimerRef.current = setTimeout(() => {
+      if (latestPhotoStatusRef.current === expectedStatus) {
+        setPhotoStatus("");
+        if (options.clearUploadProgress) setUploadProgress(null);
+        if (options.clearBatchProgress) setPhotoBatchProgress(null);
+      }
+      photoStatusClearTimerRef.current = null;
+    }, delayMs);
+  }, []);
+
+  const showClockSetupRequired = useCallback(() => {
+    const message =
+      clockSelectableProjects.length === 0
+        ? "No projects assigned. Please contact your supervisor."
+        : "Select project and cost center first.";
+    if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
+    setPhotoStatus("");
+    setLocationStatus(message);
+    clockSetupWarningTimerRef.current = setTimeout(() => {
+      if (latestLocationStatusRef.current === message) setLocationStatus("");
+      clockSetupWarningTimerRef.current = null;
+    }, 5000);
+  }, [clockSelectableProjects.length]);
 
   const timesheetRangeBounds = useMemo(() => {
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
@@ -5470,11 +5515,7 @@ const handleClockIn = async () => {
     }
 
     if (!clockSelectedProject) {
-      setLocationStatus(
-        clockSelectableProjects.length === 0
-          ? "No projects assigned. Please contact your supervisor."
-          : "Select project and cost center first."
-      );
+      showClockSetupRequired();
       return;
     }
 
@@ -5485,7 +5526,7 @@ const handleClockIn = async () => {
     const clockInCentres = clockCostCentreOptionsForProject(clockSelectedProject.id);
     if (clockInCentres.length === 0 || !costCenter || !clockInCentres.includes(costCenter)) {
       if (!costCenter) {
-        setLocationStatus("Select project and cost center first.");
+        showClockSetupRequired();
         return;
       }
       if (!isAdmin && allActiveOnProject.length > 0) {
@@ -5840,13 +5881,10 @@ const handlePhotoQuickUpload = async (event) => {
     );
 
     setUploadProgress(100);
-    setPhotoStatus("Photo uploaded ✅");
+    const uploadedStatus = "Photo uploaded ✅";
+    setPhotoStatus(uploadedStatus);
     void schedulePhotoNotificationAfterUpload();
-
-    setTimeout(() => {
-      setUploadProgress(null);
-      setPhotoStatus("");
-    }, 7000);
+    schedulePhotoStatusClear(uploadedStatus, 5000, { clearUploadProgress: true });
 
     event.target.value = "";
   } catch (err) {
@@ -6025,7 +6063,7 @@ const handlePhotoQuickUpload = async (event) => {
       return false;
     }
     if (!clockMediaContext) {
-      setPhotoStatus("Select project and cost center first.");
+      showClockSetupRequired();
       return false;
     }
     if (photoBatchUploading) return false;
@@ -6058,7 +6096,14 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoStatus("Camera permission denied.");
       return false;
     }
-  }, [applyMinimumPhotoCameraZoom, authUser, clockMediaContext, photoBatchUploading, stopPhotoCamera]);
+  }, [
+    applyMinimumPhotoCameraZoom,
+    authUser,
+    clockMediaContext,
+    photoBatchUploading,
+    showClockSetupRequired,
+    stopPhotoCamera,
+  ]);
 
   const captureCameraFrameFile = useCallback((namePrefix = "camera-photo") => {
     return new Promise((resolve, reject) => {
@@ -6198,7 +6243,7 @@ const handlePhotoQuickUpload = async (event) => {
       return;
     }
     if (!clockMediaContext || !authUser) {
-      setPhotoStatus("Select project and cost center before uploading photos.");
+      showClockSetupRequired();
       return;
     }
 
@@ -6222,14 +6267,14 @@ const handlePhotoQuickUpload = async (event) => {
         return previous.filter((draft) => !uploaded.has(draft.id));
       });
       setPhotoBatchProgress({ current: queued.length, total: queued.length, label: "Completed" });
-      setPhotoStatus(`Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`);
+      const uploadedStatus = `Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`;
+      setPhotoStatus(uploadedStatus);
       setUploadProgress(100);
       stopPhotoCamera();
-      setTimeout(() => {
-        setUploadProgress(null);
-        setPhotoBatchProgress(null);
-        setPhotoStatus("");
-      }, 7000);
+      schedulePhotoStatusClear(uploadedStatus, 5000, {
+        clearUploadProgress: true,
+        clearBatchProgress: true,
+      });
     } catch (err) {
       console.log("Batch photo upload failed:", err);
       const failedIndex = Math.min(uploadedDraftIds.length + 1, queued.length);
@@ -6247,7 +6292,15 @@ const handlePhotoQuickUpload = async (event) => {
     } finally {
       setPhotoBatchUploading(false);
     }
-  }, [authUser, clockMediaContext, revokePhotoDraftPreview, stopPhotoCamera, uploadProjectPhotoFile]);
+  }, [
+    authUser,
+    clockMediaContext,
+    revokePhotoDraftPreview,
+    schedulePhotoStatusClear,
+    showClockSetupRequired,
+    stopPhotoCamera,
+    uploadProjectPhotoFile,
+  ]);
 
   const revokeVideoDraftPreview = useCallback((draft) => {
     const url = String(draft?.previewUrl || "");
@@ -6563,7 +6616,7 @@ const handlePhotoQuickUpload = async (event) => {
       setTimeout(() => {
         setVideoUploadProgress(null);
         setVideoStatus("");
-      }, 7000);
+      }, 5000);
     } catch (err) {
       console.log("Video upload failed:", err);
       setVideoStatus("Video upload failed.");
@@ -6586,7 +6639,7 @@ const handlePhotoQuickUpload = async (event) => {
   const saveReceiptFile = async (file, details = {}) => {
     const mediaContext = clockMediaContext;
     if (!file || !mediaContext) {
-      setPhotoStatus("Select project and cost center before saving receipt.");
+      showClockSetupRequired();
       return false;
     }
     const amount = Number(details.amount || 0);
@@ -6625,8 +6678,9 @@ const handlePhotoQuickUpload = async (event) => {
         ...previous,
         [folderName]: [receipt, ...(previous[folderName] || [])],
       }));
-      setPhotoStatus(`Receipt saved: ${formatMoney(receipt.amount)}`);
-      setTimeout(() => setPhotoStatus(""), 7000);
+      const savedStatus = `Receipt saved: ${formatMoney(receipt.amount)}`;
+      setPhotoStatus(savedStatus);
+      schedulePhotoStatusClear(savedStatus, 5000);
       if (authUser?.id && userCompany?.id) {
         const actorLabel = (profileFullName || "").trim() || authUser.email || "Someone";
         void createCompanyNotifications(supabase, {
@@ -9768,7 +9822,7 @@ const handlePhotoQuickUpload = async (event) => {
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
-                          setPhotoStatus("Select project and cost center first.");
+                          showClockSetupRequired();
                           return;
                         }
                         if (photoCameraOpen && photoCameraMode === "photo") {
@@ -9791,10 +9845,12 @@ const handlePhotoQuickUpload = async (event) => {
                       className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
                       onClick={() => {
                         if (!clockSetupReady) {
-                          setPhotoStatus("Select project and cost center first.");
+                          showClockSetupRequired();
                           return;
                         }
-                        setPhotoStatus("Pay here will be added next.");
+                        const payStatus = "Pay here will be added next.";
+                        setPhotoStatus(payStatus);
+                        schedulePhotoStatusClear(payStatus, 5000);
                       }}
                       disabled={photoBatchUploading || videoRecording || videoUploading}
                     >
@@ -9809,7 +9865,7 @@ const handlePhotoQuickUpload = async (event) => {
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
-                          setPhotoStatus("Select project and cost center first.");
+                          showClockSetupRequired();
                           return;
                         }
                         if (photoCameraOpen && photoCameraMode === "receipt") {
@@ -10108,7 +10164,11 @@ const handlePhotoQuickUpload = async (event) => {
                         <button
                           type="button"
                           className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
-                          onClick={() => setPhotoStatus("Pay here will be added next.")}
+                          onClick={() => {
+                            const payStatus = "Pay here will be added next.";
+                            setPhotoStatus(payStatus);
+                            schedulePhotoStatusClear(payStatus, 5000);
+                          }}
                           disabled={photoBatchUploading || videoRecording || videoUploading}
                         >
                           Pay here
