@@ -636,6 +636,59 @@ function reportsCostCentreKeyFromRow(row) {
   return String(row?.costCenter ?? "").trim() || "—";
 }
 
+function reportDimensionLabel(value) {
+  if (value === "employee") return "Employee";
+  if (value === "project") return "Project";
+  if (value === "cost_center") return "Cost Centre";
+  return "None";
+}
+
+function mediaItemId(item, index = 0) {
+  return String(
+    item?.storagePath ||
+      item?.videoUrl ||
+      item?.imageUrl ||
+      item?.dataUrl ||
+      item?.id ||
+      `media-${index}`
+  );
+}
+
+function isVideoMediaItem(item) {
+  return item?.media_type === "video" || item?.mediaType === "video" || item?.type === "video";
+}
+
+function mediaItemUrl(item) {
+  return item?.videoUrl || item?.imageUrl || item?.dataUrl || "";
+}
+
+function encodeSharePayload(payload) {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeSharePayload(raw) {
+  const value = String(raw || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = value.padEnd(value.length + ((4 - (value.length % 4)) % 4), "=");
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function formatPlainDuration(seconds) {
+  const raw = Number(seconds);
+  if (!Number.isFinite(raw) || raw <= 0) return "";
+  const s = Math.round(raw);
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${String(rem).padStart(2, "0")}`;
+}
+
 function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone) {
   if (!visibleCurrentShift) return false;
   const liveRowId = visibleCurrentShift.supabaseTimesheetId;
@@ -1250,7 +1303,7 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   if (window.Notification.permission !== "granted") return;
   try {
     shownIdsRef.current.add(id);
-    new window.Notification(String(notificationRow.title || "OPERA"), {
+    new window.Notification(String(notificationRow.title || "OPERA.AI"), {
       body: String(notificationRow.message || ""),
       icon: "/icon-192.png",
       badge: "/icon-192.png",
@@ -1477,6 +1530,113 @@ async function sendPhotoBatchNotifications(supabase, payload, count) {
   });
 }
 
+function PublicPhotoShareView({ share, index, setIndex }) {
+  const items = Array.isArray(share?.items) ? share.items : [];
+  const safeIndex = items.length ? Math.max(0, Math.min(index, items.length - 1)) : 0;
+  const current = items[safeIndex] || null;
+  const isVideo = isVideoMediaItem(current);
+  const url = mediaItemUrl(current);
+  const go = (delta) => {
+    if (!items.length) return;
+    setIndex((prev) => {
+      const next = prev + delta;
+      if (next < 0) return items.length - 1;
+      if (next >= items.length) return 0;
+      return next;
+    });
+  };
+
+  return (
+    <div className="min-h-[100dvh] bg-neutral-950 text-slate-900 flex justify-center">
+      <div className="w-full max-w-3xl bg-slate-50 min-h-[100dvh]">
+        <header className="bg-white border-b px-4 py-4">
+          <h1 className="text-2xl font-black tracking-tight">OPERA.AI</h1>
+          <p className="text-sm font-medium text-slate-600">
+            Shared project photos{share?.folder ? ` - ${share.folder}` : ""}
+          </p>
+        </header>
+        <main className="p-4 space-y-4">
+          {!items.length ? (
+            <div className="rounded-2xl border bg-white p-5 text-center text-slate-600">
+              This share link does not contain any selected photos.
+            </div>
+          ) : (
+            <>
+              <div className="rounded-2xl border bg-white overflow-hidden">
+                <div className="bg-slate-950">
+                  {isVideo ? (
+                    <video src={url} className="w-full max-h-[72vh] bg-slate-950" controls playsInline />
+                  ) : (
+                    <img src={url} alt="Shared project" className="w-full max-h-[72vh] object-contain bg-slate-950" />
+                  )}
+                </div>
+                <div className="p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-base font-bold text-slate-900 break-words">
+                        {current?.employee || "Project media"}
+                      </p>
+                      <p className="text-sm text-slate-600 break-words">
+                        {[current?.project, current?.costCenter].filter(Boolean).join(" - ")}
+                      </p>
+                      {current?.capturedAt ? (
+                        <p className="text-xs text-slate-500">
+                          {new Date(current.capturedAt).toLocaleString()}
+                        </p>
+                      ) : null}
+                    </div>
+                    <p className="shrink-0 text-sm font-bold text-slate-500 tabular-nums">
+                      {safeIndex + 1} / {items.length}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-2xl border border-slate-300 bg-white py-3 text-base font-bold text-slate-900"
+                      onClick={() => go(-1)}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-2xl bg-slate-900 py-3 text-base font-bold text-white"
+                      onClick={() => go(1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {items.map((item, itemIndex) => {
+                  const thumbUrl = mediaItemUrl(item);
+                  const thumbVideo = isVideoMediaItem(item);
+                  return (
+                    <button
+                      key={`${mediaItemId(item, itemIndex)}-${itemIndex}`}
+                      type="button"
+                      className={`rounded-xl overflow-hidden border bg-white ${
+                        itemIndex === safeIndex ? "border-slate-900 ring-2 ring-slate-900/20" : "border-slate-200"
+                      }`}
+                      onClick={() => setIndex(itemIndex)}
+                    >
+                      {thumbVideo ? (
+                        <video src={thumbUrl} className="h-20 w-full object-cover bg-slate-950" muted playsInline preload="metadata" />
+                      ) : (
+                        <img src={thumbUrl} alt="" className="h-20 w-full object-cover" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
   const [projectId, setProjectId] = useState(adminProjects[0].id);
@@ -1538,8 +1698,12 @@ export default function EmployeeClockApp() {
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
+  const [selectedPhotoIdsByFolder, setSelectedPhotoIdsByFolder] = useState({});
+  const [photoViewer, setPhotoViewer] = useState(null);
+  const [photoShareMessage, setPhotoShareMessage] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [menuPanel, setMenuPanel] = useState("main");
+  const [publicShareIndex, setPublicShareIndex] = useState(0);
 
   const [inAppNotifications, setInAppNotifications] = useState([]);
   const [inAppNotifError, setInAppNotifError] = useState("");
@@ -1618,6 +1782,18 @@ export default function EmployeeClockApp() {
   const isAdmin = isOwner || isSupervisor;
   const isProfileArchived = normalizeEmploymentStatus(profileEmploymentStatus) === "archived";
   const companyTimeZone = userCompany?.time_zone || "America/Toronto";
+  const publicPhotoShare = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const raw = new URLSearchParams(window.location.search).get("photoShare");
+    if (!raw) return null;
+    try {
+      const decoded = decodeSharePayload(raw);
+      return decoded && decoded.type === "project_photos" ? decoded : { type: "project_photos", items: [] };
+    } catch (err) {
+      console.warn("Photo share link could not be opened:", err);
+      return { type: "project_photos", items: [] };
+    }
+  }, []);
 
   useEffect(() => {
     if (!authUser?.id) {
@@ -1661,6 +1837,12 @@ export default function EmployeeClockApp() {
   }, [isEmployeeRole, authUser?.id, projectReceipts]);
 
   const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
+  const [settingsCompanyNameDraft, setSettingsCompanyNameDraft] = useState("");
+  const [settingsCompanyEditOpen, setSettingsCompanyEditOpen] = useState(false);
+  const [settingsProfileNameDraft, setSettingsProfileNameDraft] = useState("");
+  const [settingsProfileEditOpen, setSettingsProfileEditOpen] = useState(false);
+  const [settingsProfileSaving, setSettingsProfileSaving] = useState(false);
+  const [settingsProfileMessage, setSettingsProfileMessage] = useState("");
   const [closingShiftId, setClosingShiftId] = useState(null);
   const [settingsTzMessage, setSettingsTzMessage] = useState("");
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
@@ -1681,6 +1863,10 @@ export default function EmployeeClockApp() {
   const [teamAddSubmitting, setTeamAddSubmitting] = useState(false);
   const [teamAddError, setTeamAddError] = useState("");
   const [teamListFilter, setTeamListFilter] = useState("active"); // active | archived | all
+  const [timesheetViewMode, setTimesheetViewMode] = useState("day");
+  const [timesheetDateKey, setTimesheetDateKey] = useState("");
+  const [timesheetDateFrom, setTimesheetDateFrom] = useState("");
+  const [timesheetDateTo, setTimesheetDateTo] = useState("");
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -1781,7 +1967,21 @@ export default function EmployeeClockApp() {
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
-  }, [userCompany?.id, userCompany?.time_zone]);
+    setSettingsCompanyNameDraft(userCompany?.name || "");
+  }, [userCompany?.id, userCompany?.time_zone, userCompany?.name]);
+
+  useEffect(() => {
+    setSettingsProfileNameDraft((profileFullName || "").trim());
+  }, [profileFullName, authUser?.id]);
+
+  useEffect(() => {
+    if (!companyChecked) return;
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    if (!todayKey) return;
+    setTimesheetDateKey((prev) => prev || todayKey);
+    setTimesheetDateFrom((prev) => prev || todayKey);
+    setTimesheetDateTo((prev) => prev || todayKey);
+  }, [companyChecked, companyTimeZone]);
 
   useEffect(() => {
     if (!companyChecked) return;
@@ -3008,6 +3208,31 @@ export default function EmployeeClockApp() {
     ? currentShift
     : null;
 
+  const timesheetRangeBounds = useMemo(() => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    const anchor = timesheetDateKey || todayKey;
+    if (timesheetViewMode === "week") {
+      const start = anchor ? mondayStartOfWallWeekContaining(anchor, companyTimeZone) : "";
+      const end = start ? addWallDaysInTimeZone(start, 6, companyTimeZone) : "";
+      return { from: start, to: end || start };
+    }
+    if (timesheetViewMode === "range") {
+      return { from: timesheetDateFrom || "", to: timesheetDateTo || "" };
+    }
+    return { from: anchor || "", to: anchor || "" };
+  }, [timesheetViewMode, timesheetDateKey, timesheetDateFrom, timesheetDateTo, companyTimeZone]);
+
+  const visibleTimesheetRecords = useMemo(() => {
+    const rows = Array.isArray(visibleRecords) ? visibleRecords : [];
+    const from = timesheetRangeBounds.from;
+    const to = timesheetRangeBounds.to;
+    if (!from || !to || from > to) return [];
+    return rows.filter((record) => {
+      const key = calendarDateKeyInTimeZone(record?.clockIn, companyTimeZone);
+      return key && key >= from && key <= to;
+    });
+  }, [visibleRecords, timesheetRangeBounds.from, timesheetRangeBounds.to, companyTimeZone]);
+
   const reportsDistinctCostCentres = useMemo(() => {
     const s = new Set();
     for (const r of reportsScreenRows) {
@@ -3017,11 +3242,8 @@ export default function EmployeeClockApp() {
   }, [reportsScreenRows]);
 
   const reportsRowsFilteredForUi = useMemo(() => {
-    if (reportsCostCentreAll) return reportsScreenRows;
-    if (!reportsCostCentrePicked.length) return [];
-    const allowed = new Set(reportsCostCentrePicked.map((x) => String(x).trim()));
-    return reportsScreenRows.filter((r) => allowed.has(reportsCostCentreKeyFromRow(r)));
-  }, [reportsScreenRows, reportsCostCentreAll, reportsCostCentrePicked]);
+    return reportsScreenRows;
+  }, [reportsScreenRows]);
 
   const REPORT_DIMS = ["employee", "project", "cost_center"];
 
@@ -6696,16 +6918,100 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const getFolderShareLink = (folderName) => `${window.location.origin}/photos/${folderName}`;
+  const togglePhotoSelected = (folderName, itemId) => {
+    const folder = String(folderName || "");
+    const id = String(itemId || "");
+    if (!folder || !id) return;
+    setSelectedPhotoIdsByFolder((prev) => {
+      const current = new Set(prev[folder] || []);
+      if (current.has(id)) current.delete(id);
+      else current.add(id);
+      return { ...prev, [folder]: [...current] };
+    });
+  };
+
+  const setAllProjectPhotosSelected = (folderName, selected) => {
+    const folder = String(folderName || "");
+    if (!folder) return;
+    const ids = (scopedProjectPhotos[folder] || []).map((item, index) => mediaItemId(item, index));
+    setSelectedPhotoIdsByFolder((prev) => ({ ...prev, [folder]: selected ? ids : [] }));
+  };
+
+  const openPhotoViewer = (folderName, index) => {
+    const folder = String(folderName || "");
+    const items = scopedProjectPhotos[folder] || [];
+    if (!folder || !items.length) return;
+    setPhotoViewer({ folder, index: Math.max(0, Math.min(Number(index) || 0, items.length - 1)) });
+  };
+
+  const movePhotoViewer = (delta) => {
+    setPhotoViewer((prev) => {
+      if (!prev?.folder) return prev;
+      const items = scopedProjectPhotos[prev.folder] || [];
+      if (!items.length) return null;
+      const next = (Number(prev.index) || 0) + delta;
+      if (next < 0) return { ...prev, index: items.length - 1 };
+      if (next >= items.length) return { ...prev, index: 0 };
+      return { ...prev, index: next };
+    });
+  };
+
+  const getFolderShareLink = (folderName) => {
+    const folder = String(folderName || "");
+    const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
+    const selectedItems = (scopedProjectPhotos[folder] || []).filter((item, index) =>
+      selectedIds.has(mediaItemId(item, index))
+    );
+    if (!selectedItems.length) return "";
+    const payload = {
+      type: "project_photos",
+      app: "OPERA.AI",
+      folder,
+      createdAt: new Date().toISOString(),
+      items: selectedItems.map((item, index) => ({
+        id: mediaItemId(item, index),
+        project: item?.project || folder,
+        costCenter: item?.costCenter || item?.cost_centre || "",
+        employee: item?.employee || "",
+        capturedAt: item?.capturedAt || item?.timestamp || "",
+        mediaType: isVideoMediaItem(item) ? "video" : "photo",
+        type: isVideoMediaItem(item) ? "video" : "photo",
+        imageUrl: item?.imageUrl || item?.dataUrl || "",
+        videoUrl: item?.videoUrl || "",
+        dataUrl: item?.dataUrl || "",
+        durationSeconds: item?.durationSeconds || item?.duration_seconds || null,
+      })),
+    };
+    return `${window.location.origin}/?photoShare=${encodeSharePayload(payload)}`;
+  };
 
   const shareProjectFolder = async (folderName) => {
-    const shareUrl = getFolderShareLink(folderName);
-    if (navigator.share) {
-      await navigator.share({ title: "Project Photos", text: `Project photo folder: ${shareUrl}`, url: shareUrl });
+    const folder = String(folderName || "");
+    const selectedCount = (selectedPhotoIdsByFolder[folder] || []).length;
+    if (!selectedCount) {
+      setPhotoShareMessage("Select photos in this project before sharing.");
+      setTimeout(() => setPhotoShareMessage(""), 5000);
       return;
     }
-    await navigator.clipboard.writeText(shareUrl);
-    alert("Project folder link copied. After Supabase setup, this will become a real customer share link.");
+    const shareUrl = getFolderShareLink(folder);
+    if (!shareUrl) return;
+    const shareText = `${selectedCount} selected project ${selectedCount === 1 ? "photo" : "photos"} from ${folder}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "OPERA.AI Project Photos", text: shareText, url: shareUrl });
+      } else {
+        await navigator.clipboard.writeText(shareUrl);
+        setPhotoShareMessage("Share link copied.");
+        setTimeout(() => setPhotoShareMessage(""), 5000);
+      }
+    } catch (err) {
+      console.warn("Photo share failed:", err);
+      setPhotoShareMessage("Could not share. Link copied when browser allows clipboard access.");
+      try {
+        await navigator.clipboard.writeText(shareUrl);
+      } catch {}
+      setTimeout(() => setPhotoShareMessage(""), 6000);
+    }
   };
 
   const openPhotosTab = () => {
@@ -7942,23 +8248,59 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const handleSaveCompanyTimeZone = async (event) => {
+  const handleSaveCompanyProfile = async (event) => {
     event.preventDefault();
     if (!isAdmin || !userCompany?.id) return;
+    const nameDraft = String(settingsCompanyNameDraft || "").trim();
+    if (!nameDraft) {
+      setSettingsTzMessage("Company name is required.");
+      return;
+    }
     setSettingsTzSaving(true);
     setSettingsTzMessage("");
     try {
       const { error } = await supabase
         .from("companies")
-        .update({ time_zone: settingsTzDraft })
+        .update({ name: nameDraft, time_zone: settingsTzDraft })
         .eq("id", userCompany.id);
       if (error) throw error;
-      setUserCompany((prev) => (prev ? { ...prev, time_zone: settingsTzDraft } : prev));
-      setSettingsTzMessage("Company time zone saved.");
+      setUserCompany((prev) => (prev ? { ...prev, name: nameDraft, time_zone: settingsTzDraft } : prev));
+      setSettingsCompanyEditOpen(false);
+      setSettingsTzMessage("Company profile saved.");
     } catch (err) {
       setSettingsTzMessage(getErrorMessage(err));
     } finally {
       setSettingsTzSaving(false);
+    }
+  };
+
+  const handleSaveEmployeeProfile = async (event) => {
+    event.preventDefault();
+    if (!authUser?.id) return;
+    const nameDraft = String(settingsProfileNameDraft || "").trim();
+    if (!nameDraft) {
+      setSettingsProfileMessage("Name is required.");
+      return;
+    }
+    setSettingsProfileSaving(true);
+    setSettingsProfileMessage("");
+    try {
+      const { error } = await supabase.from("profiles").update({ full_name: nameDraft }).eq("id", authUser.id);
+      if (error) throw error;
+      setProfileFullName(nameDraft);
+      setTeamRows((prev) =>
+        prev.map((row) =>
+          String(row.userId) === String(authUser.id)
+            ? { ...row, fullName: nameDraft, displayName: nameDraft }
+            : row
+        )
+      );
+      setSettingsProfileEditOpen(false);
+      setSettingsProfileMessage("Employee profile saved.");
+    } catch (err) {
+      setSettingsProfileMessage(getErrorMessage(err));
+    } finally {
+      setSettingsProfileSaving(false);
     }
   };
 
@@ -8280,12 +8622,22 @@ const handlePhotoQuickUpload = async (event) => {
   );
   };
 
+  if (publicPhotoShare) {
+    return (
+      <PublicPhotoShareView
+        share={publicPhotoShare}
+        index={publicShareIndex}
+        setIndex={setPublicShareIndex}
+      />
+    );
+  }
+
   if (initialLoading) {
     return (
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
         <div className="text-center">
           <div className="text-4xl mb-3">⏱️</div>
-          <p className="text-sm text-slate-300">Loading OPERA...</p>
+          <p className="text-sm text-slate-300">Loading OPERA.AI...</p>
         </div>
       </div>
     );
@@ -8300,7 +8652,7 @@ const handlePhotoQuickUpload = async (event) => {
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
                 <div>
-                  <h1 className="text-2xl font-bold tracking-tight">OPERA</h1>
+                  <h1 className="text-2xl font-bold tracking-tight">OPERA.AI</h1>
                   <p className="text-sm text-slate-600">Create Account</p>
                 </div>
               </div>
@@ -8309,7 +8661,7 @@ const handlePhotoQuickUpload = async (event) => {
             <form onSubmit={handleSignup} className="p-5 space-y-4">
               <div>
                 <h2 className="text-xl font-bold">Sign up</h2>
-                <p className="text-sm text-slate-500 mt-1">Create an account to start using OPERA.</p>
+                <p className="text-sm text-slate-500 mt-1">Create an account to start using OPERA.AI.</p>
               </div>
 
               <div className="space-y-2">
@@ -8384,7 +8736,7 @@ const handlePhotoQuickUpload = async (event) => {
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">OPERA</h1>
+                <h1 className="text-2xl font-bold tracking-tight">OPERA.AI</h1>
               </div>
             </div>
           </div>
@@ -8613,7 +8965,7 @@ const handlePhotoQuickUpload = async (event) => {
                   setAuthStep("login");
                 }}
               >
-                Continue to OPERA
+                Continue to OPERA.AI
               </Button>
             </div>
           </div>
@@ -8939,7 +9291,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ☰
               </button>
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">OPERA</h1>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">OPERA.AI</h1>
                 <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
@@ -9560,31 +9912,72 @@ const handlePhotoQuickUpload = async (event) => {
                     <span className="text-[13px] text-amber-800">{timesheetsError}</span>
                   </div>
                 )}
-                <div className="space-y-3">
-                  {visibleCurrentShift && (
-                    <div className="rounded-2xl border bg-blue-50 p-4">
-                      <div className="flex justify-between gap-3">
-                        <div>
-                          <p className="font-semibold">{activeShiftTitle}</p>
-                          {activeShiftEmailSecondary && (
-                            <p className="text-[11px] text-slate-500 break-all">{activeShiftEmailSecondary}</p>
-                          )}
-                          <p className="text-xs text-slate-600">{visibleCurrentShift.project}</p>
-                          <p className="text-xs text-slate-500">Cost Centre: {visibleCurrentShift.costCenter}</p>
-                          <p className="text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
-                          <p className="text-xs text-slate-500">Live GPS: {formatLocation(visibleCurrentShift.liveLocation)}</p>
-                        </div>
-                        <span className="rounded-full bg-blue-100 px-3 py-1 text-xs text-blue-700 h-fit">Active</span>
-                      </div>
-                      <p className="text-sm mt-3">In: {formatTime(visibleCurrentShift.clockIn, companyTimeZone)}</p>
-                      <p className="text-2xl font-black tabular-nums mt-2">{formatTimer(liveSeconds)}</p>
-                      <p className="text-sm font-semibold mt-1 text-green-700">Money Earned: {formatMoney(liveEarnings)}</p>
+                <div className="mb-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {[
+                      { id: "day", label: "Day" },
+                      { id: "week", label: "Week" },
+                      { id: "range", label: "Range" },
+                    ].map((mode) => (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        className={`rounded-xl py-2.5 text-[14px] font-bold ${
+                          timesheetViewMode === mode.id
+                            ? "bg-slate-900 text-white"
+                            : "bg-white text-slate-800 border border-slate-200"
+                        }`}
+                        onClick={() => setTimesheetViewMode(mode.id)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                  {timesheetViewMode === "range" ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1 text-[13px] font-semibold text-slate-700">
+                        From
+                        <input
+                          type="date"
+                          className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
+                          value={timesheetDateFrom}
+                          onChange={(e) => setTimesheetDateFrom(e.target.value)}
+                        />
+                      </label>
+                      <label className="space-y-1 text-[13px] font-semibold text-slate-700">
+                        To
+                        <input
+                          type="date"
+                          className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
+                          value={timesheetDateTo}
+                          onChange={(e) => setTimesheetDateTo(e.target.value)}
+                        />
+                      </label>
                     </div>
+                  ) : (
+                    <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
+                      {timesheetViewMode === "week" ? "Week containing" : "Date"}
+                      <input
+                        type="date"
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
+                        value={timesheetDateKey}
+                        onChange={(e) => setTimesheetDateKey(e.target.value)}
+                      />
+                    </label>
                   )}
-                  {!timesheetsLoading && visibleRecords.length === 0 && !visibleCurrentShift && (
-                    <p className="text-[15px] text-slate-500 text-center py-8">No timesheet records for this user yet.</p>
+                  {timesheetRangeBounds.from && timesheetRangeBounds.to && (
+                    <p className="text-[13px] font-medium text-slate-600">
+                      Showing {timesheetRangeBounds.from === timesheetRangeBounds.to
+                        ? timesheetRangeBounds.from
+                        : `${timesheetRangeBounds.from} to ${timesheetRangeBounds.to}`}
+                    </p>
                   )}
-                  {visibleRecords.map((record) => renderTimesheetCard(record, true))}
+                </div>
+                <div className="space-y-3">
+                  {!timesheetsLoading && visibleTimesheetRecords.length === 0 && (
+                    <p className="text-[15px] text-slate-500 text-center py-8">No timesheet records for this selection.</p>
+                  )}
+                  {visibleTimesheetRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
               </CardContent>
             </Card>
@@ -9595,55 +9988,106 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-5 space-y-4">
                 <div>
                   <h2 className="font-bold text-lg">Project Photos</h2>
-                  <p className="text-xs text-slate-500">Supervisor can view photos and videos saved by employees</p>
+                  <p className="text-sm text-slate-500">Open, select, and share project photos.</p>
                 </div>
-                <select className="w-full rounded-2xl border p-3 text-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
+                <select className="w-full rounded-2xl border p-3 text-[15px] font-semibold" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
                   {photoFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
+                {photoShareMessage ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] font-semibold text-slate-700">
+                    {photoShareMessage}
+                  </div>
+                ) : null}
                 {photoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No project photos yet.</p>}
                 <div className="space-y-4">
-                  {visiblePhotoFolders.map((folder) => (
-                    <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{(scopedProjectPhotos[folder] || []).length} media</p></div>
-                        <Button className="rounded-xl h-10 text-xs" onClick={() => shareProjectFolder(folder)}>Share Link</Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        {(scopedProjectPhotos[folder] || []).map((photo) => {
-                          const isVideoMedia =
-                            photo?.media_type === "video" ||
-                            photo?.mediaType === "video" ||
-                            photo?.type === "video";
-                          const mediaUrl = photo?.videoUrl || photo?.imageUrl || photo?.dataUrl || "";
-                          return (
-                            <div key={photo.id} className="rounded-xl overflow-hidden border bg-slate-50">
-                              {isVideoMedia ? (
-                                <video
-                                  src={mediaUrl}
-                                  className="w-full h-28 bg-slate-950 object-cover"
-                                  controls
-                                  playsInline
-                                  preload="metadata"
-                                />
-                              ) : (
-                                <img src={mediaUrl} alt="Project" className="w-full h-28 object-cover" />
-                              )}
-                              <div className="p-2 text-[10px] text-slate-600">
-                                <p className="font-semibold">{photo.employee}</p>
-                                <p>{photo.costCenter}</p>
-                                <p>{formatDate(new Date(photo.capturedAt), companyTimeZone)}</p>
-                                {isVideoMedia ? (
-                                  <p>Video{photo.durationSeconds || photo.duration_seconds ? ` - ${formatVideoDuration(photo.durationSeconds || photo.duration_seconds)}` : ""}</p>
-                                ) : null}
-                                <button className="underline text-blue-700" onClick={() => openMap(photo.location)}>Map</button>
-                              </div>
+                  {visiblePhotoFolders.map((folder) => {
+                    const folderItems = scopedProjectPhotos[folder] || [];
+                    const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
+                    const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
+                    return (
+                      <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
+                        <div className="space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[17px] font-bold text-slate-900 break-words">{folder}</p>
+                              <p className="text-sm text-slate-500">
+                                {folderItems.length} media · {selectedIds.size} selected
+                              </p>
                             </div>
-                          );
-                        })}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              className="rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[14px] font-bold text-slate-900"
+                              onClick={() => setAllProjectPhotosSelected(folder, !allSelected)}
+                            >
+                              {allSelected ? "Clear selected" : "Select all in project"}
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-2xl bg-slate-900 px-3 py-2.5 text-[14px] font-bold text-white disabled:opacity-50"
+                              onClick={() => void shareProjectFolder(folder)}
+                              disabled={selectedIds.size === 0}
+                            >
+                              Share selected
+                            </button>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          {folderItems.map((photo, index) => {
+                            const itemId = mediaItemId(photo, index);
+                            const selected = selectedIds.has(itemId);
+                            const isVideoMedia = isVideoMediaItem(photo);
+                            const mediaUrl = mediaItemUrl(photo);
+                            return (
+                              <div key={itemId} className={`rounded-xl overflow-hidden border bg-slate-50 ${selected ? "border-slate-900 ring-2 ring-slate-900/15" : "border-slate-200"}`}>
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    className="block w-full text-left"
+                                    onClick={() => openPhotoViewer(folder, index)}
+                                  >
+                                    {isVideoMedia ? (
+                                      <video
+                                        src={mediaUrl}
+                                        className="w-full h-32 bg-slate-950 object-cover"
+                                        muted
+                                        playsInline
+                                        preload="metadata"
+                                      />
+                                    ) : (
+                                      <img src={mediaUrl} alt="Project" className="w-full h-32 object-cover" />
+                                    )}
+                                  </button>
+                                  <label className="absolute left-2 top-2 flex h-8 w-8 items-center justify-center rounded-xl bg-white/95 shadow-sm">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4"
+                                      checked={selected}
+                                      onChange={() => togglePhotoSelected(folder, itemId)}
+                                      aria-label="Select photo"
+                                    />
+                                  </label>
+                                </div>
+                                <div className="p-2 text-[12px] text-slate-600">
+                                  <p className="font-semibold text-slate-900 truncate">{photo.employee || "Employee"}</p>
+                                  <p className="truncate">{photo.costCenter || "No cost centre"}</p>
+                                  <p>{photo.capturedAt ? formatDate(new Date(photo.capturedAt), companyTimeZone) : ""}</p>
+                                  {isVideoMedia ? (
+                                    <p>Video{photo.durationSeconds || photo.duration_seconds ? ` - ${formatVideoDuration(photo.durationSeconds || photo.duration_seconds)}` : ""}</p>
+                                  ) : null}
+                                  {photo.location ? (
+                                    <button className="underline text-blue-700 font-semibold" onClick={() => openMap(photo.location)}>Map</button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </CardContent>
             </Card>
@@ -9867,16 +10311,18 @@ const handlePhotoQuickUpload = async (event) => {
                       (dashboardLiveWorkingCards || []).map((card) => {
                         const { rep, uid, displayName } = card || {};
                         if (!rep || !uid) return null;
-                        const liveCtx = {
-                          selectedDateKey: calendarDateKeyInTimeZone(now, companyTimeZone) || "",
-                          companyTimeZone,
-                          now,
-                          authUser,
-                          visibleCurrentShift,
-                        };
-                        const att = teamAttendanceStatusForRecord(rep, liveCtx);
-                        const statusLabel = att?.label ? String(att.label) : "—";
+                        const timerSeconds = rep?.clockIn
+                          ? Math.max(
+                              0,
+                              Math.floor(
+                                ((now instanceof Date ? now.getTime() : new Date(now).getTime()) -
+                                  parseStoredInstant(rep.clockIn).getTime()) /
+                                  1000
+                              )
+                            )
+                          : 0;
                         const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
+                        const clockInDateDisp = rep?.clockIn ? formatDate(parseStoredInstant(rep.clockIn), companyTimeZone) : "";
                         const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                         const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
                         const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
@@ -9895,58 +10341,47 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div
                             key={`live-${String(uid)}`}
-                            className="rounded-xl border border-white/90 bg-white p-3 space-y-2 shadow-sm min-w-0 max-w-full"
+                            className="rounded-xl border border-white/90 bg-white p-3 space-y-3 shadow-sm min-w-0 max-w-full"
                           >
-                            <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
-                              <p className="text-[16px] font-semibold text-slate-900 leading-snug break-words min-w-0 flex-1">
+                            <div className="min-w-0">
+                              <p className="text-[18px] font-black text-slate-900 leading-snug break-words">
                                 {displayName || "—"}
                               </p>
-                              <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[13px] font-semibold text-emerald-900 max-w-[55%] text-right break-words">
-                                {statusLabel}
-                              </span>
+                              <p className="text-[15px] font-semibold text-slate-700 leading-snug break-words">
+                                {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
+                              </p>
                             </div>
-                            <dl className="grid grid-cols-1 gap-1.5 text-[15px] text-slate-800 min-w-0">
-                              <div className="min-w-0">
-                                <dt className="text-[13px] font-medium text-slate-500">Project</dt>
-                                <dd className="font-medium break-words">{rep?.project != null ? String(rep.project) : "—"}</dd>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                                <p className="text-[12px] font-bold uppercase tracking-wide text-slate-500">Timer</p>
+                                <p className="text-[19px] font-black tabular-nums text-slate-900">{formatTimer(timerSeconds)}</p>
                               </div>
-                              <div className="min-w-0">
-                                <dt className="text-[13px] font-medium text-slate-500">Cost centre</dt>
-                                <dd className="font-medium break-words">{rep?.costCenter != null ? String(rep.costCenter) : "—"}</dd>
+                              <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
+                                <p className="text-[12px] font-bold uppercase tracking-wide text-slate-500">Clocked in</p>
+                                <p className="text-[15px] font-bold tabular-nums text-slate-900">{clockInDisp}</p>
+                                {clockInDateDisp ? <p className="text-[12px] text-slate-500">{clockInDateDisp}</p> : null}
                               </div>
-                              <div className="min-w-0">
-                                <dt className="text-[13px] font-medium text-slate-500">Clock-in</dt>
-                                <dd className="font-semibold tabular-nums">{clockInDisp}</dd>
-                              </div>
-                            </dl>
-                            <div className="text-[14px] leading-snug pt-1 border-t border-slate-100 min-w-0">
+                            </div>
+                            <div className="text-[15px] leading-snug pt-1 border-t border-slate-100 min-w-0">
                               {hasLiveGps ? (
-                                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start sm:gap-2">
-                                  <span className="text-slate-700 break-all min-w-0">
-                                    Live GPS:{" "}
-                                    {formatLocation({
-                                      latitude: Number(latRaw),
-                                      longitude: Number(lngRaw),
-                                    })}
-                                  </span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-slate-700">Live location</span>
                                   <button
                                     type="button"
-                                    className="text-blue-700 font-semibold underline shrink-0 text-left"
+                                    className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800 font-bold shrink-0"
                                     onClick={() =>
                                       openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })
                                     }
                                   >
-                                    Map
+                                    Open map
                                   </button>
                                 </div>
                               ) : hasClockInGps ? (
-                                <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start sm:gap-2">
-                                  <span className="text-slate-700 break-all min-w-0">
-                                    Clock-in GPS: {formatLocation(ciLoc)}
-                                  </span>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="font-semibold text-slate-700">Clock-in location</span>
                                   <button
                                     type="button"
-                                    className="text-blue-700 font-semibold underline shrink-0 text-left"
+                                    className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-blue-800 font-bold shrink-0"
                                     onClick={() =>
                                       openMap({
                                         latitude: Number(ciLoc.latitude),
@@ -9954,7 +10389,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       })
                                     }
                                   >
-                                    Map
+                                    Open map
                                   </button>
                                 </div>
                               ) : (
@@ -10275,7 +10710,6 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-4 sm:p-5 space-y-5">
                 <div>
                   <h2 className="font-bold text-lg">Reports</h2>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Read-only · Times: {companyTimeZone}</p>
                 </div>
                 <div className="space-y-1.5">
                   <p className="text-xs font-semibold text-slate-700">Quick range</p>
@@ -10309,12 +10743,12 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-xs font-semibold text-slate-800">Group report</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <p className="text-xs font-semibold text-slate-800">Breakdown setup</p>
+                  <div className="grid grid-cols-3 gap-2">
                     <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Level 1
+                      Main
                       <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0"
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0"
                         value={reportsLevel1}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -10332,9 +10766,9 @@ const handlePhotoQuickUpload = async (event) => {
                       </select>
                     </label>
                     <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Level 2
+                      Then
                       <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0"
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0"
                         value={reportsLevel2}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -10351,19 +10785,15 @@ const handlePhotoQuickUpload = async (event) => {
                         <option value="none">None</option>
                         {REPORT_DIMS.filter((d) => d !== reportsLevel1).map((d) => (
                           <option key={d} value={d}>
-                            {d === "employee"
-                              ? "Employee"
-                              : d === "project"
-                                ? "Project"
-                                : "Cost Centre"}
+                            {reportDimensionLabel(d)}
                           </option>
                         ))}
                       </select>
                     </label>
                     <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Level 3
+                      Detail
                       <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal min-w-0 disabled:bg-slate-100 disabled:text-slate-500"
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0 disabled:bg-slate-100 disabled:text-slate-500"
                         disabled={reportsLevel2 === "none"}
                         value={reportsLevel2 === "none" ? "none" : reportsLevel3}
                         onChange={(e) => {
@@ -10375,83 +10805,12 @@ const handlePhotoQuickUpload = async (event) => {
                         <option value="none">None</option>
                         {REPORT_DIMS.filter((d) => d !== reportsLevel1 && d !== reportsLevel2).map((d) => (
                           <option key={d} value={d}>
-                            {d === "employee"
-                              ? "Employee"
-                              : d === "project"
-                                ? "Project"
-                                : "Cost Centre"}
+                            {reportDimensionLabel(d)}
                           </option>
                         ))}
                       </select>
                     </label>
                   </div>
-                </div>
-                <div className="space-y-1 text-xs font-medium text-slate-600 min-w-0">
-                  <span className="block text-[11px] font-medium text-slate-500">Secondary filter · Cost centres</span>
-                  <details className="rounded-xl border border-slate-200 bg-white overflow-hidden group">
-                      <summary className="px-2 py-2 cursor-pointer text-sm font-normal text-slate-900 list-none flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate">
-                          {reportsCostCentreAll
-                            ? "All cost centres"
-                            : reportsCostCentrePicked.length
-                              ? `${reportsCostCentrePicked.length} selected`
-                              : "Choose cost centres"}
-                        </span>
-                        <span className="text-slate-400 text-[10px] shrink-0 group-open:rotate-180 transition-transform">▼</span>
-                      </summary>
-                      <div className="border-t border-slate-100 px-2 py-2 space-y-2 max-h-44 overflow-y-auto overscroll-y-contain">
-                        <label className="flex items-start gap-2 text-xs font-normal">
-                          <input
-                            type="checkbox"
-                            className="mt-0.5 shrink-0"
-                            checked={reportsCostCentreAll}
-                            onChange={(e) => {
-                              const on = e.target.checked;
-                              setReportsCostCentreAll(on);
-                              setReportsExpandedL1({});
-                              setReportsExpandedL2({});
-                              if (on) {
-                                setReportsCostCentrePicked([]);
-                              } else {
-                                setReportsCostCentrePicked((prev) => {
-                                  if (prev.length > 0) return prev;
-                                  const next = reportsDistinctCostCentres.slice();
-                                  return next;
-                                });
-                              }
-                            }}
-                          />
-                          <span>All cost centres</span>
-                        </label>
-                        {!reportsCostCentreAll && (
-                          <div className="space-y-1.5 pl-1 border-l-2 border-slate-100 ml-1">
-                            {reportsDistinctCostCentres.length === 0 ? (
-                              <p className="text-[11px] text-slate-500 leading-snug">No cost centres in loaded timesheets for this range.</p>
-                            ) : (
-                              reportsDistinctCostCentres.map((cc) => (
-                                <label key={cc} className="flex items-start gap-2 text-xs font-normal">
-                                  <input
-                                    type="checkbox"
-                                    className="mt-0.5 shrink-0"
-                                    checked={reportsCostCentrePicked.includes(cc)}
-                                    onChange={(ev) => {
-                                      const checked = ev.target.checked;
-                                      setReportsExpandedL1({});
-                                      setReportsExpandedL2({});
-                                      setReportsCostCentrePicked((prev) => {
-                                        if (checked) return [...new Set([...prev, cc])];
-                                        return prev.filter((x) => x !== cc);
-                                      });
-                                    }}
-                                  />
-                                  <span className="min-w-0 break-words">{cc === "—" ? "(none)" : cc}</span>
-                                </label>
-                              ))
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </details>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <label className="space-y-1 text-xs font-medium text-slate-700">
@@ -10548,11 +10907,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </span>
                       </h3>
 
-                      {reportsScreenRows.length > 0 && reportsRowsFilteredForUi.length === 0 ? (
-                        <p className="text-sm text-slate-600 py-1 leading-snug">
-                          No timesheets match the selected cost centres.
-                        </p>
-                      ) : reportsBreakdownTree.level1Rows.length === 0 ? (
+                      {reportsBreakdownTree.level1Rows.length === 0 ? (
                         <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
                       ) : (
                         <div className="rounded-2xl border border-slate-200 overflow-x-hidden divide-y divide-slate-100 bg-white min-w-0">
@@ -13290,63 +13645,153 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5 space-y-4">
                 <div>
-                  <h2 className="font-bold text-xl">Settings</h2>
-                  <p className="text-[14px] text-slate-500">Company time zone (display only — stored times stay as ISO UTC in the database).</p>
+                  <h2 className="font-bold text-xl">Profile</h2>
+                  <p className="text-[14px] text-slate-500">Manage company and employee profile details.</p>
                 </div>
-                <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
-                  <p className="text-[14px] text-slate-500">Company</p>
-                  <p className="text-[16px] font-semibold text-slate-900">{userCompany?.name || "—"}</p>
+                <div className="rounded-2xl border bg-white p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[18px] font-black text-slate-900">Company Profile</p>
+                      <p className="text-[14px] text-slate-600">Company name and time zone.</p>
+                    </div>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-900"
+                        onClick={() => setSettingsCompanyEditOpen((open) => !open)}
+                      >
+                        {settingsCompanyEditOpen ? "Close" : "Edit"}
+                      </button>
+                    ) : null}
+                  </div>
+                  {settingsCompanyEditOpen && isAdmin ? (
+                    <form onSubmit={handleSaveCompanyProfile} className="space-y-3">
+                      <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                        Company name
+                        <input
+                          className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                          value={settingsCompanyNameDraft}
+                          onChange={(e) => setSettingsCompanyNameDraft(e.target.value)}
+                        />
+                      </label>
+                      <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                        Company time zone
+                        <select
+                          className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                          value={settingsTzDraft}
+                          onChange={(e) => setSettingsTzDraft(e.target.value)}
+                        >
+                          {COMPANY_TIME_ZONE_OPTIONS.map((tz) => (
+                            <option key={tz} value={tz}>{tz}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {settingsTzMessage && (
+                        <div
+                          className={`rounded-2xl border p-3 text-xs ${
+                            settingsTzMessage.includes("saved")
+                              ? "bg-green-50 border-green-100 text-green-800"
+                              : "bg-red-50 border-red-100 text-red-700"
+                          }`}
+                        >
+                          {settingsTzMessage}
+                        </div>
+                      )}
+                      <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsTzSaving}>
+                        {settingsTzSaving ? "Saving..." : "Save Company Profile"}
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-2">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Company</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "—"}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Time zone</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{companyTimeZone}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
-                  <p className="text-[14px] text-slate-500">Current time zone</p>
-                  <p className="text-[16px] font-semibold text-slate-900">{companyTimeZone}</p>
-                  <p className="text-[14px] text-slate-600 mt-1">
-                    Company time now: {formatTime(now, companyTimeZone)}
-                  </p>
+
+                <div className="rounded-2xl border bg-white p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[18px] font-black text-slate-900">Employee Profile</p>
+                      <p className="text-[14px] text-slate-600">Your name and login email.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-900"
+                      onClick={() => setSettingsProfileEditOpen((open) => !open)}
+                    >
+                      {settingsProfileEditOpen ? "Close" : "Edit"}
+                    </button>
+                  </div>
+                  {settingsProfileEditOpen ? (
+                    <form onSubmit={handleSaveEmployeeProfile} className="space-y-3">
+                      <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                        Display name
+                        <input
+                          className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                          value={settingsProfileNameDraft}
+                          onChange={(e) => setSettingsProfileNameDraft(e.target.value)}
+                        />
+                      </label>
+                      <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
+                        <p className="text-[13px] font-semibold text-slate-500">Email</p>
+                        <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "—"}</p>
+                      </div>
+                      {settingsProfileMessage && (
+                        <div
+                          className={`rounded-2xl border p-3 text-xs ${
+                            settingsProfileMessage.includes("saved")
+                              ? "bg-green-50 border-green-100 text-green-800"
+                              : "bg-red-50 border-red-100 text-red-700"
+                          }`}
+                        >
+                          {settingsProfileMessage}
+                        </div>
+                      )}
+                      <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsProfileSaving}>
+                        {settingsProfileSaving ? "Saving..." : "Save Employee Profile"}
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-2">
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Name</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{(profileFullName || "").trim() || "User"}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Email</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-all">{authUser?.email || "—"}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
+
                 {isAdmin ? (
-                  <div className="rounded-2xl border bg-slate-50 p-4 space-y-3">
+                  <div className="rounded-2xl border bg-white p-4 space-y-3">
                     <div>
-                      <p className="text-[16px] font-bold text-slate-900">Team</p>
+                      <p className="text-[18px] font-black text-slate-900">Team</p>
                       <p className="text-[14px] text-slate-600">Manage employee profiles, roles, pay rates, and status.</p>
                     </div>
-                    <Button type="button" className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={() => setActiveTab("team")}>
+                    <Button
+                      type="button"
+                      className="w-full rounded-2xl h-12 text-[15px] font-bold"
+                      onClick={() => setActiveTab("team")}
+                    >
                       Open Team
                     </Button>
                   </div>
                 ) : null}
-                {isAdmin ? (
-                  <form onSubmit={handleSaveCompanyTimeZone} className="space-y-3">
-                    <div className="space-y-2">
-                      <label className="text-[15px] font-medium">Company time zone</label>
-                      <select
-                        className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
-                        value={settingsTzDraft}
-                        onChange={(e) => setSettingsTzDraft(e.target.value)}
-                      >
-                        {COMPANY_TIME_ZONE_OPTIONS.map((tz) => (
-                          <option key={tz} value={tz}>{tz}</option>
-                        ))}
-                      </select>
-                    </div>
-                    {settingsTzMessage && (
-                      <div
-                        className={`rounded-2xl border p-3 text-xs ${
-                          settingsTzMessage.includes("saved")
-                            ? "bg-green-50 border-green-100 text-green-800"
-                            : "bg-red-50 border-red-100 text-red-700"
-                        }`}
-                      >
-                        {settingsTzMessage}
-                      </div>
-                    )}
-                    <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsTzSaving}>
-                      {settingsTzSaving ? "Saving…" : "Save time zone"}
-                    </Button>
-                  </form>
-                ) : (
-                  <p className="text-xs text-slate-500">Only an owner or supervisor can change the company time zone. Contact your supervisor if this should be updated.</p>
-                )}
+                {!isAdmin ? (
+                  <p className="text-xs text-slate-500">
+                    Ask a supervisor or owner to update company profile details.
+                  </p>
+                ) : null}
               </CardContent>
             </Card>
           )}
@@ -13373,6 +13818,64 @@ const handlePhotoQuickUpload = async (event) => {
             </div>
           </div>
         )}
+
+        {photoViewer && (() => {
+          const items = scopedProjectPhotos[photoViewer.folder] || [];
+          if (!items.length) return null;
+          const index = Math.max(0, Math.min(Number(photoViewer.index) || 0, items.length - 1));
+          const item = items[index];
+          const isVideo = isVideoMediaItem(item);
+          const url = mediaItemUrl(item);
+          return (
+            <div className="fixed inset-0 z-[70] bg-black/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
+              <div className="w-full max-w-sm rounded-3xl bg-white overflow-hidden shadow-2xl">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-3">
+                  <div className="min-w-0">
+                    <p className="text-[16px] font-black text-slate-900 truncate">{photoViewer.folder}</p>
+                    <p className="text-[13px] font-semibold text-slate-500">{index + 1} of {items.length}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-black text-slate-700"
+                    onClick={() => setPhotoViewer(null)}
+                    aria-label="Close photo viewer"
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="bg-slate-950">
+                  {isVideo ? (
+                    <video src={url} className="w-full max-h-[64dvh] bg-slate-950" controls playsInline />
+                  ) : (
+                    <img src={url} alt="Project" className="w-full max-h-[64dvh] object-contain bg-slate-950" />
+                  )}
+                </div>
+                <div className="p-3 space-y-3">
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-bold text-slate-900 truncate">{item?.employee || "Employee"}</p>
+                    <p className="text-[14px] text-slate-600 truncate">{item?.costCenter || "No cost centre"}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-2xl border border-slate-300 bg-white py-3 text-[15px] font-bold text-slate-900"
+                      onClick={() => movePhotoViewer(-1)}
+                    >
+                      Previous
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-2xl bg-slate-900 py-3 text-[15px] font-bold text-white"
+                      onClick={() => movePhotoViewer(1)}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {isMenuOpen && (
           <div
