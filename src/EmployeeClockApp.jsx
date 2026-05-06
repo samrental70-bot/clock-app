@@ -1585,6 +1585,8 @@ export default function EmployeeClockApp() {
   const scheduleRouteHandledRef = useRef(false);
   /** Once per login session: land employees on Schedule after company/role resolve (no repeated overrides). */
   const employeeScheduleLandingAppliedRef = useRef(false);
+  /** Once per login session: land supervisors/owners on Employees > Live Dashboard. */
+  const adminDashboardLandingAppliedRef = useRef(false);
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -1619,6 +1621,7 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (!authUser?.id) {
       employeeScheduleLandingAppliedRef.current = false;
+      adminDashboardLandingAppliedRef.current = false;
       return;
     }
     if (!companyChecked || !userCompany?.id || !isEmployeeRole) return;
@@ -1626,6 +1629,13 @@ export default function EmployeeClockApp() {
     employeeScheduleLandingAppliedRef.current = true;
     setActiveTab("schedule");
   }, [authUser?.id, companyChecked, userCompany?.id, isEmployeeRole]);
+
+  useEffect(() => {
+    if (!authUser?.id || !companyChecked || !userCompany?.id || !isAdmin) return;
+    if (adminDashboardLandingAppliedRef.current) return;
+    adminDashboardLandingAppliedRef.current = true;
+    if (activeTab === "clock") setActiveTab("dashboard");
+  }, [authUser?.id, companyChecked, userCompany?.id, isAdmin, activeTab]);
 
   const scopedProjectPhotos = useMemo(() => {
     if (!isEmployeeRole || !authUser?.id) return projectPhotos;
@@ -8066,19 +8076,19 @@ const handlePhotoQuickUpload = async (event) => {
     <div key={record.id} className="rounded-2xl border bg-white p-4">
       <div className="flex justify-between gap-3">
         <div>
-          <p className="font-semibold">{timesheetTitle}</p>
+          <p className="text-[16px] font-semibold">{timesheetTitle}</p>
           {timesheetEmailSecondary && (
-            <p className="text-[11px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
+            <p className="text-[13px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
           )}
-          <p className="text-xs text-slate-600">{record.project}</p>
-          <p className="text-xs text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
+          <p className="text-[14px] text-slate-600">{record.project}</p>
+          <p className="text-[14px] text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs h-fit ${statusBadgeClass}`}>
+        <span className={`rounded-full px-3 py-1 text-[13px] font-semibold h-fit ${statusBadgeClass}`}>
           {statusBadgeLabel}
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-3 text-xs text-slate-600">
+      <div className="grid grid-cols-3 gap-2 mt-3 text-[14px] text-slate-600">
         <div><p>Hours</p><p className="font-semibold text-slate-900">{formatDuration(getWorkedMinutes(record))}</p></div>
         <div><p>Rate</p><p className="font-semibold text-slate-900">{formatMoney(rateFromTimesheet)}/hr</p></div>
         <div>
@@ -8091,45 +8101,45 @@ const handlePhotoQuickUpload = async (event) => {
 
       {editingRecordId === record.id ? (
         <div className="mt-3 border-t pt-2 space-y-2">
-          <p className="text-[10px] text-slate-500 leading-tight">Edit in {companyTimeZone}</p>
+          <p className="text-[13px] text-slate-500 leading-tight">Edit in {companyTimeZone}</p>
           <div className="space-y-1">
-            <label className="text-[10px] text-slate-500">Clock in</label>
+            <label className="text-[13px] text-slate-500">Clock in</label>
             <div className="flex gap-1">
               <input
                 type="date"
-                className="min-w-0 flex-1 rounded-lg border px-1 py-1 text-[11px]"
+                className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
                 value={editClockInDate}
                 onChange={(e) => setEditClockInDate(e.target.value)}
               />
               <input
                 type="time"
-                className="w-[6.25rem] shrink-0 rounded-lg border px-1 py-1 text-[11px]"
+                className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
                 value={editClockInTime}
                 onChange={(e) => setEditClockInTime(e.target.value)}
               />
             </div>
             </div>
           <div className="space-y-1">
-            <label className="text-[10px] text-slate-500">Clock out</label>
+            <label className="text-[13px] text-slate-500">Clock out</label>
             <div className="flex gap-1">
               <input
                 type="date"
-                className="min-w-0 flex-1 rounded-lg border px-1 py-1 text-[11px]"
+                className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
                 value={editClockOutDate}
                 onChange={(e) => setEditClockOutDate(e.target.value)}
               />
               <input
                 type="time"
-                className="w-[6.25rem] shrink-0 rounded-lg border px-1 py-1 text-[11px]"
+                className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
                 value={editClockOutTime}
                 onChange={(e) => setEditClockOutTime(e.target.value)}
               />
           </div>
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] text-slate-500">Project</label>
+            <label className="text-[13px] text-slate-500">Project</label>
             <select
-              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+              className="w-full rounded-lg border py-2 px-2 text-[14px]"
               value={editProjectId}
               onChange={(e) => {
                 const v = e.target.value;
@@ -8146,9 +8156,9 @@ const handlePhotoQuickUpload = async (event) => {
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-[10px] text-slate-500">Cost centre</label>
+            <label className="text-[13px] text-slate-500">Cost centre</label>
             <select
-              className="w-full rounded-lg border py-1.5 px-2 text-xs"
+              className="w-full rounded-lg border py-2 px-2 text-[14px]"
               value={editCostCenter}
               onChange={(e) => setEditCostCenter(e.target.value)}
               disabled={editCentres.length === 0}
@@ -8167,20 +8177,20 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="grid grid-cols-2 gap-1.5 pt-1">
             <Button
               type="button"
-              className="rounded-lg h-9 text-[11px] font-semibold"
+              className="rounded-lg h-10 text-[14px] font-semibold"
               disabled={editTimesheetSaving}
               onClick={() => void saveEditedRecord(record)}
             >
               {editTimesheetSaving ? "Saving…" : "Save"}
             </Button>
-            <Button type="button" className="rounded-lg h-9 text-[11px]" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
+            <Button type="button" className="rounded-lg h-10 text-[14px]" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
               Cancel
             </Button>
           </div>
           {isAdmin && !editTimesheetSaving && (
             <Button
               type="button"
-              className="w-full rounded-xl h-9 text-[11px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
+              className="w-full rounded-xl h-10 text-[14px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
               disabled={busyDelete}
               onClick={() => void handleDeleteTimesheetRecord(record)}
             >
@@ -8190,12 +8200,12 @@ const handlePhotoQuickUpload = async (event) => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2 mt-3 text-xs text-slate-600 border-t pt-3">
+          <div className="grid grid-cols-2 gap-2 mt-3 text-[14px] text-slate-600 border-t pt-3">
             <div><p>In</p><p className="font-semibold text-slate-900">{formatTime(record.clockIn, companyTimeZone)}</p></div>
             <div><p>Out</p><p className={outClass}>{outText}</p></div>
           </div>
           {(record.clockInLocation || record.clockOutLocation) && (
-            <div className="mt-2 space-y-1 text-[11px] text-slate-600 border-t border-slate-100 pt-2">
+            <div className="mt-2 space-y-1 text-[13px] text-slate-600 border-t border-slate-100 pt-2">
               {record.clockInLocation && (
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span>Clock In Location:</span>
@@ -8223,28 +8233,28 @@ const handlePhotoQuickUpload = async (event) => {
             </div>
           )}
           {staleActiveMissingOut && (
-            <p className="mt-1 text-[11px] text-amber-700">This shift was never clocked out.</p>
+            <p className="mt-1 text-[13px] text-amber-700">This shift was never clocked out.</p>
           )}
           {submittedMissingClockOut && (
-            <p className="mt-1 text-[11px] text-amber-700">No clock-out on file for this submitted row.</p>
+            <p className="mt-1 text-[13px] text-amber-700">No clock-out on file for this submitted row.</p>
           )}
           {showCloseShift && (
             <Button
               type="button"
-              className="w-full rounded-xl h-9 text-xs mt-2 border border-slate-300 bg-white text-slate-800 font-semibold"
+              className="w-full rounded-xl h-10 text-[14px] mt-2 border border-slate-300 bg-white text-slate-800 font-semibold"
               disabled={busyClose}
               onClick={() => void handleCloseStaleShift(record)}
             >
               {busyClose ? "Closing…" : "Close shift"}
             </Button>
           )}
-          {record.edited && <p className="mt-2 text-xs text-red-600">Time edited by employee — waiting for admin approval.</p>}
+          {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee — waiting for admin approval.</p>}
           {((allowEdit && canEditTimesheetRecord(record)) || isAdmin) && (
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               {allowEdit && canEditTimesheetRecord(record) && (
                 <Button
                   type="button"
-                  className="rounded-xl h-9 text-[11px] col-span-2 sm:col-span-1"
+                  className="rounded-xl h-10 text-[14px] col-span-2 sm:col-span-1"
                   disabled={busyDelete}
                   onClick={() => startEditRecord(record)}
                 >
@@ -8254,7 +8264,7 @@ const handlePhotoQuickUpload = async (event) => {
               {isAdmin && (
                 <Button
                   type="button"
-                  className="rounded-xl h-9 text-[11px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 col-span-2 sm:col-span-1 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
+                  className="rounded-xl h-10 text-[14px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 col-span-2 sm:col-span-1 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
                   disabled={busyDelete || busyClose}
                   onClick={() => void handleDeleteTimesheetRecord(record)}
                 >
@@ -9000,12 +9010,12 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-3xl border-blue-100 bg-blue-50 shadow-sm">
               <CardContent className="p-3 space-y-2">
                 <div>
-                  <h2 className="font-bold text-sm sm:text-base">Install on Phone</h2>
-                  <p className="text-xs text-slate-600 leading-snug">Add this PWA to the home screen and use it like an app.</p>
+                  <h2 className="font-bold text-[17px]">Install on Phone</h2>
+                  <p className="text-[14px] text-slate-600 leading-snug">Add this PWA to the home screen and use it like an app.</p>
                 </div>
-                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-11 text-sm">📲 Install App</Button>
+                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-12 text-[15px] font-bold">📲 Install App</Button>
                 {!deferredPrompt && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-[14px] text-slate-500">
                     iPhone: Open in Safari → Tap Share → Add to Home Screen<br />
                     Android: Tap ⋮ → Install App / Add to Home Screen
                   </p>
@@ -9020,22 +9030,22 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex items-center gap-1.5">
                   <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
                   <div className="min-w-0">
-                    <h2 className="font-bold text-sm sm:text-lg leading-tight">Start Shift</h2>
-                    <p className="text-[11px] sm:text-xs text-slate-500 leading-snug">Choose project and cost centre</p>
+                    <h2 className="font-bold text-[18px] leading-tight">Start Shift</h2>
+                    <p className="text-[14px] text-slate-500 leading-snug">Choose project and cost centre</p>
                   </div>
                 </div>
 
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
                   <div className="rounded-2xl border bg-white p-3 space-y-1.5">
-                    <p className="font-semibold">No projects yet</p>
-                    <p className="text-xs text-slate-500">Ask your supervisor to add a project, or create one now if you're an owner/supervisor.</p>
+                    <p className="text-[16px] font-semibold">No projects yet</p>
+                    <p className="text-[14px] text-slate-500">Ask your supervisor to add a project, or create one now if you're an owner/supervisor.</p>
                   </div>
                 )}
 
                 {projectsError && (
-                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-[14px] text-amber-900">
                     Project loading failed — using emergency fallback projects.<br />
-                    <span className="text-[11px] text-amber-800">{projectsError}</span>
+                    <span className="text-[13px] text-amber-800">{projectsError}</span>
                   </div>
                 )}
 
@@ -9045,7 +9055,7 @@ const handlePhotoQuickUpload = async (event) => {
                   effectiveProjects.length > 0 &&
                   clockSelectableProjects.length === 0 && (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-                      <p className="text-sm text-amber-950 leading-snug">
+                      <p className="text-[15px] text-amber-950 leading-snug">
                         No projects assigned. Please contact your supervisor.
                       </p>
                     </div>
@@ -9054,15 +9064,15 @@ const handlePhotoQuickUpload = async (event) => {
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
                   <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
                   <div>
-                      <p className="font-semibold">Add Project</p>
-                      <p className="text-xs text-slate-500">Add a project and cost centres (comma-separated).</p>
+                      <p className="text-[16px] font-semibold">Add Project</p>
+                      <p className="text-[14px] text-slate-500">Add a project and cost centres (comma-separated).</p>
                   </div>
 
                     <div className="space-y-1">
-                      <label className="text-xs sm:text-sm font-medium">Project name</label>
+                      <label className="text-[14px] font-medium">Project name</label>
                       <input
                         type="text"
-                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10"
+                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11"
                         value={newProjectName}
                         onChange={(e) => setNewProjectName(e.target.value)}
                         placeholder="Example: Basement Renovation"
@@ -9071,10 +9081,10 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                     <div className="space-y-1">
-                      <label className="text-xs sm:text-sm font-medium">Cost centres</label>
+                      <label className="text-[14px] font-medium">Cost centres</label>
                       <input
                         type="text"
-                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10"
+                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11"
                         value={newProjectCostCentres}
                         onChange={(e) => setNewProjectCostCentres(e.target.value)}
                         placeholder="Framing, Drywall, Painting"
@@ -9082,21 +9092,21 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
 
                     {addProjectError && (
-                      <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-xs text-red-700">
+                      <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-[14px] text-red-700">
                         {addProjectError}
                       </div>
                     )}
 
-                    <Button type="submit" className="w-full rounded-2xl h-11 text-sm font-bold" disabled={addProjectLoading}>
+                    <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={addProjectLoading}>
                       {addProjectLoading ? "Adding..." : "Add Project"}
                     </Button>
                   </form>
                 )}
 
                 <div className="space-y-1">
-                  <label className="text-xs sm:text-sm font-medium">Scheduled Task</label>
+                  <label className="text-[14px] font-medium">Scheduled Task</label>
                   <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     disabled={clockEmployeeScheduleLoading}
                     value={clockSelectedScheduledTaskId}
                     onChange={(e) => {
@@ -9138,9 +9148,9 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs sm:text-sm font-medium">Project / Job Site</label>
+                  <label className="text-[14px] font-medium">Project / Job Site</label>
                   <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     value={projectId}
                     disabled={clockSelectableProjects.length === 0}
                     onChange={(event) => {
@@ -9157,9 +9167,9 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-xs sm:text-sm font-medium">Cost Centre</label>
+                  <label className="text-[14px] font-medium">Cost Centre</label>
                   <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-sm h-10 sm:h-11 leading-tight"
+                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -9180,7 +9190,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 {clockSelectedProject && clockCostCentresActive.length === 0 && (
-                  <p className="text-xs text-amber-800 leading-snug">
+                  <p className="text-[14px] text-amber-800 leading-snug">
                     {!isAdmin &&
                     (
                       effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
@@ -9193,7 +9203,7 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <Button
-                  className="w-full rounded-2xl h-12 sm:h-14 text-sm sm:text-base font-bold"
+                  className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
                   disabled={
                     !clockSelectedProject ||
                     clockCostCentresActive.length === 0 ||
@@ -9203,29 +9213,29 @@ const handlePhotoQuickUpload = async (event) => {
                 >
                   ✅ Clock In
                 </Button>
-                {locationStatus && <p className="text-xs text-slate-500 text-center">{locationStatus}</p>}
+                {locationStatus && <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>}
               </CardContent>
             </Card>
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50 min-h-[calc(100dvh-10.5rem)]">
-              <CardContent className="p-2.5 min-h-[calc(100dvh-10.5rem)] flex flex-col gap-2">
+            <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50">
+              <CardContent className="p-3 flex flex-col gap-2">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="flex min-h-[34dvh] flex-1 flex-col items-center justify-center text-center py-4">
-                  <p className="text-[10px] sm:text-xs text-slate-500">Live Timer</p>
+                <div className="text-center py-2">
+                  <p className="text-[15px] font-semibold text-slate-600">Live Timer</p>
                   <p className="text-5xl sm:text-6xl font-black tabular-nums leading-none mt-0.5">{formatTimer(liveSeconds)}</p>
                   <p className="text-lg sm:text-xl font-bold mt-0.5 text-green-700">{formatMoney(liveEarnings)}</p>
-                  <p className="text-[10px] sm:text-[11px] text-slate-500">Money earned</p>
+                  <p className="text-[14px] font-medium text-slate-500">Money earned</p>
                 </div>
 
                 {isChangingTask ? (
                   <div className="space-y-1.5">
-                    <select className="w-full rounded-2xl border py-2 px-2 text-sm h-10" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
+                    <select className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
                       {clockSelectableProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -9233,7 +9243,7 @@ const handlePhotoQuickUpload = async (event) => {
                       ))}
                     </select>
                     <select
-                      className="w-full rounded-2xl border py-2 px-2 text-sm h-10"
+                      className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11"
                       value={costCenter}
                       disabled={clockCostCentresActive.length === 0}
                       onChange={(e) => setCostCenter(e.target.value)}
@@ -9245,7 +9255,7 @@ const handlePhotoQuickUpload = async (event) => {
                       ))}
                     </select>
                     {clockCostCentresActive.length === 0 && (
-                      <p className="text-[10px] text-amber-800 leading-snug">
+                      <p className="text-[14px] font-medium text-amber-800 leading-snug">
                         {!isAdmin &&
                         (
                           effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
@@ -9258,13 +9268,13 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                     <div className="grid grid-cols-2 gap-1.5">
                       <Button
-                        className="h-9 rounded-xl text-sm"
+                        className="h-11 rounded-xl text-[15px] font-bold"
                         disabled={clockCostCentresActive.length === 0 || !costCenter}
                         onClick={applyTaskChange}
                       >
                         Save
                       </Button>
-                      <Button className="h-9 rounded-xl text-sm" onClick={() => setIsChangingTask(false)}>Cancel</Button>
+                      <Button className="h-11 rounded-xl text-[15px] font-bold" onClick={() => setIsChangingTask(false)}>Cancel</Button>
                     </div>
                   </div>
                 ) : (
@@ -9273,14 +9283,22 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="grid grid-cols-3 gap-1.5">
                         <button
                           type="button"
-                          className="w-full rounded-2xl h-10 bg-slate-900 text-white text-center text-xs sm:text-sm font-semibold disabled:opacity-50"
-                          onClick={startPhotoCamera}
+                          className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                            photoCameraOpen
+                              ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
+                              : "border-slate-900 bg-slate-900 text-white"
+                          }`}
+                          onClick={() => {
+                            if (photoCameraOpen) stopPhotoCamera();
+                            else void startPhotoCamera();
+                          }}
                           disabled={photoBatchUploading}
+                          aria-pressed={photoCameraOpen}
                         >
                           Camera
                         </button>
                         <label
-                          className={`block w-full rounded-2xl h-10 bg-blue-700 text-white text-center leading-10 text-xs sm:text-sm font-semibold ${
+                          className={`block w-full rounded-2xl h-11 bg-blue-700 text-white text-center leading-[2.75rem] text-[15px] font-bold ${
                             photoBatchUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
                           }`}
                         >
@@ -9295,7 +9313,7 @@ const handlePhotoQuickUpload = async (event) => {
                             disabled={photoBatchUploading}
                           />
                         </label>
-                        <label className="block w-full rounded-2xl h-10 bg-green-700 text-white text-center leading-10 text-xs sm:text-sm font-semibold cursor-pointer">
+                        <label className="block w-full rounded-2xl h-11 bg-green-700 text-white text-center leading-[2.75rem] text-[15px] font-bold cursor-pointer">
                           Receipt
                           <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
                         </label>
@@ -9312,7 +9330,7 @@ const handlePhotoQuickUpload = async (event) => {
                       />
 
                       {photoCameraError ? (
-                        <p className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[12px] font-semibold text-amber-900 leading-snug">
+                        <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] font-semibold text-amber-900 leading-snug">
                           {photoCameraError}
                         </p>
                       ) : null}
@@ -9330,7 +9348,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <div className="grid grid-cols-2 gap-1.5">
                             <button
                               type="button"
-                              className="rounded-2xl h-11 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                              className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
                               onClick={capturePhotoFromCamera}
                               disabled={photoBatchUploading || videoRecording}
                             >
@@ -9338,7 +9356,7 @@ const handlePhotoQuickUpload = async (event) => {
                             </button>
                             <button
                               type="button"
-                              className={`rounded-2xl h-11 text-sm font-bold disabled:opacity-50 ${
+                              className={`rounded-2xl h-12 text-[15px] font-bold disabled:opacity-50 ${
                                 videoRecording
                                   ? "bg-red-700 text-white"
                                   : "border border-slate-300 bg-white text-slate-800"
@@ -9349,25 +9367,18 @@ const handlePhotoQuickUpload = async (event) => {
                               {videoRecording ? `Stop ${videoRecordSeconds}s` : "Record Video"}
                             </button>
                           </div>
-                          <button
-                            type="button"
-                            className="w-full rounded-2xl h-10 border border-slate-300 bg-white text-sm font-bold text-slate-800"
-                            onClick={stopPhotoCamera}
-                          >
-                            Close Camera
-                          </button>
                         </div>
                       ) : null}
 
                       {photoDrafts.length > 0 ? (
                         <div className="space-y-2">
                           <div className="flex items-center justify-between gap-2">
-                            <p className="text-[13px] font-bold text-slate-900">
+                            <p className="text-[15px] font-bold text-slate-900">
                               Ready to upload: {photoDrafts.length}
                             </p>
                             <button
                               type="button"
-                              className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 disabled:opacity-50"
+                              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-800 disabled:opacity-50"
                               onClick={clearPhotoDrafts}
                               disabled={photoBatchUploading}
                             >
@@ -9395,7 +9406,7 @@ const handlePhotoQuickUpload = async (event) => {
                           </div>
                           <button
                             type="button"
-                            className="w-full rounded-2xl h-12 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                            className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
                             onClick={() => void uploadAllPhotoDrafts()}
                             disabled={photoBatchUploading || photoDrafts.length === 0}
                           >
@@ -9404,9 +9415,9 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       ) : null}
 
-                      {photoStatus && <p className="text-xs text-slate-600 text-center leading-snug">{photoStatus}</p>}
+                      {photoStatus && <p className="text-[15px] font-semibold text-slate-700 text-center leading-snug">{photoStatus}</p>}
                       {photoBatchProgress ? (
-                        <p className="text-xs text-center font-semibold text-slate-700">{photoBatchProgress.label}</p>
+                        <p className="text-[15px] text-center font-semibold text-slate-700">{photoBatchProgress.label}</p>
                       ) : null}
                       {uploadProgress !== null && (
                         <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
@@ -9417,7 +9428,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       )}
                       {uploadProgress !== null && (
-                        <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
+                        <p className="text-[14px] text-center text-slate-500">{uploadProgress}%</p>
                       )}
 
                       <div
@@ -9438,16 +9449,16 @@ const handlePhotoQuickUpload = async (event) => {
                             />
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
-                                <p className="truncate text-[13px] font-bold text-slate-900">
+                                <p className="truncate text-[15px] font-bold text-slate-900">
                                   {videoDraft.name || "Selected video"}
                                 </p>
-                                <p className="text-[12px] font-semibold text-slate-600">
+                                <p className="text-[14px] font-semibold text-slate-600">
                                   Duration: {formatVideoDuration(videoDraft.durationSeconds) || "confirmed"}
                                 </p>
                               </div>
                               <button
                                 type="button"
-                                className="shrink-0 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 disabled:opacity-50"
+                                className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-800 disabled:opacity-50"
                                 onClick={clearVideoDraft}
                                 disabled={videoUploading}
                               >
@@ -9456,7 +9467,7 @@ const handlePhotoQuickUpload = async (event) => {
                             </div>
                             <button
                               type="button"
-                              className="w-full rounded-2xl h-11 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                              className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
                               onClick={() => void uploadSelectedVideo()}
                               disabled={videoUploading}
                             >
@@ -9466,7 +9477,7 @@ const handlePhotoQuickUpload = async (event) => {
                         ) : null}
 
                         {videoStatus ? (
-                          <p className="text-xs text-center font-semibold text-slate-700 leading-snug">{videoStatus}</p>
+                          <p className="text-[15px] text-center font-semibold text-slate-700 leading-snug">{videoStatus}</p>
                         ) : null}
                         {videoUploadProgress !== null ? (
                           <>
@@ -9476,7 +9487,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 style={{ width: `${videoUploadProgress}%` }}
                               />
                             </div>
-                            <p className="text-xs text-center text-slate-500">{videoUploadProgress}%</p>
+                            <p className="text-[14px] text-center text-slate-500">{videoUploadProgress}%</p>
                           </>
                         ) : null}
                       </div>
@@ -9505,12 +9516,12 @@ const handlePhotoQuickUpload = async (event) => {
   <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
 )}
                     <div className="grid grid-cols-2 gap-1.5">
-                      <Button className="w-full rounded-2xl h-11 text-sm" onClick={handleChangeTask}>🔄 Change Task</Button>
-                      <Button className="w-full rounded-2xl h-11 text-sm" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
+                      <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleChangeTask}>🔄 Change Task</Button>
+                      <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
-                    <Button className="w-full rounded-2xl h-11 text-sm font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
+                    <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
                     {locationStatus && (
-                      <p className="text-xs text-slate-500 text-center pt-0.5">{locationStatus}</p>
+                      <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
                     )}
                   </div>
                 )}
@@ -9523,21 +9534,21 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h2 className="font-bold text-lg">My Timesheet</h2>
-                    <p className="text-xs text-slate-500">
+                    <h2 className="font-bold text-xl">My Timesheet</h2>
+                    <p className="text-[14px] text-slate-500">
                       {isAdmin ? "All timesheets for this company" : "Only your submitted timesheets"}
                     </p>
                   </div>
                 </div>
                 {timesheetsLoading && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 mb-3">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600 mb-3">
                     Loading timesheets…
                   </div>
                 )}
                 {timesheetsError && (
-                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900 mb-3">
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-[14px] text-amber-900 mb-3">
                     Could not load timesheets from the server. Showing saved offline copy if available.<br />
-                    <span className="text-[11px] text-amber-800">{timesheetsError}</span>
+                    <span className="text-[13px] text-amber-800">{timesheetsError}</span>
                   </div>
                 )}
                 <div className="space-y-3">
@@ -9562,7 +9573,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   )}
                   {!timesheetsLoading && visibleRecords.length === 0 && !visibleCurrentShift && (
-                    <p className="text-sm text-slate-500 text-center py-8">No timesheet records for this user yet.</p>
+                    <p className="text-[15px] text-slate-500 text-center py-8">No timesheet records for this user yet.</p>
                   )}
                   {visibleRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
@@ -9806,15 +9817,15 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 sm:p-5 space-y-4">
                 <div>
-                  <h2 className="font-bold text-lg">Dashboard</h2>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
+                  <h2 className="font-bold text-xl">Employees</h2>
+                  <p className="text-[15px] font-medium text-slate-500 mt-0.5">Live Dashboard</p>
                 </div>
                 {!userCompany?.id || !companyChecked ? (
-                  <p className="text-sm text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
+                  <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
                 ) : null}
                 {dashboardActionFeedback && (
                   <div
-                    className={`rounded-xl border p-2.5 text-xs ${
+                    className={`rounded-xl border p-3 text-[14px] ${
                       dashboardActionFeedback.type === "success"
                         ? "border-green-100 bg-green-50 text-green-900"
                         : "border-red-100 bg-red-50 text-red-800"
@@ -9826,8 +9837,8 @@ const handlePhotoQuickUpload = async (event) => {
                 {userCompany?.id && companyChecked ? (
                   <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-3 sm:p-4 space-y-3 min-w-0">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 min-w-0">
-                      <h3 className="text-sm font-bold text-slate-900">Live team (today)</h3>
-                      <p className="text-sm text-slate-800 min-w-0">
+                      <h3 className="text-[17px] font-bold text-slate-900">Live team</h3>
+                      <p className="text-[15px] text-slate-800 min-w-0">
                         <span className="text-slate-600 font-medium">Currently Working: </span>
                         <span className="font-bold tabular-nums text-slate-900">
                           {dashboardLoading ? "—" : (dashboardLiveWorkingCards || []).length}
@@ -9835,13 +9846,13 @@ const handlePhotoQuickUpload = async (event) => {
                       </p>
                     </div>
                     {dashboardLiveLocationsLoading ? (
-                      <p className="text-[11px] text-slate-600">Refreshing live GPS…</p>
+                      <p className="text-[14px] text-slate-600">Refreshing live GPS…</p>
                     ) : null}
                     {dashboardLiveLocationsError ? (
-                      <p className="text-[11px] text-amber-800">{String(dashboardLiveLocationsError)}</p>
+                      <p className="text-[14px] text-amber-800">{String(dashboardLiveLocationsError)}</p>
                     ) : null}
                     {dashboardLoading ? (
-                      <p className="text-xs text-slate-600">Loading active employees…</p>
+                      <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
                     {!dashboardLoading &&
                       (dashboardLiveWorkingCards || []).map((card) => {
@@ -9878,28 +9889,28 @@ const handlePhotoQuickUpload = async (event) => {
                             className="rounded-xl border border-white/90 bg-white p-3 space-y-2 shadow-sm min-w-0 max-w-full"
                           >
                             <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
-                              <p className="text-sm font-semibold text-slate-900 leading-snug break-words min-w-0 flex-1">
+                              <p className="text-[16px] font-semibold text-slate-900 leading-snug break-words min-w-0 flex-1">
                                 {displayName || "—"}
                               </p>
-                              <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-900 max-w-[55%] text-right break-words">
+                              <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[13px] font-semibold text-emerald-900 max-w-[55%] text-right break-words">
                                 {statusLabel}
                               </span>
                             </div>
-                            <dl className="grid grid-cols-1 gap-1.5 text-sm text-slate-800 min-w-0">
+                            <dl className="grid grid-cols-1 gap-1.5 text-[15px] text-slate-800 min-w-0">
                               <div className="min-w-0">
-                                <dt className="text-xs font-medium text-slate-500">Project</dt>
+                                <dt className="text-[13px] font-medium text-slate-500">Project</dt>
                                 <dd className="font-medium break-words">{rep?.project != null ? String(rep.project) : "—"}</dd>
                               </div>
                               <div className="min-w-0">
-                                <dt className="text-xs font-medium text-slate-500">Cost centre</dt>
+                                <dt className="text-[13px] font-medium text-slate-500">Cost centre</dt>
                                 <dd className="font-medium break-words">{rep?.costCenter != null ? String(rep.costCenter) : "—"}</dd>
                               </div>
                               <div className="min-w-0">
-                                <dt className="text-xs font-medium text-slate-500">Clock-in</dt>
+                                <dt className="text-[13px] font-medium text-slate-500">Clock-in</dt>
                                 <dd className="font-semibold tabular-nums">{clockInDisp}</dd>
                               </div>
                             </dl>
-                            <div className="text-xs leading-snug pt-1 border-t border-slate-100 min-w-0">
+                            <div className="text-[14px] leading-snug pt-1 border-t border-slate-100 min-w-0">
                               {hasLiveGps ? (
                                 <div className="flex flex-col gap-1 sm:flex-row sm:justify-between sm:items-start sm:gap-2">
                                   <span className="text-slate-700 break-all min-w-0">
@@ -9945,61 +9956,61 @@ const handlePhotoQuickUpload = async (event) => {
                         );
                       })}
                     {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
-                      <p className="text-sm text-slate-700 text-center py-2">No employees currently clocked in.</p>
+                      <p className="text-[15px] text-slate-700 text-center py-2">No employees currently clocked in.</p>
                     ) : null}
                   </div>
                 ) : null}
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-slate-700" htmlFor="dashboard-view-date">
+                  <label className="text-[14px] font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
                   </label>
                   <input
                     id="dashboard-view-date"
                     type="date"
-                    className="w-full rounded-xl border bg-white px-2 py-2 text-sm"
+                    className="w-full rounded-xl border bg-white px-3 py-2.5 text-[15px]"
                     value={dashboardViewDate}
                     onChange={(e) => setDashboardViewDate(e.target.value)}
                     disabled={!dashboardViewDate}
                   />
                   {dashboardSelectedDateLabel && (
-                    <p className="text-xs text-slate-600">
+                    <p className="text-[14px] text-slate-600">
                       Selected (company time): {dashboardSelectedDateLabel}
                     </p>
                   )}
                 </div>
                 {dashboardLoading && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600">
                     Loading dashboard…
                   </div>
                 )}
                 {dashboardError && (
-                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">{dashboardError}</div>
+                  <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-[14px] text-amber-900">{dashboardError}</div>
                 )}
                 {!dashboardLoading && !dashboardError && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Clocked In</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">{dashboardSummary.clockedIn}</p>
+                        <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Clocked In</p>
+                        <p className="text-[20px] font-bold text-slate-900 tabular-nums">{dashboardSummary.clockedIn}</p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total Hours</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums leading-tight">
+                        <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Total Hours</p>
+                        <p className="text-[20px] font-bold text-slate-900 tabular-nums leading-tight">
                           {formatDuration(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Labour Cost</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums leading-tight">
+                        <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Labour Cost</p>
+                        <p className="text-[20px] font-bold text-slate-900 tabular-nums leading-tight">
                           {formatMoney(dashboardSummary.totalCost)}
                         </p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Missing Clock-out</p>
-                        <p className="text-base font-bold text-slate-900 tabular-nums">{dashboardSummary.missingOut}</p>
+                        <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Missing Clock-out</p>
+                        <p className="text-[20px] font-bold text-slate-900 tabular-nums">{dashboardSummary.missingOut}</p>
                       </div>
                     </div>
-                    <div className="space-y-1.5 pt-1">
+                    <div className="hidden">
                       {dashboardRowsForAttendance.map((row) => {
                         const rowRoleNorm = normalizeMemberRole(row.role);
                         const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === String(row.userId));
@@ -13270,26 +13281,37 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5 space-y-4">
                 <div>
-                  <h2 className="font-bold text-lg">Settings</h2>
-                  <p className="text-xs text-slate-500">Company time zone (display only — stored times stay as ISO UTC in the database).</p>
+                  <h2 className="font-bold text-xl">Settings</h2>
+                  <p className="text-[14px] text-slate-500">Company time zone (display only — stored times stay as ISO UTC in the database).</p>
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
-                  <p className="text-xs text-slate-500">Company</p>
-                  <p className="font-semibold text-slate-900">{userCompany?.name || "—"}</p>
+                  <p className="text-[14px] text-slate-500">Company</p>
+                  <p className="text-[16px] font-semibold text-slate-900">{userCompany?.name || "—"}</p>
                 </div>
                 <div className="rounded-2xl border bg-slate-50 p-4 space-y-1">
-                  <p className="text-xs text-slate-500">Current time zone</p>
-                  <p className="font-semibold text-slate-900">{companyTimeZone}</p>
-                  <p className="text-[11px] text-slate-600 mt-1">
+                  <p className="text-[14px] text-slate-500">Current time zone</p>
+                  <p className="text-[16px] font-semibold text-slate-900">{companyTimeZone}</p>
+                  <p className="text-[14px] text-slate-600 mt-1">
                     Company time now: {formatTime(now, companyTimeZone)}
                   </p>
                 </div>
                 {isAdmin ? (
+                  <div className="rounded-2xl border bg-slate-50 p-4 space-y-3">
+                    <div>
+                      <p className="text-[16px] font-bold text-slate-900">Team</p>
+                      <p className="text-[14px] text-slate-600">Manage employee profiles, roles, pay rates, and status.</p>
+                    </div>
+                    <Button type="button" className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={() => setActiveTab("team")}>
+                      Open Team
+                    </Button>
+                  </div>
+                ) : null}
+                {isAdmin ? (
                   <form onSubmit={handleSaveCompanyTimeZone} className="space-y-3">
                     <div className="space-y-2">
-                      <label className="text-sm font-medium">Company time zone</label>
+                      <label className="text-[15px] font-medium">Company time zone</label>
                       <select
-                        className="w-full rounded-2xl border bg-white py-2 px-3 text-sm"
+                        className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
                         value={settingsTzDraft}
                         onChange={(e) => setSettingsTzDraft(e.target.value)}
                       >
@@ -13309,7 +13331,7 @@ const handlePhotoQuickUpload = async (event) => {
                         {settingsTzMessage}
                       </div>
                     )}
-                    <Button type="submit" className="w-full rounded-2xl h-12 text-sm font-bold" disabled={settingsTzSaving}>
+                    <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsTzSaving}>
                       {settingsTzSaving ? "Saving…" : "Save time zone"}
                     </Button>
                   </form>
@@ -13353,13 +13375,22 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
               </div>
-              <div className="space-y-2">
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("schedule")}>📅 Schedule</button>
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
+              <div className="space-y-2 text-[15px]">
+                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("schedule")}>📅 Schedule</button>
+                {!isAdmin && (
+                  <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
+                )}
+                {isAdmin && (
+                  <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-1.5">
+                    <p className="px-2 pt-1 text-[13px] font-black uppercase tracking-wide text-slate-500">Employees</p>
+                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("dashboard")}>Live Dashboard</button>
+                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("timesheet")}>Timesheet</button>
+                  </div>
+                )}
                 {isAdmin && (
                   <button
                     type="button"
-                    className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                    className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
                     onClick={() => openMenuTab("notifications")}
                   >
                     🔔 Notifications
@@ -13370,38 +13401,41 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </button>
                 )}
-                <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("settings")}>⚙️ Settings</button>
-                {isAdmin && (
-                  <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold" onClick={() => openMenuTab("team")}>👥 Team</button>
-                )}
+                <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
+                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
+                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-1.5">
+                  <p className="px-2 pt-1 text-[13px] font-black uppercase tracking-wide text-slate-500">Settings</p>
+                  <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("settings")}>Settings</button>
+                  {isAdmin && (
+                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("team")}>Team</button>
+                  )}
+                </div>
                 {isAdmin && (
                   <>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
                       onClick={() => openMenuTab("projects")}
                     >
                       📁 Projects
                     </button>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
                       onClick={() => openMenuTab("quotations")}
                     >
                       📝 Quotations
                     </button>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-semibold"
+                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
                       onClick={() => openMenuTab("reports")}
                     >
                       📊 Reports
                     </button>
                   </>
                 )}
-                <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-semibold" onClick={handleLogout}>🚪 Logout</button>
+                <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-bold" onClick={handleLogout}>🚪 Logout</button>
               </div>
             </div>
           </div>
@@ -13410,27 +13444,17 @@ const handlePhotoQuickUpload = async (event) => {
         <div
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className={`grid gap-1.5 grid-cols-3`}>
+          <div className={`grid gap-1.5 ${isAdmin ? "grid-cols-1" : "grid-cols-2"}`}>
             {!isAdmin && (
               <button
                 type="button"
                 onClick={() => setActiveTab("schedule")}
-                className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "schedule" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "schedule" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
                 📅 Schedule
               </button>
             )}
-            <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setActiveTab("dashboard")}
-                className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
-              >
-                📊 Dashboard
-              </button>
-            )}
-            <button onClick={() => setActiveTab("timesheet")} className={`rounded-2xl py-2.5 px-2 text-sm font-semibold ${activeTab === "timesheet" ? "bg-slate-900 text-white" : "text-slate-500"}`}>📄 Timesheet</button>
+            <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
         </div>
       </div>
