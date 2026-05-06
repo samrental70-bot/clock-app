@@ -1509,7 +1509,18 @@ export default function EmployeeClockApp() {
   const [customTo, setCustomTo] = useState("");
   const [locationStatus, setLocationStatus] = useState("");
   const [photoStatus, setPhotoStatus] = useState("");
-const [uploadProgress, setUploadProgress] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const [photoDrafts, setPhotoDrafts] = useState([]);
+  const [photoCameraOpen, setPhotoCameraOpen] = useState(false);
+  const [photoCameraError, setPhotoCameraError] = useState("");
+  const [photoBatchUploading, setPhotoBatchUploading] = useState(false);
+  const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
+  const photoDraftsRef = useRef([]);
+  const photoCameraStreamRef = useRef(null);
+  const photoVideoRef = useRef(null);
+  const photoCanvasRef = useRef(null);
+  const photoGalleryInputRef = useRef(null);
+  const photoFallbackCameraInputRef = useRef(null);
   const [watchId, setWatchId] = useState(null);
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
@@ -5429,7 +5440,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   });
 };
 
-const handlePhotoCapture = async (event) => {
+const handlePhotoQuickUpload = async (event) => {
   const file = event.target.files?.[0];
   if (!file || !visibleCurrentShift || !authUser) return;
 
@@ -5536,6 +5547,298 @@ const handlePhotoCapture = async (event) => {
     event.target.value = "";
   }
 };
+
+  const revokePhotoDraftPreview = useCallback((draft) => {
+    const url = String(draft?.previewUrl || "");
+    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  }, []);
+
+  const stopPhotoCamera = useCallback(() => {
+    const stream = photoCameraStreamRef.current;
+    if (stream) {
+      for (const track of stream.getTracks?.() || []) track.stop();
+    }
+    photoCameraStreamRef.current = null;
+    if (photoVideoRef.current) photoVideoRef.current.srcObject = null;
+    setPhotoCameraOpen(false);
+  }, []);
+
+  useEffect(() => {
+    photoDraftsRef.current = photoDrafts;
+  }, [photoDrafts]);
+
+  useEffect(() => {
+    return () => {
+      for (const draft of photoDraftsRef.current || []) revokePhotoDraftPreview(draft);
+      stopPhotoCamera();
+    };
+  }, [revokePhotoDraftPreview, stopPhotoCamera]);
+
+  useEffect(() => {
+    const hasActiveShift = Boolean(visibleCurrentShift);
+    if (photoCameraOpen && (activeTab !== "clock" || !hasActiveShift)) stopPhotoCamera();
+  }, [activeTab, photoCameraOpen, stopPhotoCamera, visibleCurrentShift]);
+
+  useEffect(() => {
+    if (!photoCameraOpen || !photoVideoRef.current || !photoCameraStreamRef.current) return;
+    const video = photoVideoRef.current;
+    video.srcObject = photoCameraStreamRef.current;
+    const playPromise = video.play?.();
+    if (playPromise?.catch) playPromise.catch(() => {});
+  }, [photoCameraOpen]);
+
+  const addPhotoDraftFiles = useCallback(
+    (files, source = "gallery") => {
+      const incoming = Array.from(files || []).filter((file) => file?.type?.startsWith("image/"));
+      if (incoming.length === 0) {
+        setPhotoStatus("Select at least one image.");
+        return;
+      }
+
+      const nowMs = Date.now();
+      const drafts = incoming.map((file, index) => ({
+        id: `${nowMs}-${index}-${Math.random().toString(36).slice(2)}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        name: file.name || `photo-${nowMs}-${index + 1}.jpg`,
+        source,
+      }));
+
+      setPhotoDrafts((previous) => [...previous, ...drafts]);
+      setPhotoStatus(`${drafts.length} photo${drafts.length === 1 ? "" : "s"} ready. Review, then upload all.`);
+      setPhotoBatchProgress(null);
+      setUploadProgress(null);
+    },
+    []
+  );
+
+  const handlePhotoCapture = useCallback(
+    (event) => {
+      addPhotoDraftFiles(event.target.files, "gallery");
+      event.target.value = "";
+    },
+    [addPhotoDraftFiles]
+  );
+
+  const removePhotoDraft = useCallback(
+    (draftId) => {
+      if (photoBatchUploading) return;
+      setPhotoDrafts((previous) => {
+        const target = previous.find((draft) => draft.id === draftId);
+        if (target) revokePhotoDraftPreview(target);
+        return previous.filter((draft) => draft.id !== draftId);
+      });
+    },
+    [photoBatchUploading, revokePhotoDraftPreview]
+  );
+
+  const clearPhotoDrafts = useCallback(() => {
+    if (photoBatchUploading) return;
+    setPhotoDrafts((previous) => {
+      for (const draft of previous || []) revokePhotoDraftPreview(draft);
+      return [];
+    });
+    setPhotoBatchProgress(null);
+    setUploadProgress(null);
+    setPhotoStatus("Photo selection cleared.");
+  }, [photoBatchUploading, revokePhotoDraftPreview]);
+
+  const startPhotoCamera = useCallback(async () => {
+    if (!visibleCurrentShift || !authUser) {
+      setPhotoStatus("Clock in before taking photos.");
+      return;
+    }
+    if (photoBatchUploading) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setPhotoCameraError("Camera stream is not supported here. You can still upload from gallery.");
+      photoFallbackCameraInputRef.current?.click();
+      return;
+    }
+
+    try {
+      setPhotoCameraError("");
+      stopPhotoCamera();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      });
+      photoCameraStreamRef.current = stream;
+      setPhotoCameraOpen(true);
+      setPhotoStatus("Camera ready. Capture photos, then upload all.");
+    } catch (err) {
+      console.warn("Camera start failed:", err);
+      setPhotoCameraError("Camera permission denied. You can still upload from gallery.");
+      setPhotoStatus("Camera permission denied. You can still upload from gallery.");
+    }
+  }, [authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
+
+  const capturePhotoFromCamera = useCallback(() => {
+    const video = photoVideoRef.current;
+    const canvas = photoCanvasRef.current;
+    if (!video || !canvas || !video.videoWidth || !video.videoHeight) {
+      setPhotoStatus("Camera is still starting. Try again in a moment.");
+      return;
+    }
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setPhotoStatus("Could not capture photo. Try again.");
+          return;
+        }
+        const nextCount = photoDraftsRef.current.length + 1;
+        const file = new File([blob], `camera-photo-${Date.now()}.jpg`, { type: "image/jpeg" });
+        addPhotoDraftFiles([file], "camera");
+        setPhotoStatus(`Captured ${nextCount} photo${nextCount === 1 ? "" : "s"}. Camera is still open.`);
+      },
+      "image/jpeg",
+      0.92
+    );
+  }, [addPhotoDraftFiles]);
+
+  const uploadProjectPhotoFile = useCallback(
+    async (file, index = 1, total = 1) => {
+      if (!file || !visibleCurrentShift || !authUser) throw new Error("Clock in before uploading photos.");
+
+      const folderName = getProjectFolderName(visibleCurrentShift.project || "");
+      const progressBase = total > 1 ? Math.round(((index - 1) / total) * 100) : 10;
+      const progressUpload = total > 1 ? Math.round(((index - 0.65) / total) * 100) : 30;
+      const progressCap = total > 1 ? Math.max(progressUpload, Math.round(((index - 0.1) / total) * 100)) : 95;
+
+      setPhotoBatchProgress({ current: index, total, label: `Uploading photo ${index} of ${total}` });
+      setPhotoStatus(`Compressing photo ${index} of ${total}...`);
+      setUploadProgress(progressBase);
+
+      const compressedFile = await compressImage(file, 700, 0.45);
+      setPhotoStatus(`Uploading photo ${index} of ${total}... ${Math.round(compressedFile.size / 1024)} KB`);
+      setUploadProgress(progressUpload);
+
+      const filePath = `${folderName}/${authUser.id}-${Date.now()}-${index}.jpg`;
+      const uploadPromise = supabase.storage
+        .from("project-photos")
+        .upload(filePath, compressedFile, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: "image/jpeg",
+        });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Cloud upload timed out after 60 seconds")), 60000)
+      );
+
+      let progressTimer = null;
+      try {
+        progressTimer = setInterval(() => {
+          setUploadProgress((prev) => {
+            const current = typeof prev === "number" ? prev : progressUpload;
+            return Math.min(progressCap, current + 3);
+          });
+        }, 2000);
+
+        const result = await Promise.race([uploadPromise, timeoutPromise]);
+        if (result?.error) throw result.error;
+      } finally {
+        if (progressTimer) clearInterval(progressTimer);
+      }
+
+      const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
+      const photoUrl = data?.publicUrl || "";
+      const capturedAt = new Date().toISOString();
+      const photo = {
+        id: Date.now() + index,
+        companyId: userCompany?.id || null,
+        userId: authUser.id,
+        project: visibleCurrentShift.project,
+        projectId: visibleCurrentShift.projectId ?? null,
+        folderName,
+        costCenter: visibleCurrentShift.costCenter,
+        employee: visibleCurrentShift.employee,
+        employeeId: visibleCurrentShift.employeeId,
+        capturedAt,
+        location: null,
+        dataUrl: "",
+        imageUrl: photoUrl,
+        storagePath: filePath,
+        type: "photo",
+      };
+
+      setProjectPhotos((previous) => ({
+        ...previous,
+        [folderName]: [photo, ...(previous[folderName] || [])],
+      }));
+      setPhotoNotificationCount((count) => count + 1);
+      setCurrentShift((previousShift) =>
+        previousShift
+          ? {
+              ...previousShift,
+              photosTaken: (previousShift.photosTaken || 0) + 1,
+              lastPhotoAt: capturedAt,
+            }
+          : previousShift
+      );
+      void schedulePhotoNotificationAfterUpload();
+      setUploadProgress(total > 1 ? Math.round((index / total) * 100) : 100);
+      return photo;
+    },
+    [authUser, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
+  );
+
+  const uploadAllPhotoDrafts = useCallback(async () => {
+    const queued = [...(photoDraftsRef.current || [])];
+    if (queued.length === 0) {
+      setPhotoStatus("Select or capture photos before uploading.");
+      return;
+    }
+    if (!visibleCurrentShift || !authUser) {
+      setPhotoStatus("Clock in before uploading photos.");
+      return;
+    }
+
+    setPhotoBatchUploading(true);
+    setPhotoBatchProgress({ current: 0, total: queued.length, label: `Preparing ${queued.length} photos` });
+    setUploadProgress(0);
+    const uploadedDraftIds = [];
+
+    try {
+      for (let i = 0; i < queued.length; i += 1) {
+        const draft = queued[i];
+        await uploadProjectPhotoFile(draft.file, i + 1, queued.length);
+        uploadedDraftIds.push(draft.id);
+      }
+
+      setPhotoDrafts((previous) => {
+        const uploaded = new Set(uploadedDraftIds);
+        for (const draft of previous || []) {
+          if (uploaded.has(draft.id)) revokePhotoDraftPreview(draft);
+        }
+        return previous.filter((draft) => !uploaded.has(draft.id));
+      });
+      setPhotoBatchProgress({ current: queued.length, total: queued.length, label: "Completed" });
+      setPhotoStatus(`Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`);
+      setUploadProgress(100);
+      setTimeout(() => setUploadProgress(null), 1500);
+    } catch (err) {
+      console.log("Batch photo upload failed:", err);
+      const failedIndex = Math.min(uploadedDraftIds.length + 1, queued.length);
+      setPhotoStatus(`Photo ${failedIndex} of ${queued.length} failed: ${getErrorMessage(err)}`);
+      setPhotoBatchProgress({ current: failedIndex, total: queued.length, label: `Photo ${failedIndex} failed` });
+      setUploadProgress(null);
+      setPhotoDrafts((previous) => {
+        const uploaded = new Set(uploadedDraftIds);
+        for (const draft of previous || []) {
+          if (uploaded.has(draft.id)) revokePhotoDraftPreview(draft);
+        }
+        return previous.filter((draft) => !uploaded.has(draft.id));
+      });
+      showErrorPopup("Photo upload failed", err);
+    } finally {
+      setPhotoBatchUploading(false);
+    }
+  }, [authUser, revokePhotoDraftPreview, uploadProjectPhotoFile, visibleCurrentShift]);
+
   const handleReceiptCapture = (event) => {
     const file = event.target.files?.[0];
     if (!file || !visibleCurrentShift) return;
@@ -8576,7 +8879,146 @@ const handlePhotoCapture = async (event) => {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl h-10 bg-slate-900 text-white text-center text-xs sm:text-sm font-semibold disabled:opacity-50"
+                          onClick={startPhotoCamera}
+                          disabled={photoBatchUploading}
+                        >
+                          Camera
+                        </button>
+                        <label
+                          className={`block w-full rounded-2xl h-10 bg-blue-700 text-white text-center leading-10 text-xs sm:text-sm font-semibold ${
+                            photoBatchUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
+                          }`}
+                        >
+                          Gallery
+                          <input
+                            ref={photoGalleryInputRef}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            className="hidden"
+                            onChange={handlePhotoCapture}
+                            disabled={photoBatchUploading}
+                          />
+                        </label>
+                        <label className="block w-full rounded-2xl h-10 bg-green-700 text-white text-center leading-10 text-xs sm:text-sm font-semibold cursor-pointer">
+                          Receipt
+                          <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
+                        </label>
+                      </div>
+
+                      <input
+                        ref={photoFallbackCameraInputRef}
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        multiple
+                        className="hidden"
+                        onChange={handlePhotoCapture}
+                      />
+
+                      {photoCameraError ? (
+                        <p className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[12px] font-semibold text-amber-900 leading-snug">
+                          {photoCameraError}
+                        </p>
+                      ) : null}
+
+                      {photoCameraOpen ? (
+                        <div className="space-y-2">
+                          <video
+                            ref={photoVideoRef}
+                            className="w-full max-h-64 rounded-2xl bg-slate-950 object-cover"
+                            playsInline
+                            muted
+                            autoPlay
+                          />
+                          <canvas ref={photoCanvasRef} className="hidden" />
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              className="rounded-2xl h-11 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                              onClick={capturePhotoFromCamera}
+                              disabled={photoBatchUploading}
+                            >
+                              Capture Photo
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-2xl h-11 border border-slate-300 bg-white text-sm font-bold text-slate-800"
+                              onClick={stopPhotoCamera}
+                            >
+                              Close Camera
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {photoDrafts.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[13px] font-bold text-slate-900">
+                              Ready to upload: {photoDrafts.length}
+                            </p>
+                            <button
+                              type="button"
+                              className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 disabled:opacity-50"
+                              onClick={clearPhotoDrafts}
+                              disabled={photoBatchUploading}
+                            >
+                              Clear all
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {photoDrafts.map((draft, index) => (
+                              <div key={draft.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                <img src={draft.previewUrl} alt={`Selected photo ${index + 1}`} className="h-20 w-full object-cover" />
+                                <span className="absolute left-1 top-1 rounded-full bg-slate-950/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                  {index + 1}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="absolute right-1 top-1 rounded-full bg-white/95 px-2 py-0.5 text-[11px] font-bold text-slate-900 shadow disabled:opacity-50"
+                                  onClick={() => removePhotoDraft(draft.id)}
+                                  disabled={photoBatchUploading}
+                                  aria-label={`Remove photo ${index + 1}`}
+                                >
+                                  X
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            className="w-full rounded-2xl h-12 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                            onClick={() => void uploadAllPhotoDrafts()}
+                            disabled={photoBatchUploading || photoDrafts.length === 0}
+                          >
+                            {photoBatchUploading ? "Uploading..." : "Upload All Photos"}
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {photoStatus && <p className="text-xs text-slate-600 text-center leading-snug">{photoStatus}</p>}
+                      {photoBatchProgress ? (
+                        <p className="text-xs text-center font-semibold text-slate-700">{photoBatchProgress.label}</p>
+                      ) : null}
+                      {uploadProgress !== null && (
+                        <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                          <div
+                            className="bg-green-600 h-3 rounded-full transition-all"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                      )}
+                      {uploadProgress !== null && (
+                        <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
+                      )}
+                    </div>
+                    <div className="hidden">
                       <label className="block w-full rounded-2xl h-9 bg-slate-900 text-white text-center leading-9 text-xs sm:text-sm font-semibold cursor-pointer">
                         📷 Photo
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handlePhotoCapture} />
@@ -8586,8 +9028,8 @@ const handlePhotoCapture = async (event) => {
                         <input type="file" accept="image/*" capture="environment" className="hidden" onChange={handleReceiptCapture} />
                       </label>
                     </div>
-                    {photoStatus && <p className="text-xs text-slate-500 text-center">{photoStatus}</p>}
-{uploadProgress !== null && (
+                    {false && photoStatus && <p className="text-xs text-slate-500 text-center">{photoStatus}</p>}
+{false && uploadProgress !== null && (
   <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
     <div
       className="bg-green-600 h-3 rounded-full transition-all"
@@ -8596,7 +9038,7 @@ const handlePhotoCapture = async (event) => {
   </div>
 )}
 
-{uploadProgress !== null && (
+{false && uploadProgress !== null && (
   <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
 )}
                     <div className="grid grid-cols-2 gap-1.5">
