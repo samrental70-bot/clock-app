@@ -5470,7 +5470,11 @@ const handleClockIn = async () => {
     }
 
     if (!clockSelectedProject) {
-      setLocationStatus("Select project first.");
+      setLocationStatus(
+        clockSelectableProjects.length === 0
+          ? "No projects assigned. Please contact your supervisor."
+          : "Select project and cost center first."
+      );
       return;
     }
 
@@ -5481,7 +5485,7 @@ const handleClockIn = async () => {
     const clockInCentres = clockCostCentreOptionsForProject(clockSelectedProject.id);
     if (clockInCentres.length === 0 || !costCenter || !clockInCentres.includes(costCenter)) {
       if (!costCenter) {
-        setLocationStatus("Select cost center first.");
+        setLocationStatus("Select project and cost center first.");
         return;
       }
       if (!isAdmin && allActiveOnProject.length > 0) {
@@ -9754,12 +9758,6 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
-                  <p className="text-[14px] font-bold text-slate-900">Camera, Pay, Receipt</p>
-                  {!clockSetupReady ? (
-                    <p className="text-[13px] font-semibold text-amber-800 leading-snug">
-                      Select project and select cost center first.
-                    </p>
-                  ) : null}
                   <div className="grid grid-cols-3 gap-1.5">
                     <button
                       type="button"
@@ -9783,7 +9781,7 @@ const handlePhotoQuickUpload = async (event) => {
                           void startPhotoCamera({ allowFallback: false, mode: "photo" });
                         }
                       }}
-                      disabled={photoBatchUploading || !clockSetupReady}
+                      disabled={photoBatchUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
                       Camera
@@ -9791,8 +9789,14 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       type="button"
                       className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
-                      onClick={() => setPhotoStatus("Pay here will be added next.")}
-                      disabled={!clockSetupReady || photoBatchUploading || videoRecording || videoUploading}
+                      onClick={() => {
+                        if (!clockSetupReady) {
+                          setPhotoStatus("Select project and cost center first.");
+                          return;
+                        }
+                        setPhotoStatus("Pay here will be added next.");
+                      }}
+                      disabled={photoBatchUploading || videoRecording || videoUploading}
                     >
                       Pay here
                     </button>
@@ -9822,7 +9826,7 @@ const handlePhotoQuickUpload = async (event) => {
                           });
                         }
                       }}
-                      disabled={!clockSetupReady || photoBatchUploading || videoRecording || videoUploading}
+                      disabled={photoBatchUploading || videoRecording || videoUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                     >
                       Receipt
@@ -10006,9 +10010,6 @@ const handlePhotoQuickUpload = async (event) => {
 
                 <Button
                   className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
-                  disabled={
-                    !clockSetupReady
-                  }
                   onClick={handleClockIn}
                 >
                   ✅ Clock In
