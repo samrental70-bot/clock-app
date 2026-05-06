@@ -1539,6 +1539,7 @@ export default function EmployeeClockApp() {
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [menuPanel, setMenuPanel] = useState("main");
 
   const [inAppNotifications, setInAppNotifications] = useState([]);
   const [inAppNotifError, setInAppNotifError] = useState("");
@@ -3469,10 +3470,6 @@ export default function EmployeeClockApp() {
   }, [authUser?.id, isAdmin, isEmployeeRole, refreshEmployeeAssignedSchedule]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "notifications") setActiveTab("schedule");
-  }, [isAdmin, activeTab]);
-
-  useEffect(() => {
     if (!isAdmin && activeTab === "dashboard") setActiveTab("schedule");
   }, [isAdmin, activeTab]);
 
@@ -4556,6 +4553,7 @@ export default function EmployeeClockApp() {
     setProfileEmploymentStatus("active");
     setCurrentShift(null);
     setIsMenuOpen(false);
+    setMenuPanel("main");
   };
 
   const liveSeconds = useMemo(() => {
@@ -6713,18 +6711,21 @@ const handlePhotoQuickUpload = async (event) => {
   const openPhotosTab = () => {
     setActiveTab("photos");
     setPhotoNotificationCount(0);
+    setMenuPanel("main");
     setIsMenuOpen(false);
   };
 
   const openMenuTab = (tabName) => {
-    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule"]);
+    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications"]);
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
+      setMenuPanel("main");
       setIsMenuOpen(false);
       setActiveTab("schedule");
       return;
     }
     setActiveTab(tabName);
     if (tabName === "photos") setPhotoNotificationCount(0);
+    setMenuPanel("main");
     setIsMenuOpen(false);
   };
 
@@ -7626,7 +7627,7 @@ const handlePhotoQuickUpload = async (event) => {
   }, [ensurePushSubscription, isInstalled]);
 
   const handleMarkAllNotificationsRead = async () => {
-    if (!isAdmin || !authUser?.id) return;
+    if (!authUser?.id) return;
     setMarkingAllNotifs(true);
     try {
       const ts = new Date().toISOString();
@@ -8926,27 +8927,35 @@ const handlePhotoQuickUpload = async (event) => {
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
           <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
             <div className="flex items-start justify-between gap-2 sm:gap-3">
-              <button onClick={() => setIsMenuOpen(true)} className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">☰</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuPanel("main");
+                  setIsMenuOpen(true);
+                }}
+                className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl font-bold"
+                aria-label="Open menu"
+              >
+                ☰
+              </button>
               <div className="flex-1 min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">OPERA</h1>
                 <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("notifications")}
-                    className="relative h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-lg"
-                    aria-label="Notifications"
-                  >
-                    🔔
-                    {inAppNotifUnread > 0 && (
-                      <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                        {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
-                      </span>
-                    )}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("notifications")}
+                  className="relative h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-lg"
+                  aria-label="Notifications"
+                >
+                  🔔
+                  {inAppNotifUnread > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                      {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
+                    </span>
+                  )}
+                </button>
                 <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl">⏱️</div>
               </div>
             </div>
@@ -9684,7 +9693,7 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {activeTab === "notifications" && isAdmin && (
+          {activeTab === "notifications" && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-4 space-y-3">
                 <div className="flex justify-between gap-2 items-start">
@@ -13366,77 +13375,163 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {isMenuOpen && (
-          <div className="fixed inset-0 z-[60] bg-black/40" onClick={() => setIsMenuOpen(false)}>
-            <div className="h-full w-72 bg-white shadow-2xl p-4 space-y-4" onClick={(event) => event.stopPropagation()}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-bold text-lg">Menu</h2>
-                  <p className="text-xs text-slate-500">{(profileFullName || "").trim() || "User"}</p>
+          <div
+            className="fixed inset-0 z-[60] bg-black/40"
+            onClick={() => {
+              setIsMenuOpen(false);
+              setMenuPanel("main");
+            }}
+          >
+            <div
+              className="h-full w-80 max-w-[88vw] bg-white shadow-2xl p-4 flex flex-col gap-4"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="min-w-0">
+                  <h2 className="font-black text-xl tracking-tight">
+                    {menuPanel === "employees" ? "Employees" : menuPanel === "settings" ? "Settings" : "Menu"}
+                  </h2>
+                  <p className="text-sm font-medium text-slate-500 truncate">{(profileFullName || "").trim() || "User"}</p>
                 </div>
-                <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
+                <button
+                  type="button"
+                  className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-bold text-slate-700"
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setMenuPanel("main");
+                  }}
+                  aria-label="Close menu"
+                >
+                  ×
+                </button>
               </div>
-              <div className="space-y-2 text-[15px]">
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("schedule")}>📅 Schedule</button>
-                {!isAdmin && (
-                  <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("timesheet")}>📄 Timesheet</button>
-                )}
-                {isAdmin && (
-                  <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-1.5">
-                    <p className="px-2 pt-1 text-[13px] font-black uppercase tracking-wide text-slate-500">Employees</p>
-                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("dashboard")}>Live Dashboard</button>
-                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("timesheet")}>Timesheet</button>
-                  </div>
-                )}
-                {isAdmin && (
-                  <button
-                    type="button"
-                    className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
-                    onClick={() => openMenuTab("notifications")}
-                  >
-                    🔔 Notifications
-                    {inAppNotifUnread > 0 && (
-                      <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">
-                        {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
-                      </span>
-                    )}
-                  </button>
-                )}
-                <button className="relative w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={openPhotosTab}>🖼 Photos {photoNotificationCount > 0 && <span className="ml-2 rounded-full bg-red-600 text-white text-[10px] px-2 py-0.5">{photoNotificationCount}</span>}</button>
-                <button className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold" onClick={() => openMenuTab("receipts")}>🧾 Receipts</button>
-                <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-1.5">
-                  <p className="px-2 pt-1 text-[13px] font-black uppercase tracking-wide text-slate-500">Settings</p>
-                  <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("settings")}>Settings</button>
-                  {isAdmin && (
-                    <button className="w-full text-left rounded-xl p-3 bg-white border border-slate-200 font-bold" onClick={() => openMenuTab("team")}>Team</button>
-                  )}
-                </div>
-                {isAdmin && (
+
+              {menuPanel !== "main" && (
+                <button
+                  type="button"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-[16px] font-bold text-slate-800"
+                  onClick={() => setMenuPanel("main")}
+                >
+                  ← Back
+                </button>
+              )}
+
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-2 text-[17px]">
+                {menuPanel === "main" && (
                   <>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
-                      onClick={() => openMenuTab("projects")}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={() => openMenuTab("schedule")}
                     >
-                      📁 Projects
+                      Schedule
                     </button>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
-                      onClick={() => openMenuTab("quotations")}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
+                      onClick={() => setMenuPanel("employees")}
                     >
-                      📝 Quotations
+                      <span>Employees</span>
+                      <span className="text-slate-400">›</span>
                     </button>
                     <button
                       type="button"
-                      className="w-full text-left rounded-2xl p-3 bg-slate-100 font-bold"
-                      onClick={() => openMenuTab("reports")}
+                      className="relative w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={openPhotosTab}
                     >
-                      📊 Reports
+                      Photos
+                      {photoNotificationCount > 0 && (
+                        <span className="ml-2 rounded-full bg-red-600 text-white text-[11px] px-2 py-0.5 align-middle">
+                          {photoNotificationCount}
+                        </span>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={() => openMenuTab("receipts")}
+                    >
+                      Receipts
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
+                      onClick={() => setMenuPanel("settings")}
+                    >
+                      <span>Settings</span>
+                      <span className="text-slate-400">›</span>
+                    </button>
+                    {isAdmin && (
+                      <>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          onClick={() => openMenuTab("projects")}
+                        >
+                          Projects
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          onClick={() => openMenuTab("reports")}
+                        >
+                          Reports
+                        </button>
+                      </>
+                    )}
+                  </>
+                )}
+
+                {menuPanel === "employees" && (
+                  <>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                        onClick={() => openMenuTab("dashboard")}
+                      >
+                        Live Dashboard
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={() => openMenuTab("timesheet")}
+                    >
+                      Timesheet
                     </button>
                   </>
                 )}
-                <button className="w-full text-left rounded-2xl p-3 bg-red-50 text-red-700 font-bold" onClick={handleLogout}>🚪 Logout</button>
+
+                {menuPanel === "settings" && (
+                  <>
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={() => openMenuTab("settings")}
+                    >
+                      Profile
+                    </button>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                        onClick={() => openMenuTab("team")}
+                      >
+                        Team
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
+
+              <button
+                type="button"
+                className="w-full rounded-2xl border border-red-100 bg-red-50 px-4 py-4 text-left text-[17px] font-black text-red-700"
+                onClick={handleLogout}
+              >
+                Logout
+              </button>
             </div>
           </div>
         )}
