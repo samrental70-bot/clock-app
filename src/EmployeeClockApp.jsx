@@ -5563,6 +5563,22 @@ const handlePhotoQuickUpload = async (event) => {
     setPhotoCameraOpen(false);
   }, []);
 
+  const applyMinimumPhotoCameraZoom = useCallback(async (stream) => {
+    const track = stream?.getVideoTracks?.()?.[0];
+    if (!track?.getCapabilities || !track?.applyConstraints) return;
+
+    try {
+      const capabilities = track.getCapabilities() || {};
+      const zoom = capabilities.zoom;
+      const minZoom = typeof zoom?.min === "number" ? zoom.min : null;
+      if (minZoom == null || !Number.isFinite(minZoom)) return;
+
+      await track.applyConstraints({ advanced: [{ zoom: minZoom }] });
+    } catch (err) {
+      console.warn("Minimum camera zoom unavailable:", err);
+    }
+  }, []);
+
   useEffect(() => {
     photoDraftsRef.current = photoDrafts;
   }, [photoDrafts]);
@@ -5662,6 +5678,7 @@ const handlePhotoQuickUpload = async (event) => {
         video: { facingMode: { ideal: "environment" } },
         audio: false,
       });
+      await applyMinimumPhotoCameraZoom(stream);
       photoCameraStreamRef.current = stream;
       setPhotoCameraOpen(true);
       setPhotoStatus("Camera ready. Capture photos, then upload all.");
@@ -5670,7 +5687,7 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoCameraError("Camera permission denied. You can still upload from gallery.");
       setPhotoStatus("Camera permission denied. You can still upload from gallery.");
     }
-  }, [authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
+  }, [applyMinimumPhotoCameraZoom, authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
 
   const capturePhotoFromCamera = useCallback(() => {
     const video = photoVideoRef.current;
