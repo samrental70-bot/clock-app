@@ -1521,6 +1521,13 @@ export default function EmployeeClockApp() {
   const photoCanvasRef = useRef(null);
   const photoGalleryInputRef = useRef(null);
   const photoFallbackCameraInputRef = useRef(null);
+  const [videoDraft, setVideoDraft] = useState(null);
+  const [videoStatus, setVideoStatus] = useState("");
+  const [videoUploadProgress, setVideoUploadProgress] = useState(null);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const videoDraftRef = useRef(null);
+  const videoRecordInputRef = useRef(null);
+  const videoSelectInputRef = useRef(null);
   const [watchId, setWatchId] = useState(null);
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
@@ -5856,6 +5863,221 @@ const handlePhotoQuickUpload = async (event) => {
     }
   }, [authUser, revokePhotoDraftPreview, uploadProjectPhotoFile, visibleCurrentShift]);
 
+  const revokeVideoDraftPreview = useCallback((draft) => {
+    const url = String(draft?.previewUrl || "");
+    if (url.startsWith("blob:")) URL.revokeObjectURL(url);
+  }, []);
+
+  const clearVideoDraft = useCallback(() => {
+    if (videoUploading) return;
+    setVideoDraft((previous) => {
+      if (previous) revokeVideoDraftPreview(previous);
+      return null;
+    });
+    setVideoUploadProgress(null);
+    setVideoStatus("");
+  }, [revokeVideoDraftPreview, videoUploading]);
+
+  useEffect(() => {
+    videoDraftRef.current = videoDraft;
+  }, [videoDraft]);
+
+  useEffect(() => {
+    return () => {
+      if (videoDraftRef.current) revokeVideoDraftPreview(videoDraftRef.current);
+    };
+  }, [revokeVideoDraftPreview]);
+
+  const readVideoDurationSeconds = useCallback((file) => {
+    return new Promise((resolve, reject) => {
+      const metadataUrl = URL.createObjectURL(file);
+      const video = document.createElement("video");
+      const cleanup = () => {
+        video.removeAttribute("src");
+        video.load?.();
+        URL.revokeObjectURL(metadataUrl);
+      };
+
+      video.preload = "metadata";
+      video.onloadedmetadata = () => {
+        const duration = Number(video.duration);
+        cleanup();
+        if (Number.isFinite(duration) && duration > 0) resolve(duration);
+        else reject(new Error("Could not read video duration."));
+      };
+      video.onerror = () => {
+        cleanup();
+        reject(new Error("Could not read video duration."));
+      };
+      video.src = metadataUrl;
+    });
+  }, []);
+
+  const formatVideoDuration = useCallback((seconds) => {
+    const raw = Number(seconds);
+    if (!Number.isFinite(raw) || raw <= 0) return "";
+    const total = Math.round(raw);
+    const mm = Math.floor(total / 60);
+    const ss = String(total % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  }, []);
+
+  const videoFileExtension = useCallback((file) => {
+    const byName = String(file?.name || "").split(".").pop()?.toLowerCase() || "";
+    if (/^[a-z0-9]{2,5}$/.test(byName)) return byName === "mov" ? "mov" : byName;
+    const type = String(file?.type || "").toLowerCase();
+    if (type.includes("quicktime")) return "mov";
+    if (type.includes("webm")) return "webm";
+    return "mp4";
+  }, []);
+
+  const handleVideoSelection = useCallback(
+    async (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+      if (!visibleCurrentShift || !authUser) {
+        setVideoStatus("Clock in before uploading video.");
+        return;
+      }
+      if (!file.type?.startsWith("video/")) {
+        setVideoStatus("Select a video file.");
+        return;
+      }
+
+      setVideoStatus("Checking video length...");
+      setVideoUploadProgress(null);
+
+      try {
+        const duration = await readVideoDurationSeconds(file);
+        if (duration > 30.25) {
+          setVideoStatus("Video must be 30 seconds or less.");
+          return;
+        }
+
+        const previewUrl = URL.createObjectURL(file);
+        setVideoDraft((previous) => {
+          if (previous) revokeVideoDraftPreview(previous);
+          return {
+            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            file,
+            previewUrl,
+            name: file.name || "Selected video",
+            durationSeconds: duration,
+          };
+        });
+        setVideoStatus("Video ready. Review, then upload.");
+      } catch (err) {
+        console.warn("Video duration check failed:", err);
+        setVideoStatus("Could not confirm video length. Please choose a video 30 seconds or less.");
+      }
+    },
+    [authUser, readVideoDurationSeconds, revokeVideoDraftPreview, visibleCurrentShift]
+  );
+
+  const uploadSelectedVideo = useCallback(async () => {
+    const draft = videoDraftRef.current;
+    if (!draft?.file) {
+      setVideoStatus("Select or record a video before uploading.");
+      return;
+    }
+    if (!visibleCurrentShift || !authUser) {
+      setVideoStatus("Clock in before uploading video.");
+      return;
+    }
+    if (videoUploading) return;
+
+    setVideoUploading(true);
+    setVideoStatus("Uploading video...");
+    setVideoUploadProgress(10);
+
+    const folderName = getProjectFolderName(visibleCurrentShift.project || "");
+    const ext = videoFileExtension(draft.file);
+    const filePath = `${folderName}/videos/${authUser.id}-${Date.now()}.${ext}`;
+    const uploadPromise = supabase.storage
+      .from("project-photos")
+      .upload(filePath, draft.file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: draft.file.type || "video/mp4",
+      });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Video upload timed out after 120 seconds")), 120000)
+    );
+
+    let progressTimer = null;
+    try {
+      progressTimer = setInterval(() => {
+        setVideoUploadProgress((prev) => {
+          const current = typeof prev === "number" ? prev : 20;
+          return Math.min(95, current + 4);
+        });
+      }, 2000);
+
+      const result = await Promise.race([uploadPromise, timeoutPromise]);
+      if (result?.error) throw result.error;
+
+      const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
+      const videoUrl = data?.publicUrl || "";
+      const capturedAt = new Date().toISOString();
+      const media = {
+        id: Date.now(),
+        company_id: userCompany?.id || null,
+        companyId: userCompany?.id || null,
+        user_id: authUser.id,
+        userId: authUser.id,
+        project: visibleCurrentShift.project,
+        project_id: visibleCurrentShift.projectId ?? null,
+        projectId: visibleCurrentShift.projectId ?? null,
+        folderName,
+        cost_centre: visibleCurrentShift.costCenter,
+        costCenter: visibleCurrentShift.costCenter,
+        employee: visibleCurrentShift.employee,
+        employeeId: visibleCurrentShift.employeeId,
+        capturedAt,
+        timestamp: capturedAt,
+        location: null,
+        dataUrl: "",
+        imageUrl: videoUrl,
+        videoUrl,
+        storagePath: filePath,
+        media_type: "video",
+        mediaType: "video",
+        type: "video",
+        duration_seconds: draft.durationSeconds,
+        durationSeconds: draft.durationSeconds,
+        fileName: draft.name,
+      };
+
+      setProjectPhotos((previous) => ({
+        ...previous,
+        [folderName]: [media, ...(previous[folderName] || [])],
+      }));
+      setVideoUploadProgress(100);
+      setVideoStatus("Video upload complete.");
+      setVideoDraft((previous) => {
+        if (previous) revokeVideoDraftPreview(previous);
+        return null;
+      });
+      setTimeout(() => setVideoUploadProgress(null), 1500);
+    } catch (err) {
+      console.log("Video upload failed:", err);
+      setVideoStatus("Video upload failed.");
+      setVideoUploadProgress(null);
+      showErrorPopup("Video upload failed", err);
+    } finally {
+      if (progressTimer) clearInterval(progressTimer);
+      setVideoUploading(false);
+    }
+  }, [
+    authUser,
+    revokeVideoDraftPreview,
+    userCompany?.id,
+    videoFileExtension,
+    videoUploading,
+    visibleCurrentShift,
+  ]);
+
   const handleReceiptCapture = (event) => {
     const file = event.target.files?.[0];
     if (!file || !visibleCurrentShift) return;
@@ -9034,6 +9256,95 @@ const handlePhotoQuickUpload = async (event) => {
                       {uploadProgress !== null && (
                         <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
                       )}
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <label
+                            className={`block w-full rounded-2xl h-10 bg-slate-800 text-white text-center leading-10 text-xs sm:text-sm font-semibold ${
+                              videoUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
+                            }`}
+                          >
+                            Record Video
+                            <input
+                              ref={videoRecordInputRef}
+                              type="file"
+                              accept="video/*"
+                              capture="environment"
+                              className="hidden"
+                              onChange={handleVideoSelection}
+                              disabled={videoUploading}
+                            />
+                          </label>
+                          <label
+                            className={`block w-full rounded-2xl h-10 border border-slate-300 bg-white text-center leading-10 text-xs sm:text-sm font-bold text-slate-800 ${
+                              videoUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
+                            }`}
+                          >
+                            Select Video
+                            <input
+                              ref={videoSelectInputRef}
+                              type="file"
+                              accept="video/*"
+                              className="hidden"
+                              onChange={handleVideoSelection}
+                              disabled={videoUploading}
+                            />
+                          </label>
+                        </div>
+
+                        {videoDraft ? (
+                          <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2">
+                            <video
+                              src={videoDraft.previewUrl}
+                              className="w-full max-h-56 rounded-xl bg-slate-950"
+                              controls
+                              playsInline
+                              preload="metadata"
+                            />
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-bold text-slate-900">
+                                  {videoDraft.name || "Selected video"}
+                                </p>
+                                <p className="text-[12px] font-semibold text-slate-600">
+                                  Duration: {formatVideoDuration(videoDraft.durationSeconds) || "confirmed"}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-[12px] font-bold text-slate-800 disabled:opacity-50"
+                                onClick={clearVideoDraft}
+                                disabled={videoUploading}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              className="w-full rounded-2xl h-11 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
+                              onClick={() => void uploadSelectedVideo()}
+                              disabled={videoUploading}
+                            >
+                              {videoUploading ? "Uploading video..." : "Upload Video"}
+                            </button>
+                          </div>
+                        ) : null}
+
+                        {videoStatus ? (
+                          <p className="text-xs text-center font-semibold text-slate-700 leading-snug">{videoStatus}</p>
+                        ) : null}
+                        {videoUploadProgress !== null ? (
+                          <>
+                            <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                              <div
+                                className="bg-slate-800 h-3 rounded-full transition-all"
+                                style={{ width: `${videoUploadProgress}%` }}
+                              />
+                            </div>
+                            <p className="text-xs text-center text-slate-500">{videoUploadProgress}%</p>
+                          </>
+                        ) : null}
+                      </div>
                     </div>
                     <div className="hidden">
                       <label className="block w-full rounded-2xl h-9 bg-slate-900 text-white text-center leading-9 text-xs sm:text-sm font-semibold cursor-pointer">
@@ -9129,7 +9440,7 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-5 space-y-4">
                 <div>
                   <h2 className="font-bold text-lg">Project Photos</h2>
-                  <p className="text-xs text-slate-500">Supervisor can view photos saved by employees</p>
+                  <p className="text-xs text-slate-500">Supervisor can view photos and videos saved by employees</p>
                 </div>
                 <select className="w-full rounded-2xl border p-3 text-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
@@ -9140,21 +9451,41 @@ const handlePhotoQuickUpload = async (event) => {
                   {visiblePhotoFolders.map((folder) => (
                     <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{(scopedProjectPhotos[folder] || []).length} photos</p></div>
+                        <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{(scopedProjectPhotos[folder] || []).length} media</p></div>
                         <Button className="rounded-xl h-10 text-xs" onClick={() => shareProjectFolder(folder)}>Share Link</Button>
                       </div>
                       <div className="grid grid-cols-2 gap-2">
-                        {(scopedProjectPhotos[folder] || []).map((photo) => (
-                          <div key={photo.id} className="rounded-xl overflow-hidden border bg-slate-50">
-                            <img src={photo.imageUrl || photo.dataUrl} alt="Project" className="w-full h-28 object-cover" />
-                            <div className="p-2 text-[10px] text-slate-600">
-                              <p className="font-semibold">{photo.employee}</p>
-                              <p>{photo.costCenter}</p>
-                              <p>{formatDate(new Date(photo.capturedAt), companyTimeZone)}</p>
-                              <button className="underline text-blue-700" onClick={() => openMap(photo.location)}>Map</button>
+                        {(scopedProjectPhotos[folder] || []).map((photo) => {
+                          const isVideoMedia =
+                            photo?.media_type === "video" ||
+                            photo?.mediaType === "video" ||
+                            photo?.type === "video";
+                          const mediaUrl = photo?.videoUrl || photo?.imageUrl || photo?.dataUrl || "";
+                          return (
+                            <div key={photo.id} className="rounded-xl overflow-hidden border bg-slate-50">
+                              {isVideoMedia ? (
+                                <video
+                                  src={mediaUrl}
+                                  className="w-full h-28 bg-slate-950 object-cover"
+                                  controls
+                                  playsInline
+                                  preload="metadata"
+                                />
+                              ) : (
+                                <img src={mediaUrl} alt="Project" className="w-full h-28 object-cover" />
+                              )}
+                              <div className="p-2 text-[10px] text-slate-600">
+                                <p className="font-semibold">{photo.employee}</p>
+                                <p>{photo.costCenter}</p>
+                                <p>{formatDate(new Date(photo.capturedAt), companyTimeZone)}</p>
+                                {isVideoMedia ? (
+                                  <p>Video{photo.durationSeconds || photo.duration_seconds ? ` - ${formatVideoDuration(photo.durationSeconds || photo.duration_seconds)}` : ""}</p>
+                                ) : null}
+                                <button className="underline text-blue-700" onClick={() => openMap(photo.location)}>Map</button>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ))}
