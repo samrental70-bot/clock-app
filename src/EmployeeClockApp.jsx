@@ -1525,9 +1525,14 @@ export default function EmployeeClockApp() {
   const [videoStatus, setVideoStatus] = useState("");
   const [videoUploadProgress, setVideoUploadProgress] = useState(null);
   const [videoUploading, setVideoUploading] = useState(false);
+  const [videoRecording, setVideoRecording] = useState(false);
+  const [videoRecordSeconds, setVideoRecordSeconds] = useState(0);
   const videoDraftRef = useRef(null);
-  const videoRecordInputRef = useRef(null);
-  const videoSelectInputRef = useRef(null);
+  const videoRecorderRef = useRef(null);
+  const videoRecordChunksRef = useRef([]);
+  const videoRecordIntervalRef = useRef(null);
+  const videoRecordStopTimerRef = useRef(null);
+  const videoRecordStartedAtRef = useRef(0);
   const [watchId, setWatchId] = useState(null);
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
@@ -5560,7 +5565,30 @@ const handlePhotoQuickUpload = async (event) => {
     if (url.startsWith("blob:")) URL.revokeObjectURL(url);
   }, []);
 
+  const stopVideoRecording = useCallback(() => {
+    if (videoRecordIntervalRef.current) {
+      clearInterval(videoRecordIntervalRef.current);
+      videoRecordIntervalRef.current = null;
+    }
+    if (videoRecordStopTimerRef.current) {
+      clearTimeout(videoRecordStopTimerRef.current);
+      videoRecordStopTimerRef.current = null;
+    }
+    const recorder = videoRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try {
+        recorder.stop();
+      } catch (err) {
+        console.warn("Video recording stop failed:", err);
+      }
+    } else {
+      setVideoRecording(false);
+      setVideoRecordSeconds(0);
+    }
+  }, []);
+
   const stopPhotoCamera = useCallback(() => {
+    stopVideoRecording();
     const stream = photoCameraStreamRef.current;
     if (stream) {
       for (const track of stream.getTracks?.() || []) track.stop();
@@ -5568,7 +5596,7 @@ const handlePhotoQuickUpload = async (event) => {
     photoCameraStreamRef.current = null;
     if (photoVideoRef.current) photoVideoRef.current.srcObject = null;
     setPhotoCameraOpen(false);
-  }, []);
+  }, [stopVideoRecording]);
 
   const applyMinimumPhotoCameraZoom = useCallback(async (stream) => {
     const track = stream?.getVideoTracks?.()?.[0];
@@ -5931,28 +5959,30 @@ const handlePhotoQuickUpload = async (event) => {
     return "mp4";
   }, []);
 
-  const handleVideoSelection = useCallback(
-    async (event) => {
-      const file = event.target.files?.[0];
-      event.target.value = "";
-      if (!file) return;
+  const prepareVideoDraftFromFile = useCallback(
+    async (file, source = "gallery", knownDurationSeconds = null) => {
+      if (!file) return false;
       if (!visibleCurrentShift || !authUser) {
         setVideoStatus("Clock in before uploading video.");
-        return;
+        return false;
       }
       if (!file.type?.startsWith("video/")) {
         setVideoStatus("Select a video file.");
-        return;
+        return false;
       }
 
       setVideoStatus("Checking video length...");
       setVideoUploadProgress(null);
 
       try {
-        const duration = await readVideoDurationSeconds(file);
+        const knownDuration = Number(knownDurationSeconds);
+        const duration =
+          Number.isFinite(knownDuration) && knownDuration > 0
+            ? knownDuration
+            : await readVideoDurationSeconds(file);
         if (duration > 30.25) {
           setVideoStatus("Video must be 30 seconds or less.");
-          return;
+          return false;
         }
 
         const previewUrl = URL.createObjectURL(file);
@@ -5962,18 +5992,129 @@ const handlePhotoQuickUpload = async (event) => {
             id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
             file,
             previewUrl,
-            name: file.name || "Selected video",
+            name: file.name || (source === "camera" ? "Recorded video" : "Selected video"),
             durationSeconds: duration,
+            source,
           };
         });
         setVideoStatus("Video ready. Review, then upload.");
+        return true;
       } catch (err) {
         console.warn("Video duration check failed:", err);
         setVideoStatus("Could not confirm video length. Please choose a video 30 seconds or less.");
+        return false;
       }
     },
     [authUser, readVideoDurationSeconds, revokeVideoDraftPreview, visibleCurrentShift]
   );
+
+  const handleMediaGallerySelection = useCallback(
+    async (event) => {
+      const files = Array.from(event.target.files || []);
+      event.target.value = "";
+      if (files.length === 0) return;
+
+      const imageFiles = files.filter((file) => file?.type?.startsWith("image/"));
+      const videoFiles = files.filter((file) => file?.type?.startsWith("video/"));
+
+      if (imageFiles.length > 0) addPhotoDraftFiles(imageFiles, "gallery");
+      if (videoFiles.length > 0) {
+        if (videoFiles.length > 1) setVideoStatus("Only one video can be prepared at a time. Using the first video.");
+        await prepareVideoDraftFromFile(videoFiles[0], "gallery");
+      }
+      if (imageFiles.length === 0 && videoFiles.length === 0) {
+        setPhotoStatus("Select photos or a video.");
+      }
+    },
+    [addPhotoDraftFiles, prepareVideoDraftFromFile]
+  );
+
+  const preferredVideoRecordingMimeType = useCallback(() => {
+    if (typeof MediaRecorder === "undefined" || !MediaRecorder.isTypeSupported) return "";
+    const candidates = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"];
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+  }, []);
+
+  const startVideoRecording = useCallback(() => {
+    const stream = photoCameraStreamRef.current;
+    if (!stream) {
+      setVideoStatus("Open the camera before recording video.");
+      return;
+    }
+    if (typeof MediaRecorder === "undefined") {
+      setVideoStatus("Video recording is not supported here. Use Gallery to choose a video.");
+      return;
+    }
+    if (videoUploading || videoRecording) return;
+
+    try {
+      videoRecordChunksRef.current = [];
+      const mimeType = preferredVideoRecordingMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      videoRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size > 0) videoRecordChunksRef.current.push(event.data);
+      };
+      recorder.onerror = (event) => {
+        console.warn("Video recording error:", event?.error || event);
+        setVideoStatus("Video recording failed.");
+        setVideoRecording(false);
+      };
+      recorder.onstop = async () => {
+        const recordedSeconds = Math.min(
+          30,
+          Math.max(1, (Date.now() - Number(videoRecordStartedAtRef.current || Date.now())) / 1000)
+        );
+        if (videoRecordIntervalRef.current) {
+          clearInterval(videoRecordIntervalRef.current);
+          videoRecordIntervalRef.current = null;
+        }
+        if (videoRecordStopTimerRef.current) {
+          clearTimeout(videoRecordStopTimerRef.current);
+          videoRecordStopTimerRef.current = null;
+        }
+        setVideoRecording(false);
+        setVideoRecordSeconds(0);
+        videoRecorderRef.current = null;
+
+        const chunks = videoRecordChunksRef.current || [];
+        videoRecordChunksRef.current = [];
+        if (chunks.length === 0) {
+          setVideoStatus("No video was recorded. Try again.");
+          return;
+        }
+
+        const type = recorder.mimeType || chunks[0]?.type || "video/webm";
+        const blob = new Blob(chunks, { type });
+        const ext = type.includes("mp4") ? "mp4" : "webm";
+        const file = new File([blob], `camera-video-${Date.now()}.${ext}`, { type });
+        await prepareVideoDraftFromFile(file, "camera", recordedSeconds);
+      };
+
+      recorder.start(1000);
+      videoRecordStartedAtRef.current = Date.now();
+      setVideoRecording(true);
+      setVideoRecordSeconds(0);
+      setVideoStatus("Recording video... 30 seconds maximum.");
+      videoRecordIntervalRef.current = setInterval(() => {
+        setVideoRecordSeconds((seconds) => Math.min(30, seconds + 1));
+      }, 1000);
+      videoRecordStopTimerRef.current = setTimeout(() => {
+        stopVideoRecording();
+      }, 30000);
+    } catch (err) {
+      console.warn("Video recording start failed:", err);
+      setVideoRecording(false);
+      setVideoStatus("Video recording is not supported here. Use Gallery to choose a video.");
+    }
+  }, [
+    preferredVideoRecordingMimeType,
+    prepareVideoDraftFromFile,
+    stopVideoRecording,
+    videoRecording,
+    videoUploading,
+  ]);
 
   const uploadSelectedVideo = useCallback(async () => {
     const draft = videoDraftRef.current;
@@ -9137,10 +9278,10 @@ const handlePhotoQuickUpload = async (event) => {
                           <input
                             ref={photoGalleryInputRef}
                             type="file"
-                            accept="image/*"
+                            accept="image/*,video/*"
                             multiple
                             className="hidden"
-                            onChange={handlePhotoCapture}
+                            onChange={handleMediaGallerySelection}
                             disabled={photoBatchUploading}
                           />
                         </label>
@@ -9181,18 +9322,30 @@ const handlePhotoQuickUpload = async (event) => {
                               type="button"
                               className="rounded-2xl h-11 bg-slate-900 text-white text-sm font-bold disabled:opacity-50"
                               onClick={capturePhotoFromCamera}
-                              disabled={photoBatchUploading}
+                              disabled={photoBatchUploading || videoRecording}
                             >
                               Capture Photo
                             </button>
                             <button
                               type="button"
-                              className="rounded-2xl h-11 border border-slate-300 bg-white text-sm font-bold text-slate-800"
-                              onClick={stopPhotoCamera}
+                              className={`rounded-2xl h-11 text-sm font-bold disabled:opacity-50 ${
+                                videoRecording
+                                  ? "bg-red-700 text-white"
+                                  : "border border-slate-300 bg-white text-slate-800"
+                              }`}
+                              onClick={videoRecording ? stopVideoRecording : startVideoRecording}
+                              disabled={photoBatchUploading || videoUploading}
                             >
-                              Close Camera
+                              {videoRecording ? `Stop ${videoRecordSeconds}s` : "Record Video"}
                             </button>
                           </div>
+                          <button
+                            type="button"
+                            className="w-full rounded-2xl h-10 border border-slate-300 bg-white text-sm font-bold text-slate-800"
+                            onClick={stopPhotoCamera}
+                          >
+                            Close Camera
+                          </button>
                         </div>
                       ) : null}
 
@@ -9257,41 +9410,13 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-xs text-center text-slate-500">{uploadProgress}%</p>
                       )}
 
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-2.5 space-y-2">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <label
-                            className={`block w-full rounded-2xl h-10 bg-slate-800 text-white text-center leading-10 text-xs sm:text-sm font-semibold ${
-                              videoUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
-                            }`}
-                          >
-                            Record Video
-                            <input
-                              ref={videoRecordInputRef}
-                              type="file"
-                              accept="video/*"
-                              capture="environment"
-                              className="hidden"
-                              onChange={handleVideoSelection}
-                              disabled={videoUploading}
-                            />
-                          </label>
-                          <label
-                            className={`block w-full rounded-2xl h-10 border border-slate-300 bg-white text-center leading-10 text-xs sm:text-sm font-bold text-slate-800 ${
-                              videoUploading ? "opacity-50 pointer-events-none" : "cursor-pointer"
-                            }`}
-                          >
-                            Select Video
-                            <input
-                              ref={videoSelectInputRef}
-                              type="file"
-                              accept="video/*"
-                              className="hidden"
-                              onChange={handleVideoSelection}
-                              disabled={videoUploading}
-                            />
-                          </label>
-                        </div>
-
+                      <div
+                        className={`${
+                          videoDraft || videoStatus || videoUploadProgress !== null
+                            ? "rounded-2xl border border-slate-200 bg-slate-50 p-2.5 space-y-2"
+                            : "hidden"
+                        }`}
+                      >
                         {videoDraft ? (
                           <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2">
                             <video
