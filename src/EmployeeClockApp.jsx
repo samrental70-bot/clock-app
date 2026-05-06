@@ -1398,31 +1398,27 @@ async function sendPushForRecentScheduleAssignmentNotifications(supabase, params
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (attempt > 0) await waitMs(attempt === 1 ? 400 : 900);
     try {
-      const { data, error } = await supabase
-        .from("notifications")
-        .select("id, recipient_user_id, created_at")
-        .eq("company_id", company)
-        .eq("type", "schedule_assigned")
-        .in("recipient_user_id", userIds)
-        .gte("created_at", recentSince)
-        .order("created_at", { ascending: false })
-        .limit(Math.max(10, userIds.length * 3));
+      const { data, error } = await supabase.rpc("get_recent_schedule_notification_ids", {
+        p_company_id: company,
+        p_recipient_user_ids: userIds,
+        p_since: recentSince,
+      });
       if (error) {
-        console.warn("[SCHEDULE_PUSH] notification id lookup error", error);
+        console.warn("[SCHEDULE_PUSH] notification id rpc error", error);
         return [];
       }
-      const seenRecipients = new Set();
-      notificationIds = [];
-      for (const row of Array.isArray(data) ? data : []) {
-        const id = String(row?.id || "").trim();
-        const recipient = String(row?.recipient_user_id || "").trim();
-        if (!id || !recipient || seenRecipients.has(recipient)) continue;
-        seenRecipients.add(recipient);
-        notificationIds.push(id);
-      }
+      const rows = Array.isArray(data) ? data : [];
+      console.log("[SCHEDULE_PUSH] rpc rows", rows);
+      notificationIds = [...new Set(rows
+        .map((row) => {
+          if (typeof row === "string") return row;
+          return row?.id ?? row?.notification_id ?? row?.notificationId ?? null;
+        })
+        .map((id) => String(id || "").trim())
+        .filter(Boolean))];
       if (notificationIds.length > 0 || attempt === 2) break;
     } catch (e) {
-      console.warn("[SCHEDULE_PUSH] notification id lookup exception", e);
+      console.warn("[SCHEDULE_PUSH] notification id rpc exception", e);
       return [];
     }
   }
