@@ -66,6 +66,16 @@ function safeRead(key, fallback) {
   }
 }
 
+function safeWrite(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch (err) {
+    console.warn(`[STORAGE] Could not save ${key}`, err);
+    return false;
+  }
+}
+
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
@@ -4197,23 +4207,23 @@ export default function EmployeeClockApp() {
   }, [clockSelectableProjects, clockCostCentreOptionsForProject, projectId, costCenter]);
 
   useEffect(() => {
-    localStorage.setItem("orp_current_shift", JSON.stringify(currentShift));
+    safeWrite("orp_current_shift", currentShift);
   }, [currentShift]);
 
   useEffect(() => {
-    localStorage.setItem("orp_timesheet_records", JSON.stringify(records));
+    safeWrite("orp_timesheet_records", records);
   }, [records]);
 
   useEffect(() => {
-    localStorage.setItem("orp_project_photos", JSON.stringify(projectPhotos));
+    safeWrite("orp_project_photos", projectPhotos);
   }, [projectPhotos]);
 
   useEffect(() => {
-    localStorage.setItem("orp_project_receipts", JSON.stringify(projectReceipts));
+    safeWrite("orp_project_receipts", projectReceipts);
   }, [projectReceipts]);
 
   useEffect(() => {
-    localStorage.setItem("orp_photo_notification_count", JSON.stringify(photoNotificationCount));
+    safeWrite("orp_photo_notification_count", photoNotificationCount);
   }, [photoNotificationCount]);
 
   useEffect(() => {
@@ -6469,36 +6479,50 @@ const handlePhotoQuickUpload = async (event) => {
     visibleCurrentShift,
   ]);
 
-  const handleReceiptCapture = (event) => {
+  const handleReceiptCapture = async (event) => {
     const file = event.target.files?.[0];
     if (!file || !visibleCurrentShift) return;
 
     const amountInput = window.prompt("Enter receipt amount:");
     const amount = Number(amountInput || 0);
     const category = window.prompt("Receipt category? Example: Materials, Fuel, Tools, Parking, Other") || "Other";
-    const note = window.prompt("Optional note for this receipt:") || "";
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
+      setPhotoStatus("Saving receipt...");
+      const receiptFile = await compressImage(file, 1000, 0.65);
+      const receiptDataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error("Receipt photo could not be read."));
+        reader.readAsDataURL(receiptFile);
+      });
+
       const folderName = getProjectFolderName(visibleCurrentShift.project);
+      const capturedAt = new Date().toISOString();
       const receipt = {
         id: Date.now(),
+        companyId: userCompany?.id || null,
+        userId: authUser?.id || null,
         project: visibleCurrentShift.project,
+        projectId: visibleCurrentShift.projectId ?? null,
         folderName,
         costCenter: visibleCurrentShift.costCenter,
         employee: visibleCurrentShift.employee,
         employeeId: visibleCurrentShift.employeeId,
         amount: Number.isFinite(amount) ? amount : 0,
         category,
-        note,
-        capturedAt: new Date().toISOString(),
+        capturedAt,
         location: visibleCurrentShift.liveLocation || visibleCurrentShift.clockInLocation || null,
-        dataUrl: reader.result,
+        dataUrl: receiptDataUrl,
         type: "receipt",
       };
 
-      setProjectReceipts((previous) => ({ ...previous, [folderName]: [receipt, ...(previous[folderName] || [])] }));
+      setProjectReceipts((previous) => ({
+        ...previous,
+        [folderName]: [receipt, ...(previous[folderName] || [])],
+      }));
       setPhotoStatus(`Receipt saved: ${formatMoney(receipt.amount)}`);
+      setTimeout(() => setPhotoStatus(""), 7000);
       if (authUser?.id && userCompany?.id) {
         const actorLabel = (profileFullName || "").trim() || authUser.email || "Someone";
         void createCompanyNotifications(supabase, {
@@ -6516,9 +6540,13 @@ const handlePhotoQuickUpload = async (event) => {
           itemCount: null,
         });
       }
+    } catch (err) {
+      console.warn("Receipt save failed:", err);
+      setPhotoStatus("Receipt save failed.");
+      showErrorPopup("Receipt save failed", err);
+    } finally {
       event.target.value = "";
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const handleClockOut = async () => {
@@ -10123,8 +10151,9 @@ const handlePhotoQuickUpload = async (event) => {
                                 <div className="flex justify-between"><p className="font-semibold">{receipt.category}</p><p className="font-bold text-slate-900">{formatMoney(receipt.amount)}</p></div>
                                 <p>{receipt.employee} • {receipt.costCenter}</p>
                                 <p>{formatDate(new Date(receipt.capturedAt), companyTimeZone)}</p>
-                                {receipt.note && <p>Note: {receipt.note}</p>}
-                                <button className="underline text-blue-700" onClick={() => openMap(receipt.location)}>Map</button>
+                                {receipt.location ? (
+                                  <button className="underline text-blue-700 font-semibold" onClick={() => openMap(receipt.location)}>Map</button>
+                                ) : null}
                               </div>
                             </div>
                           ))}
