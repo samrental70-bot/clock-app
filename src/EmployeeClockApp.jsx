@@ -1250,7 +1250,7 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   if (window.Notification.permission !== "granted") return;
   try {
     shownIdsRef.current.add(id);
-    new window.Notification(String(notificationRow.title || "Clock App"), {
+    new window.Notification(String(notificationRow.title || "OPERA"), {
       body: String(notificationRow.message || ""),
       icon: "/icon-192.png",
       badge: "/icon-192.png",
@@ -5548,7 +5548,8 @@ const handlePhotoQuickUpload = async (event) => {
 
     setTimeout(() => {
       setUploadProgress(null);
-    }, 1500);
+      setPhotoStatus("");
+    }, 7000);
 
     event.target.value = "";
   } catch (err) {
@@ -5871,7 +5872,11 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoBatchProgress({ current: queued.length, total: queued.length, label: "Completed" });
       setPhotoStatus(`Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`);
       setUploadProgress(100);
-      setTimeout(() => setUploadProgress(null), 1500);
+      setTimeout(() => {
+        setUploadProgress(null);
+        setPhotoBatchProgress(null);
+        setPhotoStatus("");
+      }, 7000);
     } catch (err) {
       console.log("Batch photo upload failed:", err);
       const failedIndex = Math.min(uploadedDraftIds.length + 1, queued.length);
@@ -6200,7 +6205,10 @@ const handlePhotoQuickUpload = async (event) => {
         if (previous) revokeVideoDraftPreview(previous);
         return null;
       });
-      setTimeout(() => setVideoUploadProgress(null), 1500);
+      setTimeout(() => {
+        setVideoUploadProgress(null);
+        setVideoStatus("");
+      }, 7000);
     } catch (err) {
       console.log("Video upload failed:", err);
       setVideoStatus("Video upload failed.");
@@ -8244,7 +8252,7 @@ const handlePhotoQuickUpload = async (event) => {
       <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
         <div className="text-center">
           <div className="text-4xl mb-3">⏱️</div>
-          <p className="text-sm text-slate-300">Loading Clock App...</p>
+          <p className="text-sm text-slate-300">Loading OPERA...</p>
         </div>
       </div>
     );
@@ -8259,7 +8267,7 @@ const handlePhotoQuickUpload = async (event) => {
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
                 <div>
-                  <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
+                  <h1 className="text-2xl font-bold tracking-tight">OPERA</h1>
                   <p className="text-sm text-slate-600">Create Account</p>
                 </div>
               </div>
@@ -8268,7 +8276,7 @@ const handlePhotoQuickUpload = async (event) => {
             <form onSubmit={handleSignup} className="p-5 space-y-4">
               <div>
                 <h2 className="text-xl font-bold">Sign up</h2>
-                <p className="text-sm text-slate-500 mt-1">Create an account to start using the clock app.</p>
+                <p className="text-sm text-slate-500 mt-1">Create an account to start using OPERA.</p>
               </div>
 
               <div className="space-y-2">
@@ -8343,8 +8351,7 @@ const handlePhotoQuickUpload = async (event) => {
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">Clock App</h1>
-                <p className="text-sm text-slate-600">Ottawa Renovation Pro LTD</p>
+                <h1 className="text-2xl font-bold tracking-tight">OPERA</h1>
               </div>
             </div>
           </div>
@@ -8573,7 +8580,7 @@ const handlePhotoQuickUpload = async (event) => {
                   setAuthStep("login");
                 }}
               >
-                Continue to Clock App
+                Continue to OPERA
               </Button>
             </div>
           </div>
@@ -8889,15 +8896,8 @@ const handlePhotoQuickUpload = async (event) => {
             <div className="flex items-start justify-between gap-2 sm:gap-3">
               <button onClick={() => setIsMenuOpen(true)} className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl">☰</button>
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">Clock App</h1>
-                <p className="text-xs sm:text-sm text-slate-600 mt-0.5">{formatDate(now, companyTimeZone)}</p>
-                <p className="text-[10px] sm:text-[11px] text-slate-500 mt-0.5">
-                  Company time now: {formatTime(now, companyTimeZone)}
-                </p>
-                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Logged in as: {employeeDisplayName || authUser.email}</p>
-                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 leading-snug">Company: {userCompany?.name || "—"}</p>
-                <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5">Role: {resolvedCompanyRole || authRole || "employee"}</p>
-                <p className="text-[10px] text-slate-400 mt-0.5">Times: {companyTimeZone}</p>
+                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">OPERA</h1>
+                <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
               <div className="flex flex-col items-end gap-1 shrink-0">
                 {isAdmin && (
@@ -9194,18 +9194,6 @@ const handlePhotoQuickUpload = async (event) => {
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="space-y-0.5">
-                  <h2 className="font-bold text-sm sm:text-lg leading-tight">Active Shift</h2>
-                  <p className="text-xs sm:text-sm text-slate-700 leading-snug">{activeShiftTitle}</p>
-                  {activeShiftEmailSecondary && (
-                    <p className="text-[10px] sm:text-[11px] text-slate-500 leading-snug break-all">{activeShiftEmailSecondary}</p>
-                  )}
-                  <p className="text-[11px] sm:text-xs text-slate-600 leading-snug">{visibleCurrentShift.project} • {visibleCurrentShift.costCenter}</p>
-                  <p className="text-[11px] sm:text-xs text-slate-500">Rate: {formatMoney(visibleCurrentShift.hourlyRate)}/hr</p>
-                  <p className="text-[11px] sm:text-xs text-slate-500">Folder: {visibleCurrentShift.projectFolder}</p>
-                  <p className="text-[11px] sm:text-xs text-slate-500">Photos: {visibleCurrentShift.photosTaken || 0}</p>
-                </div>
-
                 <div className="text-center py-0">
                   <p className="text-[10px] sm:text-xs text-slate-500">Live Timer</p>
                   <p className="text-5xl sm:text-6xl font-black tabular-nums leading-none mt-0.5">{formatTimer(liveSeconds)}</p>
@@ -13339,9 +13327,7 @@ const handlePhotoQuickUpload = async (event) => {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="font-bold text-lg">Menu</h2>
-                  <p className="text-xs text-slate-500">
-                    {employeeDisplayName || authUser.email} • {resolvedCompanyRole || authRole || "employee"}
-                  </p>
+                  <p className="text-xs text-slate-500">{(profileFullName || "").trim() || "User"}</p>
                 </div>
                 <button className="text-xl" onClick={() => setIsMenuOpen(false)}>×</button>
               </div>
