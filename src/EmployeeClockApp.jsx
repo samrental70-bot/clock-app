@@ -1517,6 +1517,7 @@ export default function EmployeeClockApp() {
   const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
+  const photoToolsRef = useRef(null);
   const photoVideoRef = useRef(null);
   const photoCanvasRef = useRef(null);
   const photoGalleryInputRef = useRef(null);
@@ -5695,16 +5696,25 @@ const handlePhotoQuickUpload = async (event) => {
     setPhotoStatus("Photo selection cleared.");
   }, [photoBatchUploading, revokePhotoDraftPreview]);
 
-  const startPhotoCamera = useCallback(async () => {
+  const startPhotoCamera = useCallback(async (options = {}) => {
+    const allowFallbackCameraInput = options?.allowFallback !== false;
+    const readyMessage =
+      typeof options?.readyMessage === "string" && options.readyMessage.trim()
+        ? options.readyMessage.trim()
+        : "Camera ready. Capture photos, then upload all.";
     if (!visibleCurrentShift || !authUser) {
       setPhotoStatus("Clock in before taking photos.");
-      return;
+      return false;
     }
-    if (photoBatchUploading) return;
+    if (photoBatchUploading) return false;
     if (!navigator.mediaDevices?.getUserMedia) {
-      setPhotoCameraError("Camera stream is not supported here. You can still upload from gallery.");
-      photoFallbackCameraInputRef.current?.click();
-      return;
+      const message = allowFallbackCameraInput
+        ? "Camera stream is not supported here. You can still upload from gallery."
+        : "In-app camera is not supported here. Use a supported browser to capture a photo before clock out.";
+      setPhotoCameraError(message);
+      setPhotoStatus(message);
+      if (allowFallbackCameraInput) photoFallbackCameraInputRef.current?.click();
+      return false;
     }
 
     try {
@@ -5717,11 +5727,13 @@ const handlePhotoQuickUpload = async (event) => {
       await applyMinimumPhotoCameraZoom(stream);
       photoCameraStreamRef.current = stream;
       setPhotoCameraOpen(true);
-      setPhotoStatus("Camera ready. Capture photos, then upload all.");
+      setPhotoStatus(readyMessage);
+      return true;
     } catch (err) {
       console.warn("Camera start failed:", err);
       setPhotoCameraError("Camera permission denied. You can still upload from gallery.");
       setPhotoStatus("Camera permission denied. You can still upload from gallery.");
+      return false;
     }
   }, [applyMinimumPhotoCameraZoom, authUser, photoBatchUploading, stopPhotoCamera, visibleCurrentShift]);
 
@@ -6283,7 +6295,17 @@ const handlePhotoQuickUpload = async (event) => {
     if (!visibleCurrentShift) return;
 
     if (!visibleCurrentShift.photosTaken || visibleCurrentShift.photosTaken < 1) {
-      alert("Please take at least one final project picture before clocking out.");
+      setPhotoCameraError("");
+      setPhotoStatus("Capture photo before clock out");
+      if (!photoCameraOpen) {
+        await startPhotoCamera({
+          allowFallback: false,
+          readyMessage: "Capture photo before clock out",
+        });
+      }
+      setTimeout(() => {
+        photoToolsRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      }, 80);
       return;
     }
 
@@ -9187,14 +9209,14 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50">
-              <CardContent className="p-2.5 flex flex-col gap-2">
+            <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50 min-h-[calc(100dvh-10.5rem)]">
+              <CardContent className="p-2.5 min-h-[calc(100dvh-10.5rem)] flex flex-col gap-2">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="text-center py-0">
+                <div className="flex min-h-[34dvh] flex-1 flex-col items-center justify-center text-center py-4">
                   <p className="text-[10px] sm:text-xs text-slate-500">Live Timer</p>
                   <p className="text-5xl sm:text-6xl font-black tabular-nums leading-none mt-0.5">{formatTimer(liveSeconds)}</p>
                   <p className="text-lg sm:text-xl font-bold mt-0.5 text-green-700">{formatMoney(liveEarnings)}</p>
@@ -9247,7 +9269,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    <div className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
+                    <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
                       <div className="grid grid-cols-3 gap-1.5">
                         <button
                           type="button"
