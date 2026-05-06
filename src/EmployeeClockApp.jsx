@@ -1299,6 +1299,30 @@ function buildScheduleAssignmentDisplay(task, companyTimeZone) {
   };
 }
 
+function scheduleShortEmployeeName(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const base = raw.includes("@") ? raw.split("@")[0] : raw;
+  const compact = base.replace(/\s+/g, " ").trim();
+  return compact.slice(0, 3) || "";
+}
+
+function scheduleShortEmployeeSummary(assignRows, fallbackNames) {
+  const names = [];
+  for (const row of Array.isArray(assignRows) ? assignRows : []) {
+    const short = scheduleShortEmployeeName(row?.employee_name || row?.employee_email || row?.user_id);
+    if (short) names.push(short);
+  }
+  if (names.length === 0 && fallbackNames) {
+    for (const part of String(fallbackNames).split(",")) {
+      const short = scheduleShortEmployeeName(part);
+      if (short) names.push(short);
+    }
+  }
+  const unique = [...new Set(names)];
+  return unique.length > 0 ? unique.join(", ") : "No emp";
+}
+
 async function createCompanyNotifications(supabase, params) {
   const {
     companyId,
@@ -8065,6 +8089,115 @@ const handlePhotoCapture = async (event) => {
     );
   };
 
+  const renderEmployeeScheduleListTaskCard = (task, dateKey) => {
+    const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
+    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+    const endDisp = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "—";
+    const linkRow =
+      task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
+    const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
+    const employeeSummary =
+      fromTaskNames !== "No emp"
+        ? fromTaskNames
+        : scheduleShortEmployeeSummary(linkRow ? [linkRow] : [], "");
+    const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
+    const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
+    const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
+    const tidStr = task?.id != null ? String(task.id) : "";
+    const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
+
+    return (
+      <div
+        key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
+        className="rounded-2xl border border-slate-200 bg-white px-3 py-3.5 shadow-sm min-w-0"
+      >
+        <div className="min-w-0">
+          <p className="text-[19px] font-extrabold text-slate-950 leading-snug break-words">
+            {ttitle}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] font-semibold text-slate-700 min-w-0">
+            <span className="shrink-0 tabular-nums">
+              {startDisp} - {endDisp}
+            </span>
+            <span className="text-slate-300">|</span>
+            <span className="shrink-0 max-w-full truncate text-slate-900">{employeeSummary}</span>
+          </div>
+        </div>
+
+        {respStatus === "pending" && assigneeRowId ? (
+          <div className="mt-3">
+            {!declineOpen ? (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={Boolean(savingThis)}
+                  onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
+                  className="flex-1 rounded-xl bg-slate-900 px-3 py-2.5 text-[15px] font-bold text-white disabled:opacity-50"
+                >
+                  {savingThis ? "Saving..." : "Accept"}
+                </button>
+                <button
+                  type="button"
+                  disabled={Boolean(savingThis)}
+                  onClick={() => {
+                    setScheduleEmployeeResponseInlineError("");
+                    setScheduleEmployeeDeclineTaskId(tidStr);
+                    setScheduleEmployeeDeclineReason("");
+                  }}
+                  className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-slate-800 disabled:opacity-50"
+                >
+                  Decline
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+                <textarea
+                  rows={2}
+                  value={scheduleEmployeeDeclineReason}
+                  onChange={(e) => setScheduleEmployeeDeclineReason(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-[15px] resize-y min-h-[3.25rem]"
+                  placeholder="Reason required"
+                  disabled={Boolean(savingThis)}
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={Boolean(savingThis)}
+                    onClick={() =>
+                      void handleEmployeeScheduleDecline(assigneeRowId, scheduleEmployeeDeclineReason)
+                    }
+                    className="flex-1 rounded-xl bg-rose-700 px-3 py-2.5 text-[15px] font-bold text-white disabled:opacity-50"
+                  >
+                    {savingThis ? "Saving..." : "Confirm"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(savingThis)}
+                    onClick={() => {
+                      setScheduleEmployeeDeclineTaskId(null);
+                      setScheduleEmployeeDeclineReason("");
+                    }}
+                    className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-slate-800 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mt-2">
+            <span
+              className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(respStatus)}`}
+            >
+              {scheduleAssigneeResponseLabel(respStatus)}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
@@ -9994,7 +10127,7 @@ const handlePhotoCapture = async (event) => {
                         <div key={dateKey} className="space-y-2">
                           <p className="text-[14px] font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
                           <div className="space-y-2">
-                            {taskList.map((task) => renderEmployeeScheduleTaskCard(task, dateKey))}
+                            {taskList.map((task) => renderEmployeeScheduleListTaskCard(task, dateKey))}
                           </div>
                         </div>
                       );
@@ -10707,20 +10840,33 @@ const handlePhotoCapture = async (event) => {
                               const at = String(task?.assigned_team ?? "").trim();
                               const notesDisp = String(task?.notes ?? "").trim();
                               const st = String(task?.status ?? "").trim() || "—";
+                              const endDisp = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "—";
+                              const employeeSummary = scheduleShortEmployeeSummary(
+                                assignRowsForTask,
+                                task?.assigned_employee_name
+                              );
                               const tidKey = task?.id != null ? String(task.id) : "";
                               const isEditingThis =
                                 tidKey && scheduleEditingTaskId === tidKey && scheduleEditDraft != null;
                               return (
                                 <div
                                   key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-                                  className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm min-w-0"
+                                  className="rounded-2xl border border-slate-200 bg-white px-3 py-3.5 space-y-2 shadow-sm min-w-0"
                                 >
-                                  <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <p className="text-sm font-bold text-slate-900 leading-snug min-w-0 flex-1">{ttitle}</p>
+                                  <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[19px] font-extrabold text-slate-950 leading-snug break-words">{ttitle}</p>
+                                      {!isEditingThis ? (
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] font-semibold text-slate-700 min-w-0">
+                                          <span className="shrink-0 tabular-nums">
+                                            {startDisp} - {endDisp}
+                                          </span>
+                                          <span className="text-slate-300">|</span>
+                                          <span className="shrink-0 max-w-full truncate text-slate-900">{employeeSummary}</span>
+                                        </div>
+                                      ) : null}
+                                    </div>
                                     <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
-                                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
-                                        {st}
-                                      </span>
                                       <button
                                         type="button"
                                         disabled={
@@ -10740,18 +10886,6 @@ const handlePhotoCapture = async (event) => {
                                         className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 disabled:opacity-50"
                                       >
                                         Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={
-                                          Boolean(scheduleEditSaving) ||
-                                          scheduleDeleteSavingId === tidKey ||
-                                          Boolean(scheduleRescheduleSavingId)
-                                        }
-                                        onClick={() => beginScheduleMoveMode(task)}
-                                        className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-900 disabled:opacity-50"
-                                      >
-                                        Move
                                       </button>
                                       <button
                                         type="button"
@@ -11049,14 +11183,6 @@ const handlePhotoCapture = async (event) => {
                                         </Button>
                                         <button
                                           type="button"
-                                          disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
-                                          onClick={() => beginScheduleMoveMode(task)}
-                                          className="flex-1 min-w-[7rem] rounded-lg h-9 text-xs font-semibold border border-amber-300 bg-amber-50 text-amber-900"
-                                        >
-                                          Move
-                                        </button>
-                                        <button
-                                          type="button"
                                           disabled={scheduleEditSaving}
                                           onClick={() => {
                                             setScheduleEditingTaskId(null);
@@ -11069,78 +11195,7 @@ const handlePhotoCapture = async (event) => {
                                         </button>
                                       </div>
                                     </form>
-                                  ) : (
-                                    <>
-                                      <p className="text-[12px] text-slate-700">
-                                        <span className="font-semibold text-slate-600">Project: </span>
-                                        {projLine}
-                                      </p>
-                                      <p className="text-[12px] text-slate-700">
-                                        <span className="font-semibold text-slate-600">Cost centre: </span>
-                                        {ccLine}
-                                      </p>
-                                      <p className="text-[12px] text-slate-800">
-                                        <span className="font-semibold text-slate-600">Time: </span>
-                                        {startDisp}
-                                        {" → "}
-                                        {windowLabel}
-                                      </p>
-                                      <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-2.5 space-y-1.5 min-w-0">
-                                        <p className="text-[11px] font-semibold text-slate-700">
-                                          Assigned employees and responses
-                                        </p>
-                                        {sortedAssignees.length === 0 ? (
-                                          <p className="text-[11px] text-slate-600">No employees assigned.</p>
-                                        ) : (
-                                          <ul className="space-y-2 list-none p-0 m-0">
-                                            {sortedAssignees.map((ar) => {
-                                              const aname = String(ar?.employee_name ?? "").trim() || "—";
-                                              const rs = normalizeScheduleAssigneeResponseStatus(ar?.response_status);
-                                              const rreason = String(ar?.decline_reason ?? "").trim();
-                                              const rAt = ar?.responded_at;
-                                              const rDisp =
-                                                rAt != null && rAt !== ""
-                                                  ? `${formatDate(rAt, companyTimeZone)} · ${formatTime(rAt, companyTimeZone)}`
-                                                  : null;
-                                              return (
-                                                <li
-                                                  key={String(ar?.id ?? `${task?.id}-${aname}`)}
-                                                  className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-[11px] min-w-0"
-                                                >
-                                                  <div className="flex flex-wrap items-center gap-2 min-w-0">
-                                                    <span className="font-semibold text-slate-800 break-words min-w-0 flex-1">{aname}</span>
-                                                    <span
-                                                      className={`shrink-0 inline-flex rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(rs)}`}
-                                                    >
-                                                      {scheduleAssigneeResponseLabel(rs)}
-                                                    </span>
-                                                  </div>
-                                                  {rDisp ? (
-                                                    <p className="text-[10px] text-slate-500 mt-0.5">Response time: {rDisp}</p>
-                                                  ) : null}
-                                                  {rs === "declined" && rreason ? (
-                                                    <p className="text-[10px] text-slate-700 mt-0.5 leading-snug break-words">
-                                                      <span className="font-semibold text-slate-600">Decline reason: </span>
-                                                      {rreason}
-                                                    </p>
-                                                  ) : null}
-                                                </li>
-                                              );
-                                            })}
-                                          </ul>
-                                        )}
-                                      </div>
-                                      {at ? (
-                                        <p className="text-[12px] text-slate-700">
-                                          <span className="font-semibold text-slate-600">Team: </span>
-                                          {at}
-                                        </p>
-                                      ) : null}
-                                      {notesDisp ? (
-                                        <p className="text-[12px] text-slate-600 leading-snug whitespace-pre-wrap">{notesDisp}</p>
-                                      ) : null}
-                                    </>
-                                  )}
+                                  ) : null}
                                 </div>
                               );
                             })}
