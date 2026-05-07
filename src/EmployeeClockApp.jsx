@@ -1749,9 +1749,10 @@ export default function EmployeeClockApp() {
   const videoRecordStopTimerRef = useRef(null);
   const videoRecordStartedAtRef = useRef(0);
   const [watchId, setWatchId] = useState(null);
-  const [clockChecklistTab, setClockChecklistTab] = useState("tasks");
-  const [clockCompletedChecklist, setClockCompletedChecklist] = useState(() =>
-    safeRead("orp_clock_completed_checklist", {})
+  const [clockListModal, setClockListModal] = useState(null);
+  const [clockListDraft, setClockListDraft] = useState("");
+  const [clockProjectLists, setClockProjectLists] = useState(() =>
+    safeRead("orp_clock_project_lists", { task: {}, material: {} })
   );
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
@@ -4432,8 +4433,8 @@ export default function EmployeeClockApp() {
   }, [photoNotificationCount]);
 
   useEffect(() => {
-    safeWrite("orp_clock_completed_checklist", clockCompletedChecklist);
-  }, [clockCompletedChecklist]);
+    safeWrite("orp_clock_project_lists", clockProjectLists);
+  }, [clockProjectLists]);
 
   useEffect(() => {
     if (!authUser?.id) {
@@ -9972,144 +9973,84 @@ const handlePhotoQuickUpload = async (event) => {
     locationStatus === "Select project and cost center first." ||
     locationStatus === "No projects assigned. Please contact your supervisor.";
 
-  const clockChecklistContext = {
-    projectId: visibleCurrentShift?.projectId ?? clockSelectedProject?.id ?? projectId,
-    projectName: visibleCurrentShift?.project || clockSelectedProject?.name || "",
-    costCenter: visibleCurrentShift?.costCenter || costCenter || "",
-    dateKey: calendarDateKeyInTimeZone(visibleCurrentShift?.clockIn || now, companyTimeZone),
+  const clockListContext = {
+    projectId: clockMediaContext?.projectId ?? visibleCurrentShift?.projectId ?? clockSelectedProject?.id ?? projectId,
+    projectName: clockMediaContext?.project || visibleCurrentShift?.project || clockSelectedProject?.name || "",
+    costCenter: clockMediaContext?.costCenter || visibleCurrentShift?.costCenter || costCenter || "",
   };
 
-  const clockChecklistDoneKey = (kind, id) =>
-    [
-      authUser?.id || "anonymous",
-      clockChecklistContext.dateKey || "today",
-      clockChecklistContext.projectId || clockChecklistContext.projectName || "project",
-      clockChecklistContext.costCenter || "cost",
-      kind,
-      id,
-    ].join("|");
+  const clockListContextReady = Boolean(
+    String(clockListContext.projectName || "").trim() &&
+      String(clockListContext.costCenter || "").trim()
+  );
 
-  const isClockChecklistDone = (kind, id) =>
-    Boolean(clockCompletedChecklist?.[clockChecklistDoneKey(kind, id)]);
+  const clockProjectListKey = [
+    authUser?.id || "anonymous",
+    userCompany?.id || "company",
+    clockListContext.projectId || getProjectFolderName(clockListContext.projectName || "project"),
+    clockListContext.costCenter || "cost",
+  ].join("|");
 
-  const completeClockChecklistItem = (kind, id, label) => {
-    const key = clockChecklistDoneKey(kind, id);
-    setClockCompletedChecklist((prev) => ({
-      ...(prev || {}),
-      [key]: { label, completedAt: new Date().toISOString() },
-    }));
+  const getClockProjectListItems = (kind) => {
+    const bucket = clockProjectLists?.[kind] || {};
+    const rows = bucket?.[clockProjectListKey] || [];
+    return Array.isArray(rows) ? rows : [];
   };
 
-  const clockTaskChecklistItems = (clockEmployeeScheduledTasks || [])
-    .filter((task) => {
-      const taskProjectId = task?.project_id != null ? String(task.project_id) : "";
-      const taskProjectName = String(task?.project_name ?? "").trim().toLowerCase();
-      const ctxProjectId = clockChecklistContext.projectId != null ? String(clockChecklistContext.projectId) : "";
-      const ctxProjectName = String(clockChecklistContext.projectName || "").trim().toLowerCase();
-      const taskCost = String(task?.cost_centre ?? "").trim();
-      const ctxCost = String(clockChecklistContext.costCenter || "").trim();
-      const projectMatches =
-        !ctxProjectId ||
-        (taskProjectId && taskProjectId === ctxProjectId) ||
-        (ctxProjectName && taskProjectName === ctxProjectName);
-      const costMatches = !ctxCost || !taskCost || taskCost === ctxCost;
-      return projectMatches && costMatches;
-    })
-    .map((task) => {
-      const id = task?.id != null ? String(task.id) : String(task?.task_title || "");
-      const label = String(task?.task_title ?? "").trim() || "Scheduled task";
-      const time = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "";
-      return { kind: "task", id, label, meta: time };
-    })
-    .filter((item) => item.id && !isClockChecklistDone(item.kind, item.id));
+  const activeClockListItems = clockListModal ? getClockProjectListItems(clockListModal) : [];
 
-  const clockMaterialChecklistItems = (() => {
-    const folderName = clockChecklistContext.projectName
-      ? getProjectFolderName(clockChecklistContext.projectName)
-      : "";
-    const rows = folderName ? projectReceipts?.[folderName] || [] : [];
-    const ctxCost = String(clockChecklistContext.costCenter || "").trim();
-    const seen = new Set();
-    return (Array.isArray(rows) ? rows : [])
-      .filter((receipt) => {
-        const receiptCost = String(receipt?.costCenter ?? receipt?.cost_centre ?? "").trim();
-        const receiptUser = String(receipt?.employeeId ?? receipt?.userId ?? receipt?.user_id ?? "");
-        if (ctxCost && receiptCost && receiptCost !== ctxCost) return false;
-        if (!isAdmin && authUser?.id && receiptUser && receiptUser !== String(authUser.id)) return false;
-        return true;
-      })
-      .map((receipt) => {
-        const label =
-          String(receipt?.category ?? "").trim() ||
-          String(receipt?.supplier ?? "").trim() ||
-          String(receipt?.material ?? "").trim() ||
-          "Material receipt";
-        const id = `${folderName}:${ctxCost}:${label}`.toLowerCase();
-        const meta = receipt?.amount != null && receipt.amount !== "" ? formatMoney(Number(receipt.amount)) : "";
-        return { kind: "material", id, label, meta };
-      })
-      .filter((item) => {
-        if (!item.id || seen.has(item.id) || isClockChecklistDone(item.kind, item.id)) return false;
-        seen.add(item.id);
-        return true;
-      });
-  })();
+  const openClockProjectList = (kind) => {
+    if (!clockListContextReady) {
+      showClockSetupRequired();
+      return;
+    }
+    setClockListDraft("");
+    setClockListModal(kind);
+  };
 
-  const renderClockChecklistPanel = () => {
-    const activeItems = clockChecklistTab === "materials" ? clockMaterialChecklistItems : clockTaskChecklistItems;
-    const emptyText =
-      clockChecklistTab === "materials"
-        ? "No materials left for this project."
-        : "No tasks left for this shift.";
-    return (
-      <div className="rounded-2xl border border-slate-200 bg-white p-2 space-y-2">
-        <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
-          {[
-            { id: "tasks", label: "Task list" },
-            { id: "materials", label: "Material list" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              className={`rounded-lg py-2 text-[14px] font-black transition ${
-                clockChecklistTab === tab.id
-                  ? "bg-slate-950 text-white shadow-sm"
-                  : "text-slate-700"
-              }`}
-              onClick={() => setClockChecklistTab(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        {activeItems.length > 0 ? (
-          <div className="space-y-1.5">
-            {activeItems.map((item) => (
-              <button
-                key={`${item.kind}-${item.id}`}
-                type="button"
-                className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left active:bg-emerald-50"
-                onClick={() => completeClockChecklistItem(item.kind, item.id, item.label)}
-              >
-                <span className="min-w-0">
-                  <span className="block truncate text-[15px] font-black text-slate-950">{item.label}</span>
-                  {item.meta ? (
-                    <span className="block text-[13px] font-semibold text-slate-500">{item.meta}</span>
-                  ) : null}
-                </span>
-                <span className="shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[12px] font-black text-emerald-800">
-                  Done
-                </span>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <p className="rounded-xl bg-slate-50 px-3 py-3 text-center text-[14px] font-semibold text-slate-500">
-            {emptyText}
-          </p>
-        )}
-      </div>
-    );
+  const addClockProjectListItem = (event) => {
+    event?.preventDefault?.();
+    const text = String(clockListDraft || "").trim();
+    if (!text || !clockListModal || !clockListContextReady) return;
+
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text,
+      projectId: clockListContext.projectId || "",
+      projectName: clockListContext.projectName || "",
+      costCenter: clockListContext.costCenter || "",
+      createdAt: new Date().toISOString(),
+    };
+
+    setClockProjectLists((prev) => {
+      const next = {
+        task: { ...(prev?.task || {}) },
+        material: { ...(prev?.material || {}) },
+      };
+      const existing = Array.isArray(next[clockListModal]?.[clockProjectListKey])
+        ? next[clockListModal][clockProjectListKey]
+        : [];
+      next[clockListModal][clockProjectListKey] = [item, ...existing];
+      return next;
+    });
+    setClockListDraft("");
+  };
+
+  const completeClockProjectListItem = (kind, itemId) => {
+    if (!kind || !itemId) return;
+    setClockProjectLists((prev) => {
+      const next = {
+        task: { ...(prev?.task || {}) },
+        material: { ...(prev?.material || {}) },
+      };
+      const existing = Array.isArray(next[kind]?.[clockProjectListKey])
+        ? next[kind][clockProjectListKey]
+        : [];
+      next[kind][clockProjectListKey] = existing.filter(
+        (item) => String(item?.id) !== String(itemId)
+      );
+      return next;
+    });
   };
 
   return (
@@ -10425,18 +10366,16 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
-                {clockSetupReady ? renderClockChecklistPanel() : null}
-
                 <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
                     </p>
                   ) : null}
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-4 gap-1.5">
                     <button
                       type="button"
-                      className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                      className={`w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
                           ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                           : "border-slate-900 bg-slate-900 text-white"
@@ -10463,7 +10402,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className={`block w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                      className={`block w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
                           ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                           : "border-green-700 bg-green-700 text-white"
@@ -10491,6 +10430,20 @@ const handlePhotoQuickUpload = async (event) => {
                       aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                     >
                       Receipt
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
+                      onClick={() => openClockProjectList("task")}
+                    >
+                      Task List
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
+                      onClick={() => openClockProjectList("material")}
+                    >
+                      Material List
                     </button>
                   </div>
 
@@ -10771,12 +10724,11 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    {renderClockChecklistPanel()}
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
-                      <div className="grid grid-cols-2 gap-1.5">
+                      <div className="grid grid-cols-4 gap-1.5">
                         <button
                           type="button"
-                          className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                          className={`w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "photo"
                               ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                               : "border-slate-900 bg-slate-900 text-white"
@@ -10799,7 +10751,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className={`block w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
+                          className={`block w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "receipt"
                               ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                               : "border-green-700 bg-green-700 text-white"
@@ -10823,6 +10775,20 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                         >
                           Receipt
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
+                          onClick={() => openClockProjectList("task")}
+                        >
+                          Task List
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
+                          onClick={() => openClockProjectList("material")}
+                        >
+                          Material List
                         </button>
                       </div>
 
@@ -15151,6 +15117,73 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
         </div>
+
+        {clockListModal && (
+          <div className="fixed inset-0 z-[73] bg-black/50 p-4 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm max-h-[86dvh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
+              <div className="border-b border-slate-200 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[22px] font-black text-slate-950 leading-tight">
+                      {clockListModal === "material" ? "Material List" : "Task List"}
+                    </p>
+                    <p className="mt-1 truncate text-[14px] font-bold text-slate-600">
+                      {[clockListContext.projectName, clockListContext.costCenter].filter(Boolean).join(" - ")}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="h-10 w-10 shrink-0 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
+                    onClick={() => {
+                      setClockListModal(null);
+                      setClockListDraft("");
+                    }}
+                    aria-label="Close list"
+                  >
+                    X
+                  </button>
+                </div>
+
+                <form onSubmit={addClockProjectListItem} className="flex gap-2">
+                  <input
+                    type="text"
+                    autoFocus
+                    className="min-w-0 flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[17px] font-bold text-slate-950"
+                    value={clockListDraft}
+                    onChange={(event) => setClockListDraft(event.target.value)}
+                    placeholder={clockListModal === "material" ? "Add material" : "Add task"}
+                  />
+                  <button
+                    type="submit"
+                    className="shrink-0 rounded-2xl bg-slate-950 px-5 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                    disabled={!String(clockListDraft || "").trim()}
+                  >
+                    Add
+                  </button>
+                </form>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
+                {activeClockListItems.map((item) => (
+                  <label
+                    key={item.id}
+                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3.5 active:bg-emerald-50"
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                      onChange={() => completeClockProjectListItem(clockListModal, item.id)}
+                      aria-label={`Complete ${item.text}`}
+                    />
+                    <span className="min-w-0 flex-1 break-words text-[17px] font-black leading-snug text-slate-950">
+                      {item.text}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {materialPaymentOpen && (
           <div className="fixed inset-0 z-[74] bg-black/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
