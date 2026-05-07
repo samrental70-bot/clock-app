@@ -4,6 +4,7 @@ import { supabase } from "./supabaseClient";
 const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
 const OPERA_APP_CHANNEL = import.meta.env.VITE_OPERA_APP_CHANNEL || "production";
 const IS_OPERA_DEVELOPMENT_APP = OPERA_APP_CHANNEL !== "production";
+const OPERA_APP_ICON = IS_OPERA_DEVELOPMENT_APP ? "/icon-development-192.png" : "/icon-192.png";
 
 const Card = ({ children, className }) => (
   <div className={`bg-white rounded-[28px] border border-slate-200/80 shadow-[0_18px_38px_rgba(15,23,42,0.08)] ${className || ""}`}>{children}</div>
@@ -1612,8 +1613,8 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
     shownIdsRef.current.add(id);
     new window.Notification(String(notificationRow.title || "OPERA.AI"), {
       body: String(notificationRow.message || ""),
-      icon: "/icon-192.png",
-      badge: "/icon-192.png",
+      icon: OPERA_APP_ICON,
+      badge: OPERA_APP_ICON,
       tag: id,
     });
   } catch (e) {
@@ -1958,6 +1959,9 @@ export default function EmployeeClockApp() {
   const [now, setNow] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
+  const [installHelpDismissed, setInstallHelpDismissed] = useState(() =>
+    Boolean(safeRead(`orp_install_help_dismissed_${OPERA_APP_CHANNEL}`, false))
+  );
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editClockInDate, setEditClockInDate] = useState("");
   const [editClockInTime, setEditClockInTime] = useState("");
@@ -6801,15 +6805,20 @@ export default function EmployeeClockApp() {
   };
 
   const getInstallInstructions = () => {
-    const ua = navigator.userAgent.toLowerCase();
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent.toLowerCase() : "";
     const isIOS = /iphone|ipad|ipod/.test(ua);
     const isAndroid = /android/.test(ua);
     const isChrome = /chrome|crios/.test(ua);
     const isSafari = /safari/.test(ua) && !/crios|chrome/.test(ua);
-    if (isIOS && isSafari) return "iPhone: Tap the Share button → Add to Home Screen.";
-    if (isIOS && !isSafari) return "iPhone: Open this link in Safari, then tap Share → Add to Home Screen.";
+    if (isIOS && isSafari) return "iPhone: tap the Share button in Safari, scroll down, then tap Add to Home Screen.";
+    if (isIOS && !isSafari) return "iPhone: open this link in Safari, then tap Share and Add to Home Screen.";
     if (isAndroid && isChrome) return "Android: Tap Chrome menu (⋮) → Install App or Add to Home Screen.";
     return "Use your browser menu and choose Install App or Add to Home Screen.";
+  };
+
+  const dismissInstallHelp = () => {
+    setInstallHelpDismissed(true);
+    safeWrite(`orp_install_help_dismissed_${OPERA_APP_CHANNEL}`, true);
   };
 
   const handleInstallApp = async () => {
@@ -10957,7 +10966,7 @@ const handlePhotoQuickUpload = async (event) => {
     return (
       <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
         <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
-          <div className="text-4xl mb-3">⏱️</div>
+          <img src={OPERA_APP_ICON} alt="" className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-sm" />
           <p className="text-sm font-semibold text-slate-600">Loading {OPERA_APP_NAME}...</p>
         </div>
       </div>
@@ -10971,7 +10980,7 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
+                <img src={OPERA_APP_ICON} alt="" className="h-12 w-12 rounded-2xl shadow-sm" />
                 <div>
                   <h1 className="text-2xl font-bold tracking-tight">{OPERA_APP_NAME}</h1>
                   <p className="text-sm text-slate-600">Create Account</p>
@@ -11058,7 +11067,7 @@ const handlePhotoQuickUpload = async (event) => {
         <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
           <div className="bg-white border-b border-slate-100 p-5">
             <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
+              <img src={OPERA_APP_ICON} alt="" className="h-12 w-12 rounded-2xl shadow-sm" />
               <div>
                 <h1 className="text-2xl font-bold tracking-tight">{OPERA_APP_NAME}</h1>
               </div>
@@ -11153,7 +11162,7 @@ const handlePhotoQuickUpload = async (event) => {
     return (
       <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
         <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
-          <div className="text-4xl mb-3">⏱️</div>
+          <img src={OPERA_APP_ICON} alt="" className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-sm" />
           <p className="text-sm font-semibold text-slate-600">Loading your workspace...</p>
         </div>
       </div>
@@ -12395,16 +12404,19 @@ const handlePhotoQuickUpload = async (event) => {
                 </svg>
                 ☰
               </button>
-              <div className="flex-1 min-w-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
-                  {IS_OPERA_DEVELOPMENT_APP && (
-                    <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700">
-                      Development
-                    </span>
-                  )}
-                </div>
+              <div className="flex flex-1 min-w-0 items-center gap-2">
+                <img src={OPERA_APP_ICON} alt="" className="h-8 w-8 shrink-0 rounded-xl shadow-sm" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
+                    {IS_OPERA_DEVELOPMENT_APP && (
+                      <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700">
+                        Development
+                      </span>
+                    )}
+                  </div>
                 <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
+                </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -12500,20 +12512,29 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {activeTab === "clock" && !isInstalled && (
-            <Card className="rounded-3xl border-blue-100 bg-blue-50 shadow-sm">
+          {!isInstalled && !installHelpDismissed && (
+            <Card className="rounded-3xl border-blue-100 bg-gradient-to-br from-white to-blue-50 shadow-sm">
               <CardContent className="p-3 space-y-2">
-                <div>
-                  <h2 className="font-bold text-[17px]">Install on Phone</h2>
-                  <p className="text-[14px] text-slate-600 leading-snug">Add this PWA to the home screen and use it like an app.</p>
+                <div className="flex items-start gap-2.5">
+                  <img src={OPERA_APP_ICON} alt="" className="h-11 w-11 shrink-0 rounded-2xl shadow-sm" />
+                  <div className="min-w-0 flex-1">
+                    <h2 className="font-black text-[17px] leading-tight">Install {OPERA_APP_NAME}</h2>
+                    <p className="mt-0.5 text-[14px] font-semibold text-slate-600 leading-snug">
+                      {deferredPrompt ? "Tap install to add it to this phone." : getInstallInstructions()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={dismissInstallHelp}
+                    className="h-8 w-8 shrink-0 rounded-full border border-slate-200 bg-white text-[16px] font-black text-slate-500"
+                    aria-label="Hide install help"
+                  >
+                    ×
+                  </button>
                 </div>
-                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-12 text-[15px] font-bold">📲 Install App</Button>
-                {!deferredPrompt && (
-                  <p className="text-[14px] text-slate-500">
-                    iPhone: Open in Safari → Tap Share → Add to Home Screen<br />
-                    Android: Tap ⋮ → Install App / Add to Home Screen
-                  </p>
-                )}
+                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-12 text-[15px] font-bold">
+                  Install App
+                </Button>
               </CardContent>
             </Card>
           )}

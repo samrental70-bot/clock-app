@@ -40,10 +40,12 @@ self.addEventListener("push", (event) => {
         ? String(notificationId)
         : "clock-app";
   const targetUrl = typeof data.url === "string" && data.url.length > 0 ? data.url : "/";
+  const isDevelopmentApp = self.location.hostname.includes("development");
+  const appIcon = isDevelopmentApp ? "/icon-development-192.png" : "/icon-192.png";
   const options = {
     body,
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: appIcon,
+    badge: appIcon,
     tag,
     data: { url: targetUrl, notificationId, type },
   };

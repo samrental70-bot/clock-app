@@ -12,6 +12,7 @@ const manifestHref = isDevelopmentApp ? "/manifest-development.json" : "/manifes
 const iconHref = isDevelopmentApp ? "/favicon-development.svg" : "/favicon.svg";
 const appleIconHref = isDevelopmentApp ? "/icon-development-192.png" : "/icon-192.png";
 const themeColor = isDevelopmentApp ? "#172554" : "#0f172a";
+const statusBarColor = isDevelopmentApp ? "black-translucent" : "default";
 
 export default defineConfig({
   define: {
@@ -31,7 +32,15 @@ export default defineConfig({
           .replace(/content="#0f172a"/, `content="${themeColor}"`)
           .replace(
             "</head>",
-            `    <link rel="apple-touch-icon" href="${appleIconHref}" />\n  </head>`
+            [
+              `    <meta name="application-name" content="${appName}" />`,
+              `    <meta name="apple-mobile-web-app-capable" content="yes" />`,
+              `    <meta name="mobile-web-app-capable" content="yes" />`,
+              `    <meta name="apple-mobile-web-app-title" content="${appName}" />`,
+              `    <meta name="apple-mobile-web-app-status-bar-style" content="${statusBarColor}" />`,
+              `    <link rel="apple-touch-icon" href="${appleIconHref}" />`,
+              "  </head>",
+            ].join("\n")
           );
       },
     },

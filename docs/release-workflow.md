@@ -12,6 +12,7 @@ Production and development can both be installed on the same phone.
 - Production installs as `OPERA.AI`
 - Development installs as `OPERA.AI Development`
 - Development uses separate PWA manifest and icon files
+- On iPhone Safari, use the Share button, then `Add to Home Screen`. It is not inside Safari's Page Menu.
 
 Use the production link for the team trial:
 
