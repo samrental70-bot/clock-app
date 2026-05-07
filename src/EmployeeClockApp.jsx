@@ -3782,6 +3782,61 @@ export default function EmployeeClockApp() {
     ? currentShift
     : null;
 
+  const dashboardTodayWorkedCards = useMemo(() => {
+    if (!isAdmin || !dashboardViewDate) return [];
+    const ctx = {
+      selectedDateKey: dashboardViewDate,
+      companyTimeZone,
+      now,
+      authUser,
+      visibleCurrentShift,
+    };
+    const cards = [];
+    for (const row of dashboardRowsForAttendance) {
+      if (!row?.userId) continue;
+      const uid = String(row.userId);
+      const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === uid);
+      if (!userDayRows.length) continue;
+      const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
+      const att = teamAttendanceStatusForRecord(rep, ctx);
+      const metrics = computeDashboardEmployeeDayMetrics(
+        userDayRows,
+        rep,
+        companyTimeZone,
+        getWorkedMinutes,
+        getLabourCost
+      );
+      const displayName =
+        (row.displayName && String(row.displayName).trim()) || shortUserLabel(row.userId);
+      cards.push({
+        row,
+        uid,
+        rep,
+        att,
+        metrics,
+        displayName,
+        shiftCount: userDayRows.length,
+      });
+    }
+    cards.sort((a, b) => {
+      if (a.att?.code === "clocked_in" && b.att?.code !== "clocked_in") return -1;
+      if (a.att?.code !== "clocked_in" && b.att?.code === "clocked_in") return 1;
+      return String(a.displayName || "").localeCompare(String(b.displayName || ""), undefined, {
+        sensitivity: "base",
+      });
+    });
+    return cards;
+  }, [
+    isAdmin,
+    dashboardViewDate,
+    dashboardRowsForAttendance,
+    dashboardDaySheets,
+    companyTimeZone,
+    now,
+    authUser,
+    visibleCurrentShift,
+  ]);
+
   const clockMediaContext = useMemo(() => {
     if (visibleCurrentShift) return visibleCurrentShift;
     if (!clockSetupReady || !authUser?.id || !clockSelectedProject) return null;
@@ -13240,12 +13295,12 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "dashboard" && isAdmin && (
-            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
+            <Card className="rounded-[32px] border border-white/80 bg-[#f7f9fc] shadow-[0_28px_70px_rgba(15,23,42,0.14)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
-                <div className="flex items-start justify-between gap-3 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                <div className="flex items-start justify-between gap-3 rounded-[26px] border border-white bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]">
                   <div className="min-w-0">
-                    <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">Employees</h2>
-                    <p className="mt-1 text-[15px] font-semibold text-slate-500">Live Dashboard</p>
+                    <h2 className="text-[23px] font-black leading-tight tracking-normal text-slate-950">Dashboard</h2>
+                    <p className="mt-1 text-[15px] font-semibold text-slate-500">Today&apos;s hours, labour, and team activity</p>
                   </div>
                   <div className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">
                     <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]" />
@@ -13287,28 +13342,34 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
-                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] bg-slate-950 p-3 text-white shadow-[0_12px_22px_rgba(15,23,42,0.22)]">
-                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-300">Working</p>
+                      <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] bg-slate-950 p-3 text-white shadow-[0_14px_28px_rgba(15,23,42,0.24)]">
+                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-300">Working now</p>
                         <p className="text-[25px] font-black tabular-nums leading-none">
                           {dashboardLoading ? "..." : (dashboardLiveWorkingCards || []).length}
                         </p>
                       </div>
-                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Hours</p>
+                      <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Today hours</p>
                         <p className="text-[clamp(15px,4vw,19px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
                           {formatDuration(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
-                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Labour</p>
+                      <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Today labour</p>
                         <p className="text-[clamp(14px,3.7vw,18px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
                           {formatMoney(dashboardSummary.totalCost)}
                         </p>
                       </div>
                     </div>
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <p className="text-[12px] font-black uppercase tracking-[0.14em] text-slate-500">Clocked in now</p>
+                      <p className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-black text-slate-700">
+                        {(dashboardLiveWorkingCards || []).length}
+                      </p>
+                    </div>
                     {!dashboardLoading &&
                       (dashboardLiveWorkingCards || []).map((card) => {
-                        const { rep, uid, displayName } = card || {};
+                        const { row, rep, uid, displayName } = card || {};
                         if (!rep || !uid) return null;
                         const timerSeconds = rep?.clockIn
                           ? Math.max(
@@ -13368,6 +13429,14 @@ const handlePhotoQuickUpload = async (event) => {
                                 Live location
                               </button>
                             ) : null}
+                            <Button
+                              type="button"
+                              className="w-full rounded-2xl h-11 text-[14px] font-black !bg-slate-950 !text-white shadow-[0_12px_26px_rgba(15,23,42,0.22)] disabled:opacity-60"
+                              disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
+                              onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
+                            >
+                              {dashboardSavingUserId === String(uid) ? "Clocking out..." : "Clock Out Employee"}
+                            </Button>
                             <div className="hidden">
                               {hasLiveGps ? (
                                 <div className="flex items-center justify-between gap-2">
@@ -13410,6 +13479,70 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[15px] font-bold text-slate-700">No employees currently clocked in.</p>
                       </div>
                     ) : null}
+                    <div className="rounded-[24px] border border-white bg-white p-3.5 shadow-[0_16px_32px_rgba(15,23,42,0.08)]">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <p className="text-[12px] font-black uppercase tracking-[0.14em] text-slate-500">Worked today</p>
+                        <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[12px] font-black text-slate-700">
+                          {dashboardTodayWorkedCards.length}
+                        </p>
+                      </div>
+                      {dashboardTodayWorkedCards.length === 0 ? (
+                        <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-center text-[15px] font-bold text-slate-600">
+                          No one has worked today yet.
+                        </p>
+                      ) : (
+                        <div className="space-y-2.5">
+                          {dashboardTodayWorkedCards.map((card) => {
+                            const statusText =
+                              card.att?.code === "clocked_in"
+                                ? "Clocked in"
+                                : card.att?.code === "missing_out"
+                                  ? "Missing out"
+                                  : "Clocked out";
+                            const statusClass =
+                              card.att?.code === "clocked_in"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                : card.att?.code === "missing_out"
+                                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                                  : "border-slate-200 bg-slate-50 text-slate-600";
+                            return (
+                              <div
+                                key={`worked-${card.uid}`}
+                                className="rounded-[22px] border border-slate-200 bg-gradient-to-br from-white to-slate-50/70 p-3 shadow-[0_10px_20px_rgba(15,23,42,0.05)]"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-[16px] font-black leading-snug text-slate-950 break-words">
+                                      {card.displayName}
+                                    </p>
+                                    <p className="mt-1 text-[13px] font-bold leading-snug text-slate-500 break-words">
+                                      {[card.metrics.projectDisp, card.metrics.costDisp].filter(Boolean).join(" - ")}
+                                    </p>
+                                  </div>
+                                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-black ${statusClass}`}>
+                                    {statusText}
+                                  </span>
+                                </div>
+                                <div className="mt-3 grid grid-cols-2 gap-2 text-[13px]">
+                                  <div className="rounded-2xl bg-white px-3 py-2 shadow-sm">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">In / Out</p>
+                                    <p className="mt-0.5 font-black tabular-nums text-slate-900">
+                                      {card.metrics.inDisp} - {card.metrics.outDisp}
+                                    </p>
+                                  </div>
+                                  <div className="rounded-2xl bg-white px-3 py-2 shadow-sm">
+                                    <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Total / Labour</p>
+                                    <p className="mt-0.5 font-black tabular-nums text-slate-900">
+                                      {card.metrics.totalDisp} - {card.metrics.labourDisp}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : null}
                 <div className="hidden">
@@ -18457,7 +18590,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         <div
-          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[23rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/95 px-2 py-2 shadow-[0_18px_42px_rgba(15,23,42,0.18)] backdrop-blur pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
+          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[23rem] -translate-x-1/2 rounded-[28px] border border-white/80 bg-white/[0.92] px-2 py-2 shadow-[0_24px_58px_rgba(15,23,42,0.24)] backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
         >
           <div className="hidden">
             {isAdmin && (
@@ -18466,7 +18599,7 @@ const handlePhotoQuickUpload = async (event) => {
                 onClick={() => setActiveTab("dashboard")}
                 className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
               >
-                Live
+                Dashboard
               </button>
             )}
             {!isAdmin && (
@@ -18486,21 +18619,21 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("dashboard")}
-                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "dashboard" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
+                  className={`rounded-[22px] py-3 px-1 text-[clamp(12px,3.4vw,15px)] font-black transition ${activeTab === "dashboard" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
-                  Live
+                  Dashboard
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("clock")}
-                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   Clock
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("reports")}
-                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "reports" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "reports" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   Reports
                 </button>
@@ -18510,14 +18643,14 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("clock")}
-                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   Clock
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("lists")}
-                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "lists" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "lists" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   List
                 </button>
