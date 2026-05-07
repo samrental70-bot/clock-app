@@ -87,6 +87,129 @@ function normalizeClockProjectListsState(value) {
   };
 }
 
+const CLOCK_LIST_KINDS = ["task", "material"];
+
+function normalizeClockListKind(kind) {
+  return kind === "material" ? "material" : "task";
+}
+
+function normalizeClockListStatus(status) {
+  return String(status || "").trim().toLowerCase() === "completed" ? "completed" : "active";
+}
+
+function makeClockProjectListKey({ userId, companyId, projectId, projectName, costCenter }) {
+  const projectToken =
+    projectId != null && projectId !== ""
+      ? String(projectId)
+      : getProjectFolderName(String(projectName || "project"));
+  return [
+    userId || "anonymous",
+    companyId || "company",
+    projectToken || "project",
+    costCenter || "project",
+  ].join("|");
+}
+
+function mergeClockProjectListBucket(primaryBucket, secondaryBucket) {
+  const out = {};
+  const mergeRows = (key, rows) => {
+    if (!Array.isArray(rows)) return;
+    const existing = Array.isArray(out[key]) ? out[key] : [];
+    const seen = new Set(existing.map((item) => String(item?.id)));
+    for (const item of rows) {
+      const id = String(item?.id || "").trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      existing.push(item);
+    }
+    out[key] = existing.sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+  };
+
+  for (const [key, rows] of Object.entries(primaryBucket || {})) mergeRows(key, rows);
+  for (const [key, rows] of Object.entries(secondaryBucket || {})) mergeRows(key, rows);
+  return out;
+}
+
+function mergeClockProjectListsState(primary, secondary) {
+  const a = normalizeClockProjectListsState(primary);
+  const b = normalizeClockProjectListsState(secondary);
+  return {
+    task: mergeClockProjectListBucket(a.task, b.task),
+    material: mergeClockProjectListBucket(a.material, b.material),
+    completed: {
+      task: mergeClockProjectListBucket(a.completed.task, b.completed.task),
+      material: mergeClockProjectListBucket(a.completed.material, b.completed.material),
+    },
+  };
+}
+
+function mapProjectListRowsToClockState(rows) {
+  const state = normalizeClockProjectListsState({});
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const kind = normalizeClockListKind(row?.kind);
+    const status = normalizeClockListStatus(row?.status);
+    const storageKey =
+      String(row?.storage_key || "").trim() ||
+      makeClockProjectListKey({
+        userId: row?.user_id,
+        companyId: row?.company_id,
+        projectId: row?.project_id,
+        projectName: row?.project_name,
+        costCenter: row?.cost_centre || "project",
+      });
+    const item = {
+      id: String(row?.id || "").trim(),
+      text: String(row?.text || ""),
+      projectId: row?.project_id || "",
+      projectName: row?.project_name || "",
+      costCenter: row?.cost_centre || "",
+      createdAt: row?.created_at || new Date().toISOString(),
+      completedAt: row?.completed_at || null,
+      imageDataUrl: row?.image_data_url || "",
+      imageName: row?.image_name || "",
+    };
+    if (!item.id) continue;
+    const bucket = status === "completed" ? state.completed[kind] : state[kind];
+    bucket[storageKey] = [item, ...(bucket[storageKey] || [])];
+  }
+  return state;
+}
+
+function flattenClockProjectListsForSupabase(state, { userId, companyId }) {
+  const normalized = normalizeClockProjectListsState(state);
+  const rows = [];
+  for (const kind of CLOCK_LIST_KINDS) {
+    for (const status of ["active", "completed"]) {
+      const bucket = status === "completed" ? normalized.completed[kind] : normalized[kind];
+      for (const [storageKey, items] of Object.entries(bucket || {})) {
+        if (!Array.isArray(items)) continue;
+        for (const item of items) {
+          const id = String(item?.id || "").trim();
+          if (!id) continue;
+          rows.push({
+            id,
+            company_id: companyId,
+            user_id: userId,
+            storage_key: storageKey,
+            kind,
+            status,
+            text: String(item?.text || item?.title || ""),
+            project_id: item?.projectId != null && item.projectId !== "" ? String(item.projectId) : null,
+            project_name: item?.projectName || null,
+            cost_centre: item?.costCenter || null,
+            image_data_url: item?.imageDataUrl || item?.photoDataUrl || item?.dataUrl || null,
+            image_name: item?.imageName || null,
+            created_at: item?.createdAt || new Date().toISOString(),
+            completed_at: status === "completed" ? item?.completedAt || new Date().toISOString() : null,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+  return rows;
+}
+
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
 const AUTO_CLOCK_OUT_HOURS = 24;
 const AUTO_CLOCK_OUT_MS = AUTO_CLOCK_OUT_HOURS * 60 * 60 * 1000;
@@ -1853,6 +1976,9 @@ export default function EmployeeClockApp() {
   const [clockProjectLists, setClockProjectLists] = useState(() =>
     normalizeClockProjectListsState(safeRead("orp_clock_project_lists", { task: {}, material: {} }))
   );
+  const clockProjectListsRef = useRef(clockProjectLists);
+  const clockProjectListsBootstrappedRef = useRef(false);
+  const [clockProjectListsSyncError, setClockProjectListsSyncError] = useState("");
   const [clockListUndo, setClockListUndo] = useState([]);
   const [clockListShowCompleted, setClockListShowCompleted] = useState(false);
   const [listSelectedProjectId, setListSelectedProjectId] = useState("");
@@ -4768,8 +4894,126 @@ export default function EmployeeClockApp() {
   }, [photoNotificationCount]);
 
   useEffect(() => {
+    clockProjectListsRef.current = normalizeClockProjectListsState(clockProjectLists);
     safeWrite("orp_clock_project_lists", clockProjectLists);
   }, [clockProjectLists]);
+
+  const saveProjectListItemToSupabase = useCallback(
+    async ({ kind, item, storageKey, status = "active" }) => {
+      if (!authUser?.id || !userCompany?.id || !item?.id || !storageKey) return false;
+      const normalizedStatus = normalizeClockListStatus(status);
+      const row = {
+        id: String(item.id),
+        company_id: userCompany.id,
+        user_id: authUser.id,
+        storage_key: storageKey,
+        kind: normalizeClockListKind(kind),
+        status: normalizedStatus,
+        text: String(item.text || item.title || ""),
+        project_id: item.projectId != null && item.projectId !== "" ? String(item.projectId) : null,
+        project_name: item.projectName || null,
+        cost_centre: item.costCenter || null,
+        image_data_url: item.imageDataUrl || item.photoDataUrl || item.dataUrl || null,
+        image_name: item.imageName || null,
+        created_at: item.createdAt || new Date().toISOString(),
+        completed_at: normalizedStatus === "completed" ? item.completedAt || new Date().toISOString() : null,
+        updated_at: new Date().toISOString(),
+      };
+      try {
+        const { error } = await supabase.from("project_list_items").upsert(row, { onConflict: "id" });
+        if (error) throw error;
+        setClockProjectListsSyncError("");
+        return true;
+      } catch (err) {
+        console.warn("[PROJECT_LISTS] save failed", err);
+        setClockProjectListsSyncError("Lists are saved on this device until Supabase list SQL is installed.");
+        return false;
+      }
+    },
+    [authUser?.id, userCompany?.id]
+  );
+
+  const loadProjectListsFromSupabase = useCallback(
+    async ({ migrateLocal = false } = {}) => {
+      if (!authUser?.id || !userCompany?.id) return false;
+      const localSnapshot = normalizeClockProjectListsState(clockProjectListsRef.current);
+      try {
+        const { data, error } = await supabase
+          .from("project_list_items")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .eq("user_id", authUser.id)
+          .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const remoteRows = data || [];
+        const remoteIds = new Set(remoteRows.map((row) => String(row?.id || "")).filter(Boolean));
+        const localMissingRows = flattenClockProjectListsForSupabase(localSnapshot, {
+          userId: authUser.id,
+          companyId: userCompany.id,
+        }).filter((row) => !remoteIds.has(String(row.id)));
+
+        if (migrateLocal && localMissingRows.length > 0) {
+          const { error: migrateError } = await supabase
+            .from("project_list_items")
+            .upsert(localMissingRows, { onConflict: "id" });
+          if (migrateError) console.warn("[PROJECT_LISTS] local migration failed", migrateError);
+        }
+
+        const remoteState = mapProjectListRowsToClockState(remoteRows);
+        const localMissingState = mapProjectListRowsToClockState(localMissingRows);
+        setClockProjectLists(mergeClockProjectListsState(remoteState, localMissingState));
+        setClockProjectListsSyncError("");
+        return true;
+      } catch (err) {
+        console.warn("[PROJECT_LISTS] load failed", err);
+        setClockProjectListsSyncError("Lists are saved on this device until Supabase list SQL is installed.");
+        return false;
+      }
+    },
+    [authUser?.id, userCompany?.id]
+  );
+
+  useEffect(() => {
+    clockProjectListsBootstrappedRef.current = false;
+  }, [authUser?.id, userCompany?.id]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    if (clockProjectListsBootstrappedRef.current) return;
+    let cancelled = false;
+    clockProjectListsBootstrappedRef.current = true;
+
+    (async () => {
+      await loadProjectListsFromSupabase({ migrateLocal: true });
+      if (cancelled) return;
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id, userCompany?.id, companyChecked, loadProjectListsFromSupabase]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    const shouldPoll = activeTab === "lists" || Boolean(clockListModal);
+    const refresh = () => {
+      void loadProjectListsFromSupabase({ migrateLocal: false });
+    };
+    const handleFocus = () => refresh();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    const intervalId = shouldPoll ? window.setInterval(refresh, 10000) : null;
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [authUser?.id, userCompany?.id, companyChecked, activeTab, clockListModal, loadProjectListsFromSupabase]);
 
   useEffect(() => {
     if (!authUser?.id) {
@@ -10657,6 +10901,12 @@ const handlePhotoQuickUpload = async (event) => {
       const stack = Array.isArray(prev) ? prev : prev ? [prev] : [];
       return stack.filter((_, index) => index !== undoIndex);
     });
+    void saveProjectListItemToSupabase({
+      kind: undo.kind,
+      item: { ...undo.item, completedAt: null },
+      storageKey: undo.key,
+      status: "active",
+    });
   };
 
   const openClockProjectList = (kind) => {
@@ -10697,6 +10947,12 @@ const handlePhotoQuickUpload = async (event) => {
       next[clockListModal][clockProjectListKey] = [item, ...existing];
       return next;
     });
+    void saveProjectListItemToSupabase({
+      kind: clockListModal,
+      item,
+      storageKey: clockProjectListKey,
+      status: "active",
+    });
     setClockListDraft("");
     setClockListImageDraft(null);
   };
@@ -10729,6 +10985,14 @@ const handlePhotoQuickUpload = async (event) => {
       }
       return next;
     });
+    if (removedItem) {
+      void saveProjectListItemToSupabase({
+        kind,
+        item: { ...removedItem, completedAt: new Date().toISOString() },
+        storageKey: clockProjectListKey,
+        status: "completed",
+      });
+    }
   };
 
   const renderClockListActionRow = () => (
@@ -10872,6 +11136,12 @@ const handlePhotoQuickUpload = async (event) => {
       next.task[listProjectStorageKey] = [item, ...rows];
       return next;
     });
+    void saveProjectListItemToSupabase({
+      kind: "task",
+      item,
+      storageKey: listProjectStorageKey,
+      status: "active",
+    });
     setListDraft("");
     setListImageDraft(null);
   };
@@ -10894,6 +11164,12 @@ const handlePhotoQuickUpload = async (event) => {
       const rows = Array.isArray(next.task?.[clockProjectListKey]) ? next.task[clockProjectListKey] : [];
       next.task[clockProjectListKey] = [item, ...rows];
       return next;
+    });
+    void saveProjectListItemToSupabase({
+      kind: "task",
+      item,
+      storageKey: clockProjectListKey,
+      status: "active",
     });
     setClockListDraft("");
     setClockListImageDraft(null);
@@ -10954,6 +11230,12 @@ const handlePhotoQuickUpload = async (event) => {
       next[listType][listProjectStorageKey] = [item, ...rows];
       return next;
     });
+    void saveProjectListItemToSupabase({
+      kind: listType,
+      item,
+      storageKey: listProjectStorageKey,
+      status: "active",
+    });
     setListDraft("");
     setListImageDraft(null);
   };
@@ -10982,6 +11264,14 @@ const handlePhotoQuickUpload = async (event) => {
       }
       return next;
     });
+    if (removedItem) {
+      void saveProjectListItemToSupabase({
+        kind: listType,
+        item: { ...removedItem, completedAt: new Date().toISOString() },
+        storageKey: sourceKey,
+        status: "completed",
+      });
+    }
   };
 
   const canUndoListPage =
@@ -12405,6 +12695,12 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                   ) : null}
                 </div>
+
+                {clockProjectListsSyncError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                    {clockProjectListsSyncError}
+                  </div>
+                ) : null}
 
                 <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
