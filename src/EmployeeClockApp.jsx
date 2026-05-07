@@ -11232,50 +11232,6 @@ const handlePhotoQuickUpload = async (event) => {
       );
     }
 
-    if (authStep === "company_created" && createdCompanyCode) {
-      return (
-        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
-            <div className="bg-white border-b border-slate-100 p-5">
-              <h1 className="text-2xl font-bold tracking-tight">Company Created</h1>
-              <p className="text-sm text-slate-600 mt-1">Share this code with employees so they can join.</p>
-              <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="rounded-3xl border bg-white p-4 text-center">
-                <p className="text-xs text-slate-500">Company code</p>
-                <p className="text-3xl font-black tracking-widest mt-1">{createdCompanyCode}</p>
-              </div>
-
-              <Button
-                className="w-full rounded-2xl h-14 text-base font-bold"
-                onClick={async () => {
-                  await handleShareCompanyInvite(createdCompanyCode, companyName || userCompany?.name || "your company");
-                }}
-              >
-                Share invite
-              </Button>
-              {companyInviteShareMessage ? (
-                <p className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-800">
-                  {companyInviteShareMessage}
-                </p>
-              ) : null}
-
-              <Button
-                className="w-full rounded-2xl h-14 text-base font-bold"
-                onClick={() => {
-                  setAuthStep("login");
-                }}
-              >
-                Continue to OPERA.AI
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     // Default onboarding choice
     return (
       <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
