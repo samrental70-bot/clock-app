@@ -3967,6 +3967,76 @@ export default function EmployeeClockApp() {
     visibleCurrentShift,
   ]);
 
+  const dashboardFinishedTodayCards = useMemo(
+    () => (dashboardTodayWorkedCards || []).filter((card) => card?.att?.code !== "clocked_in"),
+    [dashboardTodayWorkedCards]
+  );
+
+  const dashboardCoverageBars = useMemo(() => {
+    if (!isAdmin || !dashboardViewDate) return [];
+    const rows = Array.isArray(dashboardDaySheets) ? dashboardDaySheets : [];
+    const currentMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
+    const hours = Array.from({ length: 12 }, (_, i) => i + 6);
+    const rawBars = hours.map((hour) => {
+      const startIso = wallDateTimeToUtcIso(
+        dashboardViewDate,
+        `${String(hour).padStart(2, "0")}:00:00`,
+        companyTimeZone
+      );
+      const endIso = wallDateTimeToUtcIso(
+        dashboardViewDate,
+        `${String(hour + 1).padStart(2, "0")}:00:00`,
+        companyTimeZone
+      );
+      const startMs = parseStoredInstant(startIso).getTime();
+      const endMs = parseStoredInstant(endIso).getTime();
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+        return { hour, count: 0 };
+      }
+      let count = 0;
+      for (const row of rows) {
+        const inMs = parseStoredInstant(row?.clockIn).getTime();
+        const outMs = row?.clockOut ? parseStoredInstant(row.clockOut).getTime() : currentMs;
+        if (!Number.isFinite(inMs) || !Number.isFinite(outMs)) continue;
+        if (inMs < endMs && outMs > startMs) count += 1;
+      }
+      return { hour, count };
+    });
+    const maxCount = Math.max(1, ...rawBars.map((bar) => Number(bar.count) || 0));
+    return rawBars.map((bar) => ({
+      ...bar,
+      height: bar.count > 0 ? Math.max(16, Math.round((bar.count / maxCount) * 100)) : 6,
+      label:
+        bar.hour === 6
+          ? "6a"
+          : bar.hour === 9
+            ? "9a"
+            : bar.hour === 12
+              ? "12p"
+              : bar.hour === 15
+                ? "3p"
+                : "",
+    }));
+  }, [isAdmin, dashboardDaySheets, dashboardViewDate, companyTimeZone, now]);
+
+  const dashboardRadarCards = useMemo(() => {
+    const cards = Array.isArray(dashboardLiveWorkingCards) ? dashboardLiveWorkingCards : [];
+    return cards.map((card, index) => {
+      const loc = dashboardLiveLocationByUserId?.[String(card?.uid)] || null;
+      const lat = Number(loc?.latitude ?? loc?.lat);
+      const lng = Number(loc?.longitude ?? loc?.lng);
+      return {
+        ...card,
+        loc,
+        hasGps: Number.isFinite(lat) && Number.isFinite(lng),
+        lat,
+        lng,
+        x: 14 + ((index * 29) % 68),
+        y: 18 + ((index * 23) % 58),
+      };
+    });
+  }, [dashboardLiveWorkingCards, dashboardLiveLocationByUserId]);
+
   const clockMediaContext = useMemo(() => {
     if (visibleCurrentShift) return visibleCurrentShift;
     if (!clockSetupReady || !authUser?.id || !clockSelectedProject) return null;
@@ -13570,6 +13640,370 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "dashboard" && isAdmin && (
+            <div className="space-y-3">
+              <section className="relative overflow-hidden rounded-[34px] border border-white bg-white px-3.5 py-4 shadow-[0_24px_58px_rgba(15,23,42,0.12)]">
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_90%_12%,rgba(37,99,235,0.12),transparent_34%),radial-gradient(circle_at_18%_0%,rgba(16,185,129,0.10),transparent_28%)]" />
+                <div className="relative flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-700">Dashboard</p>
+                    <h2 className="mt-1 text-[23px] font-black leading-[1.02] text-slate-950 break-words">
+                      {userCompany?.name || "Company"}
+                    </h2>
+                    <p className="mt-1 text-[14px] font-bold text-slate-500">{dashboardSelectedDateLabel || "Today"}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.10)]"
+                    onClick={() => setDashboardRefreshKey((key) => key + 1)}
+                    disabled={dashboardLoading}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                <div className="relative mt-4 grid grid-cols-4 gap-2">
+                  {[
+                    {
+                      label: "Projects",
+                      action: () => setActiveTab("projects"),
+                      icon: (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                          <path d="M8 7V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1" />
+                          <path d="M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z" />
+                          <path d="M4 13h16" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      label: "Schedule",
+                      action: () => setActiveTab("schedule"),
+                      icon: (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                          <path d="M7 3v4M17 3v4" />
+                          <path d="M4 8h16" />
+                          <path d="M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+                          <path d="M8 12h3M8 16h6" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      label: "Receipts",
+                      action: () => setActiveTab("receipts"),
+                      icon: (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                          <path d="M7 3h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2V5a2 2 0 0 1 2-2Z" />
+                          <path d="M8 8h8M8 12h8M8 16h5" />
+                        </svg>
+                      ),
+                    },
+                    {
+                      label: "Employees",
+                      action: () => setActiveTab("team"),
+                      icon: (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                          <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" />
+                          <path d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                          <path d="M20 19v-1a4 4 0 0 0-3-3.8M17 4.3a3 3 0 0 1 0 5.4" />
+                        </svg>
+                      ),
+                    },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      className="min-w-0 rounded-[22px] border border-slate-200 bg-white px-1.5 py-3 text-center text-slate-950 shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]"
+                      onClick={item.action}
+                    >
+                      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-[0_12px_24px_rgba(37,99,235,0.30)]">
+                        {item.icon}
+                      </span>
+                      <span className="mt-2 block truncate text-[11px] font-black">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              {dashboardActionFeedback && (
+                <div
+                  className={`rounded-[22px] border px-4 py-3 text-[14px] font-bold ${
+                    dashboardActionFeedback.type === "success"
+                      ? "border-emerald-100 bg-emerald-50 text-emerald-900"
+                      : "border-red-100 bg-red-50 text-red-800"
+                  }`}
+                >
+                  {dashboardActionFeedback.text}
+                </div>
+              )}
+
+              {!userCompany?.id || !companyChecked ? (
+                <div className="rounded-[26px] border border-slate-200 bg-white p-4 text-[15px] font-bold text-slate-600 shadow-sm">
+                  Company not loaded. Please wait...
+                </div>
+              ) : null}
+
+              {userCompany?.id && companyChecked ? (
+                <>
+                  <section className="grid grid-cols-2 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="border-r border-slate-200 p-4">
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Team hours</p>
+                      <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
+                        {formatDuration(dashboardSummary.totalMinutes)}
+                      </p>
+                      <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
+                    </div>
+                    <div className="p-4">
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Est labor cost</p>
+                      <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
+                        {formatMoneyWhole(dashboardSummary.totalCost)}
+                      </p>
+                      <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
+                    </div>
+                  </section>
+
+                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team pulse</p>
+                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Shift coverage</h3>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700"
+                        onClick={() => setActiveTab("timesheet")}
+                      >
+                        Timesheet
+                      </button>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-[22px] bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">In</p>
+                          <p className="text-[22px] font-black tabular-nums text-slate-950">
+                            {dashboardLoading ? "-" : (dashboardLiveWorkingCards || []).length}
+                          </p>
+                        </div>
+                        <div className="mt-2 flex -space-x-1.5">
+                          {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
+                            <span
+                              key={`pulse-in-${card.uid}`}
+                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-100 text-[10px] font-black text-emerald-800"
+                              style={{ zIndex: 10 - index }}
+                            >
+                              {String(card.displayName || "?").slice(0, 1).toUpperCase()}
+                            </span>
+                          ))}
+                          {(!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) && (
+                            <span className="h-7 w-7 rounded-full bg-slate-200" />
+                          )}
+                        </div>
+                      </div>
+                      <div className="rounded-[22px] bg-slate-50 p-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">Out</p>
+                          <p className="text-[22px] font-black tabular-nums text-slate-950">
+                            {dashboardLoading ? "-" : dashboardFinishedTodayCards.length}
+                          </p>
+                        </div>
+                        <div className="mt-2 flex -space-x-1.5">
+                          {(dashboardFinishedTodayCards || []).slice(0, 5).map((card, index) => (
+                            <span
+                              key={`pulse-out-${card.uid}`}
+                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-black text-slate-600"
+                              style={{ zIndex: 10 - index }}
+                            >
+                              {String(card.displayName || "?").slice(0, 1).toUpperCase()}
+                            </span>
+                          ))}
+                          {(!dashboardFinishedTodayCards || dashboardFinishedTodayCards.length === 0) && (
+                            <span className="h-7 w-7 rounded-full bg-slate-200" />
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-4 pb-3">
+                      <div className="flex h-28 items-end gap-1.5">
+                        {(dashboardCoverageBars || []).map((bar) => (
+                          <div key={bar.hour} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+                            <div
+                              className="w-full rounded-t-xl bg-gradient-to-t from-blue-500 to-cyan-200 shadow-[0_10px_18px_rgba(14,165,233,0.18)]"
+                              style={{ height: `${bar.height}%`, opacity: bar.count > 0 ? 0.95 : 0.3 }}
+                              title={`${bar.count} working`}
+                            />
+                            <span className="h-4 text-[9px] font-bold text-slate-400">{bar.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team radar</p>
+                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Live job sites</h3>
+                      </div>
+                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                        {dashboardRadarCards.filter((card) => card.hasGps).length} live
+                      </p>
+                    </div>
+                    {dashboardLiveLocationsLoading ? (
+                      <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Refreshing live GPS...</p>
+                    ) : null}
+                    {dashboardLiveLocationsError ? (
+                      <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-[14px] font-bold text-amber-800">{String(dashboardLiveLocationsError)}</p>
+                    ) : null}
+                    <div className="relative mt-4 h-44 overflow-hidden rounded-[26px] border border-slate-200 bg-[#e9f3f1] shadow-inner">
+                      <div className="absolute inset-0 bg-[linear-gradient(35deg,transparent_0_18%,rgba(255,255,255,0.75)_18%_22%,transparent_22%_45%,rgba(255,255,255,0.70)_45%_50%,transparent_50%),linear-gradient(120deg,rgba(37,99,235,0.14)_0_12%,transparent_12%_100%)]" />
+                      <div className="absolute left-[-8%] top-[30%] h-5 w-[120%] -rotate-12 bg-white/80 shadow-sm" />
+                      <div className="absolute left-[10%] top-[-8%] h-[130%] w-4 rotate-[35deg] bg-white/80 shadow-sm" />
+                      <div className="absolute bottom-3 left-4 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                        {dashboardRadarCards.length ? "Tap a pin for location" : "No active locations"}
+                      </div>
+                      {(dashboardRadarCards || []).map((card) => (
+                        <button
+                          key={`radar-${card.uid}`}
+                          type="button"
+                          className={`absolute flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[12px] font-black shadow-[0_12px_24px_rgba(15,23,42,0.22)] ${
+                            card.hasGps ? "bg-blue-600 text-white" : "bg-slate-300 text-slate-600"
+                          }`}
+                          style={{ left: `${card.x}%`, top: `${card.y}%` }}
+                          disabled={!card.hasGps}
+                          onClick={() => card.hasGps && openMap({ latitude: card.lat, longitude: card.lng })}
+                          aria-label={`Open live location for ${card.displayName || "employee"}`}
+                        >
+                          {String(card.displayName || "?").slice(0, 1).toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Working now</p>
+                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Active team</h3>
+                      </div>
+                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                        {(dashboardLiveWorkingCards || []).length}
+                      </p>
+                    </div>
+                    {dashboardLoading ? (
+                      <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Loading active employees...</p>
+                    ) : null}
+                    {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
+                      <div className="mt-3 rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+                        <p className="text-[15px] font-black text-slate-700">No employees are clocked in.</p>
+                      </div>
+                    ) : null}
+                    <div className="mt-3 space-y-2.5">
+                      {!dashboardLoading &&
+                        (dashboardLiveWorkingCards || []).map((card) => {
+                          const { row, rep, uid, displayName } = card || {};
+                          if (!rep || !uid) return null;
+                          const timerSeconds = rep?.clockIn
+                            ? Math.max(
+                                0,
+                                Math.floor(
+                                  ((now instanceof Date ? now.getTime() : new Date(now).getTime()) -
+                                    parseStoredInstant(rep.clockIn).getTime()) /
+                                    1000
+                                )
+                              )
+                            : 0;
+                          const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
+                          const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
+                          const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
+                          const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
+                          const hasLiveGps =
+                            latRaw != null &&
+                            lngRaw != null &&
+                            Number.isFinite(Number(latRaw)) &&
+                            Number.isFinite(Number(lngRaw));
+                          return (
+                            <div
+                              key={`premium-live-${String(uid)}`}
+                              className="rounded-[24px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3.5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[17px] font-black leading-tight text-slate-950 break-words">
+                                    {displayName || "Employee"}
+                                  </p>
+                                  <p className="mt-1 text-[13px] font-bold text-slate-500 tabular-nums">
+                                    Clocked in {clockInDisp}
+                                  </p>
+                                </div>
+                                <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-[13px] font-black tabular-nums text-white">
+                                  {formatTimer(timerSeconds)}
+                                </span>
+                              </div>
+                              <p className="mt-3 rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm">
+                                {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
+                              </p>
+                              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                                <button
+                                  type="button"
+                                  className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-[13px] font-black text-blue-700 disabled:opacity-50"
+                                  disabled={!hasLiveGps}
+                                  onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
+                                >
+                                  Live location
+                                </button>
+                                <Button
+                                  type="button"
+                                  className="rounded-2xl px-4 py-2 text-[13px] font-black !bg-slate-950 !text-white"
+                                  disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
+                                  onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
+                                >
+                                  {dashboardSavingUserId === String(uid) ? "..." : "Clock out"}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Today</p>
+                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Worked today</h3>
+                      </div>
+                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                        {dashboardTodayWorkedCards.length}
+                      </p>
+                    </div>
+                    {dashboardTodayWorkedCards.length === 0 ? (
+                      <p className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-[15px] font-bold text-slate-600">
+                        No one has worked today yet.
+                      </p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {dashboardTodayWorkedCards.slice(0, 8).map((card) => (
+                          <div key={`premium-worked-${card.uid}`} className="rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[15px] font-black text-slate-950 break-words">{card.displayName}</p>
+                                <p className="mt-0.5 text-[12px] font-bold text-slate-500 break-words">
+                                  {[card.metrics.projectDisp, card.metrics.costDisp].filter(Boolean).join(" - ")}
+                                </p>
+                              </div>
+                              <p className="shrink-0 text-right text-[13px] font-black tabular-nums text-slate-950">
+                                {card.metrics.totalDisp}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              ) : null}
+            </div>
+          )}
+
+          {false && activeTab === "dashboard" && isAdmin && (
             <Card className="rounded-[32px] border border-white/80 bg-[#f7f9fc] shadow-[0_28px_70px_rgba(15,23,42,0.14)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
                 <div className="flex items-start justify-between gap-3 rounded-[26px] border border-white bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]">
