@@ -1754,6 +1754,7 @@ export default function EmployeeClockApp() {
   const [clockProjectLists, setClockProjectLists] = useState(() =>
     safeRead("orp_clock_project_lists", { task: {}, material: {} })
   );
+  const [clockListUndo, setClockListUndo] = useState(null);
   const [listSelectedProjectId, setListSelectedProjectId] = useState("");
   const [listType, setListType] = useState("task");
   const [listDraft, setListDraft] = useState("");
@@ -3114,6 +3115,106 @@ export default function EmployeeClockApp() {
       effectiveCostCentresByProjectId[String(pid)] || effectiveCostCentresByProjectId[Number(pid)] || [];
     return Array.isArray(list) ? list : [];
   }, [scheduleEditDraft?.projectId, effectiveCostCentresByProjectId]);
+
+  const scheduleTaskSuggestionPool = useMemo(() => {
+    const projects = Array.isArray(effectiveProjects) ? effectiveProjects : [];
+    const projectById = new Map();
+    const projectByFolder = new Map();
+    const projectByName = new Map();
+    for (const project of projects) {
+      const id = project?.id != null ? String(project.id) : "";
+      const name = String(project?.name || "").trim();
+      if (id) projectById.set(id, project);
+      if (name) {
+        projectByName.set(name.toLowerCase(), project);
+        projectByFolder.set(getProjectFolderName(name), project);
+      }
+    }
+
+    const out = [];
+    const seen = new Set();
+    const taskBuckets = clockProjectLists?.task || {};
+    for (const [sourceKey, rows] of Object.entries(taskBuckets)) {
+      if (!Array.isArray(rows)) continue;
+      const parts = String(sourceKey || "").split("|");
+      const projectToken = parts[2] || "";
+      const sourceCost = parts[3] || "";
+      for (const item of rows) {
+        const text = String(item?.text || "").trim();
+        if (!text) continue;
+        const itemProjectId = String(item?.projectId || "").trim();
+        const itemProjectName = String(item?.projectName || "").trim();
+        let project =
+          (itemProjectId && projectById.get(itemProjectId)) ||
+          (itemProjectName && projectByName.get(itemProjectName.toLowerCase())) ||
+          (projectToken && projectById.get(projectToken)) ||
+          (projectToken && projectByFolder.get(projectToken)) ||
+          null;
+        const resolvedProjectId = project?.id != null ? String(project.id) : itemProjectId;
+        const resolvedProjectName = String(project?.name || itemProjectName || "").trim();
+        const rawCost = String(item?.costCenter || sourceCost || "").trim();
+        const resolvedCost = rawCost && rawCost !== "project" && rawCost !== "cost" ? rawCost : "";
+        const key = `${text.toLowerCase()}|${resolvedProjectId}|${resolvedCost.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          id: item?.id || key,
+          text,
+          projectId: resolvedProjectId,
+          projectName: resolvedProjectName,
+          costCenter: resolvedCost,
+        });
+      }
+    }
+    return out.sort((a, b) => a.text.localeCompare(b.text));
+  }, [clockProjectLists, effectiveProjects]);
+
+  const getScheduleTaskTitleSuggestions = useCallback(
+    (rawTitle) => {
+      const q = String(rawTitle || "").trim().toLowerCase();
+      if (!q) return [];
+      const rows = scheduleTaskSuggestionPool.filter((item) =>
+        String(item?.text || "").trim().toLowerCase().startsWith(q) &&
+        String(item?.text || "").trim().toLowerCase() !== q
+      );
+      return rows.slice(0, 8);
+    },
+    [scheduleTaskSuggestionPool]
+  );
+
+  const scheduleTitleSuggestions = useMemo(
+    () => getScheduleTaskTitleSuggestions(scheduleDraft?.title),
+    [getScheduleTaskTitleSuggestions, scheduleDraft?.title]
+  );
+
+  const scheduleEditTitleSuggestions = useMemo(
+    () => getScheduleTaskTitleSuggestions(scheduleEditDraft?.title),
+    [getScheduleTaskTitleSuggestions, scheduleEditDraft?.title]
+  );
+
+  const applyScheduleTaskSuggestionToDraft = useCallback((suggestion) => {
+    if (!suggestion?.text) return;
+    setScheduleDraft((prev) => ({
+      ...prev,
+      title: suggestion.text,
+      projectId: suggestion.projectId || prev?.projectId || "",
+      costCentre: suggestion.costCenter || "",
+    }));
+  }, []);
+
+  const applyScheduleTaskSuggestionToEditDraft = useCallback((suggestion) => {
+    if (!suggestion?.text) return;
+    setScheduleEditDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            title: suggestion.text,
+            projectId: suggestion.projectId || prev.projectId || "",
+            costCentre: suggestion.costCenter || "",
+          }
+        : prev
+    );
+  }, []);
 
   /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
   const clockSelectableProjects = useMemo(() => {
@@ -8065,6 +8166,50 @@ const handlePhotoQuickUpload = async (event) => {
     ]
   );
 
+  const rememberScheduledTaskInTaskList = useCallback(
+    ({ taskTitle, projectId: taskProjectId, projectName, costCentre }) => {
+      const text = String(taskTitle || "").trim();
+      const projectIdForKey = String(taskProjectId || "").trim();
+      const projectNameForKey = String(projectName || "").trim();
+      if (!text || (!projectIdForKey && !projectNameForKey)) return;
+
+      const projectToken = projectIdForKey || getProjectFolderName(projectNameForKey || "project");
+      const costToken = String(costCentre || "").trim() || "project";
+      const key = [
+        authUser?.id || "anonymous",
+        userCompany?.id || "company",
+        projectToken,
+        costToken,
+      ].join("|");
+
+      const item = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        text,
+        projectId: projectIdForKey,
+        projectName: projectNameForKey,
+        costCenter: String(costCentre || "").trim(),
+        createdAt: new Date().toISOString(),
+        source: "schedule",
+      };
+
+      setClockProjectLists((prev) => {
+        const next = {
+          task: { ...(prev?.task || {}) },
+          material: { ...(prev?.material || {}) },
+        };
+        const existing = Array.isArray(next.task?.[key]) ? next.task[key] : [];
+        const textKey = text.toLowerCase();
+        const alreadyExists = existing.some(
+          (row) => String(row?.text || "").trim().toLowerCase() === textKey
+        );
+        if (alreadyExists) return prev;
+        next.task[key] = [item, ...existing];
+        return next;
+      });
+    },
+    [authUser?.id, userCompany?.id]
+  );
+
   const handleScheduleSubmit = useCallback(
     async (event) => {
       event?.preventDefault?.();
@@ -8169,6 +8314,13 @@ const handlePhotoQuickUpload = async (event) => {
           newTaskId = fbRow?.id != null ? String(fbRow.id) : null;
         }
 
+        rememberScheduledTaskInTaskList({
+          taskTitle,
+          projectId: projectIdVal,
+          projectName: projectNameVal,
+          costCentre: costCentreVal,
+        });
+
         if (selectedIds.length > 0 && newTaskId == null) {
           setScheduleSaveError(
             "The task was saved, but employees could not be assigned because the new task id was not returned. Check RLS (scheduled_tasks insert must allow returning id, or run a fresh sync)."
@@ -8232,7 +8384,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleSaving(false);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleDraft, companyTimeZone, companyProjects, schedulePickMembers]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleDraft, companyTimeZone, companyProjects, schedulePickMembers, rememberScheduledTaskInTaskList]
   );
 
   const handleScheduleUpdateTask = useCallback(
@@ -8327,6 +8479,13 @@ const handlePhotoQuickUpload = async (event) => {
           .eq("company_id", userCompany.id);
         if (upErr) throw upErr;
 
+        rememberScheduledTaskInTaskList({
+          taskTitle,
+          projectId: projectIdVal,
+          projectName: projectNameVal,
+          costCentre: costCentreVal,
+        });
+
         const selectedIdSet = new Set(selectedIds);
         const removedUserIds = [...prevAssignedUserIds].filter((uid) => !selectedIdSet.has(String(uid)));
         if (removedUserIds.length > 0) {
@@ -8377,7 +8536,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleEditSaving(false);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, scheduleEditReturnViewMode, restoreScheduleEditReturnView, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, scheduleEditReturnViewMode, restoreScheduleEditReturnView, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId, rememberScheduledTaskInTaskList]
   );
 
   const handleScheduleDeleteTask = useCallback(
@@ -10014,6 +10173,22 @@ const handlePhotoQuickUpload = async (event) => {
 
   const activeClockListItems = clockListModal ? getClockProjectListItems(clockListModal) : [];
 
+  const restoreLastClockListItem = () => {
+    if (!clockListUndo?.kind || !clockListUndo?.key || !clockListUndo?.item) return;
+    const undo = clockListUndo;
+    setClockProjectLists((prev) => {
+      const next = {
+        task: { ...(prev?.task || {}) },
+        material: { ...(prev?.material || {}) },
+      };
+      const rows = Array.isArray(next[undo.kind]?.[undo.key]) ? next[undo.kind][undo.key] : [];
+      const exists = rows.some((item) => String(item?.id) === String(undo.item?.id));
+      next[undo.kind][undo.key] = exists ? rows : [undo.item, ...rows];
+      return next;
+    });
+    setClockListUndo(null);
+  };
+
   const openClockProjectList = (kind) => {
     if (!clockListContextReady) {
       showClockSetupRequired();
@@ -10053,6 +10228,13 @@ const handlePhotoQuickUpload = async (event) => {
 
   const completeClockProjectListItem = (kind, itemId) => {
     if (!kind || !itemId) return;
+    const existingNow = Array.isArray(clockProjectLists?.[kind]?.[clockProjectListKey])
+      ? clockProjectLists[kind][clockProjectListKey]
+      : [];
+    const removedItem = existingNow.find((item) => String(item?.id) === String(itemId));
+    if (removedItem) {
+      setClockListUndo({ kind, key: clockProjectListKey, item: removedItem });
+    }
     setClockProjectLists((prev) => {
       const next = {
         task: { ...(prev?.task || {}) },
@@ -10159,6 +10341,13 @@ const handlePhotoQuickUpload = async (event) => {
 
   const completeListPageItem = (sourceKey, itemId) => {
     if (!sourceKey || !itemId) return;
+    const rowsNow = Array.isArray(clockProjectLists?.[listType]?.[sourceKey])
+      ? clockProjectLists[listType][sourceKey]
+      : [];
+    const removedItem = rowsNow.find((item) => String(item?.id) === String(itemId));
+    if (removedItem) {
+      setClockListUndo({ kind: listType, key: sourceKey, item: removedItem });
+    }
     setClockProjectLists((prev) => {
       const next = {
         task: { ...(prev?.task || {}) },
@@ -10169,6 +10358,13 @@ const handlePhotoQuickUpload = async (event) => {
       return next;
     });
   };
+
+  const canUndoListPage =
+    Boolean(clockListUndo?.kind === listType && clockListUndo?.key) &&
+    String(clockListUndo.key).startsWith(listStoragePrefix);
+  const canUndoClockListModal =
+    Boolean(clockListUndo?.kind === clockListModal && clockListUndo?.key) &&
+    String(clockListUndo.key) === String(clockProjectListKey);
 
   const reportsQuickRangeOptions = [
     { id: "weekly", label: "Week" },
@@ -11512,11 +11708,23 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "lists" && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.08)] overflow-hidden">
               <CardContent className="p-4 space-y-4">
-                <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
-                  <h2 className="text-[24px] font-black leading-tight text-slate-950">List</h2>
-                  <p className="mt-1 text-[14px] font-bold text-slate-500">
-                    Project task and material lists
-                  </p>
+                <div className="flex items-start justify-between gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                  <div className="min-w-0">
+                    <h2 className="text-[24px] font-black leading-tight text-slate-950">List</h2>
+                    <p className="mt-1 text-[14px] font-bold text-slate-500">
+                      Project task and material lists
+                    </p>
+                  </div>
+                  {canUndoListPage ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 active:bg-white"
+                      onClick={restoreLastClockListItem}
+                      aria-label="Undo last completed item"
+                    >
+                      Undo
+                    </button>
+                  ) : null}
                 </div>
 
                 <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
@@ -11574,13 +11782,25 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm overflow-hidden">
-                  <div className="border-b border-slate-100 bg-slate-50 px-3 py-2">
-                    <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      {listType === "material" ? "Material List" : "Task List"}
-                    </p>
-                    <p className="mt-0.5 text-[14px] font-black text-slate-950">
-                      {selectedListProject?.name || "Select a project"}
-                    </p>
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        {listType === "material" ? "Material List" : "Task List"}
+                      </p>
+                      <p className="mt-0.5 truncate text-[14px] font-black text-slate-950">
+                        {selectedListProject?.name || "Select a project"}
+                      </p>
+                    </div>
+                    {canUndoListPage ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] font-black text-slate-800 active:bg-slate-50"
+                        onClick={restoreLastClockListItem}
+                        aria-label="Undo last completed item"
+                      >
+                        Undo
+                      </button>
+                    ) : null}
                   </div>
                   {visibleProjectListItems.length === 0 ? (
                     <p className="px-3 py-5 text-center text-[14px] font-bold text-slate-500">
@@ -13755,7 +13975,7 @@ const handlePhotoQuickUpload = async (event) => {
                         Close
                       </button>
                     </div>
-                    <div>
+                    <div className="relative">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-title">
                         Task title
                       </label>
@@ -13766,9 +13986,32 @@ const handlePhotoQuickUpload = async (event) => {
                         value={scheduleDraft.title}
                         onChange={(e) => setScheduleDraft((d) => ({ ...d, title: e.target.value }))}
                         placeholder="e.g. Rough-in inspection"
+                        autoComplete="off"
                         disabled={scheduleSaving}
                         required
                       />
+                      {scheduleTitleSuggestions.length > 0 ? (
+                        <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_16px_30px_rgba(15,23,42,0.16)]">
+                          {scheduleTitleSuggestions.map((suggestion) => (
+                            <button
+                              key={`${suggestion.text}-${suggestion.projectId}-${suggestion.costCenter}`}
+                              type="button"
+                              className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 active:bg-slate-50"
+                              onClick={() => applyScheduleTaskSuggestionToDraft(suggestion)}
+                            >
+                              <span className="block text-[15px] font-black leading-snug text-slate-950">
+                                {suggestion.text}
+                              </span>
+                              {suggestion.projectName ? (
+                                <span className="mt-0.5 block truncate text-[12px] font-bold text-slate-500">
+                                  {suggestion.projectName}
+                                  {suggestion.costCenter ? ` - ${suggestion.costCenter}` : ""}
+                                </span>
+                              ) : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-1 gap-2">
                       <div className="space-y-1">
@@ -14468,7 +14711,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         <p className="text-[19px] font-black leading-tight text-slate-950">Edit task</p>
                                         <p className="text-[13px] font-semibold text-slate-500">Update only what changed.</p>
                                       </div>
-                                      <div>
+                                      <div className="relative">
                                         <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-title-${tidKey}`}>
                                           Task title
                                         </label>
@@ -14482,9 +14725,32 @@ const handlePhotoQuickUpload = async (event) => {
                                               prev ? { ...prev, title: e.target.value } : prev
                                             )
                                           }
+                                          autoComplete="off"
                                           disabled={scheduleEditSaving}
                                           required
                                         />
+                                        {scheduleEditTitleSuggestions.length > 0 ? (
+                                          <div className="absolute left-0 right-0 top-full z-40 mt-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_16px_30px_rgba(15,23,42,0.16)]">
+                                            {scheduleEditTitleSuggestions.map((suggestion) => (
+                                              <button
+                                                key={`${suggestion.text}-${suggestion.projectId}-${suggestion.costCenter}`}
+                                                type="button"
+                                                className="block w-full border-b border-slate-100 px-3 py-2.5 text-left last:border-b-0 active:bg-slate-50"
+                                                onClick={() => applyScheduleTaskSuggestionToEditDraft(suggestion)}
+                                              >
+                                                <span className="block text-[15px] font-black leading-snug text-slate-950">
+                                                  {suggestion.text}
+                                                </span>
+                                                {suggestion.projectName ? (
+                                                  <span className="mt-0.5 block truncate text-[12px] font-bold text-slate-500">
+                                                    {suggestion.projectName}
+                                                    {suggestion.costCenter ? ` - ${suggestion.costCenter}` : ""}
+                                                  </span>
+                                                ) : null}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
                                       </div>
                                       <div className="grid grid-cols-1 gap-2">
                                         <div className="space-y-1">
@@ -16127,17 +16393,29 @@ const handlePhotoQuickUpload = async (event) => {
                       {[clockListContext.projectName, clockListContext.costCenter].filter(Boolean).join(" - ")}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="h-10 w-10 shrink-0 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
-                    onClick={() => {
-                      setClockListModal(null);
-                      setClockListDraft("");
-                    }}
-                    aria-label="Close list"
-                  >
-                    X
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {canUndoClockListModal ? (
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 active:bg-white"
+                        onClick={restoreLastClockListItem}
+                        aria-label="Undo last completed item"
+                      >
+                        Undo
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="h-10 w-10 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
+                      onClick={() => {
+                        setClockListModal(null);
+                        setClockListDraft("");
+                      }}
+                      aria-label="Close list"
+                    >
+                      X
+                    </button>
+                  </div>
                 </div>
 
                 <form onSubmit={addClockProjectListItem} className="flex gap-2">
@@ -16476,7 +16754,6 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => openMenuTab("schedule")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Schedule</span>
-                      <span className="block text-[13px] font-bold text-slate-500">Tasks and calendar</span>
                     </button>
                     <button
                       type="button"
