@@ -14700,28 +14700,23 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                  <div className="mt-3">
                     <button
                       type="button"
-                      className="min-w-0 rounded-[20px] border border-blue-100 bg-white px-3 py-2.5 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
+                      className="w-full min-w-0 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
                       onClick={openReportsDatePicker}
                     >
-                      <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
-                        Date range
-                      </span>
-                      <span className="mt-0.5 flex min-w-0 items-center gap-2">
-                        <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-black text-white">
+                      <span className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
+                          Date range
+                        </span>
+                        <span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-black text-white">
                           {reportsSelectedRangeLabel}
                         </span>
-                        <span className="truncate text-[14px] font-black text-slate-950">{reportsDateRangeLabel}</span>
                       </span>
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-[20px] border border-slate-200 bg-white px-3 text-[13px] font-black text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.07)]"
-                      onClick={openReportsDatePicker}
-                    >
-                      Change
+                      <span className="mt-2 block text-[18px] font-black leading-tight text-slate-950">
+                        {reportsDateRangeLabel}
+                      </span>
                     </button>
                   </div>
 
