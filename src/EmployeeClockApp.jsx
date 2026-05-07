@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { supabase } from "./supabaseClient";
 
 const Card = ({ children, className }) => (
-  <div className={`bg-white rounded-3xl ${className || ""}`}>{children}</div>
+  <div className={`bg-white rounded-[28px] border border-slate-200/80 shadow-[0_18px_38px_rgba(15,23,42,0.08)] ${className || ""}`}>{children}</div>
 );
 
 const CardContent = ({ children, className }) => (
@@ -10,7 +10,7 @@ const CardContent = ({ children, className }) => (
 );
 
 const Button = ({ children, className, ...props }) => (
-  <button className={`bg-black text-white ${className || ""}`} {...props}>
+  <button className={`inline-flex items-center justify-center bg-slate-950 text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${className || ""}`} {...props}>
     {children}
   </button>
 );
@@ -1578,9 +1578,9 @@ function PublicPhotoShareView({ share, index, setIndex }) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-neutral-950 text-slate-900 flex justify-center">
-      <div className="w-full max-w-3xl bg-slate-50 min-h-[100dvh]">
-        <header className="bg-white border-b px-4 py-4">
+    <div className="min-h-[100dvh] bg-[#edf2f7] text-slate-900 flex justify-center">
+      <div className="w-full max-w-3xl bg-[#f7f9fc] min-h-[100dvh] shadow-[0_24px_70px_rgba(15,23,42,0.16)]">
+        <header className="m-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
           <h1 className="text-2xl font-black tracking-tight">OPERA.AI</h1>
           <p className="text-sm font-medium text-slate-600">
             Shared project photos{share?.folder ? ` - ${share.folder}` : ""}
@@ -9291,32 +9291,31 @@ const handlePhotoQuickUpload = async (event) => {
         : getLabourCost(record);
 
     return (
-    <div key={record.id} className="rounded-2xl border bg-white p-4">
+    <div key={record.id} className="rounded-[22px] border border-slate-200 bg-white p-3.5 shadow-sm">
       <div className="flex justify-between gap-3">
         <div>
-          <p className="text-[16px] font-semibold">{timesheetTitle}</p>
+          <p className="text-[17px] font-black text-slate-950 leading-snug">{timesheetTitle}</p>
           {timesheetEmailSecondary && (
             <p className="text-[13px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
           )}
-          <p className="text-[14px] text-slate-600">{record.project}</p>
-          <p className="text-[14px] text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
+          <p className="mt-1 text-[14px] font-bold text-slate-600">{record.project || "No project"}</p>
+          <p className="text-[13px] font-semibold text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-[13px] font-semibold h-fit ${statusBadgeClass}`}>
+        <span className={`rounded-full px-3 py-1 text-[12px] font-black h-fit ${statusBadgeClass}`}>
           {statusBadgeLabel}
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-3 text-[14px] text-slate-600">
-        <div><p>Hours</p><p className="font-semibold text-slate-900">{formatDuration(getWorkedMinutes(record))}</p></div>
-        <div><p>Rate</p><p className="font-semibold text-slate-900">{formatMoney(rateFromTimesheet)}/hr</p></div>
-        <div>
-          <p>Total Cost</p>
-          <p className="font-semibold text-slate-900">
+      <div className="grid grid-cols-3 gap-2 mt-3 text-[13px] text-slate-600">
+        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Hours</p><p className="font-black text-slate-900 leading-tight">{formatDuration(getWorkedMinutes(record))}</p></div>
+        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Rate</p><p className="font-black text-slate-900 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p></div>
+        <div className="rounded-2xl bg-slate-50 p-2">
+          <p className="font-black uppercase text-[10px]">Cost</p>
+          <p className="font-black text-slate-900 leading-tight">
             {formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record))}
           </p>
         </div>
       </div>
-
       {editingRecordId === record.id ? (
         <div className="mt-3 border-t pt-2 space-y-2">
           <p className="text-[13px] text-slate-500 leading-tight">Edit in {companyTimeZone}</p>
@@ -9509,10 +9508,10 @@ const handlePhotoQuickUpload = async (event) => {
 
   if (initialLoading) {
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <div className="text-center">
+      <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
+        <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
           <div className="text-4xl mb-3">⏱️</div>
-          <p className="text-sm text-slate-300">Loading OPERA.AI...</p>
+          <p className="text-sm font-semibold text-slate-600">Loading OPERA.AI...</p>
         </div>
       </div>
     );
@@ -9521,9 +9520,9 @@ const handlePhotoQuickUpload = async (event) => {
   if (!authUser) {
     if (authStep === "signup") {
       return (
-        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-white border-b p-5">
+        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+            <div className="bg-white border-b border-slate-100 p-5">
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
                 <div>
@@ -9605,9 +9604,9 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     return (
-      <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-        <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-          <div className="bg-white border-b p-5">
+      <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+          <div className="bg-white border-b border-slate-100 p-5">
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
               <div>
@@ -9685,9 +9684,9 @@ const handlePhotoQuickUpload = async (event) => {
     // Inline (non-blocking) loader: do not take over the whole app once opened.
     if (hasOpenedAppRef.current) {
   return (
-        <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
-          <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
+        <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
+          <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
+            <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
               <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
                 <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
                 <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
@@ -9699,10 +9698,10 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     return (
-      <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">
-        <div className="text-center">
+      <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
+        <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
           <div className="text-4xl mb-3">⏱️</div>
-          <p className="text-sm text-slate-300">Loading your workspace...</p>
+          <p className="text-sm font-semibold text-slate-600">Loading your workspace...</p>
         </div>
       </div>
     );
@@ -9712,9 +9711,9 @@ const handlePhotoQuickUpload = async (event) => {
   if (!userCompany) {
     if (authStep === "create_company") {
       return (
-        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-white border-b p-5">
+        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+            <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Create Company</h1>
               <p className="text-sm text-slate-600 mt-1">You’ll get a company code to share with employees.</p>
               <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
@@ -9761,9 +9760,9 @@ const handlePhotoQuickUpload = async (event) => {
 
     if (authStep === "join_company") {
       return (
-        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-white border-b p-5">
+        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+            <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Join Company</h1>
               <p className="text-sm text-slate-600 mt-1">Enter the company code your supervisor shared.</p>
               <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
@@ -9810,9 +9809,9 @@ const handlePhotoQuickUpload = async (event) => {
 
     if (authStep === "company_created" && createdCompanyCode) {
       return (
-        <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-            <div className="bg-white border-b p-5">
+        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+            <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Company Created</h1>
               <p className="text-sm text-slate-600 mt-1">Share this code with employees so they can join.</p>
               <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
@@ -9850,9 +9849,9 @@ const handlePhotoQuickUpload = async (event) => {
 
     // Default onboarding choice
     return (
-      <div className="min-h-screen bg-neutral-950 flex justify-center items-center text-slate-900 p-4">
-        <div className="w-full max-w-sm bg-slate-50 rounded-3xl shadow-2xl overflow-hidden">
-          <div className="bg-white border-b p-5">
+      <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+          <div className="bg-white border-b border-slate-100 p-5">
             <h1 className="text-2xl font-bold tracking-tight">Welcome</h1>
             <p className="text-sm text-slate-600 mt-1">Choose what you want to do next.</p>
             <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
@@ -10305,23 +10304,23 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const renderClockListActionRow = () => (
-    <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm">
+    <div className="rounded-[24px] border border-slate-200/90 bg-white p-2.5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]">
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white"
+          className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white active:shadow-inner"
           onClick={() => openClockProjectList("task")}
         >
-          <span className="block text-[15px] font-black leading-tight text-slate-950">Task List</span>
-          <span className="mt-0.5 block text-[12px] font-bold leading-tight text-slate-500">Project tasks</span>
+          <span className="block text-[16px] font-black leading-tight text-slate-950">Task List</span>
+          <span className="mt-1 block text-[12px] font-bold leading-tight text-slate-500">Project tasks</span>
         </button>
         <button
           type="button"
-          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white"
+          className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white active:shadow-inner"
           onClick={() => openClockProjectList("material")}
         >
-          <span className="block text-[15px] font-black leading-tight text-slate-950">Material List</span>
-          <span className="mt-0.5 block text-[12px] font-bold leading-tight text-slate-500">Project materials</span>
+          <span className="block text-[16px] font-black leading-tight text-slate-950">Material List</span>
+          <span className="mt-1 block text-[12px] font-bold leading-tight text-slate-500">Project materials</span>
         </button>
       </div>
     </div>
@@ -10540,6 +10539,10 @@ const handlePhotoQuickUpload = async (event) => {
     : reportsAvailableDims[0] || "project";
   const reportsCurrentGroups =
     reportsAvailableDims.length > 0 ? buildReportsGroups(reportsDrillRows, reportsCurrentViewBy) : [];
+  const reportsCurrentGroupMaxMinutes = Math.max(
+    1,
+    ...reportsCurrentGroups.map((row) => Number(row?.minutes || 0))
+  );
   const reportsContextCards = reportsSafeDrillStack.map((step, index) => {
     const stackSlice = reportsSafeDrillStack.slice(0, index + 1);
     return {
@@ -10555,10 +10558,10 @@ const handlePhotoQuickUpload = async (event) => {
     : "All reports";
 
   return (
-    <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
-      <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
-          <div className="rounded-2xl bg-white border border-slate-200 px-2.5 py-2 shadow-sm">
+    <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
+      <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
+        <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+          <div className="rounded-[24px] bg-white border border-slate-200/90 px-2.5 py-2 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -10566,14 +10569,14 @@ const handlePhotoQuickUpload = async (event) => {
                   setMenuPanel("main");
                   setIsMenuOpen(true);
                 }}
-                className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-lg font-bold"
+                className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-lg font-bold text-slate-900 shadow-sm active:bg-white"
                 aria-label="Open menu"
               >
                 ☰
               </button>
               <div className="flex-1 min-w-0">
-                <h1 className="text-[18px] font-black tracking-tight leading-tight">OPERA.AI</h1>
-                <p className="border-b border-slate-200 pb-1 text-[12px] font-semibold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
+                <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
+                <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
@@ -10582,7 +10585,7 @@ const handlePhotoQuickUpload = async (event) => {
                     setActiveTab("clock");
                     setIsMenuOpen(false);
                   }}
-                  className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-[0px] after:content-['\2302'] after:text-base after:leading-none"
+                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] shadow-sm active:bg-white after:content-['\2302'] after:text-base after:leading-none"
                   aria-label="Home"
                 >
                   âŒ‚
@@ -10590,7 +10593,7 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className="relative h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-base"
+                  className="relative h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-base shadow-sm active:bg-white"
                   aria-label="Notifications"
                 >
                   🔔
@@ -10677,13 +10680,13 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-2.5 sm:p-4 space-y-2">
-                <div className="flex items-center gap-1.5">
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3 sm:p-4 space-y-3">
+                <div className="flex items-center gap-2 rounded-[22px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-3 py-3">
                   <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
                   <div className="min-w-0">
-                    <h2 className="font-bold text-[18px] leading-tight">Start Shift</h2>
-                    <p className="text-[14px] text-slate-500 leading-snug">Choose project and cost center</p>
+                    <h2 className="font-black text-[21px] leading-tight text-slate-950">Start Shift</h2>
+                    <p className="text-[14px] font-semibold text-slate-500 leading-snug">Choose project and cost center</p>
                   </div>
                 </div>
 
@@ -10867,7 +10870,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
-                <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
+                <div ref={photoToolsRef} className="rounded-[24px] border border-slate-200 bg-white p-2.5 space-y-2.5 shadow-sm">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
@@ -10876,10 +10879,10 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      className={`w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                      className={`w-full rounded-[20px] h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
                           ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
-                          : "border-slate-900 bg-slate-900 text-white"
+                          : "border-slate-950 bg-slate-950 text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
@@ -10904,10 +10907,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className={`block w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                      className={`block w-full rounded-[20px] h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
                           ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
-                          : "border-green-700 bg-green-700 text-white"
+                          : "border-emerald-700 bg-emerald-700 text-white shadow-[0_10px_18px_rgba(4,120,87,0.16)]"
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
@@ -11136,18 +11139,18 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-3xl shadow-sm border-green-100 bg-green-50">
-              <CardContent className="p-3 flex flex-col gap-2">
+            <Card className="rounded-[28px] border-emerald-100 bg-gradient-to-br from-white to-emerald-50/70 overflow-hidden">
+              <CardContent className="p-3.5 flex flex-col gap-3">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="text-center py-2">
-                  <p className="text-[15px] font-semibold text-slate-600">Live Timer</p>
-                  <p className="text-5xl sm:text-6xl font-black tabular-nums leading-none mt-0.5">{formatTimer(liveSeconds)}</p>
-                  <p className="text-lg sm:text-xl font-bold mt-0.5 text-green-700">{formatMoney(liveEarnings)}</p>
-                  <p className="text-[14px] font-medium text-slate-500">Money earned</p>
+                <div className="rounded-[24px] border border-emerald-100 bg-white px-4 py-5 text-center shadow-[0_14px_30px_rgba(5,150,105,0.08)]">
+                  <p className="text-[13px] font-black uppercase text-emerald-700">Live Timer</p>
+                  <p className="mt-1 text-5xl sm:text-6xl font-black tabular-nums leading-none text-slate-950">{formatTimer(liveSeconds)}</p>
+                  <p className="mt-2 text-xl sm:text-2xl font-black text-emerald-700">{formatMoney(liveEarnings)}</p>
+                  <p className="text-[14px] font-semibold text-slate-500">Money earned</p>
                 </div>
 
                 {isChangingTask ? (
@@ -11502,12 +11505,12 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "timesheet" && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between mb-4">
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <div>
-                    <h2 className="font-bold text-xl">My Timesheet</h2>
-                    <p className="text-[14px] text-slate-500">
+                    <h2 className="font-black text-[23px] leading-tight text-slate-950">My Timesheet</h2>
+                    <p className="mt-1 text-[14px] font-semibold text-slate-500">
                       {isAdmin ? "All timesheets for this company" : "Only your submitted timesheets"}
                     </p>
                   </div>
@@ -11523,7 +11526,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <span className="text-[13px] text-amber-800">{timesheetsError}</span>
                   </div>
                 )}
-                <div className="mb-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-2.5 shadow-sm">
                   <div className="grid grid-cols-3 gap-1.5">
                     {[
                       { id: "day", label: "Day" },
@@ -11595,13 +11598,13 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "photos" && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5 space-y-4">
-                <div>
-                  <h2 className="font-bold text-lg">Project Photos</h2>
-                  <p className="text-sm text-slate-500">Open, select, and share project photos.</p>
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Project Photos</h2>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Open, select, and share project photos.</p>
                 </div>
-                <select className="w-full rounded-2xl border p-3 text-[15px] font-semibold" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
+                <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
                   {photoFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
@@ -11617,7 +11620,7 @@ const handlePhotoQuickUpload = async (event) => {
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
                     const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
                     return (
-                      <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
+                      <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
                         <div className="space-y-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -11705,14 +11708,14 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "receipts" && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5 space-y-4">
-                <div><h2 className="font-bold text-lg">Receipts</h2><p className="text-xs text-slate-500">Receipt photos and totals by project</p></div>
-                <select className="w-full rounded-2xl border p-3 text-sm" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm"><h2 className="font-black text-[23px] leading-tight text-slate-950">Receipts</h2><p className="mt-1 text-[14px] font-semibold text-slate-500">Receipt photos and totals by project</p></div>
+                <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
                   {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
-                <div className="rounded-2xl bg-slate-100 p-4"><p className="text-xs text-slate-500">Receipt Total</p><p className="text-2xl font-bold">{formatMoney(receiptTotal)}</p></div>
+                <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)]"><p className="text-[11px] font-black uppercase text-slate-300">Receipt Total</p><p className="mt-1 text-3xl font-black">{formatMoney(receiptTotal)}</p></div>
                 {receiptFolders.length === 0 && (
                   <p className="text-sm text-slate-500 text-center py-8">No receipts captured yet.</p>
                 )}
@@ -11721,7 +11724,7 @@ const handlePhotoQuickUpload = async (event) => {
                     const folderReceipts = scopedProjectReceipts[folder] || [];
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
-                      <div key={folder} className="rounded-2xl border bg-white p-4 space-y-3">
+                      <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
                         <div className="flex items-center justify-between gap-3">
                           <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{folderReceipts.length} receipts</p></div>
                           <p className="font-bold">{formatMoney(folderTotal)}</p>
@@ -11956,16 +11959,16 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "notifications" && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 space-y-3">
-                <div className="flex justify-between gap-2 items-start">
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 space-y-3">
+                <div className="flex justify-between gap-2 items-start rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <div>
-                    <h2 className="font-bold text-lg">Notifications</h2>
-                    <p className="text-xs text-slate-500">{inAppNotifUnread} unread</p>
+                    <h2 className="font-black text-[23px] leading-tight text-slate-950">Notifications</h2>
+                    <p className="mt-1 text-[14px] font-semibold text-slate-500">{inAppNotifUnread} unread</p>
         </div>
                   <Button
                     type="button"
-                    className="rounded-xl h-9 px-3 text-xs font-semibold shrink-0"
+                    className="rounded-2xl h-10 px-3 text-[13px] font-black shrink-0"
                     disabled={markingAllNotifs || inAppNotifUnread === 0}
                     onClick={() => void handleMarkAllNotificationsRead()}
                   >
@@ -12766,6 +12769,17 @@ const handlePhotoQuickUpload = async (event) => {
                                   <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
                                   <p className="mt-1 text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
                                 </div>
+                              </div>
+                              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                                <div
+                                  className="h-full rounded-full bg-slate-950 transition-all"
+                                  style={{
+                                    width: `${Math.max(
+                                      6,
+                                      Math.min(100, (Number(row.minutes || 0) / reportsCurrentGroupMaxMinutes) * 100)
+                                    )}%`,
+                                  }}
+                                />
                               </div>
                             </Tag>
                           );
@@ -13578,10 +13592,10 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "schedule" && !isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-1.5 sm:p-3 space-y-1.5">
-                <div className="space-y-1.5">
-                  <div className="rounded-[18px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
-                    <h2 className="text-[22px] font-black leading-none tracking-normal text-slate-950">Schedule</h2>
+              <CardContent className="p-2 sm:p-3 space-y-2">
+                <div className="space-y-2">
+                  <div className="rounded-[22px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-3 py-2.5 shadow-sm">
+                    <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">Schedule</h2>
                   </div>
                   <button
                     type="button"
@@ -13595,13 +13609,13 @@ const handlePhotoQuickUpload = async (event) => {
                       {employeeNotifPermMessage}
                     </div>
                   ) : null}
-                  <div className="rounded-[18px] border border-slate-200 bg-white p-1.5 shadow-sm space-y-1">
+                  <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-1">
                     <label className="sr-only" htmlFor="sched-employee-view">
                       View
                     </label>
                     <select
                       id="sched-employee-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-1.5 px-3 text-[14px] h-9 font-bold text-slate-950"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-3 text-[15px] h-11 font-black text-slate-950"
                       value={scheduleViewMode}
                       onChange={(e) => setScheduleViewMode(e.target.value)}
                     >
@@ -13613,7 +13627,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </div>
                   {scheduleViewMode !== "list" ? (
-                    <div className="grid grid-cols-3 gap-1 rounded-[18px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
+                    <div className="grid grid-cols-3 gap-1 rounded-[22px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
                         type="button"
                         className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
@@ -13953,11 +13967,11 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "schedule" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-1.5 sm:p-3 space-y-1.5">
-                <div className="space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-[18px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+              <CardContent className="p-2 sm:p-3 space-y-2">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-[22px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-3 py-2.5 shadow-sm">
                     <div className="min-w-0">
-                      <h2 className="text-[22px] font-black leading-none tracking-normal text-slate-950">
+                      <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">
                         Schedule
                       </h2>
                     </div>
@@ -13985,13 +13999,13 @@ const handlePhotoQuickUpload = async (event) => {
                       </Button>
                     )}
                   </div>
-                  <div className="rounded-[18px] border border-slate-200 bg-white p-1.5 shadow-sm space-y-1">
+                  <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-1">
                     <label className="sr-only" htmlFor="sched-admin-view">
                       View
                     </label>
                     <select
                       id="sched-admin-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-1.5 px-3 text-[14px] h-9 font-bold text-slate-950"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-3 text-[15px] h-11 font-black text-slate-950"
                       value={scheduleViewMode}
                       onChange={(e) => setScheduleViewMode(e.target.value)}
                     >
@@ -14003,7 +14017,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </div>
                   {scheduleViewMode !== "list" ? (
-                    <div className="grid grid-cols-3 gap-1 rounded-[18px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
+                    <div className="grid grid-cols-3 gap-1 rounded-[22px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
                         type="button"
                         className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
@@ -15226,17 +15240,17 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "projects" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 sm:p-5 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 sm:p-5 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <div className="min-w-0">
-                    <h2 className="font-bold text-lg">Projects</h2>
-                    <p className="text-xs text-slate-500">Company projects and cost centres</p>
+                    <h2 className="font-black text-[23px] leading-tight text-slate-950">Projects</h2>
+                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and cost centres</p>
                   </div>
                   {!projectsAddFormOpen && (
                     <Button
                       type="button"
-                      className="shrink-0 rounded-xl h-9 px-3 text-xs font-semibold"
+                      className="shrink-0 rounded-2xl h-10 px-3 text-[13px] font-black"
                       onClick={() => {
                         setProjectsEditSuccess("");
                         setEditingProjectId(null);
@@ -15817,11 +15831,11 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "team" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 sm:p-5 space-y-3">
-                <div>
-                  <h2 className="font-bold text-lg">Team</h2>
-                  <p className="text-xs text-slate-500">Company members</p>
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 sm:p-5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Team</h2>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Company members</p>
                 </div>
                 {isAdmin && (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -15848,8 +15862,8 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </div>
                 )}
-                <div className="rounded-2xl border bg-slate-50 p-3 space-y-2">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide">Join code</p>
+                <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-2 shadow-sm">
+                  <p className="text-[11px] font-black text-slate-500 uppercase">Join code</p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 min-w-0 rounded-lg bg-white border px-2 py-1.5 text-sm font-mono tracking-wide truncate">
                       {userCompany?.code || "—"}
@@ -16358,13 +16372,13 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "settings" && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-5 space-y-4">
-                <div>
-                  <h2 className="font-bold text-xl">Profile</h2>
-                  <p className="text-[14px] text-slate-500">Manage company and employee profile details.</p>
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 sm:p-5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Profile</h2>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Manage company and employee profile details.</p>
                 </div>
-                <div className="rounded-2xl border bg-white p-4 space-y-3">
+                <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[18px] font-black text-slate-900">Company Profile</p>
@@ -16431,7 +16445,7 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                 </div>
 
-                <div className="rounded-2xl border bg-white p-4 space-y-3">
+                <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[18px] font-black text-slate-900">Employee Profile</p>
@@ -16489,7 +16503,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 {isAdmin ? (
-                  <div className="rounded-2xl border bg-white p-4 space-y-3">
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
                     <div>
                       <p className="text-[18px] font-black text-slate-900">Team</p>
                       <p className="text-[14px] text-slate-600">Manage employee profiles, roles, pay rates, and status.</p>
@@ -16941,12 +16955,12 @@ const handlePhotoQuickUpload = async (event) => {
             }}
           >
             <div
-              className="h-full w-80 max-w-[88vw] bg-slate-50 shadow-2xl p-3 flex flex-col gap-3"
+              className="h-full w-80 max-w-[88vw] bg-[#f7f9fc] shadow-[0_24px_70px_rgba(15,23,42,0.22)] p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm flex items-center justify-between gap-3">
+              <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_14px_30px_rgba(15,23,42,0.08)] flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-black text-[22px] tracking-tight leading-tight text-slate-950">
+                  <h2 className="font-black text-[22px] leading-tight text-slate-950">
                     {menuPanel === "settings" ? "Settings" : "Menu"}
                   </h2>
                   <p className="text-[13px] font-bold text-slate-500 truncate">{(profileFullName || "").trim() || "User"}</p>
@@ -16974,19 +16988,19 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
               )}
 
-              <div className="flex-1 min-h-0 overflow-y-auto space-y-2 text-[17px]">
+              <div className="opera-scroll flex-1 min-h-0 overflow-y-auto space-y-2 text-[17px]">
                 {menuPanel === "main" && (
                   <>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("schedule")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Schedule</span>
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
                       onClick={() => openMenuTab("timesheet")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
@@ -16994,7 +17008,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="relative w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      className="relative w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={openPhotosTab}
                     >
                       Photos
@@ -17006,14 +17020,14 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("receipts")}
                     >
                       Receipts
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("lists")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">List</span>
@@ -17021,7 +17035,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
                       onClick={() => setMenuPanel("settings")}
                     >
                       <span>Settings</span>
@@ -17034,7 +17048,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <>
                     <button
                       type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("settings")}
                     >
                       Profile
@@ -17043,14 +17057,14 @@ const handlePhotoQuickUpload = async (event) => {
                       <>
                         <button
                           type="button"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                           onClick={() => openMenuTab("team")}
                         >
                           Team
                         </button>
                         <button
                           type="button"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                           onClick={() => openMenuTab("projects")}
                         >
                           Projects
@@ -17073,7 +17087,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         <div
-          className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
+          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[23rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/95 px-2 py-2 shadow-[0_18px_42px_rgba(15,23,42,0.18)] backdrop-blur pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
         >
           <div className="hidden">
             {isAdmin && (
@@ -17102,21 +17116,21 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("dashboard")}
-                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "dashboard" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
                 >
                   Live
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("clock")}
-                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
                 >
                   Clock
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("reports")}
-                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "reports" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "reports" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
                 >
                   Reports
                 </button>
@@ -17126,14 +17140,14 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("clock")}
-                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
                 >
                   Clock
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("lists")}
-                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "lists" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                  className={`rounded-2xl py-3 px-2 text-[15px] font-black transition ${activeTab === "lists" ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]" : "text-slate-500 active:bg-slate-50"}`}
                 >
                   List
                 </button>
