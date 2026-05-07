@@ -1936,6 +1936,7 @@ export default function EmployeeClockApp() {
   const [scheduleMoveModeTaskId, setScheduleMoveModeTaskId] = useState(null);
   /** Admin calendar drag state (timeline views only). */
   const [scheduleDragTaskId, setScheduleDragTaskId] = useState(null);
+  const [scheduleDragOffset, setScheduleDragOffset] = useState({ taskId: null, dx: 0, dy: 0, active: false });
   const scheduleTimelineColsRef = useRef(null);
   const scheduleAdminDragRef = useRef({
     pointerId: null,
@@ -1977,6 +1978,7 @@ export default function EmployeeClockApp() {
   const [scheduleEmployeeResponseInlineError, setScheduleEmployeeResponseInlineError] = useState("");
   const [scheduleEditingTaskId, setScheduleEditingTaskId] = useState(null);
   const [scheduleEditDraft, setScheduleEditDraft] = useState(null);
+  const [scheduleEditReturnViewMode, setScheduleEditReturnViewMode] = useState("");
   const [scheduleEditSaving, setScheduleEditSaving] = useState(false);
   const [scheduleEditError, setScheduleEditError] = useState("");
   const [scheduleDeleteSavingId, setScheduleDeleteSavingId] = useState(null);
@@ -7544,6 +7546,7 @@ const handlePhotoQuickUpload = async (event) => {
       setScheduleSaveError("");
       setScheduleEditingTaskId(null);
       setScheduleEditDraft(null);
+      setScheduleEditReturnViewMode("");
       setScheduleEditError("");
       const tm = String(timeHHmm ?? "09:00").trim();
       const safeTime = tm.length >= 5 ? tm.slice(0, 5) : "09:00";
@@ -7568,6 +7571,7 @@ const handlePhotoQuickUpload = async (event) => {
       const rawAssignList = tidKey ? scheduleAssigneesByTaskId?.[tidKey] : undefined;
       const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
       setScheduleMoveModeTaskId(null);
+      setScheduleEditReturnViewMode(scheduleViewMode !== "list" ? scheduleViewMode : "");
       setScheduleViewMode("list");
       setScheduleFormOpen(false);
       setScheduleSaveError("");
@@ -7575,7 +7579,7 @@ const handlePhotoQuickUpload = async (event) => {
       setScheduleEditDraft(buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone));
       setScheduleEditingTaskId(tidKey);
     },
-    [scheduleAssigneesByTaskId, companyTimeZone]
+    [scheduleAssigneesByTaskId, companyTimeZone, scheduleViewMode]
   );
 
   const beginScheduleMoveMode = useCallback((task) => {
@@ -7585,6 +7589,7 @@ const handlePhotoQuickUpload = async (event) => {
     setScheduleSaveError("");
     setScheduleEditingTaskId(null);
     setScheduleEditDraft(null);
+    setScheduleEditReturnViewMode("");
     setScheduleEditError("");
     setScheduleMoveModeTaskId(String(task.id));
   }, [isAdmin]);
@@ -7646,6 +7651,7 @@ const handlePhotoQuickUpload = async (event) => {
         dragging: false,
       };
       setScheduleDragTaskId(tid);
+      setScheduleDragOffset({ taskId: tid, dx: 0, dy: 0, active: false });
 
       try {
         e.currentTarget?.setPointerCapture?.(pid);
@@ -7668,8 +7674,14 @@ const handlePhotoQuickUpload = async (event) => {
     e.preventDefault();
     st.lastX = e.clientX;
     st.lastY = e.clientY;
+    const dx = st.lastX - st.startX;
+    const dy = st.lastY - st.startY;
     if (!st.dragging) {
-      if (Math.hypot(st.lastX - st.startX, st.lastY - st.startY) > 8) st.dragging = true;
+      if (Math.hypot(dx, dy) > 8) st.dragging = true;
+    }
+    if (st.dragging) {
+      const tid = st.task?.id != null ? String(st.task.id) : "";
+      setScheduleDragOffset({ taskId: tid, dx, dy, active: true });
     }
   }, []);
 
@@ -7698,6 +7710,7 @@ const handlePhotoQuickUpload = async (event) => {
         dragging: false,
       };
       setScheduleDragTaskId(null);
+      setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
 
       if (!task || !tid) return;
 
@@ -8096,8 +8109,11 @@ const handlePhotoQuickUpload = async (event) => {
           });
         }
 
+        const returnView = scheduleEditReturnViewMode;
         setScheduleEditingTaskId(null);
         setScheduleEditDraft(null);
+        setScheduleEditReturnViewMode("");
+        if (returnView && returnView !== "list") setScheduleViewMode(returnView);
         setScheduleRefreshKey((k) => k + 1);
       } catch (err) {
         setScheduleEditError(getErrorMessage(err));
@@ -8105,7 +8121,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleEditSaving(false);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, scheduleEditReturnViewMode, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
   );
 
   const handleScheduleDeleteTask = useCallback(
@@ -8127,9 +8143,12 @@ const handlePhotoQuickUpload = async (event) => {
           .eq("company_id", userCompany.id);
         if (error) throw error;
         if (String(scheduleEditingTaskId) === tid) {
+          const returnView = scheduleEditReturnViewMode;
           setScheduleEditingTaskId(null);
           setScheduleEditDraft(null);
           setScheduleEditError("");
+          setScheduleEditReturnViewMode("");
+          if (returnView && returnView !== "list") setScheduleViewMode(returnView);
         }
         if (String(scheduleMoveModeTaskId) === tid) setScheduleMoveModeTaskId(null);
         setScheduleRefreshKey((k) => k + 1);
@@ -8139,7 +8158,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleDeleteSavingId(null);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleMoveModeTaskId]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditReturnViewMode, scheduleMoveModeTaskId]
   );
 
   const ensurePushSubscription = useCallback(async () => {
@@ -12224,6 +12243,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleSaveError("");
                           setScheduleEditingTaskId(null);
                           setScheduleEditDraft(null);
+                          setScheduleEditReturnViewMode("");
                           setScheduleEditError("");
                           setScheduleMoveModeTaskId(null);
                           setScheduleCalendarMoveError("");
@@ -12861,12 +12881,18 @@ const handlePhotoQuickUpload = async (event) => {
                                           const tone = scheduleTimelineAdminTone(task);
                                           const isMoveHighlighted = scheduleMoveModeTaskId === tidKey;
                                           const dragging = scheduleRescheduleSavingId === tidKey;
+                                          const liveDrag =
+                                            scheduleDragOffset?.active && scheduleDragOffset?.taskId === tidKey
+                                              ? scheduleDragOffset
+                                              : null;
                                           const blockCls = `${scheduleTimelineBlockClasses(
                                             tone,
                                             compact
                                           )} sched-day-task-block absolute left-[4px] right-[4px] z-[8] overflow-hidden select-none touch-none cursor-grab${
                                             isMoveHighlighted ? " ring-[3px] ring-amber-300 ring-offset-1 ring-offset-white" : ""
-                                          }${scheduleDragTaskId === tidKey ? " cursor-grabbing opacity-75" : ""}`;
+                                          }${scheduleDragTaskId === tidKey ? " cursor-grabbing opacity-75" : ""}${
+                                            liveDrag ? " shadow-[0_18px_36px_rgba(15,23,42,0.24)] ring-2 ring-blue-200" : ""
+                                          }`;
                                           return (
                                             <div
                                               key={String(task.id)}
@@ -12876,6 +12902,12 @@ const handlePhotoQuickUpload = async (event) => {
                                                 height: hPx,
                                                 minHeight: compact ? 32 : 40,
                                                 opacity: dragging ? 0.55 : 1,
+                                                transform: liveDrag
+                                                  ? `translate3d(${liveDrag.dx}px, ${liveDrag.dy}px, 0)`
+                                                  : undefined,
+                                                zIndex: liveDrag ? 60 : undefined,
+                                                transition: liveDrag ? "none" : undefined,
+                                                willChange: liveDrag ? "transform" : undefined,
                                               }}
                                               onPointerDown={(e) => handleAdminTimelineTaskPointerDown(e, task, anchorKeys)}
                                               onPointerMove={handleAdminTimelineTaskPointerMove}
@@ -12957,6 +12989,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 setScheduleFormOpen(false);
                                 setScheduleSaveError("");
                                 setScheduleEditError("");
+                                setScheduleEditReturnViewMode("");
                                 setScheduleEditDraft(
                                   buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone)
                                 );
@@ -13371,9 +13404,12 @@ const handlePhotoQuickUpload = async (event) => {
                                           type="button"
                                           disabled={scheduleEditSaving}
                                           onClick={() => {
+                                            const returnView = scheduleEditReturnViewMode;
                                             setScheduleEditingTaskId(null);
                                             setScheduleEditDraft(null);
                                             setScheduleEditError("");
+                                            setScheduleEditReturnViewMode("");
+                                            if (returnView && returnView !== "list") setScheduleViewMode(returnView);
                                           }}
                                           className="w-full rounded-2xl h-11 text-[15px] font-black border border-slate-200 bg-white text-slate-700"
                                         >
