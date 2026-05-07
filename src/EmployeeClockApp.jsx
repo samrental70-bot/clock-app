@@ -14079,17 +14079,26 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[19px] font-black leading-tight text-slate-950">New task</p>
                         <p className="text-[13px] font-semibold text-slate-500">Fill the essentials and save.</p>
                       </div>
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[13px] font-black text-slate-700"
-                        disabled={scheduleSaving}
-                        onClick={() => {
-                          setScheduleFormOpen(false);
-                          setScheduleSaveError("");
-                        }}
-                      >
-                        Close
-                      </button>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="submit"
+                          className="rounded-2xl h-10 px-4 text-[15px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]"
+                          disabled={scheduleSaving}
+                        >
+                          {scheduleSaving ? "Saving..." : "Save"}
+                        </Button>
+                        <button
+                          type="button"
+                          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-700"
+                          disabled={scheduleSaving}
+                          onClick={() => {
+                            setScheduleFormOpen(false);
+                            setScheduleSaveError("");
+                          }}
+                        >
+                          Close
+                        </button>
+                      </div>
                     </div>
                     <div className="relative">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-title">
@@ -14372,8 +14381,16 @@ const handlePhotoQuickUpload = async (event) => {
                       </label>
                       <textarea
                         id="sched-notes"
-                        rows={3}
-                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs resize-y min-h-[4rem]"
+                        rows={Math.min(
+                          5,
+                          Math.max(
+                            1,
+                            String(scheduleDraft.notes || "")
+                              .split(/\r?\n/)
+                              .reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 44)), 0)
+                          )
+                        )}
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs resize-none min-h-[2.25rem] overflow-hidden"
                         value={scheduleDraft.notes}
                         onChange={(e) => setScheduleDraft((d) => ({ ...d, notes: e.target.value }))}
                         disabled={scheduleSaving}
