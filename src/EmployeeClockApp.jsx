@@ -12538,6 +12538,17 @@ const handlePhotoQuickUpload = async (event) => {
       String(clockListContext.costCenter || "").trim()
   );
 
+  const employeeClockActionLabel = visibleCurrentShift ? "Clock Out" : "Clock In";
+  const handleEmployeeBottomClockAction = () => {
+    if (activeTab !== "clock") setActiveTab("clock");
+    const runAction = () => {
+      if (visibleCurrentShift) void handleClockOut();
+      else void handleClockIn();
+    };
+    if (activeTab === "clock") runAction();
+    else window.setTimeout(runAction, 90);
+  };
+
   const clockProjectListKey = [
     authUser?.id || "anonymous",
     userCompany?.id || "company",
@@ -13865,12 +13876,14 @@ const handlePhotoQuickUpload = async (event) => {
                   </button>
                 ) : null}
 
-                <Button
-                  className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
-                  onClick={handleClockIn}
-                >
-                  ✅ Clock In
-                </Button>
+                {isAdmin ? (
+                  <Button
+                    className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
+                    onClick={handleClockIn}
+                  >
+                    Clock In
+                  </Button>
+                ) : null}
                 {renderClockListActionRow()}
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
@@ -14249,7 +14262,11 @@ const handlePhotoQuickUpload = async (event) => {
                         Enable Location
                       </button>
                     ) : null}
-                    <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
+                    {isAdmin ? (
+                      <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>
+                        Clock Out
+                      </Button>
+                    ) : null}
                     {renderClockListActionRow()}
                     {locationStatus && (
                       <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
@@ -21058,7 +21075,7 @@ const handlePhotoQuickUpload = async (event) => {
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
-          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-1"} gap-1.5`}>
+          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-2"} gap-1.5`}>
             {isAdmin ? (
               <>
                 <button
@@ -21084,13 +21101,32 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => setActiveTab("clock")}
-                className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
-              >
-                Clock
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleEmployeeBottomClockAction}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${
+                    activeTab === "clock"
+                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
+                      : visibleCurrentShift
+                        ? "bg-emerald-50 text-emerald-800 active:bg-emerald-100"
+                        : "text-slate-500 active:bg-slate-100"
+                  }`}
+                >
+                  {employeeClockActionLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("timesheet")}
+                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${
+                    activeTab === "timesheet"
+                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
+                      : "text-slate-500 active:bg-slate-100"
+                  }`}
+                >
+                  Timesheet
+                </button>
+              </>
             )}
           </div>
         </div>
