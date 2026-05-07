@@ -11847,7 +11847,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading}
                           aria-pressed={photoFlashOn}
                         >
-                          {photoFlashOn ? "Flash On" : "Flash Off"}
+                          {photoFlashOn ? "Flash Off" : "Flash On"}
                         </button>
                       ) : null}
                       {photoCameraMode === "receipt" ? (
@@ -12206,7 +12206,7 @@ const handlePhotoQuickUpload = async (event) => {
                               disabled={photoBatchUploading}
                               aria-pressed={photoFlashOn}
                             >
-                              {photoFlashOn ? "Flash On" : "Flash Off"}
+                              {photoFlashOn ? "Flash Off" : "Flash On"}
                             </button>
                           ) : null}
                           {photoCameraMode === "receipt" ? (
@@ -12833,7 +12833,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 onClick={() => void toggleListFlash()}
                                 aria-pressed={listFlashOn}
                               >
-                                {listFlashOn ? "Flash On" : "Flash Off"}
+                                {listFlashOn ? "Flash Off" : "Flash On"}
                               </button>
                             ) : null}
                             <button
@@ -17685,7 +17685,7 @@ const handlePhotoQuickUpload = async (event) => {
                               onClick={() => void toggleListFlash()}
                               aria-pressed={listFlashOn}
                             >
-                              {listFlashOn ? "Flash On" : "Flash Off"}
+                              {listFlashOn ? "Flash Off" : "Flash On"}
                             </button>
                           ) : null}
                           <button
