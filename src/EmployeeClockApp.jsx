@@ -2020,7 +2020,10 @@ export default function EmployeeClockApp() {
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
-  const [reportsViewMode, setReportsViewMode] = useState("overview");
+  const [reportsDrillPage, setReportsDrillPage] = useState("main");
+  const [reportsSelectedProject, setReportsSelectedProject] = useState(null);
+  const [reportsSelectedEmployee, setReportsSelectedEmployee] = useState(null);
+  const [reportsProjectGroupBy, setReportsProjectGroupBy] = useState("employee");
   /** Reports breakdown dimensions: Level 1 required; Level 2/3 optional (none). */
   const [reportsLevel1, setReportsLevel1] = useState("project");
   const [reportsLevel2, setReportsLevel2] = useState("none");
@@ -10110,6 +10113,76 @@ const handlePhotoQuickUpload = async (event) => {
     ...reportsTopProjects.map((row) => Number(row.minutes || 0))
   );
 
+  const getReportsDimForRow = (dim, row) => {
+    if (dim === "employee") {
+      const uid = String(row?.userId ?? row?.employeeId ?? "").trim();
+      const label =
+        resolveTimesheetEmployeeTitle(row, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        }) || "Employee";
+      return { key: uid ? `emp:${uid}` : `empn:${label}`, label };
+    }
+    if (dim === "project") {
+      const label = (row?.project && String(row.project).trim()) || "Unassigned";
+      const pid = row?.projectId != null ? String(row.projectId).trim() : "";
+      return { key: pid ? `projid:${pid}` : `proj:${label}`, label };
+    }
+    if (dim === "cost_center") {
+      const cc = reportsCostCentreKeyFromRow(row);
+      return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
+    }
+    return { key: "unknown", label: "Unknown" };
+  };
+
+  const summarizeReportsRows = (rows = []) => {
+    let minutes = 0;
+    let cost = 0;
+    let missingOut = 0;
+    for (const row of Array.isArray(rows) ? rows : []) {
+      minutes += getWorkedMinutes(row);
+      cost += getLabourCost(row);
+      if (!row?.clockOut) missingOut += 1;
+    }
+    return { minutes, cost, missingOut, count: Array.isArray(rows) ? rows.length : 0 };
+  };
+
+  const buildReportsGroups = (rows = [], dim = "project") => {
+    const safeDim = REPORT_DIMS.includes(dim) ? dim : "project";
+    const map = {};
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const d = getReportsDimForRow(safeDim, row);
+      if (!map[d.key]) {
+        map[d.key] = { key: d.key, label: d.label, rows: [], minutes: 0, cost: 0, missingOut: 0 };
+      }
+      map[d.key].rows.push(row);
+      map[d.key].minutes += getWorkedMinutes(row);
+      map[d.key].cost += getLabourCost(row);
+      if (!row?.clockOut) map[d.key].missingOut += 1;
+    }
+    return Object.values(map).sort(
+      (a, b) => Number(b.minutes || 0) - Number(a.minutes || 0) || String(a.label).localeCompare(String(b.label))
+    );
+  };
+
+  const reportsMainGroupBy = REPORT_DIMS.includes(reportsLevel1) ? reportsLevel1 : "project";
+  const reportsMainGroups = buildReportsGroups(reportsRowsFilteredForUi, reportsMainGroupBy);
+  const reportsSelectedProjectRows = reportsSelectedProject?.key
+    ? (reportsRowsFilteredForUi || []).filter(
+        (row) => getReportsDimForRow("project", row).key === reportsSelectedProject.key
+      )
+    : [];
+  const reportsSelectedProjectSummary = summarizeReportsRows(reportsSelectedProjectRows);
+  const reportsProjectGroups = buildReportsGroups(reportsSelectedProjectRows, reportsProjectGroupBy);
+  const reportsSelectedEmployeeRows = reportsSelectedEmployee?.key
+    ? reportsSelectedProjectRows.filter(
+        (row) => getReportsDimForRow("employee", row).key === reportsSelectedEmployee.key
+      )
+    : [];
+  const reportsSelectedEmployeeSummary = summarizeReportsRows(reportsSelectedEmployeeRows);
+  const reportsEmployeeCostCenterGroups = buildReportsGroups(reportsSelectedEmployeeRows, "cost_center");
+
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
@@ -11921,6 +11994,331 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
+            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
+              <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">
+                        {reportsDrillPage === "employee"
+                          ? reportsSelectedEmployee?.label || "Employee"
+                          : reportsDrillPage === "project"
+                            ? reportsSelectedProject?.label || "Project"
+                            : "Reports"}
+                      </h2>
+                      <p className="mt-2 text-[14px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
+                    </div>
+                    {reportsDrillPage === "main" ? (
+                      <div className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-700 shadow-sm">
+                        {reportsTotalEntries} entries
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-800 shadow-sm"
+                        onClick={() => {
+                          if (reportsDrillPage === "employee") {
+                            setReportsDrillPage("project");
+                            setReportsSelectedEmployee(null);
+                          } else {
+                            setReportsDrillPage("main");
+                            setReportsSelectedProject(null);
+                            setReportsSelectedEmployee(null);
+                          }
+                        }}
+                      >
+                        Back
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {reportsDrillPage === "main" ? (
+                  <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {reportsQuickRangeOptions.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
+                            reportsRangePreset === p.id
+                              ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                              : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
+                          }`}
+                          onClick={() => {
+                            const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
+                            if (from && to) {
+                              setReportsDateFrom(from);
+                              setReportsDateTo(to);
+                              setReportsRangePreset(p.id);
+                              setReportsDrillPage("main");
+                              setReportsSelectedProject(null);
+                              setReportsSelectedEmployee(null);
+                            }
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        From
+                        <input
+                          type="date"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                          value={reportsDateFrom}
+                          onChange={(e) => {
+                            setReportsDateFrom(e.target.value);
+                            setReportsRangePreset(null);
+                            setReportsDrillPage("main");
+                            setReportsSelectedProject(null);
+                            setReportsSelectedEmployee(null);
+                          }}
+                        />
+                      </label>
+                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        To
+                        <input
+                          type="date"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                          value={reportsDateTo}
+                          onChange={(e) => {
+                            setReportsDateTo(e.target.value);
+                            setReportsRangePreset(null);
+                            setReportsDrillPage("main");
+                            setReportsSelectedProject(null);
+                            setReportsSelectedEmployee(null);
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {reportsScreenLoading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">
+                    Loading reports...
+                  </div>
+                ) : null}
+                {reportsScreenError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-[14px] font-bold text-amber-900 leading-snug break-words">
+                    {reportsScreenError}
+                  </div>
+                ) : null}
+                {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom > reportsDateTo ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-[14px] font-bold text-red-800 leading-snug">
+                    Date from must be before Date to.
+                  </div>
+                ) : null}
+
+                {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="col-span-2 rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-300">Total hours</p>
+                        <p className="mt-2 text-[34px] font-black tabular-nums leading-none">
+                          {formatDuration(
+                            reportsDrillPage === "employee"
+                              ? reportsSelectedEmployeeSummary.minutes
+                              : reportsDrillPage === "project"
+                                ? reportsSelectedProjectSummary.minutes
+                                : reportsAggregates.totalMinutes
+                          )}
+                        </p>
+                      </div>
+                      <div className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Labour</p>
+                        <p className="mt-1 text-[20px] font-black text-slate-950 tabular-nums leading-tight">
+                          {formatMoney(
+                            reportsDrillPage === "employee"
+                              ? reportsSelectedEmployeeSummary.cost
+                              : reportsDrillPage === "project"
+                                ? reportsSelectedProjectSummary.cost
+                                : reportsAggregates.totalCost
+                          )}
+                        </p>
+                      </div>
+                      <div className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Missing out</p>
+                        <p className="mt-1 text-[20px] font-black text-slate-950 tabular-nums leading-tight">
+                          {reportsDrillPage === "employee"
+                            ? reportsSelectedEmployeeSummary.missingOut
+                            : reportsDrillPage === "project"
+                              ? reportsSelectedProjectSummary.missingOut
+                              : reportsAggregates.missingOut}
+                        </p>
+                      </div>
+                    </div>
+
+                    {reportsDrillPage === "main" ? (
+                      <>
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                          <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                            Group by
+                            <select
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                              value={reportsMainGroupBy}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                if (!REPORT_DIMS.includes(v)) return;
+                                setReportsLevel1(v);
+                                setReportsLevel2("none");
+                                setReportsLevel3("none");
+                                setReportsDrillPage("main");
+                                setReportsSelectedProject(null);
+                                setReportsSelectedEmployee(null);
+                              }}
+                            >
+                              <option value="project">Project</option>
+                              <option value="employee">Employee</option>
+                              <option value="cost_center">Cost Centre</option>
+                            </select>
+                          </label>
+                        </div>
+
+                        <div className="space-y-2">
+                          {reportsMainGroups.length === 0 ? (
+                            <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                              No timesheets in this range.
+                            </p>
+                          ) : (
+                            reportsMainGroups.map((row) => {
+                              const canOpenProject = reportsMainGroupBy === "project";
+                              const Tag = canOpenProject ? "button" : "div";
+                              return (
+                                <Tag
+                                  key={row.key}
+                                  type={canOpenProject ? "button" : undefined}
+                                  className="w-full rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-sm"
+                                  onClick={
+                                    canOpenProject
+                                      ? () => {
+                                          setReportsSelectedProject({ key: row.key, label: row.label });
+                                          setReportsSelectedEmployee(null);
+                                          setReportsProjectGroupBy("employee");
+                                          setReportsDrillPage("project");
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                      <p className="mt-1 text-[13px] font-bold text-slate-500">
+                                        {row.rows.length} entries{canOpenProject ? " - tap for details" : ""}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 text-right">
+                                      <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                      <p className="text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                    </div>
+                                  </div>
+                                </Tag>
+                              );
+                            })
+                          )}
+                        </div>
+                      </>
+                    ) : null}
+
+                    {reportsDrillPage === "project" ? (
+                      <>
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                          <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                            Group project by
+                            <select
+                              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                              value={reportsProjectGroupBy}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setReportsProjectGroupBy(v === "cost_center" ? "cost_center" : "employee");
+                                setReportsSelectedEmployee(null);
+                              }}
+                            >
+                              <option value="employee">Employee</option>
+                              <option value="cost_center">Cost Centre</option>
+                            </select>
+                          </label>
+                        </div>
+                        <div className="space-y-2">
+                          {reportsProjectGroups.length === 0 ? (
+                            <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                              No detail in this project.
+                            </p>
+                          ) : (
+                            reportsProjectGroups.map((row) => {
+                              const canOpenEmployee = reportsProjectGroupBy === "employee";
+                              const Tag = canOpenEmployee ? "button" : "div";
+                              return (
+                                <Tag
+                                  key={row.key}
+                                  type={canOpenEmployee ? "button" : undefined}
+                                  className="w-full rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-sm"
+                                  onClick={
+                                    canOpenEmployee
+                                      ? () => {
+                                          setReportsSelectedEmployee({ key: row.key, label: row.label });
+                                          setReportsDrillPage("employee");
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                      <p className="mt-1 text-[13px] font-bold text-slate-500">
+                                        {row.rows.length} entries{canOpenEmployee ? " - tap for cost centres" : ""}
+                                      </p>
+                                    </div>
+                                    <div className="shrink-0 text-right">
+                                      <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                      <p className="text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                    </div>
+                                  </div>
+                                </Tag>
+                              );
+                            })
+                          )}
+                        </div>
+                      </>
+                    ) : null}
+
+                    {reportsDrillPage === "employee" ? (
+                      <div className="space-y-2">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">Project</p>
+                          <p className="mt-1 text-[17px] font-black text-slate-950">{reportsSelectedProject?.label || "Project"}</p>
+                        </div>
+                        {reportsEmployeeCostCenterGroups.length === 0 ? (
+                          <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                            No cost centre detail for this employee.
+                          </p>
+                        ) : (
+                          reportsEmployeeCostCenterGroups.map((row) => (
+                            <div key={row.key} className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="mt-1 text-[13px] font-bold text-slate-500">{row.rows.length} entries</p>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                  <p className="text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {false && activeTab === "reports" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
