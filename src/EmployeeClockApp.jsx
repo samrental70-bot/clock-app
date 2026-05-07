@@ -280,6 +280,18 @@ function getOperaAppShareUrl(email = "") {
   return url.toString();
 }
 
+function getOperaCompanyInviteUrl(companyCode = "") {
+  const fallback = "https://project-rui1d.vercel.app";
+  const origin =
+    typeof window !== "undefined" && window.location?.origin && !window.location.origin.includes("localhost")
+      ? window.location.origin
+      : fallback;
+  const url = new URL(origin);
+  const cleanCode = String(companyCode || "").trim().toUpperCase();
+  if (cleanCode) url.searchParams.set("companyCode", cleanCode);
+  return url.toString();
+}
+
 function getCameraTorchTrack(stream) {
   return stream?.getVideoTracks?.()?.[0] || null;
 }
@@ -2123,8 +2135,19 @@ export default function EmployeeClockApp() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search || "");
     const invitedEmail = String(params.get("loginEmail") || params.get("email") || "").trim();
+    const invitedCompanyCode = String(
+      params.get("companyCode") || params.get("joinCode") || params.get("code") || ""
+    )
+      .trim()
+      .toUpperCase();
     if (invitedEmail) setLoginEmail((prev) => prev || invitedEmail);
+    if (invitedCompanyCode) setJoinCompanyCode((prev) => prev || invitedCompanyCode);
   }, []);
+
+  useEffect(() => {
+    if (!authUser?.id || !companyChecked || userCompany?.id) return;
+    if (String(joinCompanyCode || "").trim()) setAuthStep("join_company");
+  }, [authUser?.id, companyChecked, userCompany?.id, joinCompanyCode]);
 
   useEffect(() => {
     if (!authUser?.id) {
@@ -2217,6 +2240,8 @@ export default function EmployeeClockApp() {
   const [teamContactPicking, setTeamContactPicking] = useState(false);
   const [teamAddShareInfo, setTeamAddShareInfo] = useState(null);
   const [teamAddShareMessage, setTeamAddShareMessage] = useState("");
+  const [companyInviteShareMessage, setCompanyInviteShareMessage] = useState("");
+  const [pendingEmployeePayPrompt, setPendingEmployeePayPrompt] = useState(null);
   const [teamListFilter, setTeamListFilter] = useState("active"); // active | archived | all
   const [timesheetViewMode, setTimesheetViewMode] = useState("day");
   const [timesheetDateKey, setTimesheetDateKey] = useState("");
@@ -2533,6 +2558,95 @@ export default function EmployeeClockApp() {
       cancelled = true;
     };
   }, [activeTab, isAdmin, userCompany?.id, authUser?.id, teamRefreshKey]);
+
+  useEffect(() => {
+    if (!isAdmin || !userCompany?.id || !authUser?.id || !companyChecked) {
+      setPendingEmployeePayPrompt(null);
+      return;
+    }
+    let cancelled = false;
+    const storagePrefix = `opera.pendingPayPrompt.${userCompany.id}.`;
+    const hasSeenPrompt = (uid) => {
+      if (!uid || typeof window === "undefined") return false;
+      try {
+        return Boolean(window.localStorage?.getItem(`${storagePrefix}${uid}`));
+      } catch {
+        return false;
+      }
+    };
+    const checkPendingPayDetails = async () => {
+      try {
+        const { data: members, error: mErr } = await supabase
+          .from("company_members")
+          .select("id, user_id, role, created_at")
+          .eq("company_id", userCompany.id)
+          .order("created_at", { ascending: false })
+          .limit(60);
+        if (mErr) throw mErr;
+        const memberRows = Array.isArray(members) ? members : [];
+        const ids = [...new Set(memberRows.map((m) => m.user_id).filter(Boolean))];
+        const profilesMap = {};
+        if (ids.length > 0) {
+          const { data: profiles, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, email, hourly_rate, pay_rate_effective_date, employment_status")
+            .in("id", ids);
+          if (pErr) throw pErr;
+          (profiles || []).forEach((p) => {
+            profilesMap[p.id] = p;
+          });
+        }
+        const pending = memberRows
+          .map((m) => {
+            const p = profilesMap[m.user_id] || {};
+            const role = normalizeCompanyMemberRole(m.role);
+            const rateRaw = p.hourly_rate;
+            const rate = rateRaw != null && rateRaw !== "" ? Number(rateRaw) : null;
+            const activeStatus = normalizeEmploymentStatus(p.employment_status);
+            const displayName =
+              (p.full_name && String(p.full_name).trim()) ||
+              (p.email && String(p.email).trim()) ||
+              shortUserLabel(m.user_id);
+            return {
+              memberRowId: m.id,
+              userId: m.user_id,
+              role,
+              joinedAt: m.created_at ?? null,
+              displayName,
+              profileEmailRaw: p.email || "",
+              hourlyRate: Number.isFinite(rate) ? rate : null,
+              payRateEffectiveDate: p.pay_rate_effective_date ?? null,
+              employmentStatus: activeStatus,
+            };
+          })
+          .find(
+            (row) =>
+              row &&
+              String(row.userId) !== String(authUser.id) &&
+              row.role !== "owner" &&
+              row.employmentStatus !== "archived" &&
+              (!Number.isFinite(Number(row.hourlyRate)) || Number(row.hourlyRate) <= 0) &&
+              !hasSeenPrompt(row.userId)
+          );
+        if (!cancelled && pending) {
+          setPendingEmployeePayPrompt((current) => current || pending);
+        }
+      } catch (err) {
+        console.warn("[TEAM] pending pay details check failed", err);
+      }
+    };
+    void checkPendingPayDetails();
+    const interval = window.setInterval(() => void checkPendingPayDetails(), 30000);
+    const onFocus = () => void checkPendingPayDetails();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [isAdmin, userCompany?.id, authUser?.id, companyChecked, teamRefreshKey]);
 
   useEffect(() => {
     setTeamEditingMemberRowId(null);
@@ -9482,17 +9596,47 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const handleCopyTeamJoinCode = async () => {
-    const code = userCompany?.code;
+  const handleShareCompanyInvite = async (codeOverride = "", companyNameOverride = "") => {
+    const code = String(codeOverride || userCompany?.code || createdCompanyCode || "").trim().toUpperCase();
     if (!code) return;
+    const companyLabel = String(companyNameOverride || userCompany?.name || companyName || "your company").trim();
+    const appUrl = getOperaCompanyInviteUrl(code);
+    const text = [
+      `Join ${companyLabel} on OPERA.AI`,
+      "",
+      "1. Open this link.",
+      "2. Create your account or login.",
+      `3. Use company code: ${code}`,
+      "4. Tap Join company.",
+      "",
+      `Link: ${appUrl}`,
+    ].join("\n");
     try {
-      await navigator.clipboard.writeText(code);
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({
+          title: "OPERA.AI company invite",
+          text,
+          url: appUrl,
+        });
+        setCompanyInviteShareMessage("Invite ready to share.");
+      } else if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setCompanyInviteShareMessage("Invite copied.");
+      } else {
+        setCompanyInviteShareMessage(text);
+      }
       setTeamCopyOk(true);
-      setTimeout(() => setTeamCopyOk(false), 2000);
-    } catch {
-      alert("Could not copy to clipboard.");
+      setTimeout(() => {
+        setTeamCopyOk(false);
+        setCompanyInviteShareMessage("");
+      }, 5000);
+    } catch (err) {
+      const name = String(err?.name || "").toLowerCase();
+      if (name !== "aborterror") setCompanyInviteShareMessage("Could not share. Copy the code manually.");
     }
   };
+
+  const handleCopyTeamJoinCode = handleShareCompanyInvite;
 
   const handlePickEmployeeContact = async () => {
     setTeamAddError("");
@@ -10652,12 +10796,16 @@ const handlePhotoQuickUpload = async (event) => {
               <Button
                 className="w-full rounded-2xl h-14 text-base font-bold"
                 onClick={async () => {
-                  await navigator.clipboard?.writeText(createdCompanyCode).catch(() => {});
-                  alert("Company code copied (or ready to copy).");
+                  await handleShareCompanyInvite(createdCompanyCode, companyName || userCompany?.name || "your company");
                 }}
               >
-                Copy code
+                Share invite
               </Button>
+              {companyInviteShareMessage ? (
+                <p className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-800">
+                  {companyInviteShareMessage}
+                </p>
+              ) : null}
 
               <Button
                 className="w-full rounded-2xl h-14 text-base font-bold"
@@ -17158,7 +17306,10 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 )}
                 <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-2 shadow-sm">
-                  <p className="text-[11px] font-black text-slate-500 uppercase">Join code</p>
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-black text-slate-500 uppercase">Company code</p>
+                    <p className="text-[11px] font-bold text-slate-400">Add employees</p>
+                  </div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 min-w-0 rounded-lg bg-white border px-2 py-1.5 text-sm font-mono tracking-wide truncate">
                       {userCompany?.code || "—"}
@@ -17169,9 +17320,14 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => void handleCopyTeamJoinCode()}
                       disabled={!userCompany?.code}
                     >
-                      {teamCopyOk ? "Copied" : "Copy"}
+                      {teamCopyOk ? "Shared" : "Share"}
                     </Button>
                   </div>
+                  {companyInviteShareMessage ? (
+                    <p className="rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[12px] font-bold text-emerald-800">
+                      {companyInviteShareMessage}
+                    </p>
+                  ) : null}
                 </div>
                 {teamLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading employees...</div>
@@ -17232,7 +17388,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </div>
                 ) : null}
-                {isAdmin && (
+                {false && isAdmin && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
                     {!teamAddFormOpen ? (
                       <Button
@@ -17779,6 +17935,29 @@ const handlePhotoQuickUpload = async (event) => {
                         <span className="text-[14px] font-semibold text-slate-500">Time zone</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">{companyTimeZone}</span>
                       </div>
+                      {isAdmin ? (
+                        <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
+                          <span className="text-[14px] font-semibold text-slate-500">Company code</span>
+                          <div className="flex min-w-0 items-center gap-2">
+                            <code className="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[13px] font-black tracking-wide text-slate-900 truncate">
+                              {userCompany?.code || "—"}
+                            </code>
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-xl bg-slate-950 px-3 py-2 text-[13px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                              onClick={() => void handleShareCompanyInvite()}
+                              disabled={!userCompany?.code}
+                            >
+                              Share
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {companyInviteShareMessage ? (
+                        <p className="rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[12px] font-bold text-emerald-800">
+                          {companyInviteShareMessage}
+                        </p>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -17864,6 +18043,60 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
         </div>
+
+        {pendingEmployeePayPrompt && isAdmin && (
+          <div className="fixed inset-0 z-[81] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4">
+              <div className="space-y-1">
+                <p className="text-[22px] font-black text-slate-950 leading-tight">New employee joined</p>
+                <p className="text-[15px] font-semibold text-slate-600 leading-snug">
+                  {pendingEmployeePayPrompt.displayName || "New employee"} joined the company. Please complete pay rate details in Employees.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[13px] font-black text-slate-900 break-words">
+                  {pendingEmployeePayPrompt.displayName || shortUserLabel(pendingEmployeePayPrompt.userId)}
+                </p>
+                <p className="mt-0.5 text-[12px] font-bold text-slate-500">Pay rate not set</p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  className="rounded-2xl h-12 text-[15px] font-black"
+                  onClick={() => {
+                    try {
+                      window.localStorage?.setItem(
+                        `opera.pendingPayPrompt.${userCompany?.id}.${pendingEmployeePayPrompt.userId}`,
+                        new Date().toISOString()
+                      );
+                    } catch {}
+                    setPendingEmployeePayPrompt(null);
+                    setTeamRefreshKey((k) => k + 1);
+                    setTeamListFilter("active");
+                    setActiveTab("team");
+                  }}
+                >
+                  Open Employees
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-2xl h-12 text-[15px] font-black !bg-white !text-slate-900 border border-slate-300"
+                  onClick={() => {
+                    try {
+                      window.localStorage?.setItem(
+                        `opera.pendingPayPrompt.${userCompany?.id}.${pendingEmployeePayPrompt.userId}`,
+                        new Date().toISOString()
+                      );
+                    } catch {}
+                    setPendingEmployeePayPrompt(null);
+                  }}
+                >
+                  Later
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {firstLoginPasswordPromptOpen && (
           <div className="fixed inset-0 z-[82] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true">
