@@ -12357,7 +12357,7 @@ const handlePhotoQuickUpload = async (event) => {
                         required
                       />
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 gap-2">
                       <div className="space-y-1">
                         <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-project">
                           Project
@@ -12429,18 +12429,39 @@ const handlePhotoQuickUpload = async (event) => {
                           required
                         />
                       </div>
-                      <div className="space-y-1">
-                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-start-time">
-                          Start time
-                        </label>
-                        <input
-                          id="sched-start-time"
-                          type="time"
-                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                          value={scheduleDraft.startTime}
-                          onChange={(e) => setScheduleDraft((d) => ({ ...d, startTime: e.target.value }))}
-                          disabled={scheduleSaving}
-                        />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-start-time">
+                            Start time
+                          </label>
+                          <input
+                            id="sched-start-time"
+                            type="time"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={scheduleDraft.startTime}
+                            onChange={(e) => setScheduleDraft((d) => ({ ...d, startTime: e.target.value }))}
+                            disabled={scheduleSaving}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-end-time-visible">
+                            End time
+                          </label>
+                          <input
+                            id="sched-end-time-visible"
+                            type="time"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={scheduleDraft.endTime}
+                            onChange={(e) =>
+                              setScheduleDraft((d) => ({
+                                ...d,
+                                endTime: e.target.value,
+                                endDate: e.target.value && !d.endDate ? d.startDate : d.endDate,
+                              }))
+                            }
+                            disabled={scheduleSaving}
+                          />
+                        </div>
                       </div>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -12457,7 +12478,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={scheduleSaving}
                         />
                       </div>
-                      <div className="space-y-1">
+                      <div className="hidden">
                         <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-end-time">
                           End time
                         </label>
@@ -12932,10 +12953,42 @@ const handlePhotoQuickUpload = async (event) => {
                               const tidKey = task?.id != null ? String(task.id) : "";
                               const isEditingThis =
                                 tidKey && scheduleEditingTaskId === tidKey && scheduleEditDraft != null;
+                              const openThisScheduleTaskEdit = () => {
+                                setScheduleFormOpen(false);
+                                setScheduleSaveError("");
+                                setScheduleEditError("");
+                                setScheduleEditDraft(
+                                  buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone)
+                                );
+                                setScheduleEditingTaskId(tidKey);
+                              };
                               return (
                                 <div
                                   key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-                                  className="rounded-2xl border border-slate-200 bg-white px-3 py-3.5 space-y-2 shadow-sm min-w-0"
+                                  role={!isEditingThis ? "button" : undefined}
+                                  tabIndex={!isEditingThis ? 0 : undefined}
+                                  onClick={(e) => {
+                                    if (isEditingThis) return;
+                                    const target = e.target;
+                                    const el =
+                                      target instanceof Element
+                                        ? target
+                                        : target?.parentNode instanceof Element
+                                          ? target.parentNode
+                                          : null;
+                                    if (el instanceof Element && el.closest("button, a[href], input, select, textarea, label, form")) return;
+                                    openThisScheduleTaskEdit();
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (isEditingThis) return;
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      openThisScheduleTaskEdit();
+                                    }
+                                  }}
+                                  className={`rounded-2xl border border-slate-200 bg-white px-3 py-3.5 space-y-2 shadow-sm min-w-0 ${
+                                    !isEditingThis ? "cursor-pointer active:bg-slate-50" : ""
+                                  }`}
                                 >
                                   <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
                                     <div className="min-w-0 flex-1">
@@ -12950,7 +13003,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         </div>
                                       ) : null}
                                     </div>
-                                    <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                                    <div className="hidden">
                                       <button
                                         type="button"
                                         disabled={
@@ -12958,15 +13011,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           scheduleDeleteSavingId === tidKey ||
                                           Boolean(scheduleRescheduleSavingId)
                                         }
-                                        onClick={() => {
-                                          setScheduleFormOpen(false);
-                                          setScheduleSaveError("");
-                                          setScheduleEditError("");
-                                          setScheduleEditDraft(
-                                            buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone)
-                                          );
-                                          setScheduleEditingTaskId(tidKey);
-                                        }}
+                                        onClick={openThisScheduleTaskEdit}
                                         className="rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-semibold text-slate-800 disabled:opacity-50"
                                       >
                                         Edit
@@ -12990,7 +13035,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       onSubmit={(e) => void handleScheduleUpdateTask(e)}
                                       className="schedule-task-form space-y-3 rounded-[22px] border border-slate-200 bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
                                     >
-                                      <div className="border-b border-slate-100 pb-2">
+                                      <div className="hidden">
                                         <p className="text-[19px] font-black leading-tight text-slate-950">Edit task</p>
                                         <p className="text-[13px] font-semibold text-slate-500">Update only what changed.</p>
                                       </div>
@@ -13062,7 +13107,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           </select>
                                         </div>
                                       </div>
-                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                      <div className="grid grid-cols-1 gap-2">
                                         <div className="space-y-1">
                                           <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-sd-${tidKey}`}>
                                             Start date
@@ -13090,22 +13135,47 @@ const handlePhotoQuickUpload = async (event) => {
                                             required
                                           />
                                         </div>
-                                        <div className="space-y-1">
-                                          <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-st-${tidKey}`}>
-                                            Start time
-                                          </label>
-                                          <input
-                                            id={`sched-edit-st-${tidKey}`}
-                                            type="time"
-                                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                                            value={scheduleEditDraft.startTime}
-                                            onChange={(e) =>
-                                              setScheduleEditDraft((prev) =>
-                                                prev ? { ...prev, startTime: e.target.value } : prev
-                                              )
-                                            }
-                                            disabled={scheduleEditSaving}
-                                          />
+                                        <div className="grid grid-cols-2 gap-2">
+                                          <div>
+                                            <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-st-${tidKey}`}>
+                                              Start time
+                                            </label>
+                                            <input
+                                              id={`sched-edit-st-${tidKey}`}
+                                              type="time"
+                                              className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                              value={scheduleEditDraft.startTime}
+                                              onChange={(e) =>
+                                                setScheduleEditDraft((prev) =>
+                                                  prev ? { ...prev, startTime: e.target.value } : prev
+                                                )
+                                              }
+                                              disabled={scheduleEditSaving}
+                                            />
+                                          </div>
+                                          <div>
+                                            <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-et-visible-${tidKey}`}>
+                                              End time
+                                            </label>
+                                            <input
+                                              id={`sched-edit-et-visible-${tidKey}`}
+                                              type="time"
+                                              className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                              value={scheduleEditDraft.endTime}
+                                              onChange={(e) =>
+                                                setScheduleEditDraft((prev) =>
+                                                  prev
+                                                    ? {
+                                                        ...prev,
+                                                        endTime: e.target.value,
+                                                        endDate: e.target.value && !prev.endDate ? prev.startDate : prev.endDate,
+                                                      }
+                                                    : prev
+                                                )
+                                              }
+                                              disabled={scheduleEditSaving}
+                                            />
+                                          </div>
                                         </div>
                                       </div>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -13126,7 +13196,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             disabled={scheduleEditSaving}
                                           />
                                         </div>
-                                        <div className="space-y-1">
+                                        <div className="hidden">
                                           <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-et-${tidKey}`}>
                                             End time
                                           </label>
@@ -13275,14 +13345,28 @@ const handlePhotoQuickUpload = async (event) => {
                                           {scheduleEditError}
                                         </div>
                                       ) : null}
-                                      <div className="flex flex-wrap gap-2 pt-0.5">
+                                      <div className="grid grid-cols-2 gap-2 pt-1">
                                         <Button
                                           type="submit"
-                                          className="flex-1 min-w-[8rem] rounded-2xl h-12 text-[16px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]"
+                                          className="rounded-2xl h-12 text-[17px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]"
                                           disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
                                         >
-                                          {scheduleEditSaving ? "Saving…" : "Save changes"}
+                                          {scheduleEditSaving ? "Saving…" : "Save"}
                                         </Button>
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            Boolean(scheduleEditSaving) ||
+                                            scheduleDeleteSavingId === tidKey ||
+                                            Boolean(scheduleRescheduleSavingId)
+                                          }
+                                          onClick={() => void handleScheduleDeleteTask(task?.id)}
+                                          className="rounded-2xl h-12 text-[17px] font-black border border-red-200 bg-red-50 text-red-800 shadow-sm disabled:opacity-50"
+                                        >
+                                          {scheduleDeleteSavingId === tidKey ? "Deleting…" : "Delete"}
+                                        </button>
+                                      </div>
+                                      <div className="pt-0.5">
                                         <button
                                           type="button"
                                           disabled={scheduleEditSaving}
@@ -13291,7 +13375,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             setScheduleEditDraft(null);
                                             setScheduleEditError("");
                                           }}
-                                          className="flex-1 min-w-[8rem] rounded-2xl h-12 text-[16px] font-black border border-slate-300 bg-white text-slate-800"
+                                          className="w-full rounded-2xl h-11 text-[15px] font-black border border-slate-200 bg-white text-slate-700"
                                         >
                                           Cancel
                                         </button>
