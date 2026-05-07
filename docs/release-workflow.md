@@ -19,7 +19,11 @@ Use the production link for the team trial:
 https://project-rui1d.vercel.app
 ```
 
-Use the latest development preview link for testing new changes before release.
+Use the development link for testing new changes before release:
+
+```text
+https://project-rui1d-development.vercel.app
+```
 
 ## Rules
 
@@ -57,6 +61,7 @@ git checkout develop
 npm.cmd run build
 git push origin develop
 npx.cmd vercel
+npx.cmd vercel alias set <deployment-url> project-rui1d-development.vercel.app
 ```
 
 ## Production / Trial Deploy
