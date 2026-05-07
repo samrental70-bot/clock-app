@@ -12429,7 +12429,7 @@ const handlePhotoQuickUpload = async (event) => {
                           required
                         />
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="schedule-time-row">
                         <div>
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-start-time">
                             Start time
@@ -13135,7 +13135,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             required
                                           />
                                         </div>
-                                        <div className="grid grid-cols-2 gap-2">
+                                        <div className="schedule-time-row">
                                           <div>
                                             <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-st-${tidKey}`}>
                                               Start time
