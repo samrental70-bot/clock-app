@@ -14719,26 +14719,6 @@ const handlePhotoQuickUpload = async (event) => {
                       </span>
                     </button>
                   </div>
-
-                  {reportsAvailableDims.length ? (
-                    <label className="mt-2.5 grid grid-cols-[auto_1fr] items-center gap-2 rounded-[20px] border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 shadow-[0_10px_22px_rgba(15,23,42,0.06)]">
-                      <span>View by</span>
-                      <select
-                        className="h-9 min-w-0 rounded-[14px] border border-slate-100 bg-slate-50 px-2 text-[14px] font-black normal-case tracking-normal text-slate-950 outline-none focus:border-slate-300"
-                        value={reportsCurrentViewBy}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
-                        }}
-                      >
-                        {reportsAvailableDims.map((dim) => (
-                          <option key={dim} value={dim}>
-                            {reportsViewLabel(dim)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : null}
                 </div>
 
                 {reportsScreenLoading ? (
@@ -14816,6 +14796,26 @@ const handlePhotoQuickUpload = async (event) => {
                         </p>
                       </div>
                     </div>
+
+                    {reportsAvailableDims.length ? (
+                      <label className="grid grid-cols-[auto_1fr] items-center gap-2 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 shadow-[0_12px_26px_rgba(15,23,42,0.08)]">
+                        <span>View by</span>
+                        <select
+                          className="h-10 min-w-0 rounded-[16px] border border-slate-100 bg-slate-50 px-3 text-[15px] font-black normal-case tracking-normal text-slate-950 outline-none focus:border-slate-300"
+                          value={reportsCurrentViewBy}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
+                          }}
+                        >
+                          {reportsAvailableDims.map((dim) => (
+                            <option key={dim} value={dim}>
+                              {reportsViewLabel(dim)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
 
                     <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
                       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
