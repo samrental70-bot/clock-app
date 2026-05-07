@@ -3978,50 +3978,107 @@ export default function EmployeeClockApp() {
 
   const dashboardCoverageBars = useMemo(() => {
     if (!isAdmin || !dashboardViewDate) return [];
-    const rows = Array.isArray(dashboardDaySheets) ? dashboardDaySheets : [];
-    const currentMs = now instanceof Date ? now.getTime() : new Date(now).getTime();
-    const hours = Array.from({ length: 12 }, (_, i) => i + 6);
-    const rawBars = hours.map((hour) => {
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    const baseRows =
+      dashboardViewDate === todayKey
+        ? dashboardTodaySheets
+        : dashboardDaySheets;
+    const rowsById = new Map();
+    for (const row of Array.isArray(baseRows) ? baseRows : []) {
+      const key = row?.supabaseTimesheetId ?? row?.id;
+      if (key == null) continue;
+      rowsById.set(String(key), row);
+    }
+    if (dashboardViewDate === todayKey) {
+      for (const card of Array.isArray(dashboardLiveWorkingCards) ? dashboardLiveWorkingCards : []) {
+        const row = card?.rep;
+        const key = row?.supabaseTimesheetId ?? row?.id;
+        if (key == null) continue;
+        rowsById.set(String(key), row);
+      }
+    }
+    const rows = [...rowsById.values()];
+    const currentDate = now instanceof Date ? now : new Date(now);
+    const currentMs = currentDate.getTime();
+    const currentParts = wallClockPartsInTimeZone(currentDate, companyTimeZone);
+    const currentHour = Number(String(currentParts.timeStr || "12:00").split(":")[0]);
+    const startHour =
+      dashboardViewDate === todayKey && Number.isFinite(currentHour)
+        ? Math.max(0, Math.min(12, currentHour - 5))
+        : 6;
+    const hours = Array.from({ length: 12 }, (_, i) => startHour + i);
+    const compactHourLabel = (hour) => {
+      const h = Math.max(0, Math.min(23, Math.floor(Number(hour) || 0)));
+      const hr12 = h % 12 === 0 ? 12 : h % 12;
+      return `${hr12}${h < 12 ? "a" : "p"}`;
+    };
+    const rawBars = hours.map((hour, index) => {
+      const nextHour = hour + 1;
+      const endDate = nextHour >= 24 ? addWallDaysInTimeZone(dashboardViewDate, 1, companyTimeZone) : dashboardViewDate;
+      const endHour = nextHour >= 24 ? 0 : nextHour;
       const startIso = wallDateTimeToUtcIso(
         dashboardViewDate,
         `${String(hour).padStart(2, "0")}:00:00`,
         companyTimeZone
       );
       const endIso = wallDateTimeToUtcIso(
-        dashboardViewDate,
-        `${String(hour + 1).padStart(2, "0")}:00:00`,
+        endDate,
+        `${String(endHour).padStart(2, "0")}:00:00`,
         companyTimeZone
       );
       const startMs = parseStoredInstant(startIso).getTime();
       const endMs = parseStoredInstant(endIso).getTime();
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
-        return { hour, count: 0 };
+        return { hour, count: 0, names: [], label: index % 2 === 0 ? compactHourLabel(hour) : "", fullLabel: compactHourLabel(hour) };
       }
-      let count = 0;
+      const users = new Set();
+      const names = [];
       for (const row of rows) {
         const inMs = parseStoredInstant(row?.clockIn).getTime();
-        const outMs = row?.clockOut ? parseStoredInstant(row.clockOut).getTime() : currentMs;
+        const outMs = row?.clockOut
+          ? parseStoredInstant(row.clockOut).getTime()
+          : dashboardViewDate === todayKey
+            ? currentMs
+            : endMs;
         if (!Number.isFinite(inMs) || !Number.isFinite(outMs)) continue;
-        if (inMs < endMs && outMs > startMs) count += 1;
+        if (inMs < endMs && outMs > startMs) {
+          const uid = row?.userId ?? row?.employeeId ?? row?.user_id ?? row?.employee_id ?? row?.supabaseTimesheetId ?? row?.id;
+          const key = uid != null ? String(uid) : String(row?.supabaseTimesheetId ?? row?.id ?? names.length);
+          if (users.has(key)) continue;
+          users.add(key);
+          names.push(row?.employeeName || row?.employee || row?.profileDisplayName || shortUserLabel(uid));
+        }
       }
-      return { hour, count };
+      return {
+        hour,
+        count: users.size,
+        names,
+        label: index % 2 === 0 ? compactHourLabel(hour) : "",
+        fullLabel: compactHourLabel(hour),
+      };
     });
     const maxCount = Math.max(1, ...rawBars.map((bar) => Number(bar.count) || 0));
     return rawBars.map((bar) => ({
       ...bar,
       height: bar.count > 0 ? Math.max(16, Math.round((bar.count / maxCount) * 100)) : 6,
-      label:
-        bar.hour === 6
-          ? "6a"
-          : bar.hour === 9
-            ? "9a"
-            : bar.hour === 12
-              ? "12p"
-              : bar.hour === 15
-                ? "3p"
-                : "",
     }));
-  }, [isAdmin, dashboardDaySheets, dashboardViewDate, companyTimeZone, now]);
+  }, [
+    isAdmin,
+    dashboardDaySheets,
+    dashboardTodaySheets,
+    dashboardLiveWorkingCards,
+    dashboardViewDate,
+    companyTimeZone,
+    now,
+  ]);
+
+  const dashboardCoverageRangeLabel = useMemo(() => {
+    const bars = Array.isArray(dashboardCoverageBars) ? dashboardCoverageBars : [];
+    if (!bars.length) return "";
+    const first = bars[0]?.fullLabel || "";
+    const last = bars[bars.length - 1]?.fullLabel || "";
+    return first && last ? `${first} - ${last}` : "";
+  }, [dashboardCoverageBars]);
 
   const dashboardRadarCards = useMemo(() => {
     const cards = Array.isArray(dashboardLiveWorkingCards) ? dashboardLiveWorkingCards : [];
@@ -13923,7 +13980,10 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-3 pb-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged in by hour</p>
-                        <p className="text-[11px] font-black text-slate-400">6 AM - 5 PM</p>
+                        <p className="shrink-0 text-[11px] font-black text-slate-400">
+                          {dashboardCoverageRangeLabel}
+                          {(dashboardLiveWorkingCards || []).length ? ` - ${(dashboardLiveWorkingCards || []).length} now` : ""}
+                        </p>
                       </div>
                       <div className="flex h-32 items-end gap-1.5">
                         {(dashboardCoverageBars || []).map((bar) => (
@@ -13932,7 +13992,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <div
                               className="w-full rounded-t-xl bg-gradient-to-t from-slate-950 to-slate-700 shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                               style={{ height: `${bar.height}%`, opacity: bar.count > 0 ? 0.95 : 0.18 }}
-                              title={`${bar.count} working`}
+                              title={bar.names?.length ? `${bar.names.join(", ")} working` : `${bar.count} working`}
                             />
                             <span className="h-4 text-[9px] font-bold text-slate-400">{bar.label}</span>
                           </div>
