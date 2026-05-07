@@ -1751,6 +1751,9 @@ export default function EmployeeClockApp() {
   const [watchId, setWatchId] = useState(null);
   const [clockListModal, setClockListModal] = useState(null);
   const [clockListDraft, setClockListDraft] = useState("");
+  const clockListPhotoInputRef = useRef(null);
+  const listPhotoInputRef = useRef(null);
+  const [clockListImageDraft, setClockListImageDraft] = useState(null);
   const [clockProjectLists, setClockProjectLists] = useState(() =>
     safeRead("orp_clock_project_lists", { task: {}, material: {} })
   );
@@ -1758,6 +1761,8 @@ export default function EmployeeClockApp() {
   const [listSelectedProjectId, setListSelectedProjectId] = useState("");
   const [listType, setListType] = useState("task");
   const [listDraft, setListDraft] = useState("");
+  const [listImageDraft, setListImageDraft] = useState(null);
+  const [listImageViewer, setListImageViewer] = useState(null);
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
@@ -10173,6 +10178,51 @@ const handlePhotoQuickUpload = async (event) => {
 
   const activeClockListItems = clockListModal ? getClockProjectListItems(clockListModal) : [];
 
+  const listItemImageUrl = (item) =>
+    item?.imageDataUrl || item?.photoDataUrl || item?.dataUrl || "";
+
+  const buildListImageDraft = async (file) => {
+    if (!file || !String(file.type || "").startsWith("image/")) {
+      throw new Error("Choose an image file.");
+    }
+    const smallFile = await compressImage(file, 520, 0.55);
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error || new Error("Could not read image."));
+      reader.readAsDataURL(smallFile);
+    });
+    return {
+      dataUrl,
+      name: smallFile.name || file.name || "task-photo.jpg",
+      addedAt: new Date().toISOString(),
+    };
+  };
+
+  const handleClockListImagePick = async (event) => {
+    const file = event?.target?.files?.[0];
+    if (event?.target) event.target.value = "";
+    if (!file) return;
+    try {
+      const draft = await buildListImageDraft(file);
+      setClockListImageDraft(draft);
+    } catch (err) {
+      alert(getErrorMessage(err));
+    }
+  };
+
+  const handleListImagePick = async (event) => {
+    const file = event?.target?.files?.[0];
+    if (event?.target) event.target.value = "";
+    if (!file) return;
+    try {
+      const draft = await buildListImageDraft(file);
+      setListImageDraft(draft);
+    } catch (err) {
+      alert(getErrorMessage(err));
+    }
+  };
+
   const restoreLastClockListItem = () => {
     if (!clockListUndo?.kind || !clockListUndo?.key || !clockListUndo?.item) return;
     const undo = clockListUndo;
@@ -10195,6 +10245,7 @@ const handlePhotoQuickUpload = async (event) => {
       return;
     }
     setClockListDraft("");
+    setClockListImageDraft(null);
     setClockListModal(kind);
   };
 
@@ -10210,6 +10261,8 @@ const handlePhotoQuickUpload = async (event) => {
       projectName: clockListContext.projectName || "",
       costCenter: clockListContext.costCenter || "",
       createdAt: new Date().toISOString(),
+      imageDataUrl: clockListModal === "task" ? clockListImageDraft?.dataUrl || "" : "",
+      imageName: clockListModal === "task" ? clockListImageDraft?.name || "" : "",
     };
 
     setClockProjectLists((prev) => {
@@ -10224,6 +10277,7 @@ const handlePhotoQuickUpload = async (event) => {
       return next;
     });
     setClockListDraft("");
+    setClockListImageDraft(null);
   };
 
   const completeClockProjectListItem = (kind, itemId) => {
@@ -10324,6 +10378,8 @@ const handlePhotoQuickUpload = async (event) => {
       projectName: selectedListProject?.name || "",
       costCenter: "",
       createdAt: new Date().toISOString(),
+      imageDataUrl: listType === "task" ? listImageDraft?.dataUrl || "" : "",
+      imageName: listType === "task" ? listImageDraft?.name || "" : "",
     };
     setClockProjectLists((prev) => {
       const next = {
@@ -10337,6 +10393,7 @@ const handlePhotoQuickUpload = async (event) => {
       return next;
     });
     setListDraft("");
+    setListImageDraft(null);
   };
 
   const completeListPageItem = (sourceKey, itemId) => {
@@ -11730,7 +11787,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     Project
                     <select
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                      className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={effectiveListProjectId}
                       onChange={(event) => setListSelectedProjectId(event.target.value)}
                     >
@@ -11749,11 +11806,12 @@ const handlePhotoQuickUpload = async (event) => {
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     List type
                     <select
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                      className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={listType}
                       onChange={(event) => {
                         setListType(event.target.value === "material" ? "material" : "task");
                         setListDraft("");
+                        setListImageDraft(null);
                       }}
                     >
                       <option value="task">Task List</option>
@@ -11761,22 +11819,63 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </label>
 
-                  <form onSubmit={addListPageItem} className="flex gap-2">
-                    <input
-                      type="text"
-                      className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[16px] font-bold text-slate-950"
-                      value={listDraft}
-                      onChange={(event) => setListDraft(event.target.value)}
-                      placeholder={listType === "material" ? "Add material" : "Add task"}
-                      disabled={!selectedListProject}
-                    />
-                    <button
-                      type="submit"
-                      className="shrink-0 rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
-                      disabled={!selectedListProject || !String(listDraft || "").trim()}
-                    >
-                      Add
-                    </button>
+                  <form onSubmit={addListPageItem} className="rounded-[22px] border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[16px] font-bold text-slate-950 outline-none focus:border-slate-400"
+                        value={listDraft}
+                        onChange={(event) => setListDraft(event.target.value)}
+                        placeholder={listType === "material" ? "Add material" : "Add task"}
+                        disabled={!selectedListProject}
+                      />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
+                        disabled={!selectedListProject || !String(listDraft || "").trim()}
+                      >
+                        Add
+                      </button>
+                    </div>
+                    {listType === "task" ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={listPhotoInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(event) => void handleListImagePick(event)}
+                        />
+                        <button
+                          type="button"
+                          className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-800 active:bg-slate-100"
+                          onClick={() => listPhotoInputRef.current?.click()}
+                          disabled={!selectedListProject}
+                        >
+                          {listImageDraft ? "Change picture" : "Add picture"}
+                        </button>
+                        {listImageDraft ? (
+                          <>
+                            <img
+                              src={listImageDraft.dataUrl}
+                              alt=""
+                              className="h-11 w-11 rounded-2xl border border-slate-200 object-cover shadow-sm"
+                            />
+                            <button
+                              type="button"
+                              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-500 active:bg-slate-100"
+                              onClick={() => setListImageDraft(null)}
+                            >
+                              Remove
+                            </button>
+                          </>
+                        ) : (
+                          <p className="min-w-0 flex-1 text-[12px] font-bold text-slate-500">
+                            Optional task photo
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
                   </form>
                 </div>
 
@@ -11806,29 +11905,50 @@ const handlePhotoQuickUpload = async (event) => {
                       {selectedListProject ? "No items yet." : "Select a project to see the list."}
                     </p>
                   ) : (
-                    visibleProjectListItems.map((item) => (
-                      <label
-                        key={`${item.sourceKey}-${item.id}`}
-                        className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 active:bg-slate-50"
-                      >
-                        <input
-                          type="checkbox"
-                          className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
-                          onChange={() => completeListPageItem(item.sourceKey, item.id)}
-                          aria-label={`Complete ${item.text}`}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block break-words text-[16px] font-black leading-snug text-slate-950">
-                            {item.text}
-                          </span>
-                          {item.sourceCostCenter && item.sourceCostCenter !== "project" ? (
-                            <span className="mt-0.5 block text-[12px] font-bold text-slate-500">
-                              {item.sourceCostCenter}
-                            </span>
+                    visibleProjectListItems.map((item) => {
+                      const imageUrl = listItemImageUrl(item);
+                      return (
+                        <div
+                          key={`${item.sourceKey}-${item.id}`}
+                          className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 active:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                            onChange={() => completeListPageItem(item.sourceKey, item.id)}
+                            aria-label={`Complete ${item.text}`}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="break-words text-[16px] font-black leading-snug text-slate-950">
+                              {item.text}
+                            </p>
+                            {item.sourceCostCenter && item.sourceCostCenter !== "project" ? (
+                              <p className="mt-0.5 text-[12px] font-bold text-slate-500">
+                                {item.sourceCostCenter}
+                              </p>
+                            ) : null}
+                          </div>
+                          {imageUrl ? (
+                            <button
+                              type="button"
+                              className="shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 shadow-sm"
+                              onClick={() =>
+                                setListImageViewer({
+                                  imageUrl,
+                                  title: item.text,
+                                  subtitle: [selectedListProject?.name, item.sourceCostCenter]
+                                    .filter(Boolean)
+                                    .join(" - "),
+                                })
+                              }
+                              aria-label={`View picture for ${item.text}`}
+                            >
+                              <img src={imageUrl} alt="" className="h-16 w-16 object-cover" />
+                            </button>
                           ) : null}
-                        </span>
-                      </label>
-                    ))
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </CardContent>
@@ -16406,6 +16526,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => {
                         setClockListModal(null);
                         setClockListDraft("");
+                        setClockListImageDraft(null);
                       }}
                       aria-label="Close list"
                     >
@@ -16414,42 +16535,103 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                <form onSubmit={addClockProjectListItem} className="flex gap-2">
-                  <input
-                    type="text"
-                    autoFocus
-                    className="min-w-0 flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[17px] font-bold text-slate-950"
-                    value={clockListDraft}
-                    onChange={(event) => setClockListDraft(event.target.value)}
-                    placeholder={clockListModal === "material" ? "Add material" : "Add task"}
-                  />
-                  <button
-                    type="submit"
-                    className="shrink-0 rounded-2xl bg-slate-950 px-5 py-3 text-[15px] font-black text-white disabled:opacity-50"
-                    disabled={!String(clockListDraft || "").trim()}
-                  >
-                    Add
-                  </button>
+                <form onSubmit={addClockProjectListItem} className="rounded-[22px] border border-slate-200 bg-slate-50 p-2.5 space-y-2">
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      className="min-w-0 flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[17px] font-bold text-slate-950 outline-none focus:border-slate-500"
+                      value={clockListDraft}
+                      onChange={(event) => setClockListDraft(event.target.value)}
+                      placeholder={clockListModal === "material" ? "Add material" : "Add task"}
+                    />
+                    <button
+                      type="submit"
+                      className="shrink-0 rounded-2xl bg-slate-950 px-5 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
+                      disabled={!String(clockListDraft || "").trim()}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {clockListModal === "task" ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        ref={clockListPhotoInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(event) => void handleClockListImagePick(event)}
+                      />
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-800 active:bg-slate-100"
+                        onClick={() => clockListPhotoInputRef.current?.click()}
+                      >
+                        {clockListImageDraft ? "Change picture" : "Add picture"}
+                      </button>
+                      {clockListImageDraft ? (
+                        <>
+                          <img
+                            src={clockListImageDraft.dataUrl}
+                            alt=""
+                            className="h-11 w-11 rounded-2xl border border-slate-200 object-cover shadow-sm"
+                          />
+                          <button
+                            type="button"
+                            className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-500 active:bg-slate-100"
+                            onClick={() => setClockListImageDraft(null)}
+                          >
+                            Remove
+                          </button>
+                        </>
+                      ) : (
+                        <p className="min-w-0 flex-1 text-[12px] font-bold text-slate-500">
+                          Optional task photo
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
                 </form>
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
-                {activeClockListItems.map((item) => (
-                  <label
-                    key={item.id}
-                    className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3.5 active:bg-emerald-50"
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
-                      onChange={() => completeClockProjectListItem(clockListModal, item.id)}
-                      aria-label={`Complete ${item.text}`}
-                    />
-                    <span className="min-w-0 flex-1 break-words text-[17px] font-black leading-snug text-slate-950">
-                      {item.text}
-                    </span>
-                  </label>
-                ))}
+                {activeClockListItems.map((item) => {
+                  const imageUrl = listItemImageUrl(item);
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3.5 active:bg-emerald-50"
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                        onChange={() => completeClockProjectListItem(clockListModal, item.id)}
+                        aria-label={`Complete ${item.text}`}
+                      />
+                      <p className="min-w-0 flex-1 break-words text-[17px] font-black leading-snug text-slate-950">
+                        {item.text}
+                      </p>
+                      {imageUrl ? (
+                        <button
+                          type="button"
+                          className="shrink-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                          onClick={() =>
+                            setListImageViewer({
+                              imageUrl,
+                              title: item.text,
+                              subtitle: [clockListContext.projectName, clockListContext.costCenter]
+                                .filter(Boolean)
+                                .join(" - "),
+                            })
+                          }
+                          aria-label={`View picture for ${item.text}`}
+                        >
+                          <img src={imageUrl} alt="" className="h-16 w-16 object-cover" />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -16640,6 +16822,40 @@ const handlePhotoQuickUpload = async (event) => {
             </div>
           </div>
         )}
+
+        {listImageViewer?.imageUrl ? (
+          <div className="fixed inset-0 z-[90] bg-black/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-3xl bg-white overflow-hidden shadow-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-3">
+                <div className="min-w-0">
+                  <p className="text-[16px] font-black text-slate-900 truncate">
+                    {listImageViewer.title || "Task picture"}
+                  </p>
+                  {listImageViewer.subtitle ? (
+                    <p className="text-[13px] font-semibold text-slate-500 truncate">
+                      {listImageViewer.subtitle}
+                    </p>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-black text-slate-700"
+                  onClick={() => setListImageViewer(null)}
+                  aria-label="Close task picture"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="bg-slate-950">
+                <img
+                  src={listImageViewer.imageUrl}
+                  alt=""
+                  className="w-full max-h-[70dvh] object-contain bg-slate-950"
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {photoViewer && (() => {
           const items = scopedProjectPhotos[photoViewer.folder] || [];
