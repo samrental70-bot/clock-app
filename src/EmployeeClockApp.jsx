@@ -350,6 +350,26 @@ function calendarDateKeyInTimeZone(dateOrString, timeZone) {
   }).format(d);
 }
 
+function formatReportDateKey(dateKey) {
+  const s = String(dateKey || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return "";
+  const d = new Date(`${s}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return s;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(d);
+}
+
+function formatReportDateRangeLabel(fromKey, toKey) {
+  const from = formatReportDateKey(fromKey);
+  const to = formatReportDateKey(toKey);
+  if (from && to) return `${from} - ${to}`;
+  return "Choose dates";
+}
+
 /** Wall clock in `timeZone` as YYYY-MM-DD and HH:mm (24h) for edit inputs. */
 function wallClockPartsInTimeZone(instant, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
@@ -10883,10 +10903,7 @@ const handlePhotoQuickUpload = async (event) => {
     { id: "yearly", label: "Year" },
   ];
 
-  const reportsDateRangeLabel =
-    reportsDateFrom && reportsDateTo
-      ? `${reportsDateFrom} - ${reportsDateTo}`
-      : "Choose dates";
+  const reportsDateRangeLabel = formatReportDateRangeLabel(reportsDateFrom, reportsDateTo);
 
   const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
     ? reportsRowsFilteredForUi.length
@@ -11024,9 +11041,14 @@ const handlePhotoQuickUpload = async (event) => {
                   setMenuPanel("main");
                   setIsMenuOpen(true);
                 }}
-                className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-lg font-bold text-slate-900 shadow-sm active:bg-white"
+                className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] shadow-sm active:bg-white"
                 aria-label="Open menu"
               >
+                <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M5 7h14" />
+                  <path d="M5 12h14" />
+                  <path d="M5 17h14" />
+                </svg>
                 ☰
               </button>
               <div className="flex-1 min-w-0">
@@ -11040,17 +11062,26 @@ const handlePhotoQuickUpload = async (event) => {
                     setActiveTab("clock");
                     setIsMenuOpen(false);
                   }}
-                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] shadow-sm active:bg-white after:content-['\2302'] after:text-base after:leading-none"
+                  className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] shadow-sm active:bg-white"
                   aria-label="Home"
                 >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 11.5 12 4l9 7.5" />
+                    <path d="M5.5 10.5V20h13v-9.5" />
+                    <path d="M9.5 20v-5h5v5" />
+                  </svg>
                   âŒ‚
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className="relative h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-base shadow-sm active:bg-white"
+                  className="relative h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] shadow-sm active:bg-white"
                   aria-label="Notifications"
                 >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                    <path d="M10 21h4" />
+                  </svg>
                   🔔
                   {inAppNotifUnread > 0 && (
                     <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
@@ -13120,16 +13151,17 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[30px] border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/70 to-white shadow-[0_24px_56px_rgba(15,23,42,0.12)] overflow-hidden">
-              <CardContent className="p-3.5 sm:p-5 space-y-3.5">
-                <div className="rounded-[28px] border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3.5 space-y-3 text-white shadow-[0_22px_44px_rgba(15,23,42,0.22)]">
+            <Card className="rounded-[30px] border border-slate-200/80 bg-[#f8fafc] shadow-[0_24px_56px_rgba(15,23,42,0.10)] overflow-hidden">
+              <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="rounded-[28px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-[0_16px_34px_rgba(15,23,42,0.08)]">
                   <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">Date range</p>
-                      <p className="mt-1 text-[16px] font-black text-white tabular-nums">{reportsDateRangeLabel}</p>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Reports</p>
+                      <p className="mt-1 text-[21px] font-black leading-tight text-slate-950">All reports</p>
+                      <p className="mt-1 text-[13px] font-bold leading-snug text-slate-500">{reportsDateRangeLabel}</p>
                     </div>
-                    <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-amber-100">
-                      Reports
+                    <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
+                      {reportsTotalEntries} entries
                     </span>
                   </div>
                   <div className="grid grid-cols-3 gap-2">
@@ -13137,10 +13169,10 @@ const handlePhotoQuickUpload = async (event) => {
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-2xl px-2 py-3 text-[13px] font-black border transition-colors leading-tight ${
+                        className={`rounded-2xl px-2 py-2.5 text-[13px] font-black border transition-colors leading-tight ${
                           reportsRangePreset === p.id
-                            ? "bg-white text-slate-950 border-white shadow-[0_12px_24px_rgba(0,0,0,0.22)]"
-                            : "bg-white/10 text-white border-white/15 active:bg-white/20"
+                            ? "bg-slate-950 text-white border-slate-950 shadow-[0_10px_20px_rgba(15,23,42,0.18)]"
+                            : "bg-slate-50 text-slate-700 border-slate-200 active:bg-white"
                         }`}
                         onClick={() => {
                           const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
@@ -13158,11 +13190,11 @@ const handlePhotoQuickUpload = async (event) => {
                     ))}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <label className="block min-w-0 space-y-1.5 text-[12px] font-black uppercase tracking-wide text-amber-100">
-                      Date from
+                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      From
                       <input
                         type="date"
-                        className="block h-[52px] w-full min-w-0 rounded-2xl border border-white/20 bg-white px-3 text-[15px] font-black text-slate-950 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] [color-scheme:light] focus:border-amber-300"
+                        className="block h-11 w-full min-w-0 appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
                         value={reportsDateFrom}
                         onChange={(e) => {
                           setReportsDateFrom(e.target.value);
@@ -13172,11 +13204,11 @@ const handlePhotoQuickUpload = async (event) => {
                         }}
                       />
                     </label>
-                    <label className="block min-w-0 space-y-1.5 text-[12px] font-black uppercase tracking-wide text-amber-100">
-                      Date to
+                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                      To
                       <input
                         type="date"
-                        className="block h-[52px] w-full min-w-0 rounded-2xl border border-white/20 bg-white px-3 text-[15px] font-black text-slate-950 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] [color-scheme:light] focus:border-amber-300"
+                        className="block h-11 w-full min-w-0 appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
                         value={reportsDateTo}
                         onChange={(e) => {
                           setReportsDateTo(e.target.value);
@@ -13190,11 +13222,11 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 {reportsAvailableDims.length ? (
-                  <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
-                    <label className="block space-y-1.5 text-[12px] font-black uppercase tracking-[0.12em] text-slate-500">
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_12px_26px_rgba(15,23,42,0.06)]">
+                    <label className="block space-y-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
                       View by
                       <select
-                        className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-4 text-[17px] font-black text-slate-950 outline-none shadow-inner focus:border-slate-400 focus:bg-white"
+                        className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                         value={reportsCurrentViewBy}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -13211,21 +13243,21 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
 
-                <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
+                <div className="rounded-[26px] border border-slate-200 bg-white px-4 py-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
                         Reports
                       </p>
-                      <h2 className="mt-1 text-[27px] font-black leading-tight tracking-normal text-slate-950 break-words">
+                      <h2 className="mt-1 text-[24px] font-black leading-tight tracking-normal text-slate-950 break-words">
                         {reportsCurrentTitle}
                       </h2>
-                      <p className="mt-1 text-[14px] font-bold text-slate-500 tabular-nums">{reportsDateRangeLabel}</p>
+                      <p className="mt-1 text-[13px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
                     </div>
                     {reportsSafeDrillStack.length ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-950 px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)] active:bg-slate-800"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-950 px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_10px_20px_rgba(15,23,42,0.16)] active:bg-slate-800"
                         onClick={() => {
                           const next = reportsSafeDrillStack.slice(0, -1);
                           setReportsDrillStack(next);
@@ -13236,7 +13268,7 @@ const handlePhotoQuickUpload = async (event) => {
                         Back
                       </button>
                     ) : (
-                      <div className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] font-black text-amber-800">
+                      <div className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
                         {reportsTotalEntries} entries
                       </div>
                     )}
@@ -13261,39 +13293,39 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="rounded-[28px] border border-slate-200 bg-white p-3.5 shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
+                    <div className="rounded-[26px] border border-slate-200 bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
                       <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Current total</p>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Current total</p>
                         <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
                           {reportsSafeDrillStack.length ? "Filtered" : "All entries"}
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2.5 pt-3">
-                        <div className="rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-[0_18px_30px_rgba(15,23,42,0.24)]">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-amber-200">Hours</p>
-                          <p className="mt-2 text-[30px] font-black tabular-nums leading-none text-white">
+                      <div className="grid grid-cols-[0.9fr_1.1fr] gap-2.5 pt-3">
+                        <div className="min-w-0 rounded-[22px] bg-slate-950 px-3.5 py-3.5 text-white shadow-[0_14px_26px_rgba(15,23,42,0.22)]">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Hours</p>
+                          <p className="mt-2 text-[28px] font-black tabular-nums leading-none text-white">
                             {formatDuration(reportsVisibleSummary.minutes)}
                           </p>
                         </div>
-                        <div className="rounded-[24px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 shadow-[0_14px_28px_rgba(120,53,15,0.08)]">
-                          <p className="text-[11px] font-black uppercase tracking-wide text-amber-700">Amount</p>
-                          <p className="mt-2 text-[30px] font-black tabular-nums leading-none text-slate-950">
+                        <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-sm">
+                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Amount</p>
+                          <p className="mt-2 text-[23px] font-black tabular-nums leading-none text-slate-950 break-words">
                             {formatMoney(reportsVisibleSummary.cost)}
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_36px_rgba(15,23,42,0.08)] overflow-hidden">
-                      <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-900 px-4 py-3 text-white">
-                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">
+                    <div className="rounded-[26px] border border-slate-200 bg-white shadow-[0_14px_30px_rgba(15,23,42,0.07)] overflow-hidden">
+                      <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-white px-4 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
                           {reportsCurrentViewBy === "project"
                             ? "Project"
                             : reportsCurrentViewBy === "employee"
                               ? "Employee"
                               : "Cost center"}
                         </p>
-                        <p className="text-right text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">
+                        <p className="text-right text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
                           Hours / Amount
                         </p>
                       </div>
@@ -13316,7 +13348,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <Tag
                               key={`${reportsCurrentViewBy}-${row.key}`}
                               type={canDrill ? "button" : undefined}
-                              className="w-full border-b border-slate-100 bg-white px-4 py-4 text-left last:border-b-0 active:bg-amber-50/50"
+                              className="w-full border-b border-slate-100 bg-white px-4 py-3.5 text-left last:border-b-0 active:bg-slate-50"
                               onClick={
                                 canDrill
                                   ? () => {
@@ -13328,19 +13360,19 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
-                                  <p className="mt-1 text-[13px] font-bold text-slate-500">
+                                  <p className="text-[16px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="mt-1 text-[12px] font-bold text-slate-500">
                                     {row.rows.length} entries{canDrill ? " - details" : ""}
                                   </p>
                                 </div>
                                 <div className="shrink-0 text-right">
                                   <p className="text-[16px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
-                                  <p className="mt-1 text-[14px] font-black tabular-nums text-amber-700">{formatMoney(row.cost)}</p>
+                                  <p className="mt-1 text-[13px] font-black tabular-nums text-slate-600">{formatMoney(row.cost)}</p>
                                 </div>
                               </div>
-                              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
                                 <div
-                                  className="h-full rounded-full bg-gradient-to-r from-slate-950 to-amber-500 transition-all"
+                                  className="h-full rounded-full bg-gradient-to-r from-slate-950 via-blue-700 to-emerald-500 transition-all"
                                   style={{
                                     width: `${Math.max(
                                       6,
