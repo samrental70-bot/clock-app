@@ -1754,6 +1754,9 @@ export default function EmployeeClockApp() {
   const [clockProjectLists, setClockProjectLists] = useState(() =>
     safeRead("orp_clock_project_lists", { task: {}, material: {} })
   );
+  const [listSelectedProjectId, setListSelectedProjectId] = useState("");
+  const [listType, setListType] = useState("task");
+  const [listDraft, setListDraft] = useState("");
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
@@ -7625,7 +7628,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const openMenuTab = (tabName) => {
-    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications"]);
+    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
       setIsMenuOpen(false);
@@ -10088,6 +10091,85 @@ const handlePhotoQuickUpload = async (event) => {
     </div>
   );
 
+  const listProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter(
+    (project) => project?.id != null || String(project?.name || "").trim()
+  );
+  const effectiveListProjectId =
+    listSelectedProjectId ||
+    (listProjectOptions[0]?.id != null ? String(listProjectOptions[0].id) : "");
+  const selectedListProject =
+    listProjectOptions.find((project) => String(project?.id ?? "") === String(effectiveListProjectId)) ||
+    listProjectOptions[0] ||
+    null;
+  const selectedListProjectToken =
+    selectedListProject?.id != null
+      ? String(selectedListProject.id)
+      : getProjectFolderName(selectedListProject?.name || "project");
+  const listStoragePrefix = [
+    authUser?.id || "anonymous",
+    userCompany?.id || "company",
+    selectedListProjectToken || "project",
+    "",
+  ].join("|");
+  const listProjectStorageKey = [
+    authUser?.id || "anonymous",
+    userCompany?.id || "company",
+    selectedListProjectToken || "project",
+    "project",
+  ].join("|");
+  const visibleProjectListItems = (() => {
+    const bucket = clockProjectLists?.[listType] || {};
+    return Object.entries(bucket)
+      .filter(([key, rows]) => key.startsWith(listStoragePrefix) && Array.isArray(rows))
+      .flatMap(([sourceKey, rows]) =>
+        rows.map((item) => ({
+          ...item,
+          sourceKey,
+          sourceCostCenter: String(item?.costCenter || sourceKey.split("|")[3] || "").trim(),
+        }))
+      )
+      .sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
+  })();
+
+  const addListPageItem = (event) => {
+    event?.preventDefault?.();
+    const text = String(listDraft || "").trim();
+    if (!text || !selectedListProject) return;
+    const item = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      text,
+      projectId: selectedListProject?.id || "",
+      projectName: selectedListProject?.name || "",
+      costCenter: "",
+      createdAt: new Date().toISOString(),
+    };
+    setClockProjectLists((prev) => {
+      const next = {
+        task: { ...(prev?.task || {}) },
+        material: { ...(prev?.material || {}) },
+      };
+      const rows = Array.isArray(next[listType]?.[listProjectStorageKey])
+        ? next[listType][listProjectStorageKey]
+        : [];
+      next[listType][listProjectStorageKey] = [item, ...rows];
+      return next;
+    });
+    setListDraft("");
+  };
+
+  const completeListPageItem = (sourceKey, itemId) => {
+    if (!sourceKey || !itemId) return;
+    setClockProjectLists((prev) => {
+      const next = {
+        task: { ...(prev?.task || {}) },
+        material: { ...(prev?.material || {}) },
+      };
+      const rows = Array.isArray(next[listType]?.[sourceKey]) ? next[listType][sourceKey] : [];
+      next[listType][sourceKey] = rows.filter((item) => String(item?.id) !== String(itemId));
+      return next;
+    });
+  };
+
   const reportsQuickRangeOptions = [
     { id: "weekly", label: "Week" },
     { id: "monthly", label: "Month" },
@@ -11422,6 +11504,113 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                     );
                   })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {activeTab === "lists" && (
+            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.08)] overflow-hidden">
+              <CardContent className="p-4 space-y-4">
+                <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                  <h2 className="text-[24px] font-black leading-tight text-slate-950">List</h2>
+                  <p className="mt-1 text-[14px] font-bold text-slate-500">
+                    Project task and material lists
+                  </p>
+                </div>
+
+                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                    Project
+                    <select
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                      value={effectiveListProjectId}
+                      onChange={(event) => setListSelectedProjectId(event.target.value)}
+                    >
+                      {listProjectOptions.length === 0 ? (
+                        <option value="">No projects available</option>
+                      ) : (
+                        listProjectOptions.map((project) => (
+                          <option key={String(project.id ?? project.name)} value={String(project.id ?? "")}>
+                            {project.name || "Unnamed project"}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+
+                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                    List type
+                    <select
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                      value={listType}
+                      onChange={(event) => {
+                        setListType(event.target.value === "material" ? "material" : "task");
+                        setListDraft("");
+                      }}
+                    >
+                      <option value="task">Task List</option>
+                      <option value="material">Material List</option>
+                    </select>
+                  </label>
+
+                  <form onSubmit={addListPageItem} className="flex gap-2">
+                    <input
+                      type="text"
+                      className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[16px] font-bold text-slate-950"
+                      value={listDraft}
+                      onChange={(event) => setListDraft(event.target.value)}
+                      placeholder={listType === "material" ? "Add material" : "Add task"}
+                      disabled={!selectedListProject}
+                    />
+                    <button
+                      type="submit"
+                      className="shrink-0 rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                      disabled={!selectedListProject || !String(listDraft || "").trim()}
+                    >
+                      Add
+                    </button>
+                  </form>
+                </div>
+
+                <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div className="border-b border-slate-100 bg-slate-50 px-3 py-2">
+                    <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      {listType === "material" ? "Material List" : "Task List"}
+                    </p>
+                    <p className="mt-0.5 text-[14px] font-black text-slate-950">
+                      {selectedListProject?.name || "Select a project"}
+                    </p>
+                  </div>
+                  {visibleProjectListItems.length === 0 ? (
+                    <p className="px-3 py-5 text-center text-[14px] font-bold text-slate-500">
+                      {selectedListProject ? "No items yet." : "Select a project to see the list."}
+                    </p>
+                  ) : (
+                    visibleProjectListItems.map((item) => (
+                      <label
+                        key={`${item.sourceKey}-${item.id}`}
+                        className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 active:bg-slate-50"
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                          onChange={() => completeListPageItem(item.sourceKey, item.id)}
+                          aria-label={`Complete ${item.text}`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block break-words text-[16px] font-black leading-snug text-slate-950">
+                            {item.text}
+                          </span>
+                          {item.sourceCostCenter && item.sourceCostCenter !== "project" ? (
+                            <span className="mt-0.5 block text-[12px] font-bold text-slate-500">
+                              {item.sourceCostCenter}
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -16350,23 +16539,20 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                      onClick={() => openMenuTab("lists")}
+                    >
+                      <span className="block text-[17px] font-black text-slate-950">List</span>
+                      <span className="block text-[13px] font-bold text-slate-500">Tasks and materials</span>
+                    </button>
+                    <button
+                      type="button"
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
                       onClick={() => setMenuPanel("settings")}
                     >
                       <span>Settings</span>
                       <span className="text-slate-400">›</span>
                     </button>
-                    {isAdmin && (
-                      <>
-                        <button
-                          type="button"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
-                          onClick={() => openMenuTab("reports")}
-                        >
-                          Reports
-                        </button>
-                      </>
-                    )}
                   </>
                 )}
 
@@ -16415,7 +16601,7 @@ const handlePhotoQuickUpload = async (event) => {
         <div
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="hidden">
             {isAdmin && (
               <button
                 type="button"
@@ -16435,6 +16621,50 @@ const handlePhotoQuickUpload = async (event) => {
               </button>
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
+          </div>
+          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-2"} gap-1.5`}>
+            {isAdmin ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("dashboard")}
+                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                >
+                  Live
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("clock")}
+                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                >
+                  Clock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("reports")}
+                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "reports" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                >
+                  Reports
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("clock")}
+                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                >
+                  Clock
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("lists")}
+                  className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "lists" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+                >
+                  List
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
