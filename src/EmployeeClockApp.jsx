@@ -10104,13 +10104,14 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        throw new Error("Not signed in.");
+      }
+
       if (loginFieldsDirty && !ownerLoginLocked) {
-        const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-        if (sessionErr) throw sessionErr;
-        const accessToken = sessionData?.session?.access_token;
-        if (!accessToken) {
-          throw new Error("Not signed in.");
-        }
         const apiBody = {
           company_id: userCompany.id,
           target_user_id: row.userId,
@@ -10137,34 +10138,27 @@ const handlePhotoQuickUpload = async (event) => {
         }
       }
 
-      if (!isOwner && newCompanyRole !== normalizeMemberRole(row.role)) {
-        const { error: mErr } = await supabase
-          .from("company_members")
-          .update({ role: newCompanyRole })
-          .eq("id", row.memberRowId)
-          .eq("company_id", userCompany.id)
-          .eq("user_id", row.userId);
-        if (mErr) throw mErr;
-      }
-
-      const profilePayload = {
-        full_name: nameDraft,
-        email: emailDraft,
-        hourly_rate,
-        pay_rate_effective_date: pay_date,
-        joining_date: join_date,
-        employment_status: isOwner ? "active" : teamEditDraft.employmentStatus,
-      };
-      if (!isOwner) {
-        profilePayload.role = newCompanyRole === "supervisor" ? "supervisor" : "employee";
-      }
-
-      const { error: pErr } = await supabase.from("profiles").update(profilePayload).eq("id", row.userId);
-      if (pErr) {
-        if (isMissingDbColumnError(pErr)) {
-          throw new Error(`Missing profiles columns. ${TEAM_PROFILES_SQL_HINT} (${getErrorMessage(pErr)})`);
-        }
-        throw pErr;
+      const profileRes = await fetch("/api/update-employee-profile", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          company_id: userCompany.id,
+          target_user_id: row.userId,
+          full_name: nameDraft,
+          email: emailDraft,
+          role: newCompanyRole,
+          hourly_rate,
+          pay_rate_effective_date: pay_date,
+          joining_date: join_date,
+          employment_status: isOwner ? "active" : teamEditDraft.employmentStatus,
+        }),
+      });
+      const profileJson = await profileRes.json().catch(() => ({}));
+      if (!profileRes.ok) {
+        throw new Error(typeof profileJson.error === "string" ? profileJson.error : "Could not save member profile.");
       }
 
       if (!isOwner && String(row.userId) === String(authUser?.id)) {
