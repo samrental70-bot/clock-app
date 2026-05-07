@@ -19,6 +19,26 @@ function isDuplicateAuthEmailError(err) {
   return false;
 }
 
+function cleanGeneratedLoginPart(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, ".")
+    .replace(/^\.+|\.+$/g, "")
+    .slice(0, 28);
+  return normalized || "employee";
+}
+
+function buildGeneratedEmployeeEmail(fullName, companyId) {
+  const namePart = cleanGeneratedLoginPart(fullName);
+  const companyPart = cleanGeneratedLoginPart(companyId).replace(/\./g, "").slice(0, 8) || "team";
+  const stamp = Date.now().toString(36);
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `${namePart}.${companyPart}.${stamp}${randomPart}@login.opera-ai.app`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -50,7 +70,7 @@ export default async function handler(req, res) {
   const company_id = body.company_id;
   const full_name = typeof body.full_name === "string" ? body.full_name.trim() : "";
   const emailRaw = typeof body.email === "string" ? body.email.trim() : "";
-  const email = emailRaw.toLowerCase();
+  const email = (emailRaw ? emailRaw : buildGeneratedEmployeeEmail(full_name, company_id)).toLowerCase();
   const password = typeof body.password === "string" ? body.password : "";
   const role = typeof body.role === "string" ? body.role.trim().toLowerCase() : "";
 
@@ -58,7 +78,7 @@ export default async function handler(req, res) {
   const pay_rate_effective_date = body.pay_rate_effective_date;
   const joining_date_raw = body.joining_date;
 
-  if (!company_id || !full_name || !email || !password) {
+  if (!company_id || !full_name || !password) {
     res.status(400).json({ error: "Missing required fields" });
     return;
   }
@@ -185,5 +205,5 @@ export default async function handler(req, res) {
     return;
   }
 
-  res.status(200).json({ success: true, user_id: newUserId });
+  res.status(200).json({ success: true, user_id: newUserId, email });
 }

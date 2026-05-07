@@ -256,6 +256,18 @@ function generateTemporaryPassword() {
   return `${out}!7`;
 }
 
+function buildTeamAddDraftDefaults(timeZone) {
+  const todayKey =
+    calendarDateKeyInTimeZone(new Date(), timeZone || DEFAULT_COMPANY_TIME_ZONE) ||
+    new Date().toISOString().slice(0, 10);
+  return {
+    ...TEAM_ADD_INITIAL_DRAFT,
+    password: generateTemporaryPassword(),
+    payRateEffectiveDate: todayKey,
+    joiningDate: todayKey,
+  };
+}
+
 function getOperaAppShareUrl(email = "") {
   const fallback = "https://project-rui1d.vercel.app";
   const origin =
@@ -2167,7 +2179,7 @@ export default function EmployeeClockApp() {
   const [teamSavingMemberRowId, setTeamSavingMemberRowId] = useState(null);
   const [teamRefreshKey, setTeamRefreshKey] = useState(0);
   const [teamAddFormOpen, setTeamAddFormOpen] = useState(false);
-  const [teamAddDraft, setTeamAddDraft] = useState(() => ({ ...TEAM_ADD_INITIAL_DRAFT }));
+  const [teamAddDraft, setTeamAddDraft] = useState(() => buildTeamAddDraftDefaults(companyTimeZone));
   const [teamAddSubmitting, setTeamAddSubmitting] = useState(false);
   const [teamAddError, setTeamAddError] = useState("");
   const [teamContactPicking, setTeamContactPicking] = useState(false);
@@ -2498,8 +2510,8 @@ export default function EmployeeClockApp() {
     setTeamAddError("");
     setTeamAddShareInfo(null);
     setTeamAddShareMessage("");
-    setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
-  }, [activeTab, userCompany?.id]);
+    setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
+  }, [activeTab, userCompany?.id, companyTimeZone]);
 
   useEffect(() => {
     if (
@@ -9409,8 +9421,8 @@ const handlePhotoQuickUpload = async (event) => {
       if (!contact) return;
       const fullName = String(contact.name?.[0] || "").trim();
       const email = String(contact.email?.[0] || "").trim().toLowerCase();
-      if (!email) {
-        setTeamAddError("Choose a contact with an email address.");
+      if (!fullName && !email) {
+        setTeamAddError("Choose a contact with a name, or enter employee details manually.");
         return;
       }
       setTeamAddDraft((draft) => ({
@@ -9463,17 +9475,13 @@ const handlePhotoQuickUpload = async (event) => {
     if (!isAdmin || !userCompany?.id) return;
     setTeamAddError("");
     const name = String(teamAddDraft.fullName || "").trim();
-    const email = String(teamAddDraft.email || "").trim();
+    const email = String(teamAddDraft.email || "").trim().toLowerCase();
     const password = String(teamAddDraft.password || "");
     if (!name) {
       setTeamAddError("Name is required.");
       return;
     }
-    if (!email) {
-      setTeamAddError("Email is required.");
-      return;
-    }
-    if (!looksLikeEmail(email)) {
+    if (email && !looksLikeEmail(email)) {
       setTeamAddError("Enter a valid email.");
       return;
     }
@@ -9491,8 +9499,8 @@ const handlePhotoQuickUpload = async (event) => {
       new Date(),
       userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE
     );
-    const joining_date = todayKey;
-    const eff = todayKey;
+    const joining_date = String(teamAddDraft.joiningDate || "").trim() || todayKey;
+    const eff = joining_date;
     setTeamAddSubmitting(true);
     try {
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
@@ -9511,7 +9519,7 @@ const handlePhotoQuickUpload = async (event) => {
         body: JSON.stringify({
           company_id: userCompany.id,
           full_name: name,
-          email: email.toLowerCase(),
+          email,
           password,
           role,
           hourly_rate: hourlyNum,
@@ -9525,15 +9533,16 @@ const handlePhotoQuickUpload = async (event) => {
         setTeamAddError(typeof json.error === "string" ? json.error : "Could not create employee.");
         return;
       }
+      const loginEmail = String(json.email || email || "").trim().toLowerCase();
       const shareInfo = {
         userId: json.user_id || "",
         fullName: name,
-        email: email.toLowerCase(),
+        email: loginEmail,
         password,
         role,
-        appUrl: getOperaAppShareUrl(email),
+        appUrl: getOperaAppShareUrl(loginEmail),
       };
-      setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+      setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
       setTeamAddFormOpen(false);
       setTeamRefreshKey((k) => k + 1);
       setTeamAddShareInfo(shareInfo);
@@ -9550,7 +9559,7 @@ const handlePhotoQuickUpload = async (event) => {
     if (!isAdmin) return;
     setTeamAddFormOpen(false);
     setTeamAddError("");
-    setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+    setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
     const rowRoleNorm = normalizeMemberRole(row.role);
     const eff =
       row.payRateEffectiveDate != null && row.payRateEffectiveDate !== ""
@@ -16973,7 +16982,7 @@ const handlePhotoQuickUpload = async (event) => {
                           cancelTeamMemberEdit();
                           setTeamAddError("");
                           setTeamAddShareMessage("");
-                          setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT, password: generateTemporaryPassword() });
+                          setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
                           setTeamAddFormOpen(true);
                         }}
                         disabled={Boolean(teamAddSubmitting) || Boolean(teamSavingMemberRowId)}
@@ -17011,13 +17020,14 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                         <div className="space-y-1">
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-email">
-                            Email
+                            Email (optional)
                           </label>
                           <input
                             id="team-add-email"
                             type="email"
                             autoComplete="email"
                             className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            placeholder="Leave blank to create login ID"
                             value={teamAddDraft.email}
                             disabled={teamAddSubmitting}
                             onChange={(e) => setTeamAddDraft((d) => ({ ...d, email: e.target.value }))}
@@ -17083,15 +17093,27 @@ const handlePhotoQuickUpload = async (event) => {
                             onChange={(e) => setTeamAddDraft((d) => ({ ...d, hourlyRate: e.target.value }))}
                           />
                         </div>
-                        <p className="rounded-xl bg-slate-50 px-3 py-2 text-[12px] font-bold text-slate-600">
-                          Joining date and pay-rate effective date will be saved as today.
-                        </p>
-                        <div className="space-y-0.5">
-                          <p className="text-[11px] font-medium text-slate-600">Status</p>
-                          <p className="text-xs font-medium text-slate-900">active</p>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-joining-date">
+                            Joining date
+                          </label>
+                          <input
+                            id="team-add-joining-date"
+                            type="date"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.joiningDate}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) =>
+                              setTeamAddDraft((d) => ({
+                                ...d,
+                                joiningDate: e.target.value,
+                                payRateEffectiveDate: e.target.value,
+                              }))
+                            }
+                          />
                         </div>
                         {teamAddSubmitting && (
-                          <p className="text-xs text-slate-600">Creating employee…</p>
+                          <p className="text-xs text-slate-600">Creating employee...</p>
                         )}
                         <div className="flex gap-2 pt-1">
                           <Button
@@ -17099,7 +17121,7 @@ const handlePhotoQuickUpload = async (event) => {
                             className="flex-1 rounded-lg h-9 text-xs font-semibold"
                             disabled={teamAddSubmitting}
                           >
-                            {teamAddSubmitting ? "Saving…" : "Save"}
+                            {teamAddSubmitting ? "Saving..." : "Save and Share"}
                           </Button>
                           <Button
                             type="button"
@@ -17108,7 +17130,7 @@ const handlePhotoQuickUpload = async (event) => {
                             onClick={() => {
                               setTeamAddFormOpen(false);
                               setTeamAddError("");
-                              setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+                              setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
                             }}
                           >
                             Cancel
