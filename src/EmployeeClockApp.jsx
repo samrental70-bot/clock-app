@@ -76,6 +76,17 @@ function safeWrite(key, value) {
   }
 }
 
+function normalizeClockProjectListsState(value) {
+  return {
+    task: { ...(value?.task || {}) },
+    material: { ...(value?.material || {}) },
+    completed: {
+      task: { ...(value?.completed?.task || {}) },
+      material: { ...(value?.completed?.material || {}) },
+    },
+  };
+}
+
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
@@ -1755,17 +1766,18 @@ export default function EmployeeClockApp() {
   const listPhotoInputRef = useRef(null);
   const [clockListImageDraft, setClockListImageDraft] = useState(null);
   const [clockProjectLists, setClockProjectLists] = useState(() =>
-    safeRead("orp_clock_project_lists", { task: {}, material: {} })
+    normalizeClockProjectListsState(safeRead("orp_clock_project_lists", { task: {}, material: {} }))
   );
-  const [clockListUndo, setClockListUndo] = useState(null);
+  const [clockListUndo, setClockListUndo] = useState([]);
+  const [clockListShowCompleted, setClockListShowCompleted] = useState(false);
   const [listSelectedProjectId, setListSelectedProjectId] = useState("");
   const [listType, setListType] = useState("task");
+  const [listShowCompleted, setListShowCompleted] = useState(false);
   const [listDraft, setListDraft] = useState("");
   const [listImageDraft, setListImageDraft] = useState(null);
   const [listImageViewer, setListImageViewer] = useState(null);
   const [listCameraOpen, setListCameraOpen] = useState(false);
   const [listCameraTarget, setListCameraTarget] = useState("page");
-  const [listCameraStatus, setListCameraStatus] = useState("");
   const [listCameraError, setListCameraError] = useState("");
   const listCameraStreamRef = useRef(null);
   const listCameraVideoRef = useRef(null);
@@ -8262,10 +8274,7 @@ const handlePhotoQuickUpload = async (event) => {
       };
 
       setClockProjectLists((prev) => {
-        const next = {
-          task: { ...(prev?.task || {}) },
-          material: { ...(prev?.material || {}) },
-        };
+        const next = normalizeClockProjectListsState(prev);
         const existing = Array.isArray(next.task?.[key]) ? next.task[key] : [];
         const textKey = text.toLowerCase();
         const alreadyExists = existing.some(
@@ -10233,8 +10242,22 @@ const handlePhotoQuickUpload = async (event) => {
     clockListContext.costCenter || "cost",
   ].join("|");
 
-  const getClockProjectListItems = (kind) => {
-    const bucket = clockProjectLists?.[kind] || {};
+  const clockListUndoStack = Array.isArray(clockListUndo)
+    ? clockListUndo
+    : clockListUndo
+      ? [clockListUndo]
+      : [];
+  const latestClockListUndo = clockListUndoStack[0] || null;
+  const pushClockListUndo = (entry) => {
+    if (!entry?.kind || !entry?.key || !entry?.item) return;
+    setClockListUndo((prev) => {
+      const stack = Array.isArray(prev) ? prev : prev ? [prev] : [];
+      return [entry, ...stack].slice(0, 5);
+    });
+  };
+
+  const getClockProjectListItems = (kind, completed = clockListShowCompleted) => {
+    const bucket = completed ? clockProjectLists?.completed?.[kind] || {} : clockProjectLists?.[kind] || {};
     const rows = bucket?.[clockProjectListKey] || [];
     return Array.isArray(rows) ? rows : [];
   };
@@ -10292,20 +10315,31 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const restoreLastClockListItem = () => {
-    if (!clockListUndo?.kind || !clockListUndo?.key || !clockListUndo?.item) return;
-    const undo = clockListUndo;
+  const restoreLastClockListItem = (matcher) => {
+    const undoIndex =
+      typeof matcher === "function"
+        ? clockListUndoStack.findIndex((entry) => matcher(entry))
+        : 0;
+    if (undoIndex < 0) return;
+    const undo = clockListUndoStack[undoIndex] || latestClockListUndo;
+    if (!undo?.kind || !undo?.key || !undo?.item) return;
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next[undo.kind]?.[undo.key]) ? next[undo.kind][undo.key] : [];
       const exists = rows.some((item) => String(item?.id) === String(undo.item?.id));
-      next[undo.kind][undo.key] = exists ? rows : [undo.item, ...rows];
+      next[undo.kind][undo.key] = exists ? rows : [{ ...undo.item, completedAt: null }, ...rows];
+      const completedRows = Array.isArray(next.completed?.[undo.kind]?.[undo.key])
+        ? next.completed[undo.kind][undo.key]
+        : [];
+      next.completed[undo.kind][undo.key] = completedRows.filter(
+        (item) => String(item?.id) !== String(undo.item?.id)
+      );
       return next;
     });
-    setClockListUndo(null);
+    setClockListUndo((prev) => {
+      const stack = Array.isArray(prev) ? prev : prev ? [prev] : [];
+      return stack.filter((_, index) => index !== undoIndex);
+    });
   };
 
   const openClockProjectList = (kind) => {
@@ -10315,6 +10349,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
     setClockListDraft("");
     setClockListImageDraft(null);
+    setClockListShowCompleted(false);
     setClockListModal(kind);
   };
 
@@ -10338,10 +10373,7 @@ const handlePhotoQuickUpload = async (event) => {
     };
 
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const existing = Array.isArray(next[clockListModal]?.[clockProjectListKey])
         ? next[clockListModal][clockProjectListKey]
         : [];
@@ -10359,19 +10391,25 @@ const handlePhotoQuickUpload = async (event) => {
       : [];
     const removedItem = existingNow.find((item) => String(item?.id) === String(itemId));
     if (removedItem) {
-      setClockListUndo({ kind, key: clockProjectListKey, item: removedItem });
+      pushClockListUndo({ kind, key: clockProjectListKey, item: removedItem });
     }
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const existing = Array.isArray(next[kind]?.[clockProjectListKey])
         ? next[kind][clockProjectListKey]
         : [];
       next[kind][clockProjectListKey] = existing.filter(
         (item) => String(item?.id) !== String(itemId)
       );
+      if (removedItem) {
+        const completedRows = Array.isArray(next.completed?.[kind]?.[clockProjectListKey])
+          ? next.completed[kind][clockProjectListKey]
+          : [];
+        const completedExists = completedRows.some((item) => String(item?.id) === String(itemId));
+        next.completed[kind][clockProjectListKey] = completedExists
+          ? completedRows
+          : [{ ...removedItem, completedAt: new Date().toISOString() }, ...completedRows];
+      }
       return next;
     });
   };
@@ -10452,7 +10490,6 @@ const handlePhotoQuickUpload = async (event) => {
 
     try {
       setListCameraError("");
-      setListCameraStatus("");
       stopPhotoCamera();
       stopListTaskCamera();
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -10463,7 +10500,6 @@ const handlePhotoQuickUpload = async (event) => {
       listCameraStreamRef.current = stream;
       setListCameraTarget(normalizedTarget);
       setListCameraOpen(true);
-      setListCameraStatus("Camera ready. Each photo becomes a separate task.");
       setTimeout(() => listCameraVideoRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 160);
       return true;
     } catch (err) {
@@ -10513,17 +10549,13 @@ const handlePhotoQuickUpload = async (event) => {
       imageName: imageDraft.name || "task-photo.jpg",
     };
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next.task?.[listProjectStorageKey]) ? next.task[listProjectStorageKey] : [];
       next.task[listProjectStorageKey] = [item, ...rows];
       return next;
     });
     setListDraft("");
     setListImageDraft(null);
-    setListCameraStatus("Photo added as a task. Capture another if needed.");
   };
 
   const addClockListTaskPhotoItem = (imageDraft, textOverride = clockListDraft) => {
@@ -10540,17 +10572,13 @@ const handlePhotoQuickUpload = async (event) => {
       imageName: imageDraft.name || "task-photo.jpg",
     };
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next.task?.[clockProjectListKey]) ? next.task[clockProjectListKey] : [];
       next.task[clockProjectListKey] = [item, ...rows];
       return next;
     });
     setClockListDraft("");
     setClockListImageDraft(null);
-    setListCameraStatus("Photo added as a task. Capture another if needed.");
   };
 
   const captureListTaskPhoto = async () => {
@@ -10568,7 +10596,9 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const visibleProjectListItems = (() => {
-    const bucket = clockProjectLists?.[listType] || {};
+    const bucket = listShowCompleted
+      ? clockProjectLists?.completed?.[listType] || {}
+      : clockProjectLists?.[listType] || {};
     return Object.entries(bucket)
       .filter(([key, rows]) => key.startsWith(listStoragePrefix) && Array.isArray(rows))
       .flatMap(([sourceKey, rows]) =>
@@ -10599,10 +10629,7 @@ const handlePhotoQuickUpload = async (event) => {
       imageName: listType === "task" ? listImageDraft?.name || "" : "",
     };
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next[listType]?.[listProjectStorageKey])
         ? next[listType][listProjectStorageKey]
         : [];
@@ -10620,25 +10647,41 @@ const handlePhotoQuickUpload = async (event) => {
       : [];
     const removedItem = rowsNow.find((item) => String(item?.id) === String(itemId));
     if (removedItem) {
-      setClockListUndo({ kind: listType, key: sourceKey, item: removedItem });
+      pushClockListUndo({ kind: listType, key: sourceKey, item: removedItem });
     }
     setClockProjectLists((prev) => {
-      const next = {
-        task: { ...(prev?.task || {}) },
-        material: { ...(prev?.material || {}) },
-      };
+      const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next[listType]?.[sourceKey]) ? next[listType][sourceKey] : [];
       next[listType][sourceKey] = rows.filter((item) => String(item?.id) !== String(itemId));
+      if (removedItem) {
+        const completedRows = Array.isArray(next.completed?.[listType]?.[sourceKey])
+          ? next.completed[listType][sourceKey]
+          : [];
+        const completedExists = completedRows.some((item) => String(item?.id) === String(itemId));
+        next.completed[listType][sourceKey] = completedExists
+          ? completedRows
+          : [{ ...removedItem, completedAt: new Date().toISOString() }, ...completedRows];
+      }
       return next;
     });
   };
 
   const canUndoListPage =
-    Boolean(clockListUndo?.kind === listType && clockListUndo?.key) &&
-    String(clockListUndo.key).startsWith(listStoragePrefix);
+    clockListUndoStack.some(
+      (undo) => undo?.kind === listType && String(undo?.key || "").startsWith(listStoragePrefix)
+    );
   const canUndoClockListModal =
-    Boolean(clockListUndo?.kind === clockListModal && clockListUndo?.key) &&
-    String(clockListUndo.key) === String(clockProjectListKey);
+    clockListUndoStack.some(
+      (undo) => undo?.kind === clockListModal && String(undo?.key || "") === String(clockProjectListKey)
+    );
+  const restoreLastListPageItem = () =>
+    restoreLastClockListItem(
+      (undo) => undo?.kind === listType && String(undo?.key || "").startsWith(listStoragePrefix)
+    );
+  const restoreLastClockModalItem = () =>
+    restoreLastClockListItem(
+      (undo) => undo?.kind === clockListModal && String(undo?.key || "") === String(clockProjectListKey)
+    );
 
   const reportsQuickRangeOptions = [
     { id: "weekly", label: "Week" },
@@ -11996,7 +12039,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       type="button"
                       className="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 active:bg-white"
-                      onClick={restoreLastClockListItem}
+                      onClick={restoreLastListPageItem}
                       aria-label="Undo last completed item"
                     >
                       Undo
@@ -12035,6 +12078,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onChange={(event) => {
                         stopListTaskCamera();
                         setListType(event.target.value === "material" ? "material" : "task");
+                        setListShowCompleted(false);
                         setListDraft("");
                         setListImageDraft(null);
                       }}
@@ -12044,6 +12088,32 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </label>
 
+                  <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1">
+                    <button
+                      type="button"
+                      className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
+                        !listShowCompleted
+                          ? "bg-slate-950 text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                          : "text-slate-600 active:bg-white"
+                      }`}
+                      onClick={() => setListShowCompleted(false)}
+                    >
+                      Active
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
+                        listShowCompleted
+                          ? "bg-slate-950 text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                          : "text-slate-600 active:bg-white"
+                      }`}
+                      onClick={() => setListShowCompleted(true)}
+                    >
+                      Completed
+                    </button>
+                  </div>
+
+                  {!listShowCompleted ? (
                   <form onSubmit={addListPageItem} className="rounded-[22px] border border-slate-200 bg-slate-50 p-2.5 space-y-2">
                     <div className="flex gap-2">
                       <input
@@ -12069,42 +12139,25 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     {listType === "task" ? (
                       <div className="space-y-2">
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            className={`rounded-2xl px-3 py-3 text-[14px] font-black transition ${
-                              listCameraOpen && listCameraTarget === "page"
-                                ? "bg-slate-950 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
-                                : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
-                            }`}
-                            onClick={() => {
-                              if (listCameraOpen && listCameraTarget === "page") {
-                                stopListTaskCamera();
-                              } else {
-                                void startListTaskCamera("page");
-                              }
-                            }}
-                            disabled={!selectedListProject}
-                            aria-pressed={listCameraOpen && listCameraTarget === "page"}
-                          >
-                            Camera
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-800 active:bg-slate-100 disabled:opacity-50"
-                            onClick={() => listPhotoInputRef.current?.click()}
-                            disabled={!selectedListProject}
-                          >
-                            Attach
-                          </button>
-                        </div>
-                        <input
-                          ref={listPhotoInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(event) => void handleListImagePick(event)}
-                        />
+                        <button
+                          type="button"
+                          className={`w-full rounded-2xl px-3 py-3 text-[15px] font-black transition ${
+                            listCameraOpen && listCameraTarget === "page"
+                              ? "bg-slate-950 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                              : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
+                          }`}
+                          onClick={() => {
+                            if (listCameraOpen && listCameraTarget === "page") {
+                              stopListTaskCamera();
+                            } else {
+                              void startListTaskCamera("page");
+                            }
+                          }}
+                          disabled={!selectedListProject}
+                          aria-pressed={listCameraOpen && listCameraTarget === "page"}
+                        >
+                          Camera
+                        </button>
                         {listCameraOpen && listCameraTarget === "page" ? (
                           <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
                             <video
@@ -12121,9 +12174,6 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               Capture Photo
                             </button>
-                            <p className="text-center text-[12px] font-bold text-slate-500">
-                              Each capture is added as a separate task item.
-                            </p>
                           </div>
                         ) : null}
                         {listCameraError && listCameraTarget === "page" ? (
@@ -12131,40 +12181,21 @@ const handlePhotoQuickUpload = async (event) => {
                             {listCameraError}
                           </p>
                         ) : null}
-                        {listCameraStatus && listCameraTarget === "page" && !listCameraError ? (
-                          <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-[13px] font-black text-emerald-700">
-                            {listCameraStatus}
-                          </p>
-                        ) : null}
-                        {listImageDraft ? (
-                          <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2">
-                            <img
-                              src={listImageDraft.dataUrl}
-                              alt=""
-                              className="h-12 w-12 rounded-2xl border border-slate-200 object-cover shadow-sm"
-                            />
-                            <p className="min-w-0 flex-1 text-[13px] font-bold text-slate-600">
-                              Attached photo will save with this task.
-                            </p>
-                            <button
-                              type="button"
-                              className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-500 active:bg-slate-100"
-                              onClick={() => setListImageDraft(null)}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ) : null}
                       </div>
                     ) : null}
                   </form>
+                  ) : null}
                 </div>
 
                 <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">
-                        {listType === "material" ? "Material List" : "Task List"}
+                        {listShowCompleted
+                          ? `Completed ${listType === "material" ? "Material List" : "Task List"}`
+                          : listType === "material"
+                            ? "Material List"
+                            : "Task List"}
                       </p>
                       <p className="mt-0.5 truncate text-[14px] font-black text-slate-950">
                         {selectedListProject?.name || "Select a project"}
@@ -12174,7 +12205,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <button
                         type="button"
                         className="shrink-0 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-[12px] font-black text-slate-800 active:bg-slate-50"
-                        onClick={restoreLastClockListItem}
+                        onClick={restoreLastListPageItem}
                         aria-label="Undo last completed item"
                       >
                         Undo
@@ -12183,7 +12214,11 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                   {visibleProjectListItems.length === 0 ? (
                     <p className="px-3 py-5 text-center text-[14px] font-bold text-slate-500">
-                      {selectedListProject ? "No items yet." : "Select a project to see the list."}
+                      {selectedListProject
+                        ? listShowCompleted
+                          ? "No completed items yet."
+                          : "No items yet."
+                        : "Select a project to see the list."}
                     </p>
                   ) : (
                     visibleProjectListItems.map((item) => {
@@ -12194,12 +12229,18 @@ const handlePhotoQuickUpload = async (event) => {
                           key={`${item.sourceKey}-${item.id}`}
                           className="flex items-center gap-3 border-b border-slate-100 px-3 py-3 last:border-b-0 active:bg-slate-50"
                         >
-                          <input
-                            type="checkbox"
-                            className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
-                            onChange={() => completeListPageItem(item.sourceKey, item.id)}
-                            aria-label={`Complete ${itemTitle}`}
-                          />
+                          {listShowCompleted ? (
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
+                              ✓
+                            </span>
+                          ) : (
+                            <input
+                              type="checkbox"
+                              className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                              onChange={() => completeListPageItem(item.sourceKey, item.id)}
+                              aria-label={`Complete ${itemTitle}`}
+                            />
+                          )}
                           <div className="min-w-0 flex-1">
                             <p className="break-words text-[16px] font-black leading-snug text-slate-950">
                               {itemTitle}
@@ -16834,7 +16875,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <button
                         type="button"
                         className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 active:bg-white"
-                        onClick={restoreLastClockListItem}
+                        onClick={restoreLastClockModalItem}
                         aria-label="Undo last completed item"
                       >
                         Undo
@@ -16856,6 +16897,32 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1">
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
+                      !clockListShowCompleted
+                        ? "bg-slate-950 text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                        : "text-slate-600 active:bg-white"
+                    }`}
+                    onClick={() => setClockListShowCompleted(false)}
+                  >
+                    Active
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
+                      clockListShowCompleted
+                        ? "bg-slate-950 text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                        : "text-slate-600 active:bg-white"
+                    }`}
+                    onClick={() => setClockListShowCompleted(true)}
+                  >
+                    Completed
+                  </button>
+                </div>
+
+                {!clockListShowCompleted ? (
                 <form onSubmit={addClockProjectListItem} className="rounded-[22px] border border-slate-200 bg-slate-50 p-2.5 space-y-2">
                   <div className="flex gap-2">
                     <input
@@ -16880,40 +16947,24 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                   {clockListModal === "task" ? (
                     <div className="space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          className={`rounded-2xl px-3 py-3 text-[14px] font-black transition ${
-                            listCameraOpen && listCameraTarget === "modal"
-                              ? "bg-slate-950 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
-                              : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
-                          }`}
-                          onClick={() => {
-                            if (listCameraOpen && listCameraTarget === "modal") {
-                              stopListTaskCamera();
-                            } else {
-                              void startListTaskCamera("modal");
-                            }
-                          }}
-                          aria-pressed={listCameraOpen && listCameraTarget === "modal"}
-                        >
-                          Camera
-                        </button>
-                        <button
-                          type="button"
-                          className="rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-800 active:bg-slate-100"
-                          onClick={() => clockListPhotoInputRef.current?.click()}
-                        >
-                          Attach
-                        </button>
-                      </div>
-                      <input
-                        ref={clockListPhotoInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(event) => void handleClockListImagePick(event)}
-                      />
+                      <button
+                        type="button"
+                        className={`w-full rounded-2xl px-3 py-3 text-[15px] font-black transition ${
+                          listCameraOpen && listCameraTarget === "modal"
+                            ? "bg-slate-950 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                            : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
+                        }`}
+                        onClick={() => {
+                          if (listCameraOpen && listCameraTarget === "modal") {
+                            stopListTaskCamera();
+                          } else {
+                            void startListTaskCamera("modal");
+                          }
+                        }}
+                        aria-pressed={listCameraOpen && listCameraTarget === "modal"}
+                      >
+                        Camera
+                      </button>
                       {listCameraOpen && listCameraTarget === "modal" ? (
                         <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
                           <video
@@ -16930,9 +16981,6 @@ const handlePhotoQuickUpload = async (event) => {
                           >
                             Capture Photo
                           </button>
-                          <p className="text-center text-[12px] font-bold text-slate-500">
-                            Each capture is added as a separate task item.
-                          </p>
                         </div>
                       ) : null}
                       {listCameraError && listCameraTarget === "modal" ? (
@@ -16940,37 +16988,18 @@ const handlePhotoQuickUpload = async (event) => {
                           {listCameraError}
                         </p>
                       ) : null}
-                      {listCameraStatus && listCameraTarget === "modal" && !listCameraError ? (
-                        <p className="rounded-2xl bg-emerald-50 px-3 py-2 text-[13px] font-black text-emerald-700">
-                          {listCameraStatus}
-                        </p>
-                      ) : null}
-                      {clockListImageDraft ? (
-                        <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2">
-                          <img
-                            src={clockListImageDraft.dataUrl}
-                            alt=""
-                            className="h-12 w-12 rounded-2xl border border-slate-200 object-cover shadow-sm"
-                          />
-                          <p className="min-w-0 flex-1 text-[13px] font-bold text-slate-600">
-                            Attached photo will save with this task.
-                          </p>
-                          <button
-                            type="button"
-                            className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-500 active:bg-slate-100"
-                            onClick={() => setClockListImageDraft(null)}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ) : null}
                     </div>
                   ) : null}
                 </form>
+                ) : null}
               </div>
 
               <div className="min-h-0 flex-1 overflow-y-auto p-3 space-y-2">
-                {activeClockListItems.map((item) => {
+                {activeClockListItems.length === 0 ? (
+                  <p className="rounded-2xl bg-slate-50 px-3 py-5 text-center text-[14px] font-bold text-slate-500">
+                    {clockListShowCompleted ? "No completed items yet." : "No items yet."}
+                  </p>
+                ) : activeClockListItems.map((item) => {
                   const imageUrl = listItemImageUrl(item);
                   const itemTitle = listItemTitle(item);
                   return (
@@ -16978,12 +17007,18 @@ const handlePhotoQuickUpload = async (event) => {
                       key={item.id}
                       className="flex w-full items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3.5 active:bg-emerald-50"
                     >
-                      <input
-                        type="checkbox"
-                        className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
-                        onChange={() => completeClockProjectListItem(clockListModal, item.id)}
-                        aria-label={`Complete ${itemTitle}`}
-                      />
+                      {clockListShowCompleted ? (
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
+                          ✓
+                        </span>
+                      ) : (
+                        <input
+                          type="checkbox"
+                          className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
+                          onChange={() => completeClockProjectListItem(clockListModal, item.id)}
+                          aria-label={`Complete ${itemTitle}`}
+                        />
+                      )}
                       <p className="min-w-0 flex-1 break-words text-[17px] font-black leading-snug text-slate-950">
                         {itemTitle}
                       </p>
