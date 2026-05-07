@@ -10998,11 +10998,17 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "dashboard" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 sm:p-5 space-y-4">
-                <div>
-                  <h2 className="font-bold text-xl">Employees</h2>
-                  <p className="text-[15px] font-medium text-slate-500 mt-0.5">Live Dashboard</p>
+            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
+              <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="flex items-start justify-between gap-3 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">Employees</h2>
+                    <p className="mt-1 text-[15px] font-semibold text-slate-500">Live Dashboard</p>
+                  </div>
+                  <div className="shrink-0 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-emerald-700">
+                    <span className="mr-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.16)]" />
+                    Live
+                  </div>
                 </div>
                 {!userCompany?.id || !companyChecked ? (
                   <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
@@ -11019,7 +11025,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 )}
                 {userCompany?.id && companyChecked ? (
-                  <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 space-y-3 min-w-0 shadow-sm">
+                  <div className="rounded-[26px] border border-slate-200/90 bg-gradient-to-b from-white to-slate-50/80 p-3 sm:p-4 space-y-3 min-w-0 shadow-[0_16px_34px_rgba(15,23,42,0.08)]">
                     <div className="hidden">
                       <h3 className="text-[17px] font-bold text-slate-900">Live team</h3>
                       <p className="hidden">
@@ -11038,22 +11044,22 @@ const handlePhotoQuickUpload = async (event) => {
                     {dashboardLoading ? (
                       <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-2xl bg-slate-950 p-3 text-white">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-300">Working</p>
-                        <p className="text-[22px] font-black tabular-nums leading-tight">
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] bg-slate-950 p-3 text-white shadow-[0_12px_22px_rgba(15,23,42,0.22)]">
+                        <p className="text-[9px] font-black uppercase tracking-wide text-slate-300">Working</p>
+                        <p className="text-[25px] font-black tabular-nums leading-none">
                           {dashboardLoading ? "..." : (dashboardLiveWorkingCards || []).length}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Hours</p>
-                        <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
+                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Hours</p>
+                        <p className="text-[clamp(15px,4vw,19px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
                           {formatDuration(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Labour</p>
-                        <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
+                      <div className="flex min-h-[76px] flex-col justify-between rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_18px_rgba(15,23,42,0.05)]">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Labour</p>
+                        <p className="text-[clamp(14px,3.7vw,18px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
                           {formatMoney(dashboardSummary.totalCost)}
                         </p>
                       </div>
@@ -11086,17 +11092,17 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div
                             key={`live-${String(uid)}`}
-                            className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 space-y-2 min-w-0 max-w-full"
+                            className="rounded-[22px] border border-slate-200 bg-white p-3.5 space-y-3 min-w-0 max-w-full shadow-[0_14px_28px_rgba(15,23,42,0.08)]"
                           >
                             <div className="min-w-0">
-                              <p className="text-[18px] font-black text-slate-900 leading-snug break-words flex items-baseline justify-between gap-2">
+                              <p className="text-[17px] font-black text-slate-950 leading-snug break-words flex items-start justify-between gap-3">
                                 {displayName || "—"}
-                                <span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[13px] font-black tabular-nums text-white">{formatTimer(timerSeconds)}</span>
+                                <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-[13px] font-black tabular-nums text-white shadow-[0_8px_16px_rgba(15,23,42,0.20)]">{formatTimer(timerSeconds)}</span>
                               </p>
-                              <p className="text-[14px] font-bold text-slate-700 leading-snug tabular-nums">
+                              <p className="mt-1 text-[14px] font-bold text-slate-500 leading-snug tabular-nums">
                                 Clocked in {clockInDisp}
                               </p>
-                              <p className="text-[15px] font-semibold text-slate-700 leading-snug break-words">
+                              <p className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-[15px] font-bold text-slate-700 leading-snug break-words">
                                 {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
                               </p>
                             </div>
@@ -11114,7 +11120,7 @@ const handlePhotoQuickUpload = async (event) => {
                             {hasLiveGps ? (
                               <button
                                 type="button"
-                                className="w-fit text-[14px] font-bold text-blue-700 underline decoration-blue-700/50 underline-offset-2"
+                                className="w-fit rounded-full border border-blue-100 bg-blue-50 px-3 py-1.5 text-[14px] font-black text-blue-700 shadow-sm"
                                 onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
                               >
                                 Live location
@@ -11158,7 +11164,9 @@ const handlePhotoQuickUpload = async (event) => {
                         );
                       })}
                     {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
-                      <p className="text-[15px] text-slate-700 text-center py-2">No employees currently clocked in.</p>
+                      <div className="rounded-[22px] border border-dashed border-slate-200 bg-white px-4 py-6 text-center shadow-sm">
+                        <p className="text-[15px] font-bold text-slate-700">No employees currently clocked in.</p>
+                      </div>
                     ) : null}
                   </div>
                 ) : null}
