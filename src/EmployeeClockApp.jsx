@@ -12816,18 +12816,27 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.08)] overflow-hidden">
-              <CardContent className="p-3 sm:p-5 space-y-3">
-                <div className="rounded-[22px] border border-slate-200 bg-white p-2.5 space-y-2 shadow-sm">
-                  <div className="grid grid-cols-3 gap-1.5">
+            <Card className="rounded-[30px] border border-slate-200/80 bg-gradient-to-b from-white via-slate-50/70 to-white shadow-[0_24px_56px_rgba(15,23,42,0.12)] overflow-hidden">
+              <CardContent className="p-3.5 sm:p-5 space-y-3.5">
+                <div className="rounded-[28px] border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-amber-950 p-3.5 space-y-3 text-white shadow-[0_22px_44px_rgba(15,23,42,0.22)]">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">Date range</p>
+                      <p className="mt-1 text-[16px] font-black text-white tabular-nums">{reportsDateRangeLabel}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-amber-100">
+                      Reports
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
                     {reportsQuickRangeOptions.map((p) => (
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-xl px-2 py-2 text-[11px] font-black border transition-colors leading-tight ${
+                        className={`rounded-2xl px-2 py-3 text-[13px] font-black border transition-colors leading-tight ${
                           reportsRangePreset === p.id
-                            ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
-                            : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
+                            ? "bg-white text-slate-950 border-white shadow-[0_12px_24px_rgba(0,0,0,0.22)]"
+                            : "bg-white/10 text-white border-white/15 active:bg-white/20"
                         }`}
                         onClick={() => {
                           const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
@@ -12844,12 +12853,12 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <label className="block min-w-0 space-y-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block min-w-0 space-y-1.5 text-[12px] font-black uppercase tracking-wide text-amber-100">
                       Date from
                       <input
                         type="date"
-                        className="block h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
+                        className="block h-[52px] w-full min-w-0 rounded-2xl border border-white/20 bg-white px-3 text-[15px] font-black text-slate-950 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] [color-scheme:light] focus:border-amber-300"
                         value={reportsDateFrom}
                         onChange={(e) => {
                           setReportsDateFrom(e.target.value);
@@ -12859,11 +12868,11 @@ const handlePhotoQuickUpload = async (event) => {
                         }}
                       />
                     </label>
-                    <label className="block min-w-0 space-y-1 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                    <label className="block min-w-0 space-y-1.5 text-[12px] font-black uppercase tracking-wide text-amber-100">
                       Date to
                       <input
                         type="date"
-                        className="block h-10 w-full min-w-0 rounded-xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
+                        className="block h-[52px] w-full min-w-0 rounded-2xl border border-white/20 bg-white px-3 text-[15px] font-black text-slate-950 outline-none shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] [color-scheme:light] focus:border-amber-300"
                         value={reportsDateTo}
                         onChange={(e) => {
                           setReportsDateTo(e.target.value);
@@ -12877,11 +12886,11 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 {reportsAvailableDims.length ? (
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-2.5 shadow-sm">
-                    <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                  <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
+                    <label className="block space-y-1.5 text-[12px] font-black uppercase tracking-[0.12em] text-slate-500">
                       View by
                       <select
-                        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        className="h-[52px] w-full rounded-[20px] border border-slate-200 bg-gradient-to-b from-white to-slate-50 px-4 text-[17px] font-black text-slate-950 outline-none shadow-inner focus:border-slate-400 focus:bg-white"
                         value={reportsCurrentViewBy}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -12898,20 +12907,21 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
 
-                <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                <div className="rounded-[28px] border border-slate-200 bg-white px-4 py-4 shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-700">
                         Reports
                       </p>
-                      <h2 className="mt-1 text-[23px] font-black leading-tight tracking-normal text-slate-950 break-words">
+                      <h2 className="mt-1 text-[27px] font-black leading-tight tracking-normal text-slate-950 break-words">
                         {reportsCurrentTitle}
                       </h2>
+                      <p className="mt-1 text-[14px] font-bold text-slate-500 tabular-nums">{reportsDateRangeLabel}</p>
                     </div>
                     {reportsSafeDrillStack.length ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 shadow-sm active:bg-white"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-950 px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)] active:bg-slate-800"
                         onClick={() => {
                           const next = reportsSafeDrillStack.slice(0, -1);
                           setReportsDrillStack(next);
@@ -12922,7 +12932,7 @@ const handlePhotoQuickUpload = async (event) => {
                         Back
                       </button>
                     ) : (
-                      <div className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                      <div className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] font-black text-amber-800">
                         {reportsTotalEntries} entries
                       </div>
                     )}
@@ -12947,39 +12957,39 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-3 shadow-sm">
-                      <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-2">
-                        <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">Current total</p>
-                        <p className="rounded-full bg-white px-2.5 py-1 text-[11px] font-black text-slate-600">
+                    <div className="rounded-[28px] border border-slate-200 bg-white p-3.5 shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                        <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Current total</p>
+                        <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
                           {reportsSafeDrillStack.length ? "Filtered" : "All entries"}
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 pt-3">
-                        <div className="rounded-2xl bg-white px-3 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Hours</p>
-                          <p className="mt-1 text-[22px] font-black tabular-nums leading-none text-slate-950">
+                      <div className="grid grid-cols-2 gap-2.5 pt-3">
+                        <div className="rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-[0_18px_30px_rgba(15,23,42,0.24)]">
+                          <p className="text-[11px] font-black uppercase tracking-wide text-amber-200">Hours</p>
+                          <p className="mt-2 text-[30px] font-black tabular-nums leading-none text-white">
                             {formatDuration(reportsVisibleSummary.minutes)}
                           </p>
                         </div>
-                        <div className="rounded-2xl bg-white px-3 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Amount</p>
-                          <p className="mt-1 text-[22px] font-black tabular-nums leading-none text-slate-950">
+                        <div className="rounded-[24px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 shadow-[0_14px_28px_rgba(120,53,15,0.08)]">
+                          <p className="text-[11px] font-black uppercase tracking-wide text-amber-700">Amount</p>
+                          <p className="mt-2 text-[30px] font-black tabular-nums leading-none text-slate-950">
                             {formatMoney(reportsVisibleSummary.cost)}
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm overflow-hidden">
-                      <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
-                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    <div className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_36px_rgba(15,23,42,0.08)] overflow-hidden">
+                      <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-950 to-slate-900 px-4 py-3 text-white">
+                        <p className="text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">
                           {reportsCurrentViewBy === "project"
                             ? "Project"
                             : reportsCurrentViewBy === "employee"
                               ? "Employee"
                               : "Cost center"}
                         </p>
-                        <p className="text-right text-[11px] font-black uppercase tracking-wide text-slate-500">
+                        <p className="text-right text-[11px] font-black uppercase tracking-[0.16em] text-amber-200">
                           Hours / Amount
                         </p>
                       </div>
@@ -13002,7 +13012,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <Tag
                               key={`${reportsCurrentViewBy}-${row.key}`}
                               type={canDrill ? "button" : undefined}
-                              className="w-full border-b border-slate-100 bg-white px-3 py-3 text-left last:border-b-0 active:bg-slate-50"
+                              className="w-full border-b border-slate-100 bg-white px-4 py-4 text-left last:border-b-0 active:bg-amber-50/50"
                               onClick={
                                 canDrill
                                   ? () => {
@@ -13014,19 +13024,19 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[16px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
-                                  <p className="mt-1 text-[12px] font-bold text-slate-500">
+                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="mt-1 text-[13px] font-bold text-slate-500">
                                     {row.rows.length} entries{canDrill ? " - details" : ""}
                                   </p>
                                 </div>
                                 <div className="shrink-0 text-right">
-                                  <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
-                                  <p className="mt-1 text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                  <p className="text-[16px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                  <p className="mt-1 text-[14px] font-black tabular-nums text-amber-700">{formatMoney(row.cost)}</p>
                                 </div>
                               </div>
-                              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
                                 <div
-                                  className="h-full rounded-full bg-slate-950 transition-all"
+                                  className="h-full rounded-full bg-gradient-to-r from-slate-950 to-amber-500 transition-all"
                                   style={{
                                     width: `${Math.max(
                                       6,
