@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 
+const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
+const OPERA_APP_CHANNEL = import.meta.env.VITE_OPERA_APP_CHANNEL || "production";
+const IS_OPERA_DEVELOPMENT_APP = OPERA_APP_CHANNEL !== "production";
+
 const Card = ({ children, className }) => (
   <div className={`bg-white rounded-[28px] border border-slate-200/80 shadow-[0_18px_38px_rgba(15,23,42,0.08)] ${className || ""}`}>{children}</div>
 );
@@ -1853,7 +1857,7 @@ function PublicPhotoShareView({ share, index, setIndex }) {
     <div className="min-h-[100dvh] bg-[#edf2f7] text-slate-900 flex justify-center">
       <div className="w-full max-w-3xl bg-[#f7f9fc] min-h-[100dvh] shadow-[0_24px_70px_rgba(15,23,42,0.16)]">
         <header className="m-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
-          <h1 className="text-2xl font-black tracking-tight">OPERA.AI</h1>
+          <h1 className="text-2xl font-black tracking-tight">{OPERA_APP_NAME}</h1>
           <p className="text-sm font-medium text-slate-600">
             Shared project photos{share?.folder ? ` - ${share.folder}` : ""}
           </p>
@@ -10954,7 +10958,7 @@ const handlePhotoQuickUpload = async (event) => {
       <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
         <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
           <div className="text-4xl mb-3">⏱️</div>
-          <p className="text-sm font-semibold text-slate-600">Loading OPERA.AI...</p>
+          <p className="text-sm font-semibold text-slate-600">Loading {OPERA_APP_NAME}...</p>
         </div>
       </div>
     );
@@ -10969,7 +10973,7 @@ const handlePhotoQuickUpload = async (event) => {
               <div className="flex items-center gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
                 <div>
-                  <h1 className="text-2xl font-bold tracking-tight">OPERA.AI</h1>
+                  <h1 className="text-2xl font-bold tracking-tight">{OPERA_APP_NAME}</h1>
                   <p className="text-sm text-slate-600">Create Account</p>
                 </div>
               </div>
@@ -11056,7 +11060,7 @@ const handlePhotoQuickUpload = async (event) => {
             <div className="flex items-center gap-3">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl">⏱️</div>
               <div>
-                <h1 className="text-2xl font-bold tracking-tight">OPERA.AI</h1>
+                <h1 className="text-2xl font-bold tracking-tight">{OPERA_APP_NAME}</h1>
               </div>
             </div>
           </div>
@@ -11193,7 +11197,7 @@ const handlePhotoQuickUpload = async (event) => {
                 setAuthStep("login");
               }}
             >
-              Continue to OPERA.AI
+              Continue to {OPERA_APP_NAME}
             </Button>
           </div>
         </div>
@@ -12392,7 +12396,14 @@ const handlePhotoQuickUpload = async (event) => {
                 ☰
               </button>
               <div className="flex-1 min-w-0">
-                <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
+                  {IS_OPERA_DEVELOPMENT_APP && (
+                    <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700">
+                      Development
+                    </span>
+                  )}
+                </div>
                 <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">

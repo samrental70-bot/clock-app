@@ -5,6 +5,22 @@
 - Production / trial app: `main` branch, deployed with `npx.cmd vercel --prod`
 - Development app: `develop` branch, deployed without `--prod` for testing
 
+## Phone Installs
+
+Production and development can both be installed on the same phone.
+
+- Production installs as `OPERA.AI`
+- Development installs as `OPERA.AI Development`
+- Development uses separate PWA manifest and icon files
+
+Use the production link for the team trial:
+
+```text
+https://project-rui1d.vercel.app
+```
+
+Use the latest development preview link for testing new changes before release.
+
 ## Rules
 
 1. Build new features and fixes on `develop`.

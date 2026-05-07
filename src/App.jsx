@@ -2,6 +2,8 @@ import React, { Component, useEffect } from "react";
 import EmployeeClockApp from "./EmployeeClockApp";
 import { supabase } from "./supabaseClient";
 
+const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
+
 function errorCodeFor(error) {
   const raw = `${error?.name || "Error"}:${error?.message || ""}:${error?.stack || ""}`;
   let hash = 0;
@@ -47,7 +49,7 @@ class AppErrorBoundary extends Component {
         <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center p-4 text-slate-900">
           <div className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-5 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
             <h1 className="text-xl font-black">Something went wrong</h1>
-            <p className="mt-2 text-sm font-semibold text-slate-600">Please reload OPERA.AI.</p>
+            <p className="mt-2 text-sm font-semibold text-slate-600">Please reload {OPERA_APP_NAME}.</p>
             <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-left">
               <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Error code</p>
               <p className="mt-1 break-all text-[14px] font-black text-slate-950">{code}</p>

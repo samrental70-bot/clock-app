@@ -1,7 +1,8 @@
 {
   "name": "OPERA.AI",
   "short_name": "OPERA.AI",
-  "start_url": "/",
+  "id": "/?app=production",
+  "start_url": "/?app=production",
   "scope": "/",
   "display": "standalone",
   "background_color": "#0f172a",
