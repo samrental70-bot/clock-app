@@ -126,9 +126,9 @@ const SCHEDULE_FORM_EMPTY = {
 const SCHEDULE_GRID_HOUR_START = 6;
 const SCHEDULE_GRID_HOUR_END = 22;
 const SCHEDULE_GRID_TOTAL_MINUTES = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR_START) * 60;
-/** Pixel height per hour in schedule day columns (readability on mobile). */
-const SCHEDULE_GRID_PX_PER_HOUR = 56;
-const SCHEDULE_MONTH_CHIP_MAX = 3;
+/** Pixel height per hour in schedule day columns (compact enough for mobile calendar-first views). */
+const SCHEDULE_GRID_PX_PER_HOUR = 46;
+const SCHEDULE_MONTH_CHIP_MAX = 1;
 
 /** Ignore taps meant for chips/cards/dialogs—not empty calendar background. Handles non-Element targets safely. */
 function isAdminScheduleCalendarBackgroundIgnored(ev) {
@@ -11833,18 +11833,15 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "schedule" && !isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-3 sm:p-5 space-y-4">
-                <div className="space-y-3">
-                  <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
-                    <h2 className="text-[26px] font-black leading-tight tracking-normal text-slate-950">Schedule</h2>
-                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Your assignments</p>
-                    <p className="mt-2 inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-bold text-slate-600">
-                      {companyTimeZone}
-                    </p>
+              <CardContent className="p-1.5 sm:p-3 space-y-1.5">
+                <div className="space-y-1.5">
+                  <div className="rounded-[18px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                    <h2 className="text-[22px] font-black leading-none tracking-normal text-slate-950">Schedule</h2>
+                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500">Your assignments · {companyTimeZone}</p>
                   </div>
                   <button
                     type="button"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-3 px-3 text-[15px] font-bold text-slate-900 shadow-sm relative z-[1] pointer-events-auto"
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-2 px-3 text-[13px] font-bold text-slate-900 shadow-sm relative z-[1] pointer-events-auto"
                     onClick={() => void handleEmployeeRequestNotificationPermission()}
                   >
                     Enable phone notifications
@@ -11854,13 +11851,13 @@ const handlePhotoQuickUpload = async (event) => {
                       {employeeNotifPermMessage}
                     </div>
                   ) : null}
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                    <label className="text-[12px] font-black uppercase tracking-wide text-slate-500" htmlFor="sched-employee-view">
+                  <div className="rounded-[18px] border border-slate-200 bg-white p-1.5 shadow-sm space-y-1">
+                    <label className="sr-only" htmlFor="sched-employee-view">
                       View
                     </label>
                     <select
                       id="sched-employee-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 px-3 text-[16px] h-12 font-bold text-slate-950"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-1.5 px-3 text-[14px] h-9 font-bold text-slate-950"
                       value={scheduleViewMode}
                       onChange={(e) => setScheduleViewMode(e.target.value)}
                     >
@@ -11872,10 +11869,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </div>
                   {scheduleViewMode !== "list" ? (
-                    <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-slate-200 bg-slate-50/90 p-2 shadow-inner">
+                    <div className="grid grid-cols-3 gap-1 rounded-[18px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
                         type="button"
-                        className="rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[14px] font-black text-slate-800 shadow-sm"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
                         onClick={() => {
                           const tz = companyTimeZone;
                           const anchor =
@@ -11892,7 +11889,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-2xl bg-slate-950 px-2 py-2.5 text-[14px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                        className="rounded-xl bg-slate-950 px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                         onClick={() =>
                           setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
                         }
@@ -11901,7 +11898,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[14px] font-black text-slate-800 shadow-sm"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
                         onClick={() => {
                           const tz = companyTimeZone;
                           const anchor =
@@ -11930,15 +11927,15 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{employeeScheduleError}</div>
                 ) : scheduleViewMode !== "list" ? (
                   scheduleViewMode === "cal30" ? (
-                    <div className="w-full min-w-0 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
-                      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-3">
-                        <p className="text-center text-[clamp(22px,5vw,26px)] font-black text-slate-950">
+                    <div className="w-full min-w-0 overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-[0_12px_24px_rgba(15,23,42,0.07)]">
+                      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50 px-3 py-1.5">
+                        <p className="text-center text-[clamp(17px,4.2vw,20px)] font-black text-slate-950">
                           {scheduleMonthGridInfo.monthYearLabel}
                         </p>
                       </div>
-                      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-[clamp(11px,2.8vw,13px)] font-black uppercase tracking-wide text-slate-500">
+                      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-[clamp(8px,2.3vw,10px)] font-black uppercase tracking-wide text-slate-500">
                         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-                          <div key={d} className="py-2.5 text-center">
+                          <div key={d} className="py-1 text-center">
                             {d}
                           </div>
                         ))}
@@ -11962,13 +11959,13 @@ const handlePhotoQuickUpload = async (event) => {
                                 if (!cell.inMonth) return;
                                 if (e.key === "Enter" || e.key === " ") setScheduleCalendarSelectedDayKey(cell.dayKey);
                               }}
-                              className={`relative flex min-h-[6.75rem] flex-col gap-1.5 border-b border-r border-slate-100 px-2 py-2 text-left outline-none ring-inset transition-colors ${
+                              className={`relative flex min-h-[2.45rem] flex-col gap-0.5 border-b border-r border-slate-100 px-1 py-0.5 text-left outline-none ring-inset transition-colors ${
                                 cell.inMonth ? "bg-white active:bg-slate-50" : "bg-slate-50/80 opacity-75"
                               } ${isSel ? "ring-2 ring-[#174ea6]/35" : ""}`}
                             >
                               <div className="flex items-start gap-2">
                                 <span
-                                  className={`flex h-[1.875rem] min-w-[1.875rem] items-center justify-center text-[clamp(17px,4.2vw,20px)] font-bold tabular-nums leading-none ${
+                                  className={`flex h-5 min-w-5 items-center justify-center text-[clamp(12px,3.5vw,15px)] font-black tabular-nums leading-none ${
                                     isToday
                                       ? "rounded-full bg-[#1a73e8] text-white"
                                       : cell.inMonth
@@ -11989,13 +11986,13 @@ const handlePhotoQuickUpload = async (event) => {
                                       e.stopPropagation();
                                       setScheduleCalendarFocusTaskId(String(task.id));
                                     }}
-                                    className="truncate rounded-lg bg-gradient-to-br from-[#1a73e8] to-[#1558d6] px-1.5 py-1.5 text-left text-[13px] font-black text-white shadow-[0_8px_16px_rgba(26,115,232,0.22)]"
+                                    className="truncate rounded bg-gradient-to-br from-[#1a73e8] to-[#1558d6] px-1 py-0.5 text-left text-[9px] font-black leading-none text-white shadow-[0_5px_10px_rgba(26,115,232,0.16)]"
                                   >
                                     {String(task?.task_title ?? "").trim() || "Task"}
                                   </button>
                                 ))}
                                 {more > 0 ? (
-                                  <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
+                                  <span className="inline-flex px-0.5 text-[10px] font-bold tabular-nums text-slate-600">
                                     +{more} more
                                   </span>
                                 ) : null}
@@ -12029,9 +12026,9 @@ const handlePhotoQuickUpload = async (event) => {
                         const compact = scheduleViewMode === "cal7";
                         return (
                           <>
-                            <div className="sticky top-0 z-30 overflow-hidden rounded-t-[24px] border border-slate-200 border-b-slate-100 bg-white/95 shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur">
+                            <div className="sticky top-0 z-30 overflow-hidden rounded-t-[20px] border border-slate-200 border-b-slate-100 bg-white/95 shadow-[0_8px_18px_rgba(15,23,42,0.07)] backdrop-blur">
                               <div className="flex min-w-0">
-                                <div className="w-[3rem] shrink-0 border-r border-slate-100 bg-slate-50 sm:w-[3.25rem]" aria-hidden />
+                                <div className="w-[2.75rem] shrink-0 border-r border-slate-100 bg-slate-50 sm:w-[3rem]" aria-hidden />
                                 <div className="flex min-w-0 flex-1 divide-x divide-slate-100">
                                   {scheduleCalendarVisibleDayKeys.map((dayKey) => {
                                     const dn = Number(String(dayKey).split("-")[2]) || 0;
@@ -12045,17 +12042,17 @@ const handlePhotoQuickUpload = async (event) => {
                                         key={`hdr-${dayKey}`}
                                         type="button"
                                         onClick={() => setScheduleCalendarSelectedDayKey(dayKey)}
-                                        className="min-w-0 flex-1 px-0.5 py-3 text-center outline-none transition-colors active:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
+                                        className="min-w-0 flex-1 px-0.5 py-2 text-center outline-none transition-colors active:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
                                       >
                                         <span
-                                          className={`block text-[13px] font-bold uppercase tracking-wide ${
+                                          className={`block text-[11px] font-black uppercase tracking-wide ${
                                             labelAccent ? "text-[#174ea6]" : "text-slate-500"
                                           }`}
                                         >
                                           {wallWeekdayShort(dayKey, companyTimeZone)}
                                         </span>
                                         <span
-                                          className={`mx-auto mt-1.5 flex h-11 min-w-[2.75rem] max-w-[2.75rem] items-center justify-center rounded-2xl text-[clamp(17px,4.8vw,20px)] font-black tabular-nums leading-none ${
+                                          className={`mx-auto mt-1 flex h-9 min-w-[2.25rem] max-w-[2.25rem] items-center justify-center rounded-xl text-[clamp(15px,4.2vw,18px)] font-black tabular-nums leading-none ${
                                             dayIsToday
                                               ? "bg-[#1a73e8] text-white shadow-[0_10px_18px_rgba(26,115,232,0.25)]"
                                               : daySel
@@ -12071,10 +12068,10 @@ const handlePhotoQuickUpload = async (event) => {
                                 </div>
                               </div>
                             </div>
-                            <div className="overflow-hidden rounded-b-[24px] border border-t-0 border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.08)]">
+                            <div className="overflow-hidden rounded-b-[20px] border border-t-0 border-slate-200 bg-white shadow-[0_12px_24px_rgba(15,23,42,0.07)]">
                               <div className="flex min-h-0 w-full">
                                 <div
-                                  className="w-[3rem] shrink-0 border-r border-slate-200 bg-slate-50 py-2 pr-1.5 text-right text-[clamp(12px,3.4vw,14px)] font-semibold tabular-nums leading-none text-slate-500 sm:w-[3.25rem]"
+                                  className="w-[2.75rem] shrink-0 border-r border-slate-200 bg-slate-50 py-2 pr-1 text-right text-[clamp(11px,3.1vw,13px)] font-semibold tabular-nums leading-none text-slate-500 sm:w-[3rem]"
                                   style={{ minHeight: colH }}
                                 >
                                   {Array.from(
@@ -12212,22 +12209,19 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "schedule" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-3 sm:p-5 space-y-4">
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+              <CardContent className="p-1.5 sm:p-3 space-y-1.5">
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-[18px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-2.5 py-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
                     <div className="min-w-0">
-                      <h2 className="text-[26px] font-black leading-tight tracking-normal text-slate-950">
+                      <h2 className="text-[22px] font-black leading-none tracking-normal text-slate-950">
                         Schedule
                       </h2>
-                      <p className="mt-1 text-[14px] font-semibold text-slate-500">Team tasks</p>
-                      <p className="mt-2 inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[12px] font-bold text-slate-600">
-                        {companyTimeZone}
-                      </p>
+                      <p className="mt-0.5 text-[12px] font-semibold text-slate-500">Team tasks · {companyTimeZone}</p>
                     </div>
                     {!scheduleFormOpen && (
                       <Button
                         type="button"
-                        className="shrink-0 rounded-2xl h-12 px-5 text-[15px] font-black bg-slate-950 text-white shadow-[0_12px_22px_rgba(15,23,42,0.20)]"
+                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-slate-950 text-white shadow-[0_12px_22px_rgba(15,23,42,0.20)]"
                         onClick={() => {
                           setScheduleSaveError("");
                           setScheduleEditingTaskId(null);
@@ -12244,13 +12238,13 @@ const handlePhotoQuickUpload = async (event) => {
                       </Button>
                     )}
                   </div>
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                    <label className="text-[12px] font-black uppercase tracking-wide text-slate-500" htmlFor="sched-admin-view">
+                  <div className="rounded-[18px] border border-slate-200 bg-white p-1.5 shadow-sm space-y-1">
+                    <label className="sr-only" htmlFor="sched-admin-view">
                       View
                     </label>
                     <select
                       id="sched-admin-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 px-3 text-[16px] h-12 font-bold text-slate-950"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-1.5 px-3 text-[14px] h-9 font-bold text-slate-950"
                       value={scheduleViewMode}
                       onChange={(e) => setScheduleViewMode(e.target.value)}
                     >
@@ -12262,10 +12256,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </select>
                   </div>
                   {scheduleViewMode !== "list" ? (
-                    <div className="grid grid-cols-3 gap-2 rounded-[22px] border border-slate-200 bg-slate-50/90 p-2 shadow-inner">
+                    <div className="grid grid-cols-3 gap-1 rounded-[18px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
                         type="button"
-                        className="rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[14px] font-black text-slate-800 shadow-sm"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
                         onClick={() => {
                           const tz = companyTimeZone;
                           const anchor =
@@ -12282,7 +12276,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-2xl bg-slate-950 px-2 py-2.5 text-[14px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                        className="rounded-xl bg-slate-950 px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                         onClick={() =>
                           setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
                         }
@@ -12291,7 +12285,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[14px] font-black text-slate-800 shadow-sm"
+                        className="rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 shadow-sm"
                         onClick={() => {
                           const tz = companyTimeZone;
                           const anchor =
@@ -12621,15 +12615,15 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                     ) : null}
                     {scheduleViewMode === "cal30" ? (
-                    <div className="w-full min-w-0 overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_18px_36px_rgba(15,23,42,0.08)]">
-                      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-3">
-                        <p className="text-center text-[clamp(22px,5vw,26px)] font-black text-slate-950">
+                    <div className="w-full min-w-0 overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-[0_12px_24px_rgba(15,23,42,0.07)]">
+                      <div className="border-b border-slate-100 bg-gradient-to-br from-white to-slate-50 px-3 py-1.5">
+                        <p className="text-center text-[clamp(17px,4.2vw,20px)] font-black text-slate-950">
                           {scheduleMonthGridInfo.monthYearLabel}
                         </p>
                       </div>
-                      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-[clamp(11px,2.8vw,13px)] font-black uppercase tracking-wide text-slate-500">
+                      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-[clamp(8px,2.3vw,10px)] font-black uppercase tracking-wide text-slate-500">
                         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
-                          <div key={d} className="py-2.5 text-center">
+                          <div key={d} className="py-1 text-center">
                             {d}
                           </div>
                         ))}
@@ -12677,12 +12671,12 @@ const handlePhotoQuickUpload = async (event) => {
                                 }
                                 openScheduleCreateFromSlot(cell.dayKey, "09:00");
                               }}
-                              className={`relative flex min-h-[6.75rem] flex-col gap-1.5 border-b border-r border-slate-100 px-2 py-2 transition-colors active:bg-slate-50 ${
+                              className={`relative flex min-h-[2.45rem] flex-col gap-0.5 border-b border-r border-slate-100 px-1 py-0.5 transition-colors active:bg-slate-50 ${
                                 cell.inMonth ? "cursor-pointer bg-white" : "bg-slate-50/80 opacity-75"
                               } ${isSel ? "ring-2 ring-inset ring-[#174ea6]/35" : ""} touch-manipulation`}
                             >
                               <span
-                                className={`flex h-[1.875rem] min-w-[1.875rem] max-w-fit items-center justify-center text-[clamp(17px,4.2vw,20px)] font-bold tabular-nums leading-none ${
+                                className={`flex h-5 min-w-5 max-w-fit items-center justify-center text-[clamp(12px,3.5vw,15px)] font-black tabular-nums leading-none ${
                                   isToday
                                     ? "rounded-full bg-[#1a73e8] px-2 text-white"
                                     : cell.inMonth
@@ -12702,7 +12696,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       e.stopPropagation();
                                       openAdminScheduleEditFromCalendar(task);
                                     }}
-                                    className={`truncate rounded-lg bg-gradient-to-br from-[#1a73e8] to-[#1558d6] px-2 py-1.5 text-left text-[14px] font-black text-white shadow-[0_8px_16px_rgba(26,115,232,0.22)] ${
+                                    className={`truncate rounded bg-gradient-to-br from-[#1a73e8] to-[#1558d6] px-1 py-0.5 text-left text-[9px] font-black leading-none text-white shadow-[0_5px_10px_rgba(26,115,232,0.16)] ${
                                       scheduleMoveModeTaskId === String(task?.id ?? "")
                                         ? "ring-2 ring-amber-300 ring-offset-1"
                                         : ""
@@ -12712,7 +12706,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   </button>
                                 ))}
                                 {more > 0 ? (
-                                  <span className="inline-flex px-1 text-[13px] font-semibold tabular-nums text-slate-600">
+                                  <span className="inline-flex px-0.5 text-[10px] font-bold tabular-nums text-slate-600">
                                     +{more} more
                                   </span>
                                 ) : null}
@@ -12733,9 +12727,9 @@ const handlePhotoQuickUpload = async (event) => {
                         const anchorKeys = scheduleCalendarVisibleDayKeys;
                         return (
                           <>
-                            <div className="sticky top-0 z-30 overflow-hidden rounded-t-[24px] border border-slate-200 border-b-slate-100 bg-white/95 shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur">
+                            <div className="sticky top-0 z-30 overflow-hidden rounded-t-[20px] border border-slate-200 border-b-slate-100 bg-white/95 shadow-[0_8px_18px_rgba(15,23,42,0.07)] backdrop-blur">
                               <div className="flex min-w-0">
-                                <div className="w-[3rem] shrink-0 border-r border-slate-100 bg-slate-50 sm:w-[3.25rem]" aria-hidden />
+                                <div className="w-[2.75rem] shrink-0 border-r border-slate-100 bg-slate-50 sm:w-[3rem]" aria-hidden />
                                 <div className="flex min-w-0 flex-1 divide-x divide-slate-100">
                                   {(anchorKeys || []).map((dayKey) => {
                                     const dn = Number(String(dayKey).split("-")[2]) || 0;
@@ -12749,17 +12743,17 @@ const handlePhotoQuickUpload = async (event) => {
                                         key={`adm-hdr-${dayKey}`}
                                         type="button"
                                         onClick={() => setScheduleCalendarSelectedDayKey(dayKey)}
-                                        className="min-w-0 flex-1 px-0.5 py-3 text-center outline-none transition-colors active:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
+                                        className="min-w-0 flex-1 px-0.5 py-2 text-center outline-none transition-colors active:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#174ea6]/40"
                                       >
                                         <span
-                                          className={`block text-[13px] font-bold uppercase tracking-wide ${
+                                          className={`block text-[11px] font-black uppercase tracking-wide ${
                                             labelAccent ? "text-[#174ea6]" : "text-slate-500"
                                           }`}
                                         >
                                           {wallWeekdayShort(dayKey, companyTimeZone)}
                                         </span>
                                         <span
-                                          className={`mx-auto mt-1.5 flex h-11 min-w-[2.75rem] max-w-[2.75rem] items-center justify-center rounded-2xl text-[clamp(17px,4.8vw,20px)] font-black tabular-nums leading-none ${
+                                          className={`mx-auto mt-1 flex h-9 min-w-[2.25rem] max-w-[2.25rem] items-center justify-center rounded-xl text-[clamp(15px,4.2vw,18px)] font-black tabular-nums leading-none ${
                                             dayIsToday
                                               ? "bg-[#1a73e8] text-white shadow-[0_10px_18px_rgba(26,115,232,0.25)]"
                                               : daySel
@@ -12775,10 +12769,10 @@ const handlePhotoQuickUpload = async (event) => {
                                 </div>
                               </div>
                             </div>
-                            <div className="overflow-hidden rounded-b-[24px] border border-t-0 border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.08)]">
+                            <div className="overflow-hidden rounded-b-[20px] border border-t-0 border-slate-200 bg-white shadow-[0_12px_24px_rgba(15,23,42,0.07)]">
                               <div className="flex min-h-0 w-full">
                                 <div
-                                  className="w-[3rem] shrink-0 border-r border-slate-200 bg-slate-50 py-2 pr-1.5 text-right text-[clamp(12px,3.4vw,14px)] font-semibold tabular-nums leading-none text-slate-500 sm:w-[3.25rem]"
+                                  className="w-[2.75rem] shrink-0 border-r border-slate-200 bg-slate-50 py-2 pr-1 text-right text-[clamp(11px,3.1vw,13px)] font-semibold tabular-nums leading-none text-slate-500 sm:w-[3rem]"
                                   style={{ minHeight: colH }}
                                 >
                                   {Array.from(
