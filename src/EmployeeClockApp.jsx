@@ -4027,11 +4027,12 @@ export default function EmployeeClockApp() {
     const cards = Array.isArray(dashboardLiveWorkingCards) ? dashboardLiveWorkingCards : [];
     return cards.map((card, index) => {
       const loc = dashboardLiveLocationByUserId?.[String(card?.uid)] || null;
-      const lat = Number(loc?.latitude ?? loc?.lat);
-      const lng = Number(loc?.longitude ?? loc?.lng);
+      const fallbackLoc = card?.rep?.clockInLocation || null;
+      const lat = Number(loc?.latitude ?? loc?.lat ?? fallbackLoc?.latitude);
+      const lng = Number(loc?.longitude ?? loc?.lng ?? fallbackLoc?.longitude);
       return {
         ...card,
-        loc,
+        loc: loc || fallbackLoc,
         hasGps: Number.isFinite(lat) && Number.isFinite(lng),
         lat,
         lng,
@@ -4040,6 +4041,34 @@ export default function EmployeeClockApp() {
       };
     });
   }, [dashboardLiveWorkingCards, dashboardLiveLocationByUserId]);
+
+  const dashboardLiveMapLocations = useMemo(
+    () => (dashboardRadarCards || []).filter((card) => card?.hasGps),
+    [dashboardRadarCards]
+  );
+
+  const openDashboardLiveLocationsMap = () => {
+    const locs = dashboardLiveMapLocations;
+    if (!locs.length) return;
+    if (locs.length === 1) {
+      openMap({ latitude: locs[0].lat, longitude: locs[0].lng });
+      return;
+    }
+    const first = locs[0];
+    const last = locs[locs.length - 1];
+    const waypoints = locs
+      .slice(1, -1)
+      .map((loc) => `${loc.lat},${loc.lng}`)
+      .join("|");
+    const params = new URLSearchParams({
+      api: "1",
+      origin: `${first.lat},${first.lng}`,
+      destination: `${last.lat},${last.lng}`,
+      travelmode: "driving",
+    });
+    if (waypoints) params.set("waypoints", waypoints);
+    window.open(`https://www.google.com/maps/dir/?${params.toString()}`, "_blank");
+  };
 
   const clockMediaContext = useMemo(() => {
     if (visibleCurrentShift) return visibleCurrentShift;
@@ -12048,6 +12077,7 @@ const handlePhotoQuickUpload = async (event) => {
                   setIsMenuOpen(true);
                 }}
                 className="h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                style={{ fontSize: 0, lineHeight: 0 }}
                 aria-label="Open menu"
               >
                 <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -12065,10 +12095,11 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => {
-                    setActiveTab("clock");
+                    setActiveTab(isAdmin ? "dashboard" : "clock");
                     setIsMenuOpen(false);
                   }}
                   className="h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                  style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Home"
                 >
                   <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -12082,6 +12113,7 @@ const handlePhotoQuickUpload = async (event) => {
                   type="button"
                   onClick={() => setActiveTab("notifications")}
                   className="relative h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                  style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Notifications"
                 >
                   <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -13691,10 +13723,10 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "dashboard" && isAdmin && (
             <div className="space-y-3">
               <section className="relative overflow-hidden rounded-[34px] border border-white bg-white px-3.5 py-4 shadow-[0_24px_58px_rgba(15,23,42,0.12)]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_90%_12%,rgba(37,99,235,0.12),transparent_34%),radial-gradient(circle_at_18%_0%,rgba(16,185,129,0.10),transparent_28%)]" />
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_10%,rgba(15,23,42,0.10),transparent_34%),radial-gradient(circle_at_18%_0%,rgba(15,23,42,0.06),transparent_28%)]" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-blue-700">Dashboard</p>
+                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-950">Dashboard</p>
                     <h2 className="mt-1 text-[23px] font-black leading-[1.02] text-slate-950 break-words">
                       {userCompany?.name || "Company"}
                     </h2>
@@ -13736,12 +13768,13 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     },
                     {
-                      label: "Receipts",
-                      action: () => setActiveTab("receipts"),
+                      label: "Pictures",
+                      action: openPhotosTab,
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
-                          <path d="M7 3h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2V5a2 2 0 0 1 2-2Z" />
-                          <path d="M8 8h8M8 12h8M8 16h5" />
+                          <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+                          <path d="m4 16 4-4 3 3 4-5 5 6" />
+                          <path d="M8 9h.01" />
                         </svg>
                       ),
                     },
@@ -13763,7 +13796,7 @@ const handlePhotoQuickUpload = async (event) => {
                       className="min-w-0 rounded-[22px] border border-slate-200 bg-white px-1.5 py-3 text-center text-slate-950 shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]"
                       onClick={item.action}
                     >
-                      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-[0_12px_24px_rgba(37,99,235,0.30)]">
+                      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br from-slate-950 to-slate-800 text-white shadow-[0_12px_24px_rgba(15,23,42,0.28)]">
                         {item.icon}
                       </span>
                       <span className="mt-2 block truncate text-[11px] font-black">{item.label}</span>
@@ -13812,7 +13845,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team pulse</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team pulse</p>
                         <h3 className="mt-1 text-[19px] font-black text-slate-950">Shift coverage</h3>
                       </div>
                       <button
@@ -13835,7 +13868,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
                             <span
                               key={`pulse-in-${card.uid}`}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-emerald-100 text-[10px] font-black text-emerald-800"
+                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-950 text-[10px] font-black text-white"
                               style={{ zIndex: 10 - index }}
                             >
                               {String(card.displayName || "?").slice(0, 1).toUpperCase()}
@@ -13869,13 +13902,18 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-4 pb-3">
-                      <div className="flex h-28 items-end gap-1.5">
+                    <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-3 pb-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged in by hour</p>
+                        <p className="text-[11px] font-black text-slate-400">6 AM - 5 PM</p>
+                      </div>
+                      <div className="flex h-32 items-end gap-1.5">
                         {(dashboardCoverageBars || []).map((bar) => (
                           <div key={bar.hour} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
+                            <span className="text-[10px] font-black tabular-nums text-slate-700">{bar.count}</span>
                             <div
-                              className="w-full rounded-t-xl bg-gradient-to-t from-blue-500 to-cyan-200 shadow-[0_10px_18px_rgba(14,165,233,0.18)]"
-                              style={{ height: `${bar.height}%`, opacity: bar.count > 0 ? 0.95 : 0.3 }}
+                              className="w-full rounded-t-xl bg-gradient-to-t from-slate-950 to-slate-700 shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                              style={{ height: `${bar.height}%`, opacity: bar.count > 0 ? 0.95 : 0.18 }}
                               title={`${bar.count} working`}
                             />
                             <span className="h-4 text-[9px] font-bold text-slate-400">{bar.label}</span>
@@ -13888,12 +13926,17 @@ const handlePhotoQuickUpload = async (event) => {
                   <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team radar</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team radar</p>
                         <h3 className="mt-1 text-[19px] font-black text-slate-950">Live job sites</h3>
                       </div>
-                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
-                        {dashboardRadarCards.filter((card) => card.hasGps).length} live
-                      </p>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700 disabled:opacity-50"
+                        disabled={!dashboardLiveMapLocations.length}
+                        onClick={openDashboardLiveLocationsMap}
+                      >
+                        {dashboardLiveMapLocations.length} live
+                      </button>
                     </div>
                     {dashboardLiveLocationsLoading ? (
                       <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Refreshing live GPS...</p>
@@ -13901,23 +13944,43 @@ const handlePhotoQuickUpload = async (event) => {
                     {dashboardLiveLocationsError ? (
                       <p className="mt-3 rounded-2xl bg-amber-50 p-3 text-[14px] font-bold text-amber-800">{String(dashboardLiveLocationsError)}</p>
                     ) : null}
-                    <div className="relative mt-4 h-44 overflow-hidden rounded-[26px] border border-slate-200 bg-[#e9f3f1] shadow-inner">
-                      <div className="absolute inset-0 bg-[linear-gradient(35deg,transparent_0_18%,rgba(255,255,255,0.75)_18%_22%,transparent_22%_45%,rgba(255,255,255,0.70)_45%_50%,transparent_50%),linear-gradient(120deg,rgba(37,99,235,0.14)_0_12%,transparent_12%_100%)]" />
+                    <div
+                      role="button"
+                      tabIndex={dashboardLiveMapLocations.length ? 0 : -1}
+                      className={`relative mt-4 block h-44 w-full overflow-hidden rounded-[26px] border border-slate-200 bg-[#e9eef5] text-left shadow-inner ${
+                        dashboardLiveMapLocations.length ? "cursor-pointer" : "cursor-default"
+                      }`}
+                      onClick={() => {
+                        if (dashboardLiveMapLocations.length) openDashboardLiveLocationsMap();
+                      }}
+                      onKeyDown={(event) => {
+                        if (!dashboardLiveMapLocations.length) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openDashboardLiveLocationsMap();
+                        }
+                      }}
+                      aria-label="Open all live job site locations"
+                    >
+                      <div className="absolute inset-0 bg-[linear-gradient(35deg,transparent_0_18%,rgba(255,255,255,0.78)_18%_22%,transparent_22%_45%,rgba(255,255,255,0.76)_45%_50%,transparent_50%),linear-gradient(120deg,rgba(15,23,42,0.10)_0_12%,transparent_12%_100%)]" />
                       <div className="absolute left-[-8%] top-[30%] h-5 w-[120%] -rotate-12 bg-white/80 shadow-sm" />
                       <div className="absolute left-[10%] top-[-8%] h-[130%] w-4 rotate-[35deg] bg-white/80 shadow-sm" />
                       <div className="absolute bottom-3 left-4 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
-                        {dashboardRadarCards.length ? "Tap a pin for location" : "No active locations"}
+                        {dashboardLiveMapLocations.length ? "Tap map to open live locations" : "No active locations"}
                       </div>
                       {(dashboardRadarCards || []).map((card) => (
                         <button
                           key={`radar-${card.uid}`}
                           type="button"
                           className={`absolute flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[12px] font-black shadow-[0_12px_24px_rgba(15,23,42,0.22)] ${
-                            card.hasGps ? "bg-blue-600 text-white" : "bg-slate-300 text-slate-600"
+                            card.hasGps ? "bg-slate-950 text-white" : "bg-slate-300 text-slate-600"
                           }`}
                           style={{ left: `${card.x}%`, top: `${card.y}%` }}
                           disabled={!card.hasGps}
-                          onClick={() => card.hasGps && openMap({ latitude: card.lat, longitude: card.lng })}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (card.hasGps) openMap({ latitude: card.lat, longitude: card.lng });
+                          }}
                           aria-label={`Open live location for ${card.displayName || "employee"}`}
                         >
                           {String(card.displayName || "?").slice(0, 1).toUpperCase()}
@@ -13929,7 +13992,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Working now</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Working now</p>
                         <h3 className="mt-1 text-[19px] font-black text-slate-950">Active team</h3>
                       </div>
                       <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
@@ -13961,8 +14024,9 @@ const handlePhotoQuickUpload = async (event) => {
                             : 0;
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
-                          const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
-                          const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
+                          const fallbackLoc = rep?.clockInLocation || null;
+                          const latRaw = liveLoc?.latitude ?? liveLoc?.lat ?? fallbackLoc?.latitude;
+                          const lngRaw = liveLoc?.longitude ?? liveLoc?.lng ?? fallbackLoc?.longitude;
                           const hasLiveGps =
                             latRaw != null &&
                             lngRaw != null &&
@@ -13992,7 +14056,7 @@ const handlePhotoQuickUpload = async (event) => {
                               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                                 <button
                                   type="button"
-                                  className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-[13px] font-black text-blue-700 disabled:opacity-50"
+                                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 disabled:opacity-50"
                                   disabled={!hasLiveGps}
                                   onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
                                 >
@@ -14016,7 +14080,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Today</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Today</p>
                         <h3 className="mt-1 text-[19px] font-black text-slate-950">Worked today</h3>
                       </div>
                       <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
