@@ -142,6 +142,29 @@ function getOperaAppShareUrl(email = "") {
   return url.toString();
 }
 
+function getCameraTorchTrack(stream) {
+  return stream?.getVideoTracks?.()?.[0] || null;
+}
+
+function cameraStreamSupportsTorch(stream) {
+  const track = getCameraTorchTrack(stream);
+  if (!track?.getCapabilities) return false;
+  try {
+    const capabilities = track.getCapabilities() || {};
+    const fillLightModes = Array.isArray(capabilities.fillLightMode) ? capabilities.fillLightMode : [];
+    return Boolean(capabilities.torch || fillLightModes.includes("torch") || fillLightModes.includes("flash"));
+  } catch (err) {
+    console.warn("Camera flash support check failed:", err);
+    return false;
+  }
+}
+
+async function applyCameraTorch(stream, enabled) {
+  const track = getCameraTorchTrack(stream);
+  if (!track?.applyConstraints) throw new Error("Flash is not supported on this camera.");
+  await track.applyConstraints({ advanced: [{ torch: Boolean(enabled) }] });
+}
+
 const SCHEDULE_FORM_EMPTY = {
   title: "",
   notes: "",
@@ -1743,6 +1766,8 @@ export default function EmployeeClockApp() {
   const [photoCameraOpen, setPhotoCameraOpen] = useState(false);
   const [photoCameraMode, setPhotoCameraMode] = useState("photo");
   const [photoCameraError, setPhotoCameraError] = useState("");
+  const [photoFlashSupported, setPhotoFlashSupported] = useState(false);
+  const [photoFlashOn, setPhotoFlashOn] = useState(false);
   const [photoBatchUploading, setPhotoBatchUploading] = useState(false);
   const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
   const [receiptDraftFile, setReceiptDraftFile] = useState(null);
@@ -1804,6 +1829,8 @@ export default function EmployeeClockApp() {
   const [listCameraOpen, setListCameraOpen] = useState(false);
   const [listCameraTarget, setListCameraTarget] = useState("page");
   const [listCameraError, setListCameraError] = useState("");
+  const [listFlashSupported, setListFlashSupported] = useState(false);
+  const [listFlashOn, setListFlashOn] = useState(false);
   const listCameraStreamRef = useRef(null);
   const listCameraVideoRef = useRef(null);
   const listCameraCanvasRef = useRef(null);
@@ -6298,6 +6325,8 @@ const handlePhotoQuickUpload = async (event) => {
     if (photoVideoRef.current) photoVideoRef.current.srcObject = null;
     setPhotoCameraOpen(false);
     setPhotoCameraMode("photo");
+    setPhotoFlashSupported(false);
+    setPhotoFlashOn(false);
   }, [stopVideoRecording]);
 
   const stopListTaskCamera = useCallback(() => {
@@ -6309,6 +6338,8 @@ const handlePhotoQuickUpload = async (event) => {
     if (listCameraVideoRef.current) listCameraVideoRef.current.srcObject = null;
     setListCameraOpen(false);
     setListCameraTarget("page");
+    setListFlashSupported(false);
+    setListFlashOn(false);
   }, []);
 
   const applyMinimumPhotoCameraZoom = useCallback(async (stream) => {
@@ -6326,6 +6357,62 @@ const handlePhotoQuickUpload = async (event) => {
       console.warn("Minimum camera zoom unavailable:", err);
     }
   }, []);
+
+  const preparePhotoCameraFlash = useCallback(async (stream) => {
+    const supported = cameraStreamSupportsTorch(stream);
+    setPhotoFlashSupported(supported);
+    setPhotoFlashOn(false);
+    if (!supported) return;
+    try {
+      await applyCameraTorch(stream, false);
+    } catch (err) {
+      console.warn("Photo camera flash unavailable:", err);
+      setPhotoFlashSupported(false);
+      setPhotoFlashOn(false);
+    }
+  }, []);
+
+  const prepareListCameraFlash = useCallback(async (stream) => {
+    const supported = cameraStreamSupportsTorch(stream);
+    setListFlashSupported(supported);
+    setListFlashOn(false);
+    if (!supported) return;
+    try {
+      await applyCameraTorch(stream, false);
+    } catch (err) {
+      console.warn("Task list camera flash unavailable:", err);
+      setListFlashSupported(false);
+      setListFlashOn(false);
+    }
+  }, []);
+
+  const togglePhotoFlash = useCallback(async () => {
+    const next = !photoFlashOn;
+    try {
+      await applyCameraTorch(photoCameraStreamRef.current, next);
+      setPhotoFlashOn(next);
+      setPhotoCameraError("");
+    } catch (err) {
+      console.warn("Photo camera flash toggle failed:", err);
+      setPhotoFlashSupported(false);
+      setPhotoFlashOn(false);
+      setPhotoCameraError("Flash is not available on this camera.");
+    }
+  }, [photoFlashOn]);
+
+  const toggleListFlash = useCallback(async () => {
+    const next = !listFlashOn;
+    try {
+      await applyCameraTorch(listCameraStreamRef.current, next);
+      setListFlashOn(next);
+      setListCameraError("");
+    } catch (err) {
+      console.warn("Task list camera flash toggle failed:", err);
+      setListFlashSupported(false);
+      setListFlashOn(false);
+      setListCameraError("Flash is not available on this camera.");
+    }
+  }, [listFlashOn]);
 
   const scrollClockMediaIntoView = useCallback((target = "tools") => {
     const scroll = () => {
@@ -6499,6 +6586,7 @@ const handlePhotoQuickUpload = async (event) => {
         audio: false,
       });
       await applyMinimumPhotoCameraZoom(stream);
+      await preparePhotoCameraFlash(stream);
       photoCameraStreamRef.current = stream;
       setPhotoCameraMode(nextMode);
       setPhotoCameraOpen(true);
@@ -6516,6 +6604,7 @@ const handlePhotoQuickUpload = async (event) => {
     authUser,
     clockMediaContext,
     photoBatchUploading,
+    preparePhotoCameraFlash,
     scrollClockMediaIntoView,
     showClockSetupRequired,
     stopPhotoCamera,
@@ -10601,6 +10690,7 @@ const handlePhotoQuickUpload = async (event) => {
         audio: false,
       });
       await applyMinimumPhotoCameraZoom(stream);
+      await prepareListCameraFlash(stream);
       listCameraStreamRef.current = stream;
       setListCameraTarget(normalizedTarget);
       setListCameraOpen(true);
@@ -11320,6 +11410,21 @@ const handlePhotoQuickUpload = async (event) => {
                         autoPlay
                       />
                       <canvas ref={photoCanvasRef} className="hidden" />
+                      {photoFlashSupported ? (
+                        <button
+                          type="button"
+                          className={`w-full rounded-2xl h-11 border text-[15px] font-black transition ${
+                            photoFlashOn
+                              ? "border-amber-400 bg-amber-400 text-slate-950 shadow-[0_10px_18px_rgba(245,158,11,0.22)]"
+                              : "border-slate-300 bg-white text-slate-800"
+                          }`}
+                          onClick={() => void togglePhotoFlash()}
+                          disabled={photoBatchUploading}
+                          aria-pressed={photoFlashOn}
+                        >
+                          {photoFlashOn ? "Flash On" : "Flash Off"}
+                        </button>
+                      ) : null}
                       {photoCameraMode === "receipt" ? (
                         <button
                           type="button"
@@ -11664,6 +11769,21 @@ const handlePhotoQuickUpload = async (event) => {
                             autoPlay
                           />
                           <canvas ref={photoCanvasRef} className="hidden" />
+                          {photoFlashSupported ? (
+                            <button
+                              type="button"
+                              className={`w-full rounded-2xl h-11 border text-[15px] font-black transition ${
+                                photoFlashOn
+                                  ? "border-amber-400 bg-amber-400 text-slate-950 shadow-[0_10px_18px_rgba(245,158,11,0.22)]"
+                                  : "border-slate-300 bg-white text-slate-800"
+                              }`}
+                              onClick={() => void togglePhotoFlash()}
+                              disabled={photoBatchUploading}
+                              aria-pressed={photoFlashOn}
+                            >
+                              {photoFlashOn ? "Flash On" : "Flash Off"}
+                            </button>
+                          ) : null}
                           {photoCameraMode === "receipt" ? (
                             <button
                               type="button"
@@ -12271,6 +12391,20 @@ const handlePhotoQuickUpload = async (event) => {
                               muted
                             />
                             <canvas ref={listCameraCanvasRef} className="hidden" />
+                            {listFlashSupported ? (
+                              <button
+                                type="button"
+                                className={`w-full rounded-2xl border px-4 py-3 text-[15px] font-black transition ${
+                                  listFlashOn
+                                    ? "border-amber-400 bg-amber-400 text-slate-950 shadow-[0_10px_18px_rgba(245,158,11,0.22)]"
+                                    : "border-slate-300 bg-white text-slate-800"
+                                }`}
+                                onClick={() => void toggleListFlash()}
+                                aria-pressed={listFlashOn}
+                              >
+                                {listFlashOn ? "Flash On" : "Flash Off"}
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
@@ -17108,6 +17242,20 @@ const handlePhotoQuickUpload = async (event) => {
                             muted
                           />
                           <canvas ref={listCameraCanvasRef} className="hidden" />
+                          {listFlashSupported ? (
+                            <button
+                              type="button"
+                              className={`w-full rounded-2xl border px-4 py-3 text-[15px] font-black transition ${
+                                listFlashOn
+                                  ? "border-amber-400 bg-amber-400 text-slate-950 shadow-[0_10px_18px_rgba(245,158,11,0.22)]"
+                                  : "border-slate-300 bg-white text-slate-800"
+                              }`}
+                              onClick={() => void toggleListFlash()}
+                              aria-pressed={listFlashOn}
+                            >
+                              {listFlashOn ? "Flash On" : "Flash Off"}
+                            </button>
+                          ) : null}
                           <button
                             type="button"
                             className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
