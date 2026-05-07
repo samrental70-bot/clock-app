@@ -10370,7 +10370,6 @@ const handlePhotoQuickUpload = async (event) => {
     { id: "weekly", label: "Week" },
     { id: "monthly", label: "Month" },
     { id: "yearly", label: "Year" },
-    { id: "last_year", label: "Last Year" },
   ];
 
   const reportsDateRangeLabel =
@@ -12442,13 +12441,35 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "reports" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.08)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
-                <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
-                  <div className="grid grid-cols-4 gap-1.5">
+                {reportsAvailableDims.length ? (
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                    <label className="block space-y-1.5 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      View by
+                      <select
+                        className="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[17px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        value={reportsCurrentViewBy}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
+                        }}
+                      >
+                        {reportsAvailableDims.map((dim) => (
+                          <option key={dim} value={dim}>
+                            {reportsViewLabel(dim)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                ) : null}
+
+                <div className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
+                  <div className="grid grid-cols-3 gap-2">
                     {reportsQuickRangeOptions.map((p) => (
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
+                        className={`rounded-2xl px-2 py-3 text-[13px] font-black border transition-colors leading-tight ${
                           reportsRangePreset === p.id
                             ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
                             : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
@@ -12468,12 +12489,12 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      From
+                  <div className="grid grid-cols-1 gap-2">
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Date from
                       <input
                         type="date"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        className="block h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
                         value={reportsDateFrom}
                         onChange={(e) => {
                           setReportsDateFrom(e.target.value);
@@ -12483,11 +12504,11 @@ const handlePhotoQuickUpload = async (event) => {
                         }}
                       />
                     </label>
-                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      To
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Date to
                       <input
                         type="date"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        className="block h-12 w-full min-w-0 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
                         value={reportsDateTo}
                         onChange={(e) => {
                           setReportsDateTo(e.target.value);
@@ -12571,31 +12592,6 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-
-                    {reportsAvailableDims.length ? (
-                      <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                        <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                          View by
-                          <select
-                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
-                            value={reportsCurrentViewBy}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
-                            }}
-                          >
-                            {reportsAvailableDims.map((dim) => (
-                              <option key={dim} value={dim}>
-                                {reportsViewLabel(dim)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <p className="text-[13px] font-bold leading-snug text-slate-500">
-                          Tap a row to narrow the report and keep drilling into the next detail.
-                        </p>
-                      </div>
-                    ) : null}
 
                     <div className="rounded-[24px] border border-slate-200 bg-white shadow-sm overflow-hidden">
                       <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-slate-50 px-3 py-2">
