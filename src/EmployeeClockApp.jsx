@@ -11019,8 +11019,8 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 )}
                 {userCompany?.id && companyChecked ? (
-                  <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-3 sm:p-4 space-y-3 min-w-0">
-                    <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 min-w-0">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-4 space-y-3 min-w-0 shadow-sm">
+                    <div className="hidden">
                       <h3 className="text-[17px] font-bold text-slate-900">Live team</h3>
                       <p className="hidden">
                         <span className="text-slate-600 font-medium">Currently Working: </span>
@@ -11039,20 +11039,20 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
                     <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Clocked In</p>
-                        <p className="text-[18px] font-black text-slate-900 tabular-nums">
+                      <div className="rounded-2xl bg-slate-950 p-3 text-white">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-300">Working</p>
+                        <p className="text-[22px] font-black tabular-nums leading-tight">
                           {dashboardLoading ? "..." : (dashboardLiveWorkingCards || []).length}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Total Hours</p>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Hours</p>
                         <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
                           {formatDuration(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
-                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Labour Cost</p>
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide">Labour</p>
                         <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
                           {formatMoney(dashboardSummary.totalCost)}
                         </p>
@@ -11086,12 +11086,12 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div
                             key={`live-${String(uid)}`}
-                            className="rounded-xl border border-white/90 bg-white p-3 space-y-2 shadow-sm min-w-0 max-w-full"
+                            className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 space-y-2 min-w-0 max-w-full"
                           >
                             <div className="min-w-0">
                               <p className="text-[18px] font-black text-slate-900 leading-snug break-words flex items-baseline justify-between gap-2">
                                 {displayName || "—"}
-                                <span className="shrink-0 tabular-nums">{formatTimer(timerSeconds)}</span>
+                                <span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[13px] font-black tabular-nums text-white">{formatTimer(timerSeconds)}</span>
                               </p>
                               <p className="text-[14px] font-bold text-slate-700 leading-snug tabular-nums">
                                 Clocked in {clockInDisp}
@@ -11162,7 +11162,7 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                   </div>
                 ) : null}
-                <div className="space-y-1">
+                <div className="hidden">
                   <label className="text-[14px] font-medium text-slate-700" htmlFor="dashboard-view-date">
                     Date
                   </label>
