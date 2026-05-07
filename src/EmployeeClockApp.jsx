@@ -2304,7 +2304,7 @@ export default function EmployeeClockApp() {
   const companyCheckedRef = useRef(false);
   const scheduleRouteHandledRef = useRef(false);
   const autoClockOutSweepRunningRef = useRef(false);
-  /** Once per login session: land employees on Schedule after company/role resolve (no repeated overrides). */
+  /** Once per login session: keep employees on Clock after company/role resolve (no repeated overrides). */
   const employeeScheduleLandingAppliedRef = useRef(false);
   /** Once per login session: land supervisors/owners on Employees > Live Dashboard. */
   const adminDashboardLandingAppliedRef = useRef(false);
@@ -2409,7 +2409,7 @@ export default function EmployeeClockApp() {
     if (!companyChecked || !userCompany?.id || !isEmployeeRole) return;
     if (employeeScheduleLandingAppliedRef.current) return;
     employeeScheduleLandingAppliedRef.current = true;
-    setActiveTab("schedule");
+    setActiveTab("clock");
   }, [authUser?.id, companyChecked, userCompany?.id, isEmployeeRole]);
 
   useEffect(() => {
@@ -5198,15 +5198,15 @@ export default function EmployeeClockApp() {
   }, [authUser?.id, isAdmin, isEmployeeRole, refreshEmployeeAssignedSchedule]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "dashboard") setActiveTab("schedule");
+    if (!isAdmin && activeTab === "dashboard") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "projects") setActiveTab("schedule");
+    if (!isAdmin && activeTab === "projects") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (isEmployeeRole && activeTab === "team") setActiveTab("schedule");
+    if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
   }, [isEmployeeRole, activeTab]);
 
   useEffect(() => {
@@ -5907,7 +5907,7 @@ export default function EmployeeClockApp() {
   }, [authUser?.id]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "reports") setActiveTab("schedule");
+    if (!isAdmin && activeTab === "reports") setActiveTab("clock");
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
@@ -20552,7 +20552,7 @@ const handlePhotoQuickUpload = async (event) => {
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
-          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-2"} gap-1.5`}>
+          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-1"} gap-1.5`}>
             {isAdmin ? (
               <>
                 <button
@@ -20578,22 +20578,13 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
               </>
             ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("clock")}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
-                >
-                  Clock
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("lists")}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "lists" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
-                >
-                  List
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => setActiveTab("clock")}
+                className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
+              >
+                Clock
+              </button>
             )}
           </div>
         </div>
