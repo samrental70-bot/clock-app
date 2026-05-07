@@ -5663,13 +5663,7 @@ const handleClockIn = async () => {
         }
 
         setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
-        setLocationStatus(
-          gps
-            ? "Clock-in saved. Location captured."
-            : locResult.error === "denied"
-              ? "Clock-in saved. Location unavailable / permission denied."
-              : "Clock-in saved. Location unavailable."
-        );
+        setLocationStatus("");
         void updateLiveLocationOnce({
           status: "clocked_in",
           projectName: clockSelectedProject.name,
@@ -5701,13 +5695,7 @@ const handleClockIn = async () => {
   }
 
   setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
-    setLocationStatus(
-      gps
-        ? "Clock-in saved. Location captured."
-        : locResult.error === "denied"
-          ? "Clock-in saved. Location unavailable / permission denied."
-          : "Clock-in saved. Location unavailable."
-    );
+    setLocationStatus("");
     void updateLiveLocationOnce({
       status: "clocked_in",
       projectName: clockSelectedProject.name,
@@ -5905,7 +5893,7 @@ const handlePhotoQuickUpload = async (event) => {
     const uploadedStatus = "Photo uploaded ✅";
     setPhotoStatus(uploadedStatus);
     void schedulePhotoNotificationAfterUpload();
-    schedulePhotoStatusClear(uploadedStatus, 5000, { clearUploadProgress: true });
+    schedulePhotoStatusClear(uploadedStatus, 3000, { clearUploadProgress: true });
 
     event.target.value = "";
   } catch (err) {
@@ -6429,7 +6417,7 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoStatus(uploadedStatus);
       setUploadProgress(100);
       stopPhotoCamera();
-      schedulePhotoStatusClear(uploadedStatus, 5000, {
+      schedulePhotoStatusClear(uploadedStatus, 3000, {
         clearUploadProgress: true,
         clearBatchProgress: true,
       });
@@ -9715,28 +9703,39 @@ const handlePhotoQuickUpload = async (event) => {
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2 sm:space-y-3 pb-[calc(4.25rem+env(safe-area-inset-bottom,0px))]">
-          <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
-            <div className="flex items-start justify-between gap-2 sm:gap-3">
+          <div className="rounded-2xl bg-white border border-slate-200 px-2.5 py-2 shadow-sm">
+            <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => {
                   setMenuPanel("main");
                   setIsMenuOpen(true);
                 }}
-                className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-lg sm:text-xl font-bold"
+                className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-lg font-bold"
                 aria-label="Open menu"
               >
                 ☰
               </button>
               <div className="flex-1 min-w-0">
-                <h1 className="text-xl sm:text-2xl font-bold tracking-tight leading-tight">OPERA.AI</h1>
-                <p className="text-xs sm:text-sm text-slate-600 mt-0.5 leading-snug">{(profileFullName || "").trim() || "User"}</p>
+                <h1 className="text-[18px] font-black tracking-tight leading-tight">OPERA.AI</h1>
+                <p className="border-b border-slate-200 pb-1 text-[12px] font-semibold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
               </div>
-              <div className="flex flex-col items-end gap-1 shrink-0">
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("clock");
+                    setIsMenuOpen(false);
+                  }}
+                  className="h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-[0px] after:content-['\2302'] after:text-base after:leading-none"
+                  aria-label="Home"
+                >
+                  âŒ‚
+                </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className="relative h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-lg"
+                  className="relative h-9 w-9 rounded-xl bg-slate-100 flex items-center justify-center text-base"
                   aria-label="Notifications"
                 >
                   🔔
@@ -9746,7 +9745,6 @@ const handlePhotoQuickUpload = async (event) => {
                     </span>
                   )}
                 </button>
-                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-2xl bg-slate-100 flex items-center justify-center text-xl sm:text-2xl">⏱️</div>
               </div>
             </div>
           </div>
@@ -10011,7 +10009,7 @@ const handlePhotoQuickUpload = async (event) => {
                       {locationStatus}
                     </p>
                   ) : null}
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-2 gap-1.5">
                     <button
                       type="button"
                       className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
@@ -10038,20 +10036,6 @@ const handlePhotoQuickUpload = async (event) => {
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
                       Camera
-                    </button>
-                    <button
-                      type="button"
-                      className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
-                      onClick={() => {
-                        if (!clockSetupReady) {
-                          showClockSetupRequired();
-                          return;
-                        }
-                        openMaterialPaymentFlow();
-                      }}
-                      disabled={photoBatchUploading || videoRecording || videoUploading}
-                    >
-                      Pay here
                     </button>
                     <button
                       type="button"
@@ -10336,7 +10320,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-1.5">
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
-                      <div className="grid grid-cols-3 gap-1.5">
+                      <div className="grid grid-cols-2 gap-1.5">
                         <button
                           type="button"
                           className={`w-full rounded-2xl h-11 border text-center text-[15px] font-bold transition disabled:opacity-50 ${
@@ -10359,14 +10343,6 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
                           Camera
-                        </button>
-                        <button
-                          type="button"
-                          className="block w-full rounded-2xl h-11 bg-blue-700 text-white text-center text-[15px] font-bold disabled:opacity-50"
-                          onClick={openMaterialPaymentFlow}
-                          disabled={photoBatchUploading || videoRecording || videoUploading}
-                        >
-                          Pay here
                         </button>
                         <button
                           type="button"
