@@ -13723,7 +13723,7 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "dashboard" && isAdmin && (
             <div className="space-y-3">
               <section className="relative overflow-hidden rounded-[34px] border border-white bg-white px-3.5 py-4 shadow-[0_24px_58px_rgba(15,23,42,0.12)]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_10%,rgba(15,23,42,0.10),transparent_34%),radial-gradient(circle_at_18%_0%,rgba(15,23,42,0.06),transparent_28%)]" />
+                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_10%,rgba(14,165,233,0.14),transparent_32%),radial-gradient(circle_at_18%_0%,rgba(245,158,11,0.13),transparent_30%),radial-gradient(circle_at_70%_92%,rgba(16,185,129,0.10),transparent_30%)]" />
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-950">Dashboard</p>
@@ -13747,6 +13747,10 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Projects",
                       action: () => setActiveTab("projects"),
+                      tone: "from-amber-400 to-orange-500",
+                      surface: "from-amber-50 to-orange-50 border-amber-100",
+                      text: "text-amber-950",
+                      shadow: "shadow-[0_14px_26px_rgba(245,158,11,0.24)]",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M8 7V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1" />
@@ -13758,6 +13762,10 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Schedule",
                       action: () => setActiveTab("schedule"),
+                      tone: "from-blue-500 to-sky-600",
+                      surface: "from-blue-50 to-sky-50 border-blue-100",
+                      text: "text-blue-950",
+                      shadow: "shadow-[0_14px_26px_rgba(37,99,235,0.24)]",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M7 3v4M17 3v4" />
@@ -13770,6 +13778,10 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Pictures",
                       action: openPhotosTab,
+                      tone: "from-violet-500 to-fuchsia-600",
+                      surface: "from-violet-50 to-fuchsia-50 border-violet-100",
+                      text: "text-violet-950",
+                      shadow: "shadow-[0_14px_26px_rgba(124,58,237,0.24)]",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
@@ -13781,6 +13793,10 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Employees",
                       action: () => setActiveTab("team"),
+                      tone: "from-emerald-500 to-teal-600",
+                      surface: "from-emerald-50 to-teal-50 border-emerald-100",
+                      text: "text-emerald-950",
+                      shadow: "shadow-[0_14px_26px_rgba(16,185,129,0.24)]",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" />
@@ -13793,13 +13809,13 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       key={item.label}
                       type="button"
-                      className="min-w-0 rounded-[22px] border border-slate-200 bg-white px-1.5 py-3 text-center text-slate-950 shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]"
+                      className={`min-w-0 rounded-[22px] border bg-gradient-to-br ${item.surface} px-1.5 py-3 text-center shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]`}
                       onClick={item.action}
                     >
-                      <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br from-slate-950 to-slate-800 text-white shadow-[0_12px_24px_rgba(15,23,42,0.28)]">
+                      <span className={`mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br ${item.tone} text-white ${item.shadow}`}>
                         {item.icon}
                       </span>
-                      <span className="mt-2 block truncate text-[11px] font-black">{item.label}</span>
+                      <span className={`mt-2 block truncate text-[11px] font-black ${item.text}`}>{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -13826,15 +13842,17 @@ const handlePhotoQuickUpload = async (event) => {
               {userCompany?.id && companyChecked ? (
                 <>
                   <section className="grid grid-cols-2 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
-                    <div className="border-r border-slate-200 p-4">
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Team hours</p>
+                    <div className="relative overflow-hidden border-r border-slate-200 bg-gradient-to-br from-blue-50 to-white p-4">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-sky-500" />
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team hours</p>
                       <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
                         {formatDuration(dashboardSummary.totalMinutes)}
                       </p>
                       <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
                     </div>
-                    <div className="p-4">
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Est labor cost</p>
+                    <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-white p-4">
+                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">Est labor cost</p>
                       <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
                         {formatMoneyWhole(dashboardSummary.totalCost)}
                       </p>
@@ -19508,10 +19526,13 @@ const handlePhotoQuickUpload = async (event) => {
                   <>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      className="w-full rounded-[22px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-blue-50"
                       onClick={() => openMenuTab("schedule")}
                     >
-                      <span className="block text-[17px] font-black text-slate-950">Schedule</span>
+                      <span className="flex items-center gap-3 text-[17px] font-black text-blue-950">
+                        <span className="h-3 w-3 rounded-full bg-blue-600 shadow-[0_0_0_4px_rgba(37,99,235,0.12)]" />
+                        Schedule
+                      </span>
                     </button>
                     <button
                       type="button"
@@ -19523,10 +19544,13 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="relative w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      className="relative w-full rounded-[22px] border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-4 py-4 text-left font-black text-violet-950 shadow-sm active:bg-violet-50"
                       onClick={openPhotosTab}
                     >
-                      Photos
+                      <span className="inline-flex items-center gap-3">
+                        <span className="h-3 w-3 rounded-full bg-violet-600 shadow-[0_0_0_4px_rgba(124,58,237,0.12)]" />
+                        Pictures
+                      </span>
                       {photoNotificationCount > 0 && (
                         <span className="ml-2 rounded-full bg-red-600 text-white text-[11px] px-2 py-0.5 align-middle">
                           {photoNotificationCount}
@@ -19572,17 +19596,23 @@ const handlePhotoQuickUpload = async (event) => {
                       <>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                          className="w-full rounded-[22px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-4 py-4 text-left font-black text-emerald-950 shadow-sm active:bg-emerald-50"
                           onClick={() => openMenuTab("team")}
                         >
-                          Employees
+                          <span className="inline-flex items-center gap-3">
+                            <span className="h-3 w-3 rounded-full bg-emerald-600 shadow-[0_0_0_4px_rgba(16,185,129,0.12)]" />
+                            Employees
+                          </span>
                         </button>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                          className="w-full rounded-[22px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
                           onClick={() => openMenuTab("projects")}
                         >
-                          Projects
+                          <span className="inline-flex items-center gap-3">
+                            <span className="h-3 w-3 rounded-full bg-amber-500 shadow-[0_0_0_4px_rgba(245,158,11,0.14)]" />
+                            Projects
+                          </span>
                         </button>
                       </>
                     )}
