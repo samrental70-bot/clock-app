@@ -2095,6 +2095,8 @@ export default function EmployeeClockApp() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [oauthLoading, setOauthLoading] = useState("");
+  const [oauthError, setOauthError] = useState("");
   const [firstLoginPasswordPromptOpen, setFirstLoginPasswordPromptOpen] = useState(false);
   const [firstLoginPasswordPromptSaving, setFirstLoginPasswordPromptSaving] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
@@ -5295,7 +5297,15 @@ export default function EmployeeClockApp() {
     const ensureProfile = async (user, fullName) => {
       if (!user) return;
       const payload = { id: user.id };
-      if (fullName) payload.full_name = fullName;
+      const metaName =
+        String(
+          fullName ||
+            user.user_metadata?.full_name ||
+            user.user_metadata?.name ||
+            user.user_metadata?.user_name ||
+            ""
+        ).trim();
+      if (metaName) payload.full_name = metaName;
       if (user.email) payload.email = user.email;
       // Leave role as-is if it already exists; default to employee for new users.
       payload.role = "employee";
@@ -5523,6 +5533,7 @@ export default function EmployeeClockApp() {
     loginClickedRef.current = true;
     setLoginLoading(true);
     setLoginError("");
+    setOauthError("");
     setCompanyError("");
     setStartupError("");
     setLoginDebug(`Clicked. Email: ${loginEmail}`);
@@ -5612,10 +5623,51 @@ export default function EmployeeClockApp() {
     }
   };
 
+  const getOAuthRedirectUrl = () => {
+    const fallback = getOperaAppShareUrl();
+    if (typeof window === "undefined" || !window.location?.origin) return fallback;
+    const current = new URL(window.location.href);
+    const redirect = new URL(`${window.location.origin}${window.location.pathname}`);
+    ["companyCode", "joinCode", "code", "loginEmail", "email"].forEach((key) => {
+      const value = current.searchParams.get(key);
+      if (value) redirect.searchParams.set(key, value);
+    });
+    return redirect.toString();
+  };
+
+  const handleOAuthLogin = async (provider) => {
+    const cleanProvider = String(provider || "").trim();
+    if (!["google", "facebook", "apple"].includes(cleanProvider)) return;
+    setOauthError("");
+    setLoginError("");
+    setSignupError("");
+    setCompanyError("");
+    setStartupError("");
+    setOauthLoading(cleanProvider);
+    try {
+      const options = { redirectTo: getOAuthRedirectUrl() };
+      if (cleanProvider === "google") {
+        options.queryParams = { prompt: "select_account" };
+      }
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: cleanProvider,
+        options,
+      });
+      if (error) {
+        setOauthError(error.message);
+        setOauthLoading("");
+      }
+    } catch (err) {
+      setOauthError(getErrorMessage(err));
+      setOauthLoading("");
+    }
+  };
+
   const handleSignup = async (event) => {
     event.preventDefault();
     setSignupLoading(true);
     setSignupError("");
+    setOauthError("");
     setCompanyError("");
 
     try {
@@ -10477,6 +10529,61 @@ const handlePhotoQuickUpload = async (event) => {
   );
   };
 
+  const renderOAuthButtons = () => {
+    const providers = [
+      {
+        id: "google",
+        label: "Google",
+        icon: <span className="text-[17px] font-black leading-none text-[#4285F4]">G</span>,
+      },
+      {
+        id: "facebook",
+        label: "Facebook",
+        icon: <span className="text-[21px] font-black leading-none text-[#1877F2]">f</span>,
+      },
+      {
+        id: "apple",
+        label: "Apple",
+        icon: <span className="text-[16px] font-black leading-none text-slate-950">A</span>,
+      },
+    ];
+
+    return (
+      <div className="space-y-2">
+        <div className="grid grid-cols-3 gap-2">
+          {providers.map((provider) => {
+            const loadingThisProvider = oauthLoading === provider.id;
+            return (
+              <button
+                key={provider.id}
+                type="button"
+                className="min-w-0 rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[12px] font-black text-slate-800 shadow-sm transition active:scale-[0.98] active:bg-slate-50 disabled:opacity-60"
+                onClick={() => void handleOAuthLogin(provider.id)}
+                disabled={Boolean(oauthLoading) || loginLoading || signupLoading}
+                aria-label={`Continue with ${provider.label}`}
+              >
+                <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-50">
+                  {provider.icon}
+                </span>
+                <span className="block truncate">{loadingThisProvider ? "Opening..." : provider.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
+          <span className="h-px flex-1 bg-slate-200" />
+          <span>or</span>
+          <span className="h-px flex-1 bg-slate-200" />
+        </div>
+        {oauthError && (
+          <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-sm text-red-700">
+            {oauthError}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (publicPhotoShare) {
     return (
       <PublicPhotoShareView
@@ -10516,8 +10623,10 @@ const handlePhotoQuickUpload = async (event) => {
             <form onSubmit={handleSignup} className="p-5 space-y-4">
               <div>
                 <h2 className="text-xl font-bold">Sign up</h2>
-                <p className="text-sm text-slate-500 mt-1">Create an account to start using OPERA.AI.</p>
+                <p className="text-sm text-slate-500 mt-1">Create with Google, Facebook, Apple, or email.</p>
               </div>
+
+              {renderOAuthButtons()}
 
               <div className="space-y-2">
                 <label className="text-sm font-medium">Name</label>
@@ -10573,6 +10682,7 @@ const handlePhotoQuickUpload = async (event) => {
                 className="w-full text-sm text-slate-600 underline"
                 onClick={() => {
                   setSignupError("");
+                  setOauthError("");
                   setAuthStep("login");
                 }}
               >
@@ -10599,8 +10709,10 @@ const handlePhotoQuickUpload = async (event) => {
           <form onSubmit={handleLogin} className="p-5 space-y-4">
             <div>
               <h2 className="text-xl font-bold">Login</h2>
-              <p className="text-sm text-slate-500 mt-1">Enter your user ID and password.</p>
+              <p className="text-sm text-slate-500 mt-1">Use Google, Facebook, Apple, or your user ID.</p>
             </div>
+
+            {renderOAuthButtons()}
 
             <div className="space-y-2">
               <label className="text-sm font-medium">User ID</label>
@@ -10649,6 +10761,7 @@ const handlePhotoQuickUpload = async (event) => {
               className="w-full text-sm text-slate-600 underline"
               onClick={() => {
                 setLoginError("");
+                setOauthError("");
                 setAuthStep("signup");
               }}
             >
