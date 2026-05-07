@@ -12222,6 +12222,64 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "reports" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_18px_38px_rgba(15,23,42,0.08)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {reportsQuickRangeOptions.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
+                          reportsRangePreset === p.id
+                            ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                            : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
+                        }`}
+                        onClick={() => {
+                          const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
+                          if (from && to) {
+                            setReportsDateFrom(from);
+                            setReportsDateTo(to);
+                            setReportsRangePreset(p.id);
+                            setReportsDrillStack([]);
+                            setReportsDrillViewBy("project");
+                          }
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      From
+                      <input
+                        type="date"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        value={reportsDateFrom}
+                        onChange={(e) => {
+                          setReportsDateFrom(e.target.value);
+                          setReportsRangePreset(null);
+                          setReportsDrillStack([]);
+                          setReportsDrillViewBy("project");
+                        }}
+                      />
+                    </label>
+                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      To
+                      <input
+                        type="date"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        value={reportsDateTo}
+                        onChange={(e) => {
+                          setReportsDateTo(e.target.value);
+                          setReportsRangePreset(null);
+                          setReportsDrillStack([]);
+                          setReportsDrillViewBy("project");
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
                 <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -12231,7 +12289,6 @@ const handlePhotoQuickUpload = async (event) => {
                       <h2 className="mt-1 text-[23px] font-black leading-tight tracking-normal text-slate-950 break-words">
                         {reportsCurrentTitle}
                       </h2>
-                      <p className="mt-1 text-[14px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
                     </div>
                     {reportsSafeDrillStack.length ? (
                       <button
@@ -12253,66 +12310,6 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </div>
                 </div>
-
-                {!reportsSafeDrillStack.length ? (
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {reportsQuickRangeOptions.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
-                            reportsRangePreset === p.id
-                              ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
-                              : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
-                          }`}
-                          onClick={() => {
-                            const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
-                            if (from && to) {
-                              setReportsDateFrom(from);
-                              setReportsDateTo(to);
-                              setReportsRangePreset(p.id);
-                              setReportsDrillStack([]);
-                              setReportsDrillViewBy("project");
-                            }
-                          }}
-                        >
-                          {p.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                        From
-                        <input
-                          type="date"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
-                          value={reportsDateFrom}
-                          onChange={(e) => {
-                            setReportsDateFrom(e.target.value);
-                            setReportsRangePreset(null);
-                            setReportsDrillStack([]);
-                            setReportsDrillViewBy("project");
-                          }}
-                        />
-                      </label>
-                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                        To
-                        <input
-                          type="date"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
-                          value={reportsDateTo}
-                          onChange={(e) => {
-                            setReportsDateTo(e.target.value);
-                            setReportsRangePreset(null);
-                            setReportsDrillStack([]);
-                            setReportsDrillViewBy("project");
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-                ) : null}
 
                 {reportsScreenLoading ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">
@@ -12354,35 +12351,6 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-
-                    {reportsContextCards.length ? (
-                      <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                          Drill path
-                        </p>
-                        {reportsContextCards.map((card, index) => (
-                          <div
-                            key={`${card.dim}-${card.key}-${index}`}
-                            className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2.5"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                                {reportsViewLabel(card.dim)}
-                              </p>
-                              <p className="mt-0.5 truncate text-[15px] font-black text-slate-950">{card.label}</p>
-                            </div>
-                            <div className="shrink-0 text-right">
-                              <p className="text-[13px] font-black tabular-nums text-slate-950">
-                                {formatDuration(card.summary.minutes)}
-                              </p>
-                              <p className="text-[12px] font-bold tabular-nums text-slate-500">
-                                {formatMoney(card.summary.cost)}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
 
                     {reportsAvailableDims.length ? (
                       <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
