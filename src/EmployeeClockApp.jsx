@@ -1482,6 +1482,30 @@ function mapTimesheetRowFromSupabase(row) {
   };
 }
 
+function mapTimesheetChangeRequestFromSupabase(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    userId: row.user_id,
+    employeeName: row.employee_name || "",
+    employeeEmail: row.employee_email || "",
+    requestType: row.request_type || "manual_time",
+    status: row.status || "pending",
+    timesheetId: row.timesheet_id || null,
+    originalSnapshot: row.original_snapshot || null,
+    requestedClockIn: row.requested_clock_in,
+    requestedClockOut: row.requested_clock_out,
+    requestedProjectId: row.requested_project_id || "",
+    requestedProjectName: row.requested_project_name || "",
+    requestedCostCentre: row.requested_cost_centre || "",
+    reason: row.reason || "",
+    supervisorNote: row.supervisor_note || "",
+    reviewedBy: row.reviewed_by || null,
+    reviewedAt: row.reviewed_at || null,
+    createdAt: row.created_at,
+  };
+}
+
 /** Load profile full_name/email for timesheet rows (by user_id). */
 async function fetchProfilesByTimesheetUserIds(supabase, userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
@@ -2151,6 +2175,18 @@ export default function EmployeeClockApp() {
   const [editCostCenter, setEditCostCenter] = useState("");
   const [editTimesheetSaving, setEditTimesheetSaving] = useState(false);
   const [deletingTimesheetId, setDeletingTimesheetId] = useState(null);
+  const [manualTimeOpen, setManualTimeOpen] = useState(false);
+  const [manualTimeDate, setManualTimeDate] = useState("");
+  const [manualTimeClockInTime, setManualTimeClockInTime] = useState("");
+  const [manualTimeClockOutTime, setManualTimeClockOutTime] = useState("");
+  const [manualTimeProjectId, setManualTimeProjectId] = useState("");
+  const [manualTimeCostCentre, setManualTimeCostCentre] = useState("");
+  const [manualTimeReason, setManualTimeReason] = useState("");
+  const [manualTimeSaving, setManualTimeSaving] = useState(false);
+  const [timesheetRequests, setTimesheetRequests] = useState([]);
+  const [timesheetRequestsLoading, setTimesheetRequestsLoading] = useState(false);
+  const [timesheetRequestsError, setTimesheetRequestsError] = useState("");
+  const [reviewingTimesheetRequestId, setReviewingTimesheetRequestId] = useState(null);
   const [isChangingTask, setIsChangingTask] = useState(false);
   const [reportRange, setReportRange] = useState("today");
   const [reportType, setReportType] = useState("employee");
@@ -3706,10 +3742,39 @@ export default function EmployeeClockApp() {
     }
   }, [authUser?.id, userCompany?.id, userCompanyRole, isEmployeeRole]);
 
+  const fetchTimesheetChangeRequests = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    setTimesheetRequestsLoading(true);
+    setTimesheetRequestsError("");
+    try {
+      let query = supabase
+        .from("timesheet_change_requests")
+        .select("*")
+        .eq("company_id", userCompany.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (!isAdmin) query = query.eq("user_id", authUser.id);
+      const { data, error } = await query;
+      if (error) throw error;
+      setTimesheetRequests((data || []).map(mapTimesheetChangeRequestFromSupabase));
+    } catch (err) {
+      console.warn("[TIMESHEET_REQUESTS] load failed", err);
+      setTimesheetRequestsError("Timesheet approval requests are not ready. Run the timesheet_change_requests SQL migration.");
+    } finally {
+      setTimesheetRequestsLoading(false);
+    }
+  }, [authUser?.id, isAdmin, userCompany?.id, userCompanyRole]);
+
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     fetchTimesheetsFromSupabase();
   }, [authUser?.id, userCompany?.id, userCompanyRole, fetchTimesheetsFromSupabase]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    if (activeTab !== "timesheet") return;
+    void fetchTimesheetChangeRequests();
+  }, [activeTab, authUser?.id, fetchTimesheetChangeRequests, userCompany?.id, userCompanyRole]);
 
   const runAutoClockOutSweep = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return;
@@ -4738,6 +4803,29 @@ export default function EmployeeClockApp() {
       return key && key >= from && key <= to;
     });
   }, [visibleRecords, timesheetRangeBounds.from, timesheetRangeBounds.to, companyTimeZone]);
+
+  const pendingTimesheetRequests = useMemo(
+    () => normalizeArray(timesheetRequests).filter((request) => request?.status === "pending"),
+    [timesheetRequests]
+  );
+
+  const visibleEmployeeTimesheetRequests = useMemo(() => {
+    if (isAdmin) return pendingTimesheetRequests;
+    return normalizeArray(timesheetRequests).filter((request) => request?.status === "pending");
+  }, [isAdmin, pendingTimesheetRequests, timesheetRequests]);
+
+  const manualTimeProjectOptions = useMemo(
+    () => (isAdmin ? effectiveProjects : clockSelectableProjects),
+    [clockSelectableProjects, effectiveProjects, isAdmin]
+  );
+
+  const manualTimeCostCentres = useMemo(
+    () =>
+      effectiveCostCentresByProjectId[String(manualTimeProjectId)] ||
+      effectiveCostCentresByProjectId[Number(manualTimeProjectId)] ||
+      [],
+    [manualTimeProjectId, effectiveCostCentresByProjectId]
+  );
 
   const reportsDistinctCostCentres = useMemo(() => {
     const s = new Set();
@@ -9019,6 +9107,102 @@ const handlePhotoQuickUpload = async (event) => {
     effectiveCostCentresByProjectId[Number(pid)] ||
     [];
 
+  const submitTimesheetChangeRequest = async (requestRow) => {
+    if (!authUser?.id || !userCompany?.id) throw new Error("Sign in before requesting time changes.");
+    const { data, error } = await supabase
+      .from("timesheet_change_requests")
+      .insert(requestRow)
+      .select("id")
+      .single();
+    if (error) throw error;
+
+    const label = (profileFullName || "").trim() || authUser.email || "Employee";
+    void createCompanyNotifications(supabase, {
+      companyId: userCompany.id,
+      actorUserId: authUser.id,
+      actorRole: resolvedCompanyRole,
+      type: "timesheet_change_requested",
+      title: "Timesheet approval needed",
+      message: `${label} requested ${requestRow.request_type === "manual_time" ? "manual time" : "a timesheet edit"} approval.`,
+      projectId: requestRow.requested_project_id,
+      projectName: requestRow.requested_project_name,
+      costCentre: requestRow.requested_cost_centre,
+      relatedTimesheetId: requestRow.timesheet_id,
+      relatedFolder: requestRow.requested_project_name ? getProjectFolderName(requestRow.requested_project_name) : null,
+      itemCount: null,
+    });
+
+    await fetchTimesheetChangeRequests();
+    return data?.id || null;
+  };
+
+  const openManualTimeForm = () => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    setManualTimeDate((prev) => prev || todayKey);
+    setManualTimeClockInTime((prev) => prev || "08:00");
+    setManualTimeClockOutTime((prev) => prev || "16:00");
+    const firstProject = clockSelectableProjects[0] || effectiveProjects[0] || null;
+    const nextProjectId = manualTimeProjectId || (firstProject?.id != null ? String(firstProject.id) : "");
+    setManualTimeProjectId(nextProjectId);
+    const centres = costCentresForEditProject(nextProjectId);
+    setManualTimeCostCentre((prev) => (prev && centres.includes(prev) ? prev : centres[0] || ""));
+    setManualTimeOpen(true);
+  };
+
+  const submitManualTimeRequest = async (event) => {
+    event?.preventDefault?.();
+    if (manualTimeSaving) return;
+    if (!authUser?.id || !userCompany?.id) return;
+    const projectOptions = isAdmin ? effectiveProjects : clockSelectableProjects;
+    const project = projectOptions.find((p) => String(p.id) === String(manualTimeProjectId));
+    if (!project) {
+      alert("Please select a project.");
+      return;
+    }
+    const centres = costCentresForEditProject(project.id);
+    if (centres.length > 0 && (!manualTimeCostCentre || !centres.includes(manualTimeCostCentre))) {
+      alert("Please select a task.");
+      return;
+    }
+    if (!manualTimeDate || !manualTimeClockInTime || !manualTimeClockOutTime) {
+      alert("Date, clock-in, and clock-out are required.");
+      return;
+    }
+    const clockInIso = wallDateTimeToUtcIso(manualTimeDate, manualTimeClockInTime, companyTimeZone);
+    const clockOutIso = wallDateTimeToUtcIso(manualTimeDate, manualTimeClockOutTime, companyTimeZone);
+    if (!clockInIso || !clockOutIso || new Date(clockOutIso).getTime() <= new Date(clockInIso).getTime()) {
+      alert("Clock out must be after clock in.");
+      return;
+    }
+
+    setManualTimeSaving(true);
+    try {
+      await submitTimesheetChangeRequest({
+        company_id: userCompany.id,
+        user_id: authUser.id,
+        employee_name: (profileFullName || "").trim() || authUser.email || "Employee",
+        employee_email: authUser.email || null,
+        request_type: "manual_time",
+        status: "pending",
+        timesheet_id: null,
+        original_snapshot: null,
+        requested_clock_in: clockInIso,
+        requested_clock_out: clockOutIso,
+        requested_project_id: String(project.id),
+        requested_project_name: project.name || "",
+        requested_cost_centre: manualTimeCostCentre || "",
+        reason: String(manualTimeReason || "").trim() || null,
+      });
+      setManualTimeOpen(false);
+      setManualTimeReason("");
+      alert("Manual time sent to supervisor for approval.");
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setManualTimeSaving(false);
+    }
+  };
+
   const handleDashboardEmployeeClockIn = async (row) => {
     if (!isAdmin || !authUser?.id || !userCompany?.id) return;
     if (row.employmentStatus === "archived") {
@@ -9245,6 +9429,46 @@ const handlePhotoQuickUpload = async (event) => {
       return;
     }
 
+    if (!isAdmin) {
+      setEditTimesheetSaving(true);
+      try {
+        await submitTimesheetChangeRequest({
+          company_id: userCompany.id,
+          user_id: authUser.id,
+          employee_name: resolveTimesheetEmployeeTitle(record, {
+            profileFullName,
+            authUser,
+            teamProfileFullNameByUserId,
+          }),
+          employee_email: record.employeeEmail || authUser.email || null,
+          request_type: "edit_time",
+          status: "pending",
+          timesheet_id: rowId,
+          original_snapshot: {
+            clock_in: record.clockIn,
+            clock_out: record.clockOut,
+            project_id: record.projectId,
+            project_name: record.project,
+            cost_centre: record.costCenter,
+            hourly_rate: record.hourlyRate,
+          },
+          requested_clock_in: clockInIso,
+          requested_clock_out: clockOutIso,
+          requested_project_id: String(proj.id),
+          requested_project_name: proj.name || "",
+          requested_cost_centre: editCostCenter || "",
+          reason: "Employee requested timesheet edit",
+        });
+        cancelEditRecord();
+        alert("Timesheet edit sent to supervisor for approval.");
+      } catch (err) {
+        alert(getErrorMessage(err));
+      } finally {
+        setEditTimesheetSaving(false);
+      }
+      return;
+    }
+
     setEditTimesheetSaving(true);
     try {
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
@@ -9310,6 +9534,159 @@ const handlePhotoQuickUpload = async (event) => {
     } finally {
       setDeletingTimesheetId(null);
     }
+  };
+
+  const approveTimesheetRequest = async (request) => {
+    if (!isAdmin || !request?.id || reviewingTimesheetRequestId) return;
+    if (!window.confirm("Approve this time request?")) return;
+    setReviewingTimesheetRequestId(request.id);
+    try {
+      const clockInIso = request.requestedClockIn;
+      const clockOutIso = request.requestedClockOut;
+      const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
+        userId: request.userId,
+        clockInIso,
+        clockOutIso,
+        timesheetHourlyRate:
+          request.requestType === "edit_time" ? request.originalSnapshot?.hourly_rate : 0,
+      });
+
+      if (request.requestType === "manual_time") {
+        const { data: prof } = await supabase
+          .from("profiles")
+          .select("hourly_rate")
+          .eq("id", request.userId)
+          .maybeSingle();
+        const hourlyRate = hourlyRateFromProfileValue(prof?.hourly_rate);
+        const insertRow = {
+          company_id: request.companyId,
+          user_id: request.userId,
+          employee_name: request.employeeName || "Employee",
+          employee_email: request.employeeEmail || null,
+          company_name: userCompany?.name || null,
+          project_id: request.requestedProjectId || null,
+          project_name: request.requestedProjectName || "",
+          cost_centre: request.requestedCostCentre || "",
+          clock_in: clockInIso,
+          hourly_rate: hourlyRate,
+          ...labourUpdate,
+        };
+        const { error } = await supabaseInsertTimesheetRow(supabase, insertRow);
+        if (error) throw error;
+      } else {
+        if (!request.timesheetId) throw new Error("Missing original timesheet id.");
+        const { error } = await supabaseUpdateTimesheetRow(supabase, request.timesheetId, {
+          clock_in: clockInIso,
+          clock_out: clockOutIso,
+          project_id: request.requestedProjectId || null,
+          project_name: request.requestedProjectName || "",
+          cost_centre: request.requestedCostCentre || "",
+          ...labourUpdate,
+        });
+        if (error) throw error;
+      }
+
+      const { error: reqErr } = await supabase
+        .from("timesheet_change_requests")
+        .update({
+          status: "approved",
+          reviewed_by: authUser.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq("id", request.id);
+      if (reqErr) throw reqErr;
+
+      await fetchTimesheetChangeRequests();
+      await fetchTimesheetsFromSupabase();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setReviewingTimesheetRequestId(null);
+    }
+  };
+
+  const rejectTimesheetRequest = async (request) => {
+    if (!isAdmin || !request?.id || reviewingTimesheetRequestId) return;
+    if (!window.confirm("Reject this time request?")) return;
+    setReviewingTimesheetRequestId(request.id);
+    try {
+      const { error } = await supabase
+        .from("timesheet_change_requests")
+        .update({
+          status: "rejected",
+          reviewed_by: authUser.id,
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq("id", request.id);
+      if (error) throw error;
+      await fetchTimesheetChangeRequests();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setReviewingTimesheetRequestId(null);
+    }
+  };
+
+  const renderTimesheetRequestCard = (request) => {
+    const busy = reviewingTimesheetRequestId === request.id;
+    const requestLabel = request.requestType === "manual_time" ? "Manual time" : "Edit request";
+    const original = request.originalSnapshot || {};
+    return (
+      <div key={request.id} className="rounded-[22px] border border-amber-200 bg-amber-50 p-3.5 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[16px] font-black text-slate-950">{requestLabel}</p>
+            <p className="text-[14px] font-bold text-slate-700 truncate">
+              {request.employeeName || request.employeeEmail || "Employee"}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-full bg-white px-3 py-1 text-[12px] font-black text-amber-800">
+            Pending
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-[13px] text-slate-700">
+          <div className="rounded-2xl bg-white p-2">
+            <p className="text-[10px] font-black uppercase text-slate-500">Clock in</p>
+            <p className="font-black text-slate-950">{formatDate(request.requestedClockIn, companyTimeZone)}</p>
+            <p className="font-bold">{formatTime(request.requestedClockIn, companyTimeZone)}</p>
+          </div>
+          <div className="rounded-2xl bg-white p-2">
+            <p className="text-[10px] font-black uppercase text-slate-500">Clock out</p>
+            <p className="font-black text-slate-950">{formatDate(request.requestedClockOut, companyTimeZone)}</p>
+            <p className="font-bold">{formatTime(request.requestedClockOut, companyTimeZone)}</p>
+          </div>
+        </div>
+        <p className="mt-2 text-[14px] font-bold text-slate-800">
+          {request.requestedProjectName || "No project"} - {request.requestedCostCentre || "No task"}
+        </p>
+        {request.requestType === "edit_time" && original.clock_in ? (
+          <p className="mt-1 text-[12px] font-semibold text-slate-500">
+            Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "—"}
+          </p>
+        ) : null}
+        {request.reason ? <p className="mt-1 text-[13px] text-slate-600">{request.reason}</p> : null}
+        {isAdmin ? (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              className="rounded-2xl bg-slate-950 px-3 py-3 text-[14px] font-black text-white disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void approveTimesheetRequest(request)}
+            >
+              {busy ? "Working..." : "Approve"}
+            </button>
+            <button
+              type="button"
+              className="rounded-2xl border border-red-200 bg-white px-3 py-3 text-[14px] font-black text-red-700 disabled:opacity-50"
+              disabled={busy}
+              onClick={() => void rejectTimesheetRequest(request)}
+            >
+              Reject
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   const togglePhotoSelected = (folderName, itemId) => {
@@ -11193,6 +11570,9 @@ const handlePhotoQuickUpload = async (event) => {
 
     const busyClose = closingShiftId != null && String(recordRowId) === closingShiftId;
     const busyDelete = deletingTimesheetId != null && String(recordRowId) === deletingTimesheetId;
+    const pendingEditRequest = pendingTimesheetRequests.find(
+      (request) => request?.requestType === "edit_time" && String(request?.timesheetId || "") === String(recordRowId || "")
+    );
     const editCentres =
       editingRecordId === record.id ? costCentresForEditProject(editProjectId) : [];
 
@@ -11237,7 +11617,9 @@ const handlePhotoQuickUpload = async (event) => {
       </div>
       {editingRecordId === record.id ? (
         <div className="mt-3 border-t pt-2 space-y-2">
-          <p className="text-[13px] text-slate-500 leading-tight">Edit in {companyTimeZone}</p>
+          <p className="text-[13px] text-slate-500 leading-tight">
+            {isAdmin ? `Edit in ${companyTimeZone}` : `Send requested changes for supervisor approval (${companyTimeZone})`}
+          </p>
           <div className="space-y-1">
             <label className="text-[13px] text-slate-500">Clock in</label>
             <div className="flex gap-1">
@@ -11317,7 +11699,7 @@ const handlePhotoQuickUpload = async (event) => {
               disabled={editTimesheetSaving}
               onClick={() => void saveEditedRecord(record)}
             >
-              {editTimesheetSaving ? "Saving…" : "Save"}
+              {editTimesheetSaving ? (isAdmin ? "Saving..." : "Sending...") : (isAdmin ? "Save" : "Send request")}
             </Button>
             <Button type="button" className="rounded-lg h-10 text-[14px]" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
               Cancel
@@ -11390,16 +11772,21 @@ const handlePhotoQuickUpload = async (event) => {
             </Button>
           )}
           {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee — waiting for admin approval.</p>}
+          {pendingEditRequest ? (
+            <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+              Edit request pending supervisor approval.
+            </p>
+          ) : null}
           {((allowEdit && canEditTimesheetRecord(record)) || isAdmin) && (
             <div className="mt-2 grid grid-cols-2 gap-1.5">
               {allowEdit && canEditTimesheetRecord(record) && (
                 <Button
                   type="button"
                   className="rounded-xl h-10 text-[14px] col-span-2 sm:col-span-1"
-                  disabled={busyDelete}
+                  disabled={busyDelete || Boolean(pendingEditRequest)}
                   onClick={() => startEditRecord(record)}
                 >
-                  ✏️ Edit
+                  {isAdmin ? "Edit" : "Request edit"}
                 </Button>
               )}
               {isAdmin && (
@@ -13884,6 +14271,125 @@ const handlePhotoQuickUpload = async (event) => {
                     </p>
                   </div>
                 </div>
+                {!isAdmin ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                    onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
+                  >
+                    {manualTimeOpen ? "Close manual time" : "Add manual time"}
+                  </button>
+                ) : null}
+                {manualTimeOpen && !isAdmin ? (
+                  <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                    <p className="text-[15px] font-black text-slate-950">Manual time request</p>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Date
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeDate}
+                        onChange={(event) => setManualTimeDate(event.target.value)}
+                        required
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        Clock in
+                        <input
+                          type="time"
+                          className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                          value={manualTimeClockInTime}
+                          onChange={(event) => setManualTimeClockInTime(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        Clock out
+                        <input
+                          type="time"
+                          className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                          value={manualTimeClockOutTime}
+                          onChange={(event) => setManualTimeClockOutTime(event.target.value)}
+                          required
+                        />
+                      </label>
+                    </div>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Project
+                      <select
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeProjectId}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setManualTimeProjectId(next);
+                          const centres =
+                            effectiveCostCentresByProjectId[String(next)] ||
+                            effectiveCostCentresByProjectId[Number(next)] ||
+                            [];
+                          setManualTimeCostCentre(centres[0] || "");
+                        }}
+                        required
+                      >
+                        <option value="">Select project</option>
+                        {manualTimeProjectOptions.map((project) => (
+                          <option key={project.id} value={String(project.id)}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Task
+                      <select
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeCostCentre}
+                        onChange={(event) => setManualTimeCostCentre(event.target.value)}
+                        disabled={!manualTimeProjectId || manualTimeCostCentres.length === 0}
+                      >
+                        <option value="">{manualTimeProjectId ? "Select task" : "Select project first"}</option>
+                        {manualTimeCostCentres.map((centre) => (
+                          <option key={centre} value={centre}>
+                            {centre}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Reason
+                      <input
+                        type="text"
+                        className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeReason}
+                        onChange={(event) => setManualTimeReason(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                      disabled={manualTimeSaving}
+                    >
+                      {manualTimeSaving ? "Sending..." : "Send for supervisor approval"}
+                    </button>
+                  </form>
+                ) : null}
+                {timesheetRequestsError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                    {timesheetRequestsError}
+                  </div>
+                ) : null}
+                {visibleEmployeeTimesheetRequests.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[14px] font-black uppercase tracking-wide text-slate-500">
+                        {isAdmin ? "Pending time approvals" : "Waiting for supervisor approval"}
+                      </p>
+                      {timesheetRequestsLoading ? <span className="text-[12px] font-bold text-slate-500">Refreshing...</span> : null}
+                    </div>
+                    {visibleEmployeeTimesheetRequests.map((request) => renderTimesheetRequestCard(request))}
+                  </div>
+                ) : null}
                 {timesheetsLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600 mb-3">
                     Loading timesheets…
