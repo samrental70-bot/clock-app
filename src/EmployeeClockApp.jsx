@@ -10834,6 +10834,24 @@ const handlePhotoQuickUpload = async (event) => {
     return listItemImageUrl(item) ? "Photo task" : "Untitled item";
   };
 
+  const getNextPhotoTaskLabelForKey = (storageKey) => {
+    const activeRows = Array.isArray(clockProjectLists?.task?.[storageKey])
+      ? clockProjectLists.task[storageKey]
+      : [];
+    const completedRows = Array.isArray(clockProjectLists?.completed?.task?.[storageKey])
+      ? clockProjectLists.completed.task[storageKey]
+      : [];
+    let maxNumber = 0;
+    for (const item of [...activeRows, ...completedRows]) {
+      if (!listItemImageUrl(item)) continue;
+      const text = String(item?.text || item?.title || "").trim();
+      const match = text.match(/^photo\s+task\s+(\d+)$/i);
+      if (match) maxNumber = Math.max(maxNumber, Number(match[1]) || 0);
+      else maxNumber += 1;
+    }
+    return `Photo task ${maxNumber + 1}`;
+  };
+
   const buildListImageDraft = async (file) => {
     if (!file || !String(file.type || "").startsWith("image/")) {
       throw new Error("Choose an image file.");
@@ -10927,10 +10945,14 @@ const handlePhotoQuickUpload = async (event) => {
     if (!clockListModal || !clockListContextReady) return;
     if (clockListModal === "material" && !text) return;
     if (clockListModal === "task" && !text && !hasTaskImage) return;
+    const itemText =
+      clockListModal === "task" && !text && hasTaskImage
+        ? getNextPhotoTaskLabelForKey(clockProjectListKey)
+        : text;
 
     const item = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text,
+      text: itemText,
       projectId: clockListContext.projectId || "",
       projectName: clockListContext.projectName || "",
       costCenter: clockListContext.costCenter || "",
@@ -11119,7 +11141,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const addListPageTaskPhotoItem = (imageDraft, textOverride = listDraft) => {
     if (!selectedListProject || !imageDraft?.dataUrl) return;
-    const text = String(textOverride || "").trim();
+    const text = String(textOverride || "").trim() || getNextPhotoTaskLabelForKey(listProjectStorageKey);
     const item = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,
@@ -11148,7 +11170,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const addClockListTaskPhotoItem = (imageDraft, textOverride = clockListDraft) => {
     if (!clockListContextReady || !imageDraft?.dataUrl) return;
-    const text = String(textOverride || "").trim();
+    const text = String(textOverride || "").trim() || getNextPhotoTaskLabelForKey(clockProjectListKey);
     const item = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       text,
@@ -11212,9 +11234,13 @@ const handlePhotoQuickUpload = async (event) => {
     if (!selectedListProject) return;
     if (listType === "material" && !text) return;
     if (listType === "task" && !text && !hasTaskImage) return;
+    const itemText =
+      listType === "task" && !text && hasTaskImage
+        ? getNextPhotoTaskLabelForKey(listProjectStorageKey)
+        : text;
     const item = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      text,
+      text: itemText,
       projectId: selectedListProject?.id || "",
       projectName: selectedListProject?.name || "",
       costCenter: "",
@@ -11783,7 +11809,7 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
-                      Camera
+                      {photoCameraOpen && photoCameraMode === "photo" ? "Camera Off" : "Camera"}
                     </button>
                     <button
                       type="button"
@@ -11815,7 +11841,7 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading || videoRecording || videoUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                     >
-                      Receipt
+                      {photoCameraOpen && photoCameraMode === "receipt" ? "Receipt Off" : "Receipt"}
                     </button>
                   </div>
 
@@ -12136,7 +12162,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading}
                           aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
-                          Camera
+                          {photoCameraOpen && photoCameraMode === "photo" ? "Camera Off" : "Camera"}
                         </button>
                         <button
                           type="button"
@@ -12164,7 +12190,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading || videoRecording || videoUploading}
                           aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                         >
-                          Receipt
+                          {photoCameraOpen && photoCameraMode === "receipt" ? "Receipt Off" : "Receipt"}
                         </button>
                       </div>
 
@@ -12811,7 +12837,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={!selectedListProject}
                           aria-pressed={listCameraOpen && listCameraTarget === "page"}
                         >
-                          Camera
+                          {listCameraOpen && listCameraTarget === "page" ? "Camera Off" : "Camera"}
                         </button>
                         {listCameraOpen && listCameraTarget === "page" ? (
                           <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
@@ -17663,7 +17689,7 @@ const handlePhotoQuickUpload = async (event) => {
                         }}
                         aria-pressed={listCameraOpen && listCameraTarget === "modal"}
                       >
-                        Camera
+                        {listCameraOpen && listCameraTarget === "modal" ? "Camera Off" : "Camera"}
                       </button>
                       {listCameraOpen && listCameraTarget === "modal" ? (
                         <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
