@@ -836,6 +836,9 @@ function computeReportsQuickRange(preset, now, timeZone) {
   const y = Number(yStr);
   const m = Number(mStr);
   if (!y || !m) return { from: "", to: "" };
+  if (preset === "today") {
+    return { from: todayKey, to: todayKey };
+  }
   if (preset === "weekly") {
     const mon = mondayStartOfWallWeekContaining(todayKey, tz);
     const sun = addWallDaysInTimeZone(mon, 6, tz);
@@ -2373,9 +2376,9 @@ export default function EmployeeClockApp() {
     const y = Number(yStr);
     const m = Number(mStr);
     if (!y || !m) return;
-    const fromKey = `${y}-${String(m).padStart(2, "0")}-01`;
-    setReportsDateFrom((prev) => prev || fromKey);
+    setReportsDateFrom((prev) => prev || todayKey);
     setReportsDateTo((prev) => prev || todayKey);
+    setReportsRangePreset((prev) => prev || "today");
   }, [isAdmin, activeTab, companyTimeZone]);
 
   useEffect(() => {
@@ -11507,9 +11510,9 @@ const handlePhotoQuickUpload = async (event) => {
     );
 
   const reportsQuickRangeOptions = [
+    { id: "today", label: "Today" },
     { id: "weekly", label: "Week" },
     { id: "monthly", label: "Month" },
-    { id: "yearly", label: "Year" },
   ];
 
   const reportsDateRangeLabel = formatReportDateRangeLabel(reportsDateFrom, reportsDateTo);
