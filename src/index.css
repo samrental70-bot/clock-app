@@ -13,3 +13,48 @@ body {
   max-height: 100dvh;
   overflow: hidden;
 }
+
+.schedule-task-form {
+  color: #0f172a;
+}
+
+.schedule-task-form label,
+.schedule-task-form .schedule-form-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.875rem;
+  font-weight: 800;
+  color: #334155;
+}
+
+.schedule-task-form input:not([type="checkbox"]),
+.schedule-task-form select,
+.schedule-task-form textarea {
+  min-height: 2.9rem !important;
+  border-radius: 1rem !important;
+  padding: 0.65rem 0.8rem !important;
+  font-size: 1rem !important;
+  font-weight: 650 !important;
+  color: #0f172a !important;
+}
+
+.schedule-task-form textarea {
+  line-height: 1.35 !important;
+}
+
+.schedule-task-form input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.schedule-task-form .schedule-pick-list {
+  max-height: 11rem;
+  border-radius: 1rem;
+}
+
+.schedule-task-form .schedule-pick-list label {
+  margin: 0;
+  padding: 0.55rem;
+  border-radius: 0.85rem;
+  font-size: 0.95rem;
+}
