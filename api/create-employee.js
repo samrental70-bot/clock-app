@@ -39,6 +39,57 @@ function buildGeneratedEmployeeEmail(fullName, companyId) {
   return `${namePart}.${companyPart}.${stamp}${randomPart}@login.opera-ai.app`;
 }
 
+async function assignUserToAllActiveProjects(supabase, { companyId, userId, assignedBy }) {
+  const { data: projects, error: projectsErr } = await supabase
+    .from("projects")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("status", "active");
+  if (projectsErr) throw projectsErr;
+
+  const projectIds = [...new Set((projects || []).map((p) => p.id).filter(Boolean))];
+  if (projectIds.length === 0) return { projects: 0, costCentres: 0 };
+
+  const projectAssignmentRows = projectIds.map((projectId) => ({
+    company_id: companyId,
+    project_id: projectId,
+    user_id: userId,
+    assigned_by: assignedBy || null,
+    status: "active",
+  }));
+
+  const { error: paErr } = await supabase.from("project_assignments").insert(projectAssignmentRows);
+  if (paErr) throw paErr;
+
+  const { data: centres, error: centresErr } = await supabase
+    .from("cost_centres")
+    .select("id, project_id")
+    .eq("company_id", companyId)
+    .in("project_id", projectIds)
+    .eq("status", "active");
+  if (centresErr) throw centresErr;
+
+  const costCentreRows = (centres || [])
+    .filter((c) => c?.id && c?.project_id)
+    .map((c) => ({
+      company_id: companyId,
+      project_id: c.project_id,
+      cost_centre_id: c.id,
+      user_id: userId,
+      assigned_by: assignedBy || null,
+      status: "active",
+    }));
+
+  if (costCentreRows.length > 0) {
+    const { error: pccaErr } = await supabase
+      .from("project_cost_centre_assignments")
+      .insert(costCentreRows);
+    if (pccaErr) throw pccaErr;
+  }
+
+  return { projects: projectAssignmentRows.length, costCentres: costCentreRows.length };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -209,5 +260,16 @@ export default async function handler(req, res) {
     return;
   }
 
-  res.status(200).json({ success: true, user_id: newUserId, email });
+  let defaultAssignments = { projects: 0, costCentres: 0 };
+  try {
+    defaultAssignments = await assignUserToAllActiveProjects(supabase, {
+      companyId: company_id,
+      userId: newUserId,
+      assignedBy: callerId,
+    });
+  } catch (assignErr) {
+    console.warn("[CREATE_EMPLOYEE] default project assignment failed", assignErr);
+  }
+
+  res.status(200).json({ success: true, user_id: newUserId, email, default_assignments: defaultAssignments });
 }

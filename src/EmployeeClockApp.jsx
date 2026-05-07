@@ -6018,6 +6018,30 @@ export default function EmployeeClockApp() {
       );
       setAuthRole("employee");
 
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (accessToken) {
+          const assignRes = await fetch("/api/assign-default-projects", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({
+              company_id: company.id,
+              target_user_id: authUser.id,
+            }),
+          });
+          if (!assignRes.ok) {
+            const json = await assignRes.json().catch(() => ({}));
+            console.warn("[JOIN_COMPANY] default project assignment failed", json);
+          }
+        }
+      } catch (assignErr) {
+        console.warn("[JOIN_COMPANY] default project assignment failed", assignErr);
+      }
+
       setUserCompany(company);
       setUserCompanyRole("employee");
       setCompanyChecked(true);
@@ -6108,16 +6132,103 @@ export default function EmployeeClockApp() {
     [isAdmin]
   );
 
+  const fetchCompanyDefaultCostCentreNames = async (companyId) => {
+    const { data, error } = await supabase
+      .from("cost_centres")
+      .select("name")
+      .eq("company_id", companyId)
+      .eq("status", "active")
+      .order("name", { ascending: true });
+    if (error) throw error;
+    const seen = new Set();
+    const names = [];
+    for (const row of data || []) {
+      const name = String(row?.name || "").trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) continue;
+      seen.add(key);
+      names.push(name);
+    }
+    return names;
+  };
+
+  const fetchActiveCompanyMemberUserIds = async (companyId) => {
+    const { data: members, error: membersErr } = await supabase
+      .from("company_members")
+      .select("user_id")
+      .eq("company_id", companyId);
+    if (membersErr) throw membersErr;
+    const userIds = [...new Set((members || []).map((m) => m.user_id).filter(Boolean))];
+    if (userIds.length === 0) return [];
+
+    const { data: profiles, error: profilesErr } = await supabase
+      .from("profiles")
+      .select("id, employment_status")
+      .in("id", userIds);
+    if (profilesErr) {
+      console.warn("[PROJECT_DEFAULTS] profile status fetch failed", profilesErr);
+      return userIds;
+    }
+    const statusById = Object.fromEntries((profiles || []).map((p) => [String(p.id), p.employment_status]));
+    return userIds.filter((uid) => normalizeEmploymentStatus(statusById[String(uid)]) !== "archived");
+  };
+
+  const assignNewProjectToActiveMembers = async ({ companyId, projectId, costCentreRows, assignedBy }) => {
+    const userIds = await fetchActiveCompanyMemberUserIds(companyId);
+    if (userIds.length === 0) return { users: 0, costCentres: 0 };
+
+    const projectAssignmentRows = userIds.map((uid) => ({
+      company_id: companyId,
+      project_id: projectId,
+      user_id: uid,
+      assigned_by: assignedBy,
+      status: "active",
+    }));
+
+    const { error: paErr } = await supabase.from("project_assignments").insert(projectAssignmentRows);
+    if (paErr) throw paErr;
+
+    const activeCostCentres = (costCentreRows || []).filter((cc) => cc?.id);
+    const pccaRows = [];
+    for (const uid of userIds) {
+      for (const cc of activeCostCentres) {
+        pccaRows.push({
+          company_id: companyId,
+          project_id: projectId,
+          cost_centre_id: cc.id,
+          user_id: uid,
+          assigned_by: assignedBy,
+          status: "active",
+        });
+      }
+    }
+
+    if (pccaRows.length > 0) {
+      const { error: pccaErr } = await supabase.from("project_cost_centre_assignments").insert(pccaRows);
+      if (pccaErr) throw pccaErr;
+    }
+
+    return { users: userIds.length, costCentres: pccaRows.length };
+  };
+
   const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
     const name = String(projectName || "").trim();
     if (!name) {
       const err = new Error("Project name is required.");
       throw err;
     }
-    const centres = String(costCentresCsv || "")
+    const typedCentres = String(costCentresCsv || "")
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean);
+    const companyDefaultCentres = await fetchCompanyDefaultCostCentreNames(companyId);
+    const centreSeen = new Set();
+    const centres = [...companyDefaultCentres, ...typedCentres].filter((c) => {
+      const key = String(c || "").trim().toLowerCase();
+      if (!key || centreSeen.has(key)) return false;
+      centreSeen.add(key);
+      return true;
+    });
 
     const projectPayload = {
       company_id: companyId,
@@ -6134,6 +6245,7 @@ export default function EmployeeClockApp() {
 
     if (projectErr) throw projectErr;
 
+    let createdCentres = [];
     if (centres.length > 0) {
       const rows = centres.map((c, index) => ({
         company_id: companyId,
@@ -6143,9 +6255,20 @@ export default function EmployeeClockApp() {
         display_order: index,
         created_by: userId,
       }));
-      const { error: centresErr } = await supabase.from("cost_centres").insert(rows);
+      const { data: insertedCentres, error: centresErr } = await supabase
+        .from("cost_centres")
+        .insert(rows)
+        .select("id, name");
       if (centresErr) throw centresErr;
+      createdCentres = insertedCentres || [];
     }
+
+    await assignNewProjectToActiveMembers({
+      companyId,
+      projectId: created.id,
+      costCentreRows: createdCentres,
+      assignedBy: userId,
+    });
 
     return created;
   };
@@ -17596,7 +17719,7 @@ const handlePhotoQuickUpload = async (event) => {
                         className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
                         value={projectsAddCostCentres}
                         onChange={(e) => setProjectsAddCostCentres(e.target.value)}
-                        placeholder="Comma-separated, e.g. Framing, Drywall, Painting"
+                        placeholder="Uses all existing cost centres. Add more with commas."
                         disabled={projectsAddSaving}
                       />
                     </div>
