@@ -927,6 +927,186 @@ function mediaItemUrl(item) {
   return item?.videoUrl || item?.imageUrl || item?.dataUrl || "";
 }
 
+function mediaItemFolder(item) {
+  return (
+    item?.folderName ||
+    item?.folder_name ||
+    getProjectFolderName(item?.project || item?.project_name || "project")
+  );
+}
+
+function normalizeProjectMediaType(value) {
+  const v = String(value || "").trim().toLowerCase();
+  if (v === "video") return "video";
+  if (v === "receipt") return "receipt";
+  if (v === "document") return "document";
+  return "photo";
+}
+
+function normalizeDocumentationType(value, mediaType = "photo") {
+  const v = String(value || "").trim().toLowerCase();
+  const allowed = new Set(["before", "after", "daily_progress", "receipt", "video", "clockout", "document", "other"]);
+  if (allowed.has(v)) return v;
+  if (mediaType === "receipt") return "receipt";
+  if (mediaType === "video") return "video";
+  if (mediaType === "document") return "document";
+  return "daily_progress";
+}
+
+function projectMediaRowToLocalItem(row) {
+  const mediaType = normalizeProjectMediaType(row?.media_type);
+  const projectName = row?.project_name || row?.project || "Project";
+  const folderName = getProjectFolderName(projectName);
+  const publicUrl = row?.public_url || row?.imageUrl || row?.videoUrl || row?.dataUrl || "";
+  const capturedAt = row?.captured_at || row?.capturedAt || row?.created_at || new Date().toISOString();
+  const base = {
+    id: row?.id,
+    dbId: row?.id,
+    company_id: row?.company_id || null,
+    companyId: row?.company_id || null,
+    user_id: row?.user_id || null,
+    userId: row?.user_id || null,
+    project: projectName,
+    project_name: projectName,
+    projectId: row?.project_id ?? null,
+    project_id: row?.project_id ?? null,
+    folderName,
+    costCenter: row?.cost_centre || row?.costCenter || "",
+    cost_centre: row?.cost_centre || row?.costCenter || "",
+    employee: row?.employee_name || row?.employee || "Employee",
+    employeeId: row?.user_id || row?.employeeId || null,
+    capturedAt,
+    timestamp: capturedAt,
+    uploadedAt: row?.uploaded_at || row?.created_at || capturedAt,
+    storageBucket: row?.storage_bucket || "project-photos",
+    storagePath: row?.storage_path || "",
+    location: row?.location || null,
+    source: row?.source || "",
+    documentation_type: normalizeDocumentationType(row?.documentation_type, mediaType),
+    documentationType: normalizeDocumentationType(row?.documentation_type, mediaType),
+    notes: row?.notes || "",
+    dataUrl: "",
+  };
+
+  if (mediaType === "receipt") {
+    return {
+      ...base,
+      imageUrl: publicUrl,
+      dataUrl: publicUrl,
+      type: "receipt",
+      media_type: "receipt",
+      mediaType: "receipt",
+      amount: row?.amount != null ? Number(row.amount) : 0,
+      supplier: row?.supplier || "",
+      category: row?.supplier || row?.notes || "Receipt",
+      status: row?.receipt_status || "Receipt Uploaded",
+      receiptStatus: row?.receipt_status || "Receipt Uploaded",
+      receiptUploadedAt: row?.uploaded_at || capturedAt,
+      receipt_uploaded_at: row?.uploaded_at || capturedAt,
+    };
+  }
+
+  if (mediaType === "video") {
+    return {
+      ...base,
+      imageUrl: publicUrl,
+      videoUrl: publicUrl,
+      type: "video",
+      media_type: "video",
+      mediaType: "video",
+      duration_seconds: row?.duration_seconds ?? null,
+      durationSeconds: row?.duration_seconds ?? null,
+    };
+  }
+
+  return {
+    ...base,
+    imageUrl: publicUrl,
+    type: "photo",
+    media_type: "photo",
+    mediaType: "photo",
+  };
+}
+
+function bucketProjectMediaItems(items) {
+  const buckets = {};
+  for (const item of normalizeArray(items)) {
+    const folderName = mediaItemFolder(item);
+    if (!buckets[folderName]) buckets[folderName] = [];
+    buckets[folderName].push(item);
+  }
+  for (const folder of Object.keys(buckets)) {
+    buckets[folder].sort((a, b) => new Date(b?.capturedAt || b?.captured_at || 0) - new Date(a?.capturedAt || a?.captured_at || 0));
+  }
+  return buckets;
+}
+
+function splitProjectMediaRows(rows) {
+  const photos = [];
+  const receipts = [];
+  for (const row of normalizeArray(rows)) {
+    const item = projectMediaRowToLocalItem(row);
+    if (normalizeProjectMediaType(row?.media_type) === "receipt") receipts.push(item);
+    else photos.push(item);
+  }
+  return {
+    photos: bucketProjectMediaItems(photos),
+    receipts: bucketProjectMediaItems(receipts),
+  };
+}
+
+function mergeMediaBuckets(primaryBuckets, fallbackBuckets) {
+  const out = {};
+  const folders = new Set([
+    ...Object.keys(normalizeMediaBuckets(fallbackBuckets)),
+    ...Object.keys(normalizeMediaBuckets(primaryBuckets)),
+  ]);
+  for (const folder of folders) {
+    const seen = new Set();
+    const merged = [];
+    const add = (item, index) => {
+      const id = mediaItemId(item, index);
+      if (seen.has(id)) return;
+      seen.add(id);
+      merged.push(item);
+    };
+    normalizeArray(primaryBuckets?.[folder]).forEach(add);
+    normalizeArray(fallbackBuckets?.[folder]).forEach(add);
+    out[folder] = merged.sort((a, b) => new Date(b?.capturedAt || b?.captured_at || 0) - new Date(a?.capturedAt || a?.captured_at || 0));
+  }
+  return out;
+}
+
+function mediaItemCapturedAtMs(item) {
+  const ms = new Date(item?.capturedAt || item?.captured_at || item?.timestamp || item?.created_at || 0).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function filterMediaBucketsByDocumentationFilters(buckets, filters = {}) {
+  const source = normalizeMediaBuckets(buckets);
+  const out = {};
+  const fromMs = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00`).getTime() : null;
+  const toMs = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59.999`).getTime() : null;
+  for (const [folder, items] of Object.entries(source)) {
+    const filtered = normalizeArray(items).filter((item) => {
+      const mediaType = normalizeProjectMediaType(item?.media_type || item?.mediaType || item?.type);
+      const docType = normalizeDocumentationType(item?.documentation_type || item?.documentationType, mediaType);
+      const capturedMs = mediaItemCapturedAtMs(item);
+      const employeeId = String(item?.employeeId || item?.userId || item?.user_id || "");
+      const cost = String(item?.costCenter || item?.cost_centre || "");
+      if (filters.mediaType && filters.mediaType !== "all" && mediaType !== filters.mediaType) return false;
+      if (filters.documentationType && filters.documentationType !== "all" && docType !== filters.documentationType) return false;
+      if (filters.employeeId && filters.employeeId !== "all" && employeeId !== String(filters.employeeId)) return false;
+      if (filters.costCentre && filters.costCentre !== "all" && cost !== String(filters.costCentre)) return false;
+      if (fromMs != null && capturedMs && capturedMs < fromMs) return false;
+      if (toMs != null && capturedMs && capturedMs > toMs) return false;
+      return true;
+    });
+    if (filtered.length) out[folder] = filtered;
+  }
+  return out;
+}
+
 function encodeSharePayload(payload) {
   const json = JSON.stringify(payload);
   const bytes = new TextEncoder().encode(json);
@@ -2011,6 +2191,7 @@ export default function EmployeeClockApp() {
   const photoFallbackCameraInputRef = useRef(null);
   const photoStatusClearTimerRef = useRef(null);
   const latestPhotoStatusRef = useRef("");
+  const projectMediaLocalSyncAttemptedRef = useRef(false);
   const clockSetupWarningTimerRef = useRef(null);
   const latestLocationStatusRef = useRef("");
   const materialPaymentCountdownTimerRef = useRef(null);
@@ -2064,6 +2245,14 @@ export default function EmployeeClockApp() {
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
+  const [mediaFilterDateFrom, setMediaFilterDateFrom] = useState("");
+  const [mediaFilterDateTo, setMediaFilterDateTo] = useState("");
+  const [mediaFilterEmployeeId, setMediaFilterEmployeeId] = useState("all");
+  const [mediaFilterCostCentre, setMediaFilterCostCentre] = useState("all");
+  const [mediaFilterMediaType, setMediaFilterMediaType] = useState("all");
+  const [mediaFilterDocumentationType, setMediaFilterDocumentationType] = useState("all");
+  const [projectMediaLoading, setProjectMediaLoading] = useState(false);
+  const [projectMediaSyncError, setProjectMediaSyncError] = useState("");
   const [selectedPhotoIdsByFolder, setSelectedPhotoIdsByFolder] = useState({});
   const [photoViewer, setPhotoViewer] = useState(null);
   const [photoShareMessage, setPhotoShareMessage] = useState("");
@@ -2253,6 +2442,68 @@ export default function EmployeeClockApp() {
     }
     return out;
   }, [isEmployeeRole, authUser?.id, projectReceipts]);
+
+  const mediaFilterOptions = useMemo(() => {
+    const people = new Map();
+    const tasks = new Set();
+    const collect = (buckets) => {
+      for (const items of Object.values(normalizeMediaBuckets(buckets))) {
+        for (const item of normalizeArray(items)) {
+          const employeeId = String(item?.employeeId || item?.userId || item?.user_id || "");
+          const employeeName = String(item?.employee || item?.employee_name || "").trim();
+          if (employeeId && employeeName) people.set(employeeId, employeeName);
+          const taskName = String(item?.costCenter || item?.cost_centre || "").trim();
+          if (taskName) tasks.add(taskName);
+        }
+      }
+    };
+    collect(scopedProjectPhotos);
+    collect(scopedProjectReceipts);
+    return {
+      employees: [...people.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+      costCentres: [...tasks].sort((a, b) => a.localeCompare(b)),
+    };
+  }, [scopedProjectPhotos, scopedProjectReceipts]);
+
+  const filteredProjectPhotos = useMemo(
+    () =>
+      filterMediaBucketsByDocumentationFilters(scopedProjectPhotos, {
+        dateFrom: mediaFilterDateFrom,
+        dateTo: mediaFilterDateTo,
+        employeeId: mediaFilterEmployeeId,
+        costCentre: mediaFilterCostCentre,
+        mediaType: mediaFilterMediaType,
+        documentationType: mediaFilterDocumentationType,
+      }),
+    [
+      mediaFilterCostCentre,
+      mediaFilterDateFrom,
+      mediaFilterDateTo,
+      mediaFilterDocumentationType,
+      mediaFilterEmployeeId,
+      mediaFilterMediaType,
+      scopedProjectPhotos,
+    ]
+  );
+
+  const filteredProjectReceipts = useMemo(
+    () =>
+      filterMediaBucketsByDocumentationFilters(scopedProjectReceipts, {
+        dateFrom: mediaFilterDateFrom,
+        dateTo: mediaFilterDateTo,
+        employeeId: mediaFilterEmployeeId,
+        costCentre: mediaFilterCostCentre,
+        mediaType: "receipt",
+        documentationType: "receipt",
+      }),
+    [
+      mediaFilterCostCentre,
+      mediaFilterDateFrom,
+      mediaFilterDateTo,
+      mediaFilterEmployeeId,
+      scopedProjectReceipts,
+    ]
+  );
 
   const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
   const [settingsCompanyNameDraft, setSettingsCompanyNameDraft] = useState("");
@@ -4229,6 +4480,128 @@ export default function EmployeeClockApp() {
     }, delayMs);
   }, []);
 
+  const loadProjectMediaFromSupabase = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!authUser?.id || !userCompany?.id || !companyChecked) return false;
+      if (!silent) setProjectMediaLoading(true);
+      try {
+        let query = supabase
+          .from("project_media")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .order("captured_at", { ascending: false })
+          .limit(1000);
+        if (!isAdmin) query = query.eq("user_id", authUser.id);
+        const { data, error } = await query;
+        if (error) {
+          console.warn("[PROJECT_MEDIA] load failed", error);
+          setProjectMediaSyncError("Shared media database is not ready. Run the project_media SQL migration in Supabase.");
+          return false;
+        }
+
+        const split = splitProjectMediaRows(data || []);
+        setProjectPhotos((previous) => mergeMediaBuckets(split.photos, previous));
+        setProjectReceipts((previous) => mergeMediaBuckets(split.receipts, previous));
+        setProjectMediaSyncError("");
+        return true;
+      } catch (err) {
+        console.warn("[PROJECT_MEDIA] load exception", err);
+        setProjectMediaSyncError("Shared media could not be refreshed. Local media remains safe on this device.");
+        return false;
+      } finally {
+        if (!silent) setProjectMediaLoading(false);
+      }
+    },
+    [authUser?.id, companyChecked, isAdmin, userCompany?.id]
+  );
+
+  const insertProjectMediaMetadata = useCallback(
+    async (mediaItem, overrides = {}) => {
+      if (!authUser?.id || !userCompany?.id || !mediaItem?.storagePath) return null;
+      const mediaType = normalizeProjectMediaType(overrides.mediaType || mediaItem.media_type || mediaItem.mediaType || mediaItem.type);
+      const documentationType = normalizeDocumentationType(
+        overrides.documentationType || mediaItem.documentation_type || mediaItem.documentationType,
+        mediaType
+      );
+      const row = {
+        company_id: userCompany.id,
+        project_id: mediaItem.projectId != null ? String(mediaItem.projectId) : mediaItem.project_id != null ? String(mediaItem.project_id) : null,
+        project_name: mediaItem.project || mediaItem.project_name || null,
+        cost_centre_id: mediaItem.costCentreId != null ? String(mediaItem.costCentreId) : mediaItem.cost_centre_id != null ? String(mediaItem.cost_centre_id) : null,
+        cost_centre: mediaItem.costCenter || mediaItem.cost_centre || null,
+        user_id: mediaItem.userId || mediaItem.user_id || authUser.id,
+        employee_name: mediaItem.employee || mediaItem.employeeName || mediaItem.employee_name || profileFullName || authUser.email || "Employee",
+        media_type: mediaType,
+        documentation_type: documentationType,
+        storage_bucket: mediaItem.storageBucket || "project-photos",
+        storage_path: mediaItem.storagePath,
+        public_url: mediaItem.videoUrl || mediaItem.imageUrl || mediaItem.dataUrl || null,
+        captured_at: mediaItem.capturedAt || mediaItem.captured_at || mediaItem.timestamp || new Date().toISOString(),
+        uploaded_at: mediaItem.uploadedAt || new Date().toISOString(),
+        duration_seconds: mediaItem.durationSeconds ?? mediaItem.duration_seconds ?? null,
+        amount: mediaItem.amount != null && Number.isFinite(Number(mediaItem.amount)) ? Number(mediaItem.amount) : null,
+        supplier: mediaItem.supplier || null,
+        receipt_status: mediaItem.receiptStatus || mediaItem.receipt_status || mediaItem.status || null,
+        notes: mediaItem.notes || mediaItem.category || null,
+        source: overrides.source || mediaItem.source || null,
+        related_timesheet_id: mediaItem.relatedTimesheetId || mediaItem.related_timesheet_id || mediaItem.supabaseTimesheetId || null,
+        location: mediaItem.location || null,
+      };
+
+      try {
+        const { data, error } = await supabase
+          .from("project_media")
+          .upsert(row, { onConflict: "company_id,storage_bucket,storage_path" })
+          .select("id")
+          .single();
+        if (error) {
+          console.warn("[PROJECT_MEDIA] metadata insert failed", error);
+          const message = "Media uploaded, but shared database metadata did not save. Run the project_media SQL migration, then try again.";
+          setProjectMediaSyncError(message);
+          setPhotoStatus(message);
+          return null;
+        }
+        setProjectMediaSyncError("");
+        return data?.id || null;
+      } catch (err) {
+        console.warn("[PROJECT_MEDIA] metadata insert exception", err);
+        const message = "Media uploaded, but shared database metadata did not save. Local copy remains safe.";
+        setProjectMediaSyncError(message);
+        setPhotoStatus(message);
+        return null;
+      }
+    },
+    [authUser?.email, authUser?.id, profileFullName, userCompany?.id]
+  );
+
+  const syncLocalProjectMediaMetadataToSupabase = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || projectMediaLocalSyncAttemptedRef.current) return;
+    projectMediaLocalSyncAttemptedRef.current = true;
+    const items = [];
+    for (const bucket of Object.values(normalizeMediaBuckets(projectPhotos))) {
+      for (const item of normalizeArray(bucket)) {
+        if (item?.storagePath && !item?.dbId) items.push(item);
+      }
+    }
+    for (const bucket of Object.values(normalizeMediaBuckets(projectReceipts))) {
+      for (const item of normalizeArray(bucket)) {
+        if (item?.storagePath && !item?.dbId) items.push(item);
+      }
+    }
+    if (!items.length) return;
+    console.log("[PROJECT_MEDIA] syncing local metadata", items.length);
+    for (const item of items.slice(0, 100)) {
+      await insertProjectMediaMetadata(item, {
+        mediaType: normalizeProjectMediaType(item?.media_type || item?.mediaType || item?.type),
+        documentationType: normalizeDocumentationType(
+          item?.documentation_type || item?.documentationType,
+          normalizeProjectMediaType(item?.media_type || item?.mediaType || item?.type)
+        ),
+        source: item?.source || "local_migration",
+      });
+    }
+  }, [authUser?.id, insertProjectMediaMetadata, projectPhotos, projectReceipts, userCompany?.id]);
+
   const showClockSetupRequired = useCallback(() => {
     const message =
       clockSelectableProjects.length === 0
@@ -4972,12 +5345,12 @@ export default function EmployeeClockApp() {
     }, {})
   );
 
-  const photoFolders = Object.keys(scopedProjectPhotos);
+  const photoFolders = Object.keys(filteredProjectPhotos);
   const visiblePhotoFolders = selectedPhotoFolder === "all" ? photoFolders : photoFolders.filter((folder) => folder === selectedPhotoFolder);
-  const receiptFolders = Object.keys(scopedProjectReceipts);
+  const receiptFolders = Object.keys(filteredProjectReceipts);
   const visibleReceiptFolders = selectedReceiptFolder === "all" ? receiptFolders : receiptFolders.filter((folder) => folder === selectedReceiptFolder);
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
-    return total + normalizeArray(scopedProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
+    return total + normalizeArray(filteredProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
   }, 0);
 
   useEffect(() => {
@@ -5304,6 +5677,42 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     safeWrite("orp_project_receipts", projectReceipts);
   }, [projectReceipts]);
+
+  useEffect(() => {
+    projectMediaLocalSyncAttemptedRef.current = false;
+  }, [authUser?.id, userCompany?.id]);
+
+  useEffect(() => {
+    void loadProjectMediaFromSupabase({ silent: true });
+  }, [loadProjectMediaFromSupabase]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    void syncLocalProjectMediaMetadataToSupabase();
+  }, [authUser?.id, companyChecked, syncLocalProjectMediaMetadataToSupabase, userCompany?.id]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return undefined;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void loadProjectMediaFromSupabase({ silent: true });
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [authUser?.id, companyChecked, loadProjectMediaFromSupabase, userCompany?.id]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return undefined;
+    if (activeTab !== "photos" && activeTab !== "receipts") return undefined;
+    const id = setInterval(() => {
+      void loadProjectMediaFromSupabase({ silent: true });
+    }, 10000);
+    return () => clearInterval(id);
+  }, [activeTab, authUser?.id, companyChecked, loadProjectMediaFromSupabase, userCompany?.id]);
 
   useEffect(() => {
     safeWrite("orp_photo_notification_count", photoNotificationCount);
@@ -7200,7 +7609,10 @@ const handlePhotoQuickUpload = async (event) => {
 
     const photo = {
       id: Date.now(),
+      companyId: userCompany?.id || null,
+      userId: authUser.id,
       project: visibleCurrentShift.project,
+      projectId: visibleCurrentShift.projectId ?? null,
       folderName,
       costCenter: visibleCurrentShift.costCenter,
       employee: visibleCurrentShift.employee,
@@ -7209,8 +7621,19 @@ const handlePhotoQuickUpload = async (event) => {
       location: null,
       dataUrl: "",
       imageUrl: photoUrl,
+      storagePath: filePath,
+      storageBucket: "project-photos",
+      documentation_type: "daily_progress",
       type: "photo",
     };
+
+    const metadataId = await insertProjectMediaMetadata(photo, {
+      mediaType: "photo",
+      documentationType: "daily_progress",
+      source: "gallery",
+    });
+    if (metadataId) photo.dbId = metadataId;
+    else photo.metadataSyncFailed = true;
 
     setProjectPhotos((previous) => ({
       ...previous,
@@ -7230,7 +7653,9 @@ const handlePhotoQuickUpload = async (event) => {
     );
 
     setUploadProgress(100);
-    const uploadedStatus = "Photo uploaded ✅";
+    const uploadedStatus = photo.metadataSyncFailed
+      ? "Photo uploaded. Shared database sync pending."
+      : "Photo uploaded ✅";
     setPhotoStatus(uploadedStatus);
     void schedulePhotoNotificationAfterUpload();
     schedulePhotoStatusClear(uploadedStatus, 3000, { clearUploadProgress: true });
@@ -7745,7 +8170,7 @@ const handlePhotoQuickUpload = async (event) => {
   }, [addPhotoDraftFiles, captureCameraFrameFile, scrollClockMediaIntoView]);
 
   const uploadProjectPhotoFile = useCallback(
-    async (file, index = 1, total = 1) => {
+    async (file, index = 1, total = 1, source = "camera") => {
       const mediaContext = clockMediaContext;
       if (!file || !mediaContext || !authUser) {
         throw new Error("Select project and task before uploading photos.");
@@ -7794,6 +8219,8 @@ const handlePhotoQuickUpload = async (event) => {
       const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
       const photoUrl = data?.publicUrl || "";
       const capturedAt = new Date().toISOString();
+      const isClockOutPhoto =
+        Boolean(visibleCurrentShift) && Number(visibleCurrentShift?.photosTaken || 0) < 1;
       const photo = {
         id: Date.now() + index,
         companyId: userCompany?.id || null,
@@ -7809,8 +8236,20 @@ const handlePhotoQuickUpload = async (event) => {
         dataUrl: "",
         imageUrl: photoUrl,
         storagePath: filePath,
+        storageBucket: "project-photos",
+        documentation_type: isClockOutPhoto ? "clockout" : "daily_progress",
+        source: isClockOutPhoto ? "clockout" : source,
+        relatedTimesheetId: mediaContext.supabaseTimesheetId ?? null,
         type: "photo",
       };
+
+      const metadataId = await insertProjectMediaMetadata(photo, {
+        mediaType: "photo",
+        documentationType: isClockOutPhoto ? "clockout" : "daily_progress",
+        source: isClockOutPhoto ? "clockout" : source,
+      });
+      if (metadataId) photo.dbId = metadataId;
+      else photo.metadataSyncFailed = true;
 
       setProjectPhotos((previous) => ({
         ...previous,
@@ -7832,7 +8271,7 @@ const handlePhotoQuickUpload = async (event) => {
       setUploadProgress(total > 1 ? Math.round((index / total) * 100) : 100);
       return photo;
     },
-    [authUser, clockMediaContext, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
+    [authUser, clockMediaContext, insertProjectMediaMetadata, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
   );
 
   const uploadAllPhotoDrafts = useCallback(async () => {
@@ -7850,11 +8289,13 @@ const handlePhotoQuickUpload = async (event) => {
     setPhotoBatchProgress({ current: 0, total: queued.length, label: `Preparing ${queued.length} photos` });
     setUploadProgress(0);
     const uploadedDraftIds = [];
+    const uploadedPhotos = [];
 
     try {
       for (let i = 0; i < queued.length; i += 1) {
         const draft = queued[i];
-        await uploadProjectPhotoFile(draft.file, i + 1, queued.length);
+        const uploadedPhoto = await uploadProjectPhotoFile(draft.file, i + 1, queued.length, draft.source || "camera");
+        uploadedPhotos.push(uploadedPhoto);
         uploadedDraftIds.push(draft.id);
       }
 
@@ -7866,7 +8307,10 @@ const handlePhotoQuickUpload = async (event) => {
         return previous.filter((draft) => !uploaded.has(draft.id));
       });
       setPhotoBatchProgress({ current: queued.length, total: queued.length, label: "Completed" });
-      const uploadedStatus = `Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`;
+      const metadataSyncFailed = uploadedPhotos.some((photo) => photo?.metadataSyncFailed);
+      const uploadedStatus = metadataSyncFailed
+        ? `Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}. Shared database sync pending.`
+        : `Uploaded ${queued.length} photo${queued.length === 1 ? "" : "s"}.`;
       setPhotoStatus(uploadedStatus);
       setUploadProgress(100);
       stopPhotoCamera();
@@ -8193,20 +8637,33 @@ const handlePhotoQuickUpload = async (event) => {
         imageUrl: videoUrl,
         videoUrl,
         storagePath: filePath,
+        storageBucket: "project-photos",
         media_type: "video",
         mediaType: "video",
         type: "video",
+        documentation_type: "video",
+        documentationType: "video",
+        source: draft.source || "camera",
+        relatedTimesheetId: mediaContext.supabaseTimesheetId ?? null,
         duration_seconds: draft.durationSeconds,
         durationSeconds: draft.durationSeconds,
         fileName: draft.name,
       };
+
+      const metadataId = await insertProjectMediaMetadata(media, {
+        mediaType: "video",
+        documentationType: "video",
+        source: draft.source || "camera",
+      });
+      if (metadataId) media.dbId = metadataId;
+      else media.metadataSyncFailed = true;
 
       setProjectPhotos((previous) => ({
         ...previous,
         [folderName]: [media, ...(previous[folderName] || [])],
       }));
       setVideoUploadProgress(100);
-      setVideoStatus("Video upload complete.");
+      setVideoStatus(media.metadataSyncFailed ? "Video uploaded. Shared database sync pending." : "Video upload complete.");
       setVideoDraft((previous) => {
         if (previous) revokeVideoDraftPreview(previous);
         return null;
@@ -8228,6 +8685,7 @@ const handlePhotoQuickUpload = async (event) => {
   }, [
     authUser,
     clockMediaContext,
+    insertProjectMediaMetadata,
     revokeVideoDraftPreview,
     stopPhotoCamera,
     userCompany?.id,
@@ -8237,7 +8695,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const saveReceiptFile = async (file, details = {}) => {
     const mediaContext = clockMediaContext;
-    if (!file || !mediaContext) {
+    if (!file || !mediaContext || !authUser) {
       showClockSetupRequired();
       return false;
     }
@@ -8248,15 +8706,25 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       setPhotoStatus("Saving receipt...");
       const receiptFile = await compressImage(file, 1000, 0.65);
-      const receiptDataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(reader.error || new Error("Receipt photo could not be read."));
-        reader.readAsDataURL(receiptFile);
-      });
 
       const folderName = getProjectFolderName(mediaContext.project);
       const capturedAt = new Date().toISOString();
+      const filePath = `${folderName}/receipts/${authUser?.id || "user"}-${Date.now()}.jpg`;
+      const uploadPromise = supabase.storage
+        .from("project-photos")
+        .upload(filePath, receiptFile, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: "image/jpeg",
+        });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Receipt upload timed out after 60 seconds")), 60000)
+      );
+      const uploadResult = await Promise.race([uploadPromise, timeoutPromise]);
+      if (uploadResult?.error) throw uploadResult.error;
+
+      const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
+      const receiptUrl = data?.publicUrl || "";
       const receipt = {
         id: materialPayment?.id || Date.now(),
         companyId: userCompany?.id || null,
@@ -8278,10 +8746,27 @@ const handlePhotoQuickUpload = async (event) => {
         status: "Receipt Uploaded",
         receiptStatus: "Receipt Uploaded",
         location: mediaContext.liveLocation || mediaContext.clockInLocation || null,
-        dataUrl: receiptDataUrl,
+        dataUrl: receiptUrl,
+        imageUrl: receiptUrl,
+        storagePath: filePath,
+        storageBucket: "project-photos",
+        media_type: "receipt",
+        mediaType: "receipt",
+        documentation_type: "receipt",
+        documentationType: "receipt",
+        source: "receipt",
+        relatedTimesheetId: mediaContext.supabaseTimesheetId ?? null,
         type: "receipt",
         isMaterialPayment: Boolean(materialPayment),
       };
+
+      const metadataId = await insertProjectMediaMetadata(receipt, {
+        mediaType: "receipt",
+        documentationType: "receipt",
+        source: "receipt",
+      });
+      if (metadataId) receipt.dbId = metadataId;
+      else receipt.metadataSyncFailed = true;
 
       setProjectReceipts((previous) => {
         const existingRows = previous[folderName] || [];
@@ -8301,7 +8786,9 @@ const handlePhotoQuickUpload = async (event) => {
         };
       });
       if (materialPayment?.id) materialPaymentPendingRef.current = null;
-      const savedStatus = `Receipt saved: ${formatMoney(receipt.amount)}`;
+      const savedStatus = receipt.metadataSyncFailed
+        ? `Receipt uploaded: ${formatMoney(receipt.amount)}. Shared database sync pending.`
+        : `Receipt saved: ${formatMoney(receipt.amount)}`;
       setPhotoStatus(savedStatus);
       schedulePhotoStatusClear(savedStatus, 5000);
       if (authUser?.id && userCompany?.id) {
@@ -8804,13 +9291,13 @@ const handlePhotoQuickUpload = async (event) => {
   const setAllProjectPhotosSelected = (folderName, selected) => {
     const folder = String(folderName || "");
     if (!folder) return;
-    const ids = (scopedProjectPhotos[folder] || []).map((item, index) => mediaItemId(item, index));
+    const ids = (filteredProjectPhotos[folder] || []).map((item, index) => mediaItemId(item, index));
     setSelectedPhotoIdsByFolder((prev) => ({ ...prev, [folder]: selected ? ids : [] }));
   };
 
   const openPhotoViewer = (folderName, index) => {
     const folder = String(folderName || "");
-    const items = scopedProjectPhotos[folder] || [];
+    const items = filteredProjectPhotos[folder] || [];
     if (!folder || !items.length) return;
     setPhotoViewer({ folder, index: Math.max(0, Math.min(Number(index) || 0, items.length - 1)) });
   };
@@ -8818,7 +9305,7 @@ const handlePhotoQuickUpload = async (event) => {
   const movePhotoViewer = (delta) => {
     setPhotoViewer((prev) => {
       if (!prev?.folder) return prev;
-      const items = scopedProjectPhotos[prev.folder] || [];
+      const items = filteredProjectPhotos[prev.folder] || [];
       if (!items.length) return null;
       const next = (Number(prev.index) || 0) + delta;
       if (next < 0) return { ...prev, index: items.length - 1 };
@@ -8830,7 +9317,7 @@ const handlePhotoQuickUpload = async (event) => {
   const getFolderShareLink = (folderName) => {
     const folder = String(folderName || "");
     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
-    const selectedItems = (scopedProjectPhotos[folder] || []).filter((item, index) =>
+    const selectedItems = (filteredProjectPhotos[folder] || []).filter((item, index) =>
       selectedIds.has(mediaItemId(item, index))
     );
     if (!selectedItems.length) return "";
@@ -13448,12 +13935,56 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-3.5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <h2 className="font-black text-[23px] leading-tight text-slate-950">Project Photos</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Open, select, and share project photos.</p>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">
+                    {projectMediaLoading ? "Refreshing shared media..." : "Open, select, and share project photos."}
+                  </p>
                 </div>
+                {projectMediaSyncError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                    {projectMediaSyncError}
+                  </div>
+                ) : null}
                 <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
                   {photoFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
+                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                      From
+                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateFrom} onChange={(e) => setMediaFilterDateFrom(e.target.value)} />
+                    </label>
+                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                      To
+                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateTo} onChange={(e) => setMediaFilterDateTo(e.target.value)} />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
+                      <option value="all">All employees</option>
+                      {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+                    </select>
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterCostCentre} onChange={(e) => setMediaFilterCostCentre(e.target.value)}>
+                      <option value="all">All tasks</option>
+                      {mediaFilterOptions.costCentres.map((task) => <option key={task} value={task}>{task}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterMediaType} onChange={(e) => setMediaFilterMediaType(e.target.value)}>
+                      <option value="all">Photos + videos</option>
+                      <option value="photo">Photos only</option>
+                      <option value="video">Videos only</option>
+                    </select>
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDocumentationType} onChange={(e) => setMediaFilterDocumentationType(e.target.value)}>
+                      <option value="all">All documentation</option>
+                      <option value="daily_progress">Daily progress</option>
+                      <option value="clockout">Clock-out photos</option>
+                      <option value="before">Before</option>
+                      <option value="after">After</option>
+                      <option value="video">Video</option>
+                    </select>
+                  </div>
+                </div>
                 {photoShareMessage ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] font-semibold text-slate-700">
                     {photoShareMessage}
@@ -13462,7 +13993,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {photoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No project photos yet.</p>}
                 <div className="space-y-4">
                   {visiblePhotoFolders.map((folder) => {
-                    const folderItems = normalizeArray(scopedProjectPhotos[folder]);
+                    const folderItems = normalizeArray(filteredProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
                     const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
                     return (
@@ -13557,17 +14088,44 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm"><h2 className="font-black text-[23px] leading-tight text-slate-950">Receipts</h2><p className="mt-1 text-[14px] font-semibold text-slate-500">Receipt photos and totals by project</p></div>
+                {projectMediaSyncError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                    {projectMediaSyncError}
+                  </div>
+                ) : null}
                 <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
                   <option value="all">All Project Folders</option>
                   {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
+                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                      From
+                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateFrom} onChange={(e) => setMediaFilterDateFrom(e.target.value)} />
+                    </label>
+                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                      To
+                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateTo} onChange={(e) => setMediaFilterDateTo(e.target.value)} />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
+                      <option value="all">All employees</option>
+                      {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+                    </select>
+                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterCostCentre} onChange={(e) => setMediaFilterCostCentre(e.target.value)}>
+                      <option value="all">All tasks</option>
+                      {mediaFilterOptions.costCentres.map((task) => <option key={task} value={task}>{task}</option>)}
+                    </select>
+                  </div>
+                </div>
                 <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)]"><p className="text-[11px] font-black uppercase text-slate-300">Receipt Total</p><p className="mt-1 text-3xl font-black">{formatMoney(receiptTotal)}</p></div>
                 {receiptFolders.length === 0 && (
                   <p className="text-sm text-slate-500 text-center py-8">No receipts captured yet.</p>
                 )}
                 <div className="space-y-4">
                   {visibleReceiptFolders.map((folder) => {
-                    const folderReceipts = normalizeArray(scopedProjectReceipts[folder]);
+                    const folderReceipts = normalizeArray(filteredProjectReceipts[folder]);
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
                       <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
@@ -13578,8 +14136,8 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="space-y-3">
                           {folderReceipts.map((receipt) => (
                             <div key={receipt.id} className="rounded-xl border bg-slate-50 overflow-hidden">
-                              {receipt.dataUrl ? (
-                                <img src={receipt.dataUrl} alt="Receipt" className="w-full h-36 object-cover" />
+                              {receipt.dataUrl || receipt.imageUrl ? (
+                                <img src={receipt.dataUrl || receipt.imageUrl} alt="Receipt" className="w-full h-36 object-cover" />
                               ) : (
                                 <div className="flex h-36 items-center justify-center bg-slate-100 px-4 text-center text-[14px] font-bold text-slate-500">
                                   Receipt pending
@@ -19725,7 +20283,7 @@ const handlePhotoQuickUpload = async (event) => {
         ) : null}
 
         {photoViewer && (() => {
-          const items = scopedProjectPhotos[photoViewer.folder] || [];
+          const items = filteredProjectPhotos[photoViewer.folder] || [];
           if (!items.length) return null;
           const index = Math.max(0, Math.min(Number(photoViewer.index) || 0, items.length - 1));
           const item = items[index];
