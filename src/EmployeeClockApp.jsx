@@ -1699,6 +1699,7 @@ export default function EmployeeClockApp() {
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
+  const photoUploadActionsRef = useRef(null);
   const photoVideoRef = useRef(null);
   const photoCanvasRef = useRef(null);
   const photoGalleryInputRef = useRef(null);
@@ -5960,9 +5961,20 @@ const handlePhotoQuickUpload = async (event) => {
     }
   }, []);
 
+  const scrollClockMediaIntoView = useCallback((target = "tools") => {
+    setTimeout(() => {
+      const node = target === "upload" ? photoUploadActionsRef.current : photoToolsRef.current;
+      (node || photoToolsRef.current)?.scrollIntoView?.({ behavior: "smooth", block: "end" });
+    }, 120);
+  }, []);
+
   useEffect(() => {
     photoDraftsRef.current = photoDrafts;
   }, [photoDrafts]);
+
+  useEffect(() => {
+    if (activeTab === "clock" && photoDrafts.length > 0) scrollClockMediaIntoView("upload");
+  }, [activeTab, photoDrafts.length, scrollClockMediaIntoView]);
 
   useEffect(() => {
     return () => {
@@ -6098,6 +6110,7 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoCameraMode(nextMode);
       setPhotoCameraOpen(true);
       setPhotoStatus(readyMessage);
+      scrollClockMediaIntoView("tools");
       return true;
     } catch (err) {
       console.warn("Camera start failed:", err);
@@ -6110,6 +6123,7 @@ const handlePhotoQuickUpload = async (event) => {
     authUser,
     clockMediaContext,
     photoBatchUploading,
+    scrollClockMediaIntoView,
     showClockSetupRequired,
     stopPhotoCamera,
   ]);
@@ -6286,10 +6300,10 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoStatus(getErrorMessage(err));
       return;
     }
-    const nextCount = photoDraftsRef.current.length + 1;
     addPhotoDraftFiles([file], "camera");
-    setPhotoStatus(`Captured ${nextCount} photo${nextCount === 1 ? "" : "s"}. Camera is still open.`);
-  }, [addPhotoDraftFiles, captureCameraFrameFile]);
+    setPhotoStatus("");
+    scrollClockMediaIntoView("upload");
+  }, [addPhotoDraftFiles, captureCameraFrameFile, scrollClockMediaIntoView]);
 
   const uploadProjectPhotoFile = useCallback(
     async (file, index = 1, total = 1) => {
@@ -10077,7 +10091,7 @@ const handlePhotoQuickUpload = async (event) => {
                   ) : null}
 
                   {photoCameraOpen ? (
-                    <div className="space-y-2">
+                    <div ref={photoUploadActionsRef} className="space-y-2">
                       <video
                         ref={photoVideoRef}
                         className="w-full max-h-64 rounded-2xl bg-slate-950 object-cover"
@@ -10123,7 +10137,7 @@ const handlePhotoQuickUpload = async (event) => {
                   ) : null}
 
                   {photoDrafts.length > 0 ? (
-                    <div className="space-y-2">
+                    <div ref={photoUploadActionsRef} className="space-y-2">
                       <div className="flex items-center justify-between gap-2">
                         <p className="text-[15px] font-bold text-slate-900">
                           Ready to upload: {photoDrafts.length}
@@ -10390,7 +10404,7 @@ const handlePhotoQuickUpload = async (event) => {
                       ) : null}
 
                       {photoCameraOpen ? (
-                        <div className="space-y-2">
+                        <div ref={photoUploadActionsRef} className="space-y-2">
                           <video
                             ref={photoVideoRef}
                             className="w-full max-h-64 rounded-2xl bg-slate-950 object-cover"
@@ -10436,7 +10450,7 @@ const handlePhotoQuickUpload = async (event) => {
                       ) : null}
 
                       {photoDrafts.length > 0 ? (
-                        <div className="space-y-2">
+                        <div ref={photoUploadActionsRef} className="space-y-2">
                           <div className="flex items-center justify-between gap-2">
                             <p className="text-[15px] font-bold text-slate-900">
                               Ready to upload: {photoDrafts.length}
@@ -11008,7 +11022,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/70 p-3 sm:p-4 space-y-3 min-w-0">
                     <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3 min-w-0">
                       <h3 className="text-[17px] font-bold text-slate-900">Live team</h3>
-                      <p className="text-[15px] text-slate-800 min-w-0">
+                      <p className="hidden">
                         <span className="text-slate-600 font-medium">Currently Working: </span>
                         <span className="font-bold tabular-nums text-slate-900">
                           {dashboardLoading ? "—" : (dashboardLiveWorkingCards || []).length}
@@ -11024,6 +11038,26 @@ const handlePhotoQuickUpload = async (event) => {
                     {dashboardLoading ? (
                       <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Clocked In</p>
+                        <p className="text-[18px] font-black text-slate-900 tabular-nums">
+                          {dashboardLoading ? "..." : (dashboardLiveWorkingCards || []).length}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Total Hours</p>
+                        <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
+                          {formatDuration(dashboardSummary.totalMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-emerald-100 bg-white p-2">
+                        <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Labour Cost</p>
+                        <p className="text-[18px] font-black text-slate-900 tabular-nums leading-tight">
+                          {formatMoney(dashboardSummary.totalCost)}
+                        </p>
+                      </div>
+                    </div>
                     {!dashboardLoading &&
                       (dashboardLiveWorkingCards || []).map((card) => {
                         const { rep, uid, displayName } = card || {};
@@ -11039,7 +11073,6 @@ const handlePhotoQuickUpload = async (event) => {
                             )
                           : 0;
                         const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
-                        const clockInDateDisp = rep?.clockIn ? formatDate(parseStoredInstant(rep.clockIn), companyTimeZone) : "";
                         const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                         const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
                         const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
@@ -11048,27 +11081,26 @@ const handlePhotoQuickUpload = async (event) => {
                           lngRaw != null &&
                           Number.isFinite(Number(latRaw)) &&
                           Number.isFinite(Number(lngRaw));
-                        const ciLoc = rep?.clockInLocation;
-                        const hasClockInGps =
-                          ciLoc &&
-                          ciLoc.latitude != null &&
-                          ciLoc.longitude != null &&
-                          Number.isFinite(Number(ciLoc.latitude)) &&
-                          Number.isFinite(Number(ciLoc.longitude));
+                        const hasClockInGps = false;
+                        const ciLoc = null;
                         return (
                           <div
                             key={`live-${String(uid)}`}
-                            className="rounded-xl border border-white/90 bg-white p-3 space-y-3 shadow-sm min-w-0 max-w-full"
+                            className="rounded-xl border border-white/90 bg-white p-3 space-y-2 shadow-sm min-w-0 max-w-full"
                           >
                             <div className="min-w-0">
-                              <p className="text-[18px] font-black text-slate-900 leading-snug break-words">
+                              <p className="text-[18px] font-black text-slate-900 leading-snug break-words flex items-baseline justify-between gap-2">
                                 {displayName || "—"}
+                                <span className="shrink-0 tabular-nums">{formatTimer(timerSeconds)}</span>
+                              </p>
+                              <p className="text-[14px] font-bold text-slate-700 leading-snug tabular-nums">
+                                Clocked in {clockInDisp}
                               </p>
                               <p className="text-[15px] font-semibold text-slate-700 leading-snug break-words">
                                 {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
                               </p>
                             </div>
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="hidden">
                               <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                                 <p className="text-[12px] font-bold uppercase tracking-wide text-slate-500">Timer</p>
                                 <p className="text-[19px] font-black tabular-nums text-slate-900">{formatTimer(timerSeconds)}</p>
@@ -11076,10 +11108,19 @@ const handlePhotoQuickUpload = async (event) => {
                               <div className="rounded-xl bg-slate-50 border border-slate-100 p-2">
                                 <p className="text-[12px] font-bold uppercase tracking-wide text-slate-500">Clocked in</p>
                                 <p className="text-[15px] font-bold tabular-nums text-slate-900">{clockInDisp}</p>
-                                {clockInDateDisp ? <p className="text-[12px] text-slate-500">{clockInDateDisp}</p> : null}
+                                {null}
                               </div>
                             </div>
-                            <div className="text-[15px] leading-snug pt-1 border-t border-slate-100 min-w-0">
+                            {hasLiveGps ? (
+                              <button
+                                type="button"
+                                className="w-fit text-[14px] font-bold text-blue-700 underline decoration-blue-700/50 underline-offset-2"
+                                onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
+                              >
+                                Live location
+                              </button>
+                            ) : null}
+                            <div className="hidden">
                               {hasLiveGps ? (
                                 <div className="flex items-center justify-between gap-2">
                                   <span className="font-semibold text-slate-700">Live location</span>
@@ -11133,7 +11174,7 @@ const handlePhotoQuickUpload = async (event) => {
                     onChange={(e) => setDashboardViewDate(e.target.value)}
                     disabled={!dashboardViewDate}
                   />
-                  {dashboardSelectedDateLabel && (
+                  {false && dashboardSelectedDateLabel && (
                     <p className="text-[14px] text-slate-600">
                       Selected (company time): {dashboardSelectedDateLabel}
                     </p>
@@ -11149,7 +11190,7 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
                 {!dashboardLoading && !dashboardError && (
                   <>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="hidden">
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                         <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Clocked In</p>
                         <p className="text-[20px] font-bold text-slate-900 tabular-nums">{dashboardSummary.clockedIn}</p>
