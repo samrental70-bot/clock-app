@@ -1938,6 +1938,9 @@ export default function EmployeeClockApp() {
   const [scheduleDragTaskId, setScheduleDragTaskId] = useState(null);
   const [scheduleDragOffset, setScheduleDragOffset] = useState({ taskId: null, dx: 0, dy: 0, active: false });
   const scheduleTimelineColsRef = useRef(null);
+  const scheduleEditReturnScrollYRef = useRef(null);
+  const schedulePendingScrollRestoreYRef = useRef(null);
+  const schedulePendingScrollRestoreSawLoadingRef = useRef(false);
   const scheduleAdminDragRef = useRef({
     pointerId: null,
     task: null,
@@ -7541,12 +7544,71 @@ const handlePhotoQuickUpload = async (event) => {
     [authUser?.id, userCompany?.id]
   );
 
+  const scheduleRestoreWindowScrollY = useCallback((targetScrollY, { keepPending = false } = {}) => {
+    if (typeof window === "undefined" || !Number.isFinite(Number(targetScrollY))) return;
+    const y = Math.max(0, Number(targetScrollY));
+    const x = Number.isFinite(Number(window.scrollX)) ? Number(window.scrollX) : 0;
+    const applyScroll = () => window.scrollTo({ top: y, left: x, behavior: "auto" });
+    window.requestAnimationFrame?.(() => {
+      applyScroll();
+      window.requestAnimationFrame?.(applyScroll);
+    });
+    window.setTimeout?.(applyScroll, 80);
+    window.setTimeout?.(applyScroll, 180);
+    if (!keepPending) schedulePendingScrollRestoreYRef.current = null;
+  }, []);
+
+  const restoreScheduleEditReturnView = useCallback((returnViewRaw) => {
+    const returnView = String(returnViewRaw || "").trim();
+    const targetScrollY = scheduleEditReturnScrollYRef.current;
+    scheduleEditReturnScrollYRef.current = null;
+    setScheduleEditReturnViewMode("");
+    if (!returnView || returnView === "list") {
+      schedulePendingScrollRestoreYRef.current = null;
+      schedulePendingScrollRestoreSawLoadingRef.current = false;
+      return;
+    }
+    setScheduleViewMode(returnView);
+    if (!Number.isFinite(Number(targetScrollY))) {
+      schedulePendingScrollRestoreYRef.current = null;
+      schedulePendingScrollRestoreSawLoadingRef.current = false;
+      return;
+    }
+    schedulePendingScrollRestoreYRef.current = Number(targetScrollY);
+    schedulePendingScrollRestoreSawLoadingRef.current = false;
+    scheduleRestoreWindowScrollY(targetScrollY, { keepPending: true });
+  }, [scheduleRestoreWindowScrollY]);
+
+  useEffect(() => {
+    if (activeTab !== "schedule") return;
+    const y = schedulePendingScrollRestoreYRef.current;
+    if (!Number.isFinite(Number(y))) return;
+    if (scheduleLoading) {
+      schedulePendingScrollRestoreSawLoadingRef.current = true;
+      return;
+    }
+    if (schedulePendingScrollRestoreSawLoadingRef.current) {
+      scheduleRestoreWindowScrollY(y);
+      schedulePendingScrollRestoreSawLoadingRef.current = false;
+      return;
+    }
+    scheduleRestoreWindowScrollY(y, { keepPending: true });
+    window.setTimeout?.(() => {
+      const pendingY = schedulePendingScrollRestoreYRef.current;
+      if (!Number.isFinite(Number(pendingY)) || schedulePendingScrollRestoreSawLoadingRef.current) return;
+      scheduleRestoreWindowScrollY(pendingY);
+    }, 500);
+  }, [activeTab, scheduleLoading, scheduleViewMode, scheduleRestoreWindowScrollY]);
+
   const openScheduleCreateFromSlot = useCallback(
     (dateKey, timeHHmm = "09:00") => {
       setScheduleSaveError("");
       setScheduleEditingTaskId(null);
       setScheduleEditDraft(null);
       setScheduleEditReturnViewMode("");
+      scheduleEditReturnScrollYRef.current = null;
+      schedulePendingScrollRestoreYRef.current = null;
+      schedulePendingScrollRestoreSawLoadingRef.current = false;
       setScheduleEditError("");
       const tm = String(timeHHmm ?? "09:00").trim();
       const safeTime = tm.length >= 5 ? tm.slice(0, 5) : "09:00";
@@ -7570,8 +7632,13 @@ const handlePhotoQuickUpload = async (event) => {
       const tidKey = task?.id != null ? String(task.id) : "";
       const rawAssignList = tidKey ? scheduleAssigneesByTaskId?.[tidKey] : undefined;
       const assignRowsForTask = Array.isArray(rawAssignList) ? rawAssignList : [];
+      const returnView = scheduleViewMode !== "list" ? scheduleViewMode : "";
       setScheduleMoveModeTaskId(null);
-      setScheduleEditReturnViewMode(scheduleViewMode !== "list" ? scheduleViewMode : "");
+      setScheduleEditReturnViewMode(returnView);
+      scheduleEditReturnScrollYRef.current =
+        returnView && typeof window !== "undefined" ? window.scrollY : null;
+      schedulePendingScrollRestoreYRef.current = null;
+      schedulePendingScrollRestoreSawLoadingRef.current = false;
       setScheduleViewMode("list");
       setScheduleFormOpen(false);
       setScheduleSaveError("");
@@ -7590,6 +7657,9 @@ const handlePhotoQuickUpload = async (event) => {
     setScheduleEditingTaskId(null);
     setScheduleEditDraft(null);
     setScheduleEditReturnViewMode("");
+    scheduleEditReturnScrollYRef.current = null;
+    schedulePendingScrollRestoreYRef.current = null;
+    schedulePendingScrollRestoreSawLoadingRef.current = false;
     setScheduleEditError("");
     setScheduleMoveModeTaskId(String(task.id));
   }, [isAdmin]);
@@ -7601,10 +7671,17 @@ const handlePhotoQuickUpload = async (event) => {
       const payload = buildScheduledTaskClockMovePayload(task, newStartIso, companyTimeZone);
       if (!payload) {
         setScheduleCalendarMoveError("Could not compute the new schedule.");
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
         return;
       }
       setScheduleCalendarMoveError("");
       setScheduleRescheduleSavingId(tid);
+      setScheduledTasks((prev) =>
+        (Array.isArray(prev) ? prev : []).map((row) =>
+          String(row?.id ?? "") === tid ? { ...row, ...payload } : row
+        )
+      );
+      setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
       try {
         const { error } = await supabase
           .from("scheduled_tasks")
@@ -7617,6 +7694,11 @@ const handlePhotoQuickUpload = async (event) => {
       } catch (err) {
         const msg = getErrorMessage(err);
         setScheduleCalendarMoveError(msg);
+        setScheduledTasks((prev) =>
+          (Array.isArray(prev) ? prev : []).map((row) =>
+            String(row?.id ?? "") === tid ? { ...row, ...task } : row
+          )
+        );
         setScheduleRefreshKey((k) => k + 1);
       } finally {
         setScheduleRescheduleSavingId(null);
@@ -7710,17 +7792,21 @@ const handlePhotoQuickUpload = async (event) => {
         dragging: false,
       };
       setScheduleDragTaskId(null);
-      setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
 
-      if (!task || !tid) return;
+      if (!task || !tid) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
+        return;
+      }
 
       if (!wasDragging) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
         openAdminScheduleEditFromCalendar(task);
         return;
       }
 
       const colsNode = scheduleTimelineColsRef.current;
       if (!(colsNode instanceof Element)) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
         setScheduleCalendarMoveError("Unable to determine drop target. Try again.");
         return;
       }
@@ -7730,7 +7816,10 @@ const handlePhotoQuickUpload = async (event) => {
       const x = Math.min(Math.max(0, dropX - rect.left), w - 1);
       const dayIndex = Math.min(colCount - 1, Math.max(0, Math.floor((x / w) * colCount)));
       const dayKey = anchorKeys[dayIndex];
-      if (!dayKey) return;
+      if (!dayKey) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
+        return;
+      }
 
       const h = rect.height > 0 ? rect.height : 1;
       const y = Math.min(Math.max(0, dropY - rect.top), h - 1);
@@ -7746,6 +7835,7 @@ const handlePhotoQuickUpload = async (event) => {
 
       const newStartIso = wallDateTimeToUtcIso(dayKey, normalizeTimeInputForWallClock(wallTime), companyTimeZone);
       if (!newStartIso) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
         setScheduleCalendarMoveError("Could not compute the new start time.");
         return;
       }
@@ -7753,7 +7843,10 @@ const handlePhotoQuickUpload = async (event) => {
       const origDay = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
       const origM = wallMinutesFromScheduleGridStart(task?.start_time, origDay, companyTimeZone);
       const origSnap = origM != null ? Math.round(Number(origM) / 15) * 15 : null;
-      if (origDay === dayKey && origSnap === totalMin) return;
+      if (origDay === dayKey && origSnap === totalMin) {
+        setScheduleDragOffset({ taskId: null, dx: 0, dy: 0, active: false });
+        return;
+      }
 
       void persistAdminScheduledTaskClockMove(task, newStartIso);
     },
@@ -8112,8 +8205,7 @@ const handlePhotoQuickUpload = async (event) => {
         const returnView = scheduleEditReturnViewMode;
         setScheduleEditingTaskId(null);
         setScheduleEditDraft(null);
-        setScheduleEditReturnViewMode("");
-        if (returnView && returnView !== "list") setScheduleViewMode(returnView);
+        restoreScheduleEditReturnView(returnView);
         setScheduleRefreshKey((k) => k + 1);
       } catch (err) {
         setScheduleEditError(getErrorMessage(err));
@@ -8121,7 +8213,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleEditSaving(false);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, scheduleEditReturnViewMode, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditDraft, scheduleEditReturnViewMode, restoreScheduleEditReturnView, companyTimeZone, companyProjects, schedulePickMembers, scheduleAssigneesByTaskId]
   );
 
   const handleScheduleDeleteTask = useCallback(
@@ -8147,8 +8239,7 @@ const handlePhotoQuickUpload = async (event) => {
           setScheduleEditingTaskId(null);
           setScheduleEditDraft(null);
           setScheduleEditError("");
-          setScheduleEditReturnViewMode("");
-          if (returnView && returnView !== "list") setScheduleViewMode(returnView);
+          restoreScheduleEditReturnView(returnView);
         }
         if (String(scheduleMoveModeTaskId) === tid) setScheduleMoveModeTaskId(null);
         setScheduleRefreshKey((k) => k + 1);
@@ -8158,7 +8249,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleDeleteSavingId(null);
       }
     },
-    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditReturnViewMode, scheduleMoveModeTaskId]
+    [isAdmin, userCompany?.id, authUser?.id, scheduleEditingTaskId, scheduleEditReturnViewMode, restoreScheduleEditReturnView, scheduleMoveModeTaskId]
   );
 
   const ensurePushSubscription = useCallback(async () => {
@@ -12244,6 +12335,9 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleEditingTaskId(null);
                           setScheduleEditDraft(null);
                           setScheduleEditReturnViewMode("");
+                          scheduleEditReturnScrollYRef.current = null;
+                          schedulePendingScrollRestoreYRef.current = null;
+                          schedulePendingScrollRestoreSawLoadingRef.current = false;
                           setScheduleEditError("");
                           setScheduleMoveModeTaskId(null);
                           setScheduleCalendarMoveError("");
@@ -12990,6 +13084,9 @@ const handlePhotoQuickUpload = async (event) => {
                                 setScheduleSaveError("");
                                 setScheduleEditError("");
                                 setScheduleEditReturnViewMode("");
+                                scheduleEditReturnScrollYRef.current = null;
+                                schedulePendingScrollRestoreYRef.current = null;
+                                schedulePendingScrollRestoreSawLoadingRef.current = false;
                                 setScheduleEditDraft(
                                   buildScheduleEditDraftFromTask(task, assignRowsForTask, companyTimeZone)
                                 );
@@ -13408,8 +13505,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             setScheduleEditingTaskId(null);
                                             setScheduleEditDraft(null);
                                             setScheduleEditError("");
-                                            setScheduleEditReturnViewMode("");
-                                            if (returnView && returnView !== "list") setScheduleViewMode(returnView);
+                                            restoreScheduleEditReturnView(returnView);
                                           }}
                                           className="w-full rounded-2xl h-11 text-[15px] font-black border border-slate-200 bg-white text-slate-700"
                                         >
