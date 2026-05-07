@@ -117,6 +117,31 @@ const TEAM_ADD_INITIAL_DRAFT = {
   joiningDate: "",
 };
 
+function generateTemporaryPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  let out = "Op";
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    const values = new Uint32Array(8);
+    crypto.getRandomValues(values);
+    for (const value of values) out += alphabet[value % alphabet.length];
+  } else {
+    for (let i = 0; i < 8; i += 1) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `${out}!7`;
+}
+
+function getOperaAppShareUrl(email = "") {
+  const fallback = "https://project-rui1d.vercel.app";
+  const origin =
+    typeof window !== "undefined" && window.location?.origin && !window.location.origin.includes("localhost")
+      ? window.location.origin
+      : fallback;
+  const url = new URL(origin);
+  const cleanEmail = String(email || "").trim().toLowerCase();
+  if (cleanEmail) url.searchParams.set("loginEmail", cleanEmail);
+  return url.toString();
+}
+
 const SCHEDULE_FORM_EMPTY = {
   title: "",
   notes: "",
@@ -1883,6 +1908,13 @@ export default function EmployeeClockApp() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search || "");
+    const invitedEmail = String(params.get("loginEmail") || params.get("email") || "").trim();
+    if (invitedEmail) setLoginEmail((prev) => prev || invitedEmail);
+  }, []);
+
+  useEffect(() => {
     if (!authUser?.id) {
       employeeScheduleLandingAppliedRef.current = false;
       adminDashboardLandingAppliedRef.current = false;
@@ -1949,6 +1981,9 @@ export default function EmployeeClockApp() {
   const [teamAddDraft, setTeamAddDraft] = useState(() => ({ ...TEAM_ADD_INITIAL_DRAFT }));
   const [teamAddSubmitting, setTeamAddSubmitting] = useState(false);
   const [teamAddError, setTeamAddError] = useState("");
+  const [teamContactPicking, setTeamContactPicking] = useState(false);
+  const [teamAddShareInfo, setTeamAddShareInfo] = useState(null);
+  const [teamAddShareMessage, setTeamAddShareMessage] = useState("");
   const [teamListFilter, setTeamListFilter] = useState("active"); // active | archived | all
   const [timesheetViewMode, setTimesheetViewMode] = useState("day");
   const [timesheetDateKey, setTimesheetDateKey] = useState("");
@@ -2272,6 +2307,8 @@ export default function EmployeeClockApp() {
     setTeamEditInlineError("");
     setTeamAddFormOpen(false);
     setTeamAddError("");
+    setTeamAddShareInfo(null);
+    setTeamAddShareMessage("");
     setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
   }, [activeTab, userCompany?.id]);
 
@@ -7785,7 +7822,7 @@ const handlePhotoQuickUpload = async (event) => {
     if (!shareUrl) return;
     const shareText = `${selectedCount} selected project ${selectedCount === 1 ? "photo" : "photos"} from ${folder}`;
     try {
-      if (navigator.share) {
+      if (typeof navigator !== "undefined" && navigator.share) {
         await navigator.share({ title: "OPERA.AI Project Photos", text: shareText, url: shareUrl });
       } else {
         await navigator.clipboard.writeText(shareUrl);
@@ -8913,6 +8950,69 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
+  const handlePickEmployeeContact = async () => {
+    setTeamAddError("");
+    setTeamAddShareMessage("");
+    if (typeof navigator === "undefined" || !navigator.contacts?.select) {
+      setTeamAddError("Phone contact picker is not supported on this browser. Enter employee details manually.");
+      return;
+    }
+    setTeamContactPicking(true);
+    try {
+      const contacts = await navigator.contacts.select(["name", "email"], { multiple: false });
+      const contact = Array.isArray(contacts) ? contacts[0] : null;
+      if (!contact) return;
+      const fullName = String(contact.name?.[0] || "").trim();
+      const email = String(contact.email?.[0] || "").trim().toLowerCase();
+      if (!email) {
+        setTeamAddError("Choose a contact with an email address.");
+        return;
+      }
+      setTeamAddDraft((draft) => ({
+        ...draft,
+        fullName: fullName || draft.fullName,
+        email,
+        password: draft.password || generateTemporaryPassword(),
+        role: "employee",
+      }));
+    } catch (err) {
+      const name = String(err?.name || "").toLowerCase();
+      if (name !== "aborterror" && name !== "notallowederror") {
+        setTeamAddError(getErrorMessage(err));
+      }
+    } finally {
+      setTeamContactPicking(false);
+    }
+  };
+
+  const shareEmployeeLogin = async (shareInfo = teamAddShareInfo) => {
+    if (!shareInfo?.email || !shareInfo?.password) return;
+    const appUrl = shareInfo.appUrl || getOperaAppShareUrl(shareInfo.email);
+    const text = [
+      "OPERA.AI login",
+      `Open app: ${appUrl}`,
+      `User ID: ${shareInfo.email}`,
+      `Temporary password: ${shareInfo.password}`,
+    ].join("\n");
+    try {
+      if (typeof navigator !== "undefined" && navigator.share) {
+        await navigator.share({
+          title: "OPERA.AI employee login",
+          text,
+          url: appUrl,
+        });
+      } else if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setTeamAddShareMessage("Login details copied.");
+      } else {
+        setTeamAddShareMessage(text);
+      }
+    } catch (err) {
+      const name = String(err?.name || "").toLowerCase();
+      if (name !== "aborterror") setTeamAddShareMessage("Could not share. Copy the details manually.");
+    }
+  };
+
   const handleSubmitAddEmployee = async (event) => {
     event.preventDefault();
     if (!isAdmin || !userCompany?.id) return;
@@ -8936,24 +9036,18 @@ const handlePhotoQuickUpload = async (event) => {
       setTeamAddError("Password must be at least 6 characters.");
       return;
     }
-    const eff = String(teamAddDraft.payRateEffectiveDate || "").trim();
-    if (!eff) {
-      setTeamAddError("Effective date is required.");
-      return;
-    }
     const hourlyNum = parseFloat(String(teamAddDraft.hourlyRate).replace(",", "."));
     if (!Number.isFinite(hourlyNum) || hourlyNum < 0) {
       setTeamAddError("Enter a valid pay rate.");
       return;
     }
     const role = teamAddDraft.role === "supervisor" ? "supervisor" : "employee";
-    let joining_date = String(teamAddDraft.joiningDate || "").trim().slice(0, 10);
-    if (!joining_date) {
-      joining_date = calendarDateKeyInTimeZone(
-        new Date(),
-        userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE
-      );
-    }
+    const todayKey = calendarDateKeyInTimeZone(
+      new Date(),
+      userCompany.time_zone || DEFAULT_COMPANY_TIME_ZONE
+    );
+    const joining_date = todayKey;
+    const eff = todayKey;
     setTeamAddSubmitting(true);
     try {
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
@@ -8986,10 +9080,20 @@ const handlePhotoQuickUpload = async (event) => {
         setTeamAddError(typeof json.error === "string" ? json.error : "Could not create employee.");
         return;
       }
+      const shareInfo = {
+        userId: json.user_id || "",
+        fullName: name,
+        email: email.toLowerCase(),
+        password,
+        role,
+        appUrl: getOperaAppShareUrl(email),
+      };
       setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
       setTeamAddFormOpen(false);
       setTeamRefreshKey((k) => k + 1);
-      setTeamRoleFeedback({ type: "success", text: "Employee added." });
+      setTeamAddShareInfo(shareInfo);
+      setTeamAddShareMessage("");
+      setTeamRoleFeedback({ type: "success", text: "Employee added. Share login details below." });
     } catch (err) {
       setTeamAddError(getErrorMessage(err));
     } finally {
@@ -16152,7 +16256,7 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5 space-y-3">
                 <h2 className="font-bold text-lg">Access restricted</h2>
-                <p className="text-sm text-slate-600">You do not have access to the team screen.</p>
+                <p className="text-sm text-slate-600">You do not have access to the employees screen.</p>
                 <Button type="button" className="w-full rounded-2xl h-11 text-sm font-semibold" onClick={() => setActiveTab("clock")}>
                   Back to Clock
                 </Button>
@@ -16164,8 +16268,8 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Team</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Company members</p>
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Employees</h2>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Employee accounts</p>
                 </div>
                 {isAdmin && (
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -16209,7 +16313,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
                 {teamLoading && (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading team…</div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading employees...</div>
                 )}
                 {teamError && (
                   <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-xs text-amber-900">{teamError}</div>
@@ -16230,6 +16334,43 @@ const handlePhotoQuickUpload = async (event) => {
                     {teamSchemaWarning}
                   </div>
                 )}
+                {teamAddShareInfo ? (
+                  <div className="rounded-[22px] border border-emerald-200 bg-emerald-50 p-3 space-y-2 shadow-sm">
+                    <div>
+                      <p className="text-[14px] font-black text-emerald-950">Employee login ready</p>
+                      <p className="mt-0.5 text-[12px] font-bold text-emerald-800 break-words">
+                        {teamAddShareInfo.fullName || "Employee"} - {teamAddShareInfo.email}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-white/85 border border-emerald-100 p-2 text-[12px] font-bold text-slate-800 space-y-1">
+                      <p className="break-all">App: {teamAddShareInfo.appUrl}</p>
+                      <p className="break-all">User ID: {teamAddShareInfo.email}</p>
+                      <p>Temporary password: {teamAddShareInfo.password}</p>
+                    </div>
+                    {teamAddShareMessage ? (
+                      <p className="text-[12px] font-bold text-emerald-800">{teamAddShareMessage}</p>
+                    ) : null}
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        className="rounded-xl h-10 text-[13px] font-black"
+                        onClick={() => void shareEmployeeLogin()}
+                      >
+                        Share Login
+                      </Button>
+                      <Button
+                        type="button"
+                        className="rounded-xl h-10 text-[13px] font-black !bg-white !text-slate-900 border border-emerald-200"
+                        onClick={() => {
+                          setTeamAddShareInfo(null);
+                          setTeamAddShareMessage("");
+                        }}
+                      >
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
                 {isAdmin && (
                   <div className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2">
                     {!teamAddFormOpen ? (
@@ -16239,7 +16380,8 @@ const handlePhotoQuickUpload = async (event) => {
                         onClick={() => {
                           cancelTeamMemberEdit();
                           setTeamAddError("");
-                          setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT });
+                          setTeamAddShareMessage("");
+                          setTeamAddDraft({ ...TEAM_ADD_INITIAL_DRAFT, password: generateTemporaryPassword() });
                           setTeamAddFormOpen(true);
                         }}
                         disabled={Boolean(teamAddSubmitting) || Boolean(teamSavingMemberRowId)}
@@ -16253,6 +16395,14 @@ const handlePhotoQuickUpload = async (event) => {
                             {teamAddError}
                           </div>
                         )}
+                        <Button
+                          type="button"
+                          className="w-full rounded-xl h-10 text-[13px] font-black !bg-white !text-slate-900 border border-slate-300"
+                          disabled={teamAddSubmitting || teamContactPicking}
+                          onClick={() => void handlePickEmployeeContact()}
+                        >
+                          {teamContactPicking ? "Opening Contacts..." : "Pick From Contacts"}
+                        </Button>
                         <div className="space-y-1">
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-name">
                             Name
@@ -16285,15 +16435,25 @@ const handlePhotoQuickUpload = async (event) => {
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-password">
                             Temporary password
                           </label>
-                          <input
-                            id="team-add-password"
-                            type="password"
-                            autoComplete="new-password"
-                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                            value={teamAddDraft.password}
-                            disabled={teamAddSubmitting}
-                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, password: e.target.value }))}
-                          />
+                          <div className="flex gap-2">
+                            <input
+                              id="team-add-password"
+                              type="text"
+                              autoComplete="new-password"
+                              className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                              value={teamAddDraft.password}
+                              disabled={teamAddSubmitting}
+                              onChange={(e) => setTeamAddDraft((d) => ({ ...d, password: e.target.value }))}
+                            />
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[11px] font-black text-slate-700"
+                              disabled={teamAddSubmitting}
+                              onClick={() => setTeamAddDraft((d) => ({ ...d, password: generateTemporaryPassword() }))}
+                            >
+                              Generate
+                            </button>
+                          </div>
                         </div>
                         <div className="space-y-1.5">
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-role">
@@ -16331,35 +16491,9 @@ const handlePhotoQuickUpload = async (event) => {
                             onChange={(e) => setTeamAddDraft((d) => ({ ...d, hourlyRate: e.target.value }))}
                           />
                         </div>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-eff">
-                            Effective date
-                          </label>
-                          <input
-                            id="team-add-eff"
-                            type="date"
-                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                            value={teamAddDraft.payRateEffectiveDate}
-                            disabled={teamAddSubmitting}
-                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, payRateEffectiveDate: e.target.value }))}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-join">
-                            Joining date
-                          </label>
-                          <input
-                            id="team-add-join"
-                            type="date"
-                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                            value={teamAddDraft.joiningDate}
-                            disabled={teamAddSubmitting}
-                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, joiningDate: e.target.value }))}
-                          />
-                          <p className="text-[10px] text-slate-500 leading-snug">
-                            Optional — defaults to today (company time zone) if left empty.
-                          </p>
-                        </div>
+                        <p className="rounded-xl bg-slate-50 px-3 py-2 text-[12px] font-bold text-slate-600">
+                          Joining date and pay-rate effective date will be saved as today.
+                        </p>
                         <div className="space-y-0.5">
                           <p className="text-[11px] font-medium text-slate-600">Status</p>
                           <p className="text-xs font-medium text-slate-900">active</p>
@@ -16684,7 +16818,7 @@ const handlePhotoQuickUpload = async (event) => {
                   !teamError &&
                   displayedTeamRows.length === 0 &&
                   (isAdmin ? teamRows.length === 0 : !teamRows.some((r) => String(r.userId) === String(authUser?.id))) && (
-                    <p className="text-xs text-slate-500 text-center py-3">No members found.</p>
+                    <p className="text-xs text-slate-500 text-center py-3">No employees found.</p>
                   )}
                 {!teamLoading &&
                   !teamError &&
@@ -16693,8 +16827,8 @@ const handlePhotoQuickUpload = async (event) => {
                   displayedTeamRows.length === 0 && (
                     <p className="text-xs text-slate-500 text-center py-3">
                       {teamListFilter === "all"
-                        ? "No members in this view."
-                        : `No ${teamListFilter === "active" ? "active" : "archived"} members in this view.`}
+                        ? "No employees in this view."
+                        : `No ${teamListFilter === "active" ? "active" : "archived"} employees in this view.`}
                     </p>
                   )}
               </CardContent>
@@ -16835,7 +16969,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {isAdmin ? (
                   <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
                     <div>
-                      <p className="text-[18px] font-black text-slate-900">Team</p>
+                      <p className="text-[18px] font-black text-slate-900">Employees</p>
                       <p className="text-[14px] text-slate-600">Manage employee profiles, roles, pay rates, and status.</p>
                     </div>
                     <Button
@@ -16843,7 +16977,7 @@ const handlePhotoQuickUpload = async (event) => {
                       className="w-full rounded-2xl h-12 text-[15px] font-bold"
                       onClick={() => setActiveTab("team")}
                     >
-                      Open Team
+                      Open Employees
                     </Button>
                   </div>
                 ) : null}
@@ -17440,7 +17574,7 @@ const handlePhotoQuickUpload = async (event) => {
                           className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                           onClick={() => openMenuTab("team")}
                         >
-                          Team
+                          Employees
                         </button>
                         <button
                           type="button"
