@@ -1053,7 +1053,7 @@ async function fetchProfilesByTimesheetUserIds(supabase, userIds) {
  */
 function getCurrentLocation() {
   return new Promise((resolve) => {
-    if (!navigator.geolocation) {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
       resolve({ coords: null, error: "unavailable" });
       return;
     }
@@ -1084,6 +1084,26 @@ function getCurrentLocation() {
       }
     );
   });
+}
+
+async function readGeolocationPermissionState() {
+  try {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.geolocation ||
+      !navigator.permissions?.query
+    ) {
+      return "unknown";
+    }
+    const result = await navigator.permissions.query({ name: "geolocation" });
+    return result?.state || "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function clockLocationStorageKey(userId) {
+  return `orp_clock_location_enabled_${userId || "anonymous"}`;
 }
 
 function isMissingOptionalAccuracyColumnError(error) {
@@ -1679,6 +1699,8 @@ export default function EmployeeClockApp() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [locationStatus, setLocationStatus] = useState("");
+  const [clockLocationEnabled, setClockLocationEnabled] = useState(false);
+  const [clockLocationPermissionState, setClockLocationPermissionState] = useState("unknown");
   const [photoStatus, setPhotoStatus] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
   const [photoDrafts, setPhotoDrafts] = useState([]);
@@ -1727,6 +1749,10 @@ export default function EmployeeClockApp() {
   const videoRecordStopTimerRef = useRef(null);
   const videoRecordStartedAtRef = useRef(0);
   const [watchId, setWatchId] = useState(null);
+  const [clockChecklistTab, setClockChecklistTab] = useState("tasks");
+  const [clockCompletedChecklist, setClockCompletedChecklist] = useState(() =>
+    safeRead("orp_clock_completed_checklist", {})
+  );
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
@@ -3339,6 +3365,68 @@ export default function EmployeeClockApp() {
     }, 5000);
   }, [clockSelectableProjects.length]);
 
+  const refreshClockLocationPermission = useCallback(async () => {
+    const state = await readGeolocationPermissionState();
+    setClockLocationPermissionState(state);
+    if (state === "granted" && authUser?.id) {
+      setClockLocationEnabled(true);
+      safeWrite(clockLocationStorageKey(authUser.id), true);
+    }
+    if (state === "denied" && authUser?.id) {
+      setClockLocationEnabled(false);
+      safeWrite(clockLocationStorageKey(authUser.id), false);
+    }
+    return state;
+  }, [authUser?.id]);
+
+  const getClockActionLocation = useCallback(async () => {
+    const permissionState = await refreshClockLocationPermission();
+    const allowed =
+      clockLocationEnabled ||
+      permissionState === "granted" ||
+      Boolean(authUser?.id && safeRead(clockLocationStorageKey(authUser.id), false));
+    if (!allowed) return { coords: null, error: "not_enabled" };
+    const result = await getCurrentLocation();
+    if (result.error === "denied" && authUser?.id) {
+      setClockLocationEnabled(false);
+      safeWrite(clockLocationStorageKey(authUser.id), false);
+      setClockLocationPermissionState("denied");
+    }
+    return result;
+  }, [authUser?.id, clockLocationEnabled, refreshClockLocationPermission]);
+
+  const handleEnableClockLocation = useCallback(async () => {
+    if (!authUser?.id) return;
+    setLocationStatus("Enabling location...");
+    const result = await getCurrentLocation();
+    const nextState = await readGeolocationPermissionState();
+    setClockLocationPermissionState(nextState);
+    if (result.coords) {
+      setClockLocationEnabled(true);
+      safeWrite(clockLocationStorageKey(authUser.id), true);
+      setLocationStatus("Location enabled.");
+      setTimeout(() => {
+        if (latestLocationStatusRef.current === "Location enabled.") setLocationStatus("");
+      }, 3000);
+      if (visibleCurrentShift) {
+        void updateLiveLocationOnce({
+          status: "clocked_in",
+          projectName: visibleCurrentShift.project,
+          costCentre: visibleCurrentShift.costCenter,
+          coords: result.coords,
+        });
+      }
+      return;
+    }
+    setClockLocationEnabled(false);
+    safeWrite(clockLocationStorageKey(authUser.id), false);
+    setLocationStatus(
+      result.error === "denied"
+        ? "Location blocked in browser settings."
+        : "Location unavailable on this device."
+    );
+  }, [authUser?.id, updateLiveLocationOnce, visibleCurrentShift]);
+
   const timesheetRangeBounds = useMemo(() => {
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
     const anchor = timesheetDateKey || todayKey;
@@ -4342,6 +4430,36 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     safeWrite("orp_photo_notification_count", photoNotificationCount);
   }, [photoNotificationCount]);
+
+  useEffect(() => {
+    safeWrite("orp_clock_completed_checklist", clockCompletedChecklist);
+  }, [clockCompletedChecklist]);
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      setClockLocationEnabled(false);
+      setClockLocationPermissionState("unknown");
+      return;
+    }
+    let cancelled = false;
+    const storedEnabled = Boolean(safeRead(clockLocationStorageKey(authUser.id), false));
+    setClockLocationEnabled(storedEnabled);
+    (async () => {
+      const state = await readGeolocationPermissionState();
+      if (cancelled) return;
+      setClockLocationPermissionState(state);
+      if (state === "granted") {
+        setClockLocationEnabled(true);
+        safeWrite(clockLocationStorageKey(authUser.id), true);
+      } else if (state === "denied") {
+        setClockLocationEnabled(false);
+        safeWrite(clockLocationStorageKey(authUser.id), false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id]);
 
   useEffect(() => {
     if (!isAdmin && activeTab === "reports") setActiveTab("schedule");
@@ -5567,8 +5685,10 @@ const handleClockIn = async () => {
       return;
     }
 
-    setLocationStatus("Getting location...");
-    const locResult = await getCurrentLocation();
+    if (clockLocationEnabled || clockLocationPermissionState === "granted") {
+      setLocationStatus("Getting location...");
+    }
+    const locResult = await getClockActionLocation();
     const gps = locResult.coords;
 
     let employeeHourlyRate = 0;
@@ -6986,8 +7106,10 @@ const handlePhotoQuickUpload = async (event) => {
       setWatchId(null);
     }
 
-    setLocationStatus("Getting location...");
-    const locResult = await getCurrentLocation();
+    if (clockLocationEnabled || clockLocationPermissionState === "granted") {
+      setLocationStatus("Getting location...");
+    }
+    const locResult = await getClockActionLocation();
     const clockOutGps = locResult.coords;
     const clockOutTime = new Date().toISOString();
     let didSaveClockOut = false;
@@ -7051,13 +7173,7 @@ const handlePhotoQuickUpload = async (event) => {
         coords: clockOutGps,
       });
     }
-    setLocationStatus(
-      clockOutGps
-        ? "Clock-out saved. Location captured."
-        : locResult.error === "denied"
-          ? "Clock-out saved. Location unavailable / permission denied."
-          : "Clock-out saved. Location unavailable."
-    );
+    setLocationStatus("");
     setActiveTab("clock");
     void fetchTimesheetsFromSupabase();
   };
@@ -9824,6 +9940,146 @@ const handlePhotoQuickUpload = async (event) => {
     locationStatus === "Select project and cost center first." ||
     locationStatus === "No projects assigned. Please contact your supervisor.";
 
+  const clockChecklistContext = {
+    projectId: visibleCurrentShift?.projectId ?? clockSelectedProject?.id ?? projectId,
+    projectName: visibleCurrentShift?.project || clockSelectedProject?.name || "",
+    costCenter: visibleCurrentShift?.costCenter || costCenter || "",
+    dateKey: calendarDateKeyInTimeZone(visibleCurrentShift?.clockIn || now, companyTimeZone),
+  };
+
+  const clockChecklistDoneKey = (kind, id) =>
+    [
+      authUser?.id || "anonymous",
+      clockChecklistContext.dateKey || "today",
+      clockChecklistContext.projectId || clockChecklistContext.projectName || "project",
+      clockChecklistContext.costCenter || "cost",
+      kind,
+      id,
+    ].join("|");
+
+  const isClockChecklistDone = (kind, id) =>
+    Boolean(clockCompletedChecklist?.[clockChecklistDoneKey(kind, id)]);
+
+  const completeClockChecklistItem = (kind, id, label) => {
+    const key = clockChecklistDoneKey(kind, id);
+    setClockCompletedChecklist((prev) => ({
+      ...(prev || {}),
+      [key]: { label, completedAt: new Date().toISOString() },
+    }));
+  };
+
+  const clockTaskChecklistItems = (clockEmployeeScheduledTasks || [])
+    .filter((task) => {
+      const taskProjectId = task?.project_id != null ? String(task.project_id) : "";
+      const taskProjectName = String(task?.project_name ?? "").trim().toLowerCase();
+      const ctxProjectId = clockChecklistContext.projectId != null ? String(clockChecklistContext.projectId) : "";
+      const ctxProjectName = String(clockChecklistContext.projectName || "").trim().toLowerCase();
+      const taskCost = String(task?.cost_centre ?? "").trim();
+      const ctxCost = String(clockChecklistContext.costCenter || "").trim();
+      const projectMatches =
+        !ctxProjectId ||
+        (taskProjectId && taskProjectId === ctxProjectId) ||
+        (ctxProjectName && taskProjectName === ctxProjectName);
+      const costMatches = !ctxCost || !taskCost || taskCost === ctxCost;
+      return projectMatches && costMatches;
+    })
+    .map((task) => {
+      const id = task?.id != null ? String(task.id) : String(task?.task_title || "");
+      const label = String(task?.task_title ?? "").trim() || "Scheduled task";
+      const time = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "";
+      return { kind: "task", id, label, meta: time };
+    })
+    .filter((item) => item.id && !isClockChecklistDone(item.kind, item.id));
+
+  const clockMaterialChecklistItems = (() => {
+    const folderName = clockChecklistContext.projectName
+      ? getProjectFolderName(clockChecklistContext.projectName)
+      : "";
+    const rows = folderName ? projectReceipts?.[folderName] || [] : [];
+    const ctxCost = String(clockChecklistContext.costCenter || "").trim();
+    const seen = new Set();
+    return (Array.isArray(rows) ? rows : [])
+      .filter((receipt) => {
+        const receiptCost = String(receipt?.costCenter ?? receipt?.cost_centre ?? "").trim();
+        const receiptUser = String(receipt?.employeeId ?? receipt?.userId ?? receipt?.user_id ?? "");
+        if (ctxCost && receiptCost && receiptCost !== ctxCost) return false;
+        if (!isAdmin && authUser?.id && receiptUser && receiptUser !== String(authUser.id)) return false;
+        return true;
+      })
+      .map((receipt) => {
+        const label =
+          String(receipt?.category ?? "").trim() ||
+          String(receipt?.supplier ?? "").trim() ||
+          String(receipt?.material ?? "").trim() ||
+          "Material receipt";
+        const id = `${folderName}:${ctxCost}:${label}`.toLowerCase();
+        const meta = receipt?.amount != null && receipt.amount !== "" ? formatMoney(Number(receipt.amount)) : "";
+        return { kind: "material", id, label, meta };
+      })
+      .filter((item) => {
+        if (!item.id || seen.has(item.id) || isClockChecklistDone(item.kind, item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  })();
+
+  const renderClockChecklistPanel = () => {
+    const activeItems = clockChecklistTab === "materials" ? clockMaterialChecklistItems : clockTaskChecklistItems;
+    const emptyText =
+      clockChecklistTab === "materials"
+        ? "No materials left for this project."
+        : "No tasks left for this shift.";
+    return (
+      <div className="rounded-2xl border border-slate-200 bg-white p-2 space-y-2">
+        <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+          {[
+            { id: "tasks", label: "Task list" },
+            { id: "materials", label: "Material list" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`rounded-lg py-2 text-[14px] font-black transition ${
+                clockChecklistTab === tab.id
+                  ? "bg-slate-950 text-white shadow-sm"
+                  : "text-slate-700"
+              }`}
+              onClick={() => setClockChecklistTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        {activeItems.length > 0 ? (
+          <div className="space-y-1.5">
+            {activeItems.map((item) => (
+              <button
+                key={`${item.kind}-${item.id}`}
+                type="button"
+                className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left active:bg-emerald-50"
+                onClick={() => completeClockChecklistItem(item.kind, item.id, item.label)}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-[15px] font-black text-slate-950">{item.label}</span>
+                  {item.meta ? (
+                    <span className="block text-[13px] font-semibold text-slate-500">{item.meta}</span>
+                  ) : null}
+                </span>
+                <span className="shrink-0 rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-[12px] font-black text-emerald-800">
+                  Done
+                </span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-xl bg-slate-50 px-3 py-3 text-center text-[14px] font-semibold text-slate-500">
+            {emptyText}
+          </p>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
@@ -10128,6 +10384,8 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
+                {clockSetupReady ? renderClockChecklistPanel() : null}
+
                 <div ref={photoToolsRef} className="rounded-2xl border border-slate-200 bg-slate-50 p-2 space-y-2">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
@@ -10370,6 +10628,16 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
+                {!(clockLocationEnabled || clockLocationPermissionState === "granted") ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-[15px] font-black text-slate-800"
+                    onClick={() => void handleEnableClockLocation()}
+                  >
+                    Enable Location
+                  </button>
+                ) : null}
+
                 <Button
                   className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
                   onClick={handleClockIn}
@@ -10444,6 +10712,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
+                    {renderClockChecklistPanel()}
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
                       <div className="grid grid-cols-2 gap-1.5">
                         <button
@@ -10709,6 +10978,15 @@ const handlePhotoQuickUpload = async (event) => {
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleChangeTask}>🔄 Change Task</Button>
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
+                    {!(clockLocationEnabled || clockLocationPermissionState === "granted") ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-[15px] font-black text-slate-800"
+                        onClick={() => void handleEnableClockLocation()}
+                      >
+                        Enable Location
+                      </button>
+                    ) : null}
                     <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
                     {locationStatus && (
                       <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
