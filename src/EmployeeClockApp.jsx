@@ -11579,6 +11579,9 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsVisibleSummary = reportsSafeDrillStack.length
     ? reportsDrillSummary
     : { minutes: reportsAggregates.totalMinutes, cost: reportsAggregates.totalCost };
+  const reportsVisibleEntryCount = reportsSafeDrillStack.length
+    ? reportsDrillSummary.count
+    : reportsTotalEntries;
   const reportsCurrentTitle = reportsSafeDrillStack.length
     ? reportsSafeDrillStack.map((step) => step.label).join(" / ")
     : "All reports";
@@ -13711,28 +13714,47 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[30px] border border-slate-200/80 bg-[#f8fafc] shadow-[0_24px_56px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-3 sm:p-5 space-y-3">
-                <div className="rounded-[28px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-[0_16px_34px_rgba(15,23,42,0.08)]">
-                  <div className="flex items-center justify-between gap-3">
+            <Card className="rounded-[32px] border border-white/70 bg-[#f7f9fc] shadow-[0_26px_62px_rgba(15,23,42,0.12)] overflow-hidden">
+              <CardContent className="p-2.5 sm:p-4 space-y-3">
+                <div className="relative overflow-hidden rounded-[30px] border border-white bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_38%),linear-gradient(145deg,#ffffff_0%,#f8fafc_64%,#eef6f2_100%)] px-4 py-4 shadow-[0_18px_42px_rgba(15,23,42,0.10)]">
+                  <div className="pointer-events-none absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-blue-300/70 to-transparent" />
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Reports</p>
-                      <p className="mt-1 text-[21px] font-black leading-tight text-slate-950">All reports</p>
-                      <p className="mt-1 text-[13px] font-bold leading-snug text-slate-500">{reportsDateRangeLabel}</p>
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Reports</p>
+                      <h2 className="mt-1 text-[26px] font-black leading-[1.02] text-slate-950 break-words">
+                        {reportsCurrentTitle}
+                      </h2>
+                      <p className="mt-1.5 text-[14px] font-bold leading-snug text-slate-600">{reportsDateRangeLabel}</p>
                     </div>
-                    <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
-                      {reportsTotalEntries} entries
-                    </span>
+                    {reportsSafeDrillStack.length ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-950 px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_12px_22px_rgba(15,23,42,0.18)] active:bg-slate-800"
+                        onClick={() => {
+                          const next = reportsSafeDrillStack.slice(0, -1);
+                          setReportsDrillStack(next);
+                          const remaining = REPORT_DIMS.filter((dim) => !new Set(next.map((step) => step.dim)).has(dim));
+                          setReportsDrillViewBy(remaining[0] || "project");
+                        }}
+                      >
+                        Back
+                      </button>
+                    ) : (
+                      <span className="shrink-0 rounded-full border border-blue-100 bg-white/90 px-3 py-1.5 text-[11px] font-black text-slate-800 shadow-sm">
+                        {reportsVisibleEntryCount} entries
+                      </span>
+                    )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+
+                  <div className="mt-4 grid grid-cols-3 gap-2 rounded-[22px] border border-slate-200/80 bg-white/70 p-1.5 shadow-inner">
                     {reportsQuickRangeOptions.map((p) => (
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-2xl px-2 py-2.5 text-[13px] font-black border transition-colors leading-tight ${
+                        className={`rounded-[18px] px-2 py-2.5 text-[13px] font-black transition-colors leading-tight ${
                           reportsRangePreset === p.id
-                            ? "bg-slate-950 text-white border-slate-950 shadow-[0_10px_20px_rgba(15,23,42,0.18)]"
-                            : "bg-slate-50 text-slate-700 border-slate-200 active:bg-white"
+                            ? "bg-slate-950 text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]"
+                            : "text-slate-700 active:bg-white"
                         }`}
                         onClick={() => {
                           const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
@@ -13749,12 +13771,13 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
                       From
                       <input
                         type="date"
-                        className="block h-11 w-full min-w-0 appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
+                        className="block h-12 w-full min-w-0 appearance-none rounded-[20px] border border-slate-200 bg-white px-2 text-[clamp(12px,3.4vw,14px)] font-black text-slate-950 outline-none [color-scheme:light] focus:border-blue-300"
                         value={reportsDateFrom}
                         onChange={(e) => {
                           setReportsDateFrom(e.target.value);
@@ -13764,11 +13787,11 @@ const handlePhotoQuickUpload = async (event) => {
                         }}
                       />
                     </label>
-                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                    <label className="block min-w-0 space-y-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
                       To
                       <input
                         type="date"
-                        className="block h-11 w-full min-w-0 appearance-none rounded-2xl border border-slate-200 bg-slate-50 px-2 text-[12px] font-black text-slate-950 outline-none [color-scheme:light] focus:border-slate-400 focus:bg-white"
+                        className="block h-12 w-full min-w-0 appearance-none rounded-[20px] border border-slate-200 bg-white px-2 text-[clamp(12px,3.4vw,14px)] font-black text-slate-950 outline-none [color-scheme:light] focus:border-blue-300"
                         value={reportsDateTo}
                         onChange={(e) => {
                           setReportsDateTo(e.target.value);
@@ -13779,14 +13802,12 @@ const handlePhotoQuickUpload = async (event) => {
                       />
                     </label>
                   </div>
-                </div>
 
-                {reportsAvailableDims.length ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_12px_26px_rgba(15,23,42,0.06)]">
-                    <label className="block space-y-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                  {reportsAvailableDims.length ? (
+                    <label className="mt-3 block space-y-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
                       View by
                       <select
-                        className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        className="h-12 w-full rounded-[20px] border border-slate-200 bg-white px-3 text-[16px] font-black text-slate-950 outline-none focus:border-blue-300"
                         value={reportsCurrentViewBy}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -13800,39 +13821,7 @@ const handlePhotoQuickUpload = async (event) => {
                         ))}
                       </select>
                     </label>
-                  </div>
-                ) : null}
-
-                <div className="rounded-[26px] border border-slate-200 bg-white px-4 py-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
-                        Reports
-                      </p>
-                      <h2 className="mt-1 text-[24px] font-black leading-tight tracking-normal text-slate-950 break-words">
-                        {reportsCurrentTitle}
-                      </h2>
-                      <p className="mt-1 text-[13px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
-                    </div>
-                    {reportsSafeDrillStack.length ? (
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-2xl border border-slate-200 bg-slate-950 px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_10px_20px_rgba(15,23,42,0.16)] active:bg-slate-800"
-                        onClick={() => {
-                          const next = reportsSafeDrillStack.slice(0, -1);
-                          setReportsDrillStack(next);
-                          const remaining = REPORT_DIMS.filter((dim) => !new Set(next.map((step) => step.dim)).has(dim));
-                          setReportsDrillViewBy(remaining[0] || "project");
-                        }}
-                      >
-                        Back
-                      </button>
-                    ) : (
-                      <div className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
-                        {reportsTotalEntries} entries
-                      </div>
-                    )}
-                  </div>
+                  ) : null}
                 </div>
 
                 {reportsScreenLoading ? (
@@ -13853,39 +13842,47 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="rounded-[26px] border border-slate-200 bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.07)]">
-                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Current total</p>
-                        <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
-                          {reportsSafeDrillStack.length ? "Filtered" : "All entries"}
+                    <div className="rounded-[28px] border border-white bg-white p-3.5 shadow-[0_18px_42px_rgba(15,23,42,0.10)]">
+                      <div className="flex items-center justify-between gap-3 pb-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Current total</p>
+                          <p className="mt-1 text-[13px] font-bold text-slate-500">
+                            {reportsSafeDrillStack.length ? "Filtered view" : "All entries"}
+                          </p>
+                        </div>
+                        <p className="rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1.5 text-[11px] font-black text-emerald-800">
+                          {reportsVisibleEntryCount} rows
                         </p>
                       </div>
-                      <div className="grid grid-cols-[0.9fr_1.1fr] gap-2.5 pt-3">
-                        <div className="min-w-0 rounded-[22px] bg-slate-950 px-3.5 py-3.5 text-white shadow-[0_14px_26px_rgba(15,23,42,0.22)]">
-                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Hours</p>
-                          <p className="mt-2 text-[28px] font-black tabular-nums leading-none text-white">
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <div className="min-w-0 rounded-[24px] bg-slate-950 px-3.5 py-4 text-white shadow-[0_16px_30px_rgba(15,23,42,0.24)]">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-blue-200">Hours</p>
+                          <p className="mt-2 text-[clamp(25px,8.4vw,34px)] font-black tabular-nums leading-[0.98] text-white break-words">
                             {formatDuration(reportsVisibleSummary.minutes)}
                           </p>
                         </div>
-                        <div className="min-w-0 rounded-[22px] border border-slate-200 bg-white px-3.5 py-3.5 shadow-sm">
-                          <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Amount</p>
-                          <p className="mt-2 text-[23px] font-black tabular-nums leading-none text-slate-950 break-words">
+                        <div className="min-w-0 rounded-[24px] border border-amber-100 bg-[linear-gradient(145deg,#fff_0%,#fffdf7_100%)] px-3.5 py-4 shadow-[0_10px_24px_rgba(180,83,9,0.08)]">
+                          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-amber-700">Amount</p>
+                          <p className="mt-2 text-[clamp(19px,6.5vw,28px)] font-black tabular-nums leading-[1.02] text-slate-950 break-words">
                             {formatMoney(reportsVisibleSummary.cost)}
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <div className="rounded-[26px] border border-slate-200 bg-white shadow-[0_14px_30px_rgba(15,23,42,0.07)] overflow-hidden">
-                      <div className="grid grid-cols-[1fr_auto] gap-3 border-b border-slate-100 bg-white px-4 py-3">
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
-                          {reportsCurrentViewBy === "project"
-                            ? "Project"
-                            : reportsCurrentViewBy === "employee"
-                              ? "Employee"
-                              : "Cost center"}
-                        </p>
-                        <p className="text-right text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
+                    <div className="rounded-[28px] border border-white bg-white p-2.5 shadow-[0_18px_42px_rgba(15,23,42,0.10)]">
+                      <div className="flex items-center justify-between gap-3 px-2 pb-2">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Breakdown</p>
+                          <p className="mt-0.5 text-[15px] font-black text-slate-950">
+                            {reportsCurrentViewBy === "project"
+                              ? "Project view"
+                              : reportsCurrentViewBy === "employee"
+                                ? "Employee view"
+                                : "Cost center view"}
+                          </p>
+                        </div>
+                        <p className="text-right text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
                           Hours / Amount
                         </p>
                       </div>
@@ -13894,7 +13891,8 @@ const handlePhotoQuickUpload = async (event) => {
                           {reportsAvailableDims.length ? "No detail in this view." : "No more breakdown levels."}
                         </p>
                       ) : (
-                        reportsCurrentGroups.map((row) => {
+                        <div className="space-y-2">
+                          {reportsCurrentGroups.map((row) => {
                           const nextStack = [
                             ...reportsSafeDrillStack,
                             { dim: reportsCurrentViewBy, key: row.key, label: row.label },
@@ -13908,7 +13906,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <Tag
                               key={`${reportsCurrentViewBy}-${row.key}`}
                               type={canDrill ? "button" : undefined}
-                              className="w-full border-b border-slate-100 bg-white px-4 py-3.5 text-left last:border-b-0 active:bg-slate-50"
+                              className="w-full rounded-[22px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfdff_100%)] px-3.5 py-3.5 text-left shadow-[0_8px_18px_rgba(15,23,42,0.06)] active:bg-slate-50"
                               onClick={
                                 canDrill
                                   ? () => {
@@ -13920,19 +13918,19 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[16px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
                                   <p className="mt-1 text-[12px] font-bold text-slate-500">
-                                    {row.rows.length} entries{canDrill ? " - details" : ""}
+                                    {row.rows.length} entries{canDrill ? " - tap for details" : ""}
                                   </p>
                                 </div>
-                                <div className="shrink-0 text-right">
-                                  <p className="text-[16px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
-                                  <p className="mt-1 text-[13px] font-black tabular-nums text-slate-600">{formatMoney(row.cost)}</p>
+                                <div className="shrink-0 text-right max-w-[42%]">
+                                  <p className="text-[16px] font-black tabular-nums leading-tight text-slate-950">{formatDuration(row.minutes)}</p>
+                                  <p className="mt-1 text-[13px] font-black tabular-nums leading-tight text-amber-700 break-words">{formatMoney(row.cost)}</p>
                                 </div>
                               </div>
-                              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
                                 <div
-                                  className="h-full rounded-full bg-gradient-to-r from-slate-950 via-blue-700 to-emerald-500 transition-all"
+                                  className="h-full rounded-full bg-gradient-to-r from-slate-950 via-blue-700 to-emerald-500 shadow-[0_0_14px_rgba(37,99,235,0.24)] transition-all"
                                   style={{
                                     width: `${Math.max(
                                       6,
@@ -13943,7 +13941,8 @@ const handlePhotoQuickUpload = async (event) => {
                               </div>
                             </Tag>
                           );
-                        })
+                        })}
+                        </div>
                       )}
                     </div>
                   </>
