@@ -2024,6 +2024,8 @@ export default function EmployeeClockApp() {
   const [reportsSelectedProject, setReportsSelectedProject] = useState(null);
   const [reportsSelectedEmployee, setReportsSelectedEmployee] = useState(null);
   const [reportsProjectGroupBy, setReportsProjectGroupBy] = useState("employee");
+  const [reportsDrillStack, setReportsDrillStack] = useState([]);
+  const [reportsDrillViewBy, setReportsDrillViewBy] = useState("project");
   /** Reports breakdown dimensions: Level 1 required; Level 2/3 optional (none). */
   const [reportsLevel1, setReportsLevel1] = useState("project");
   const [reportsLevel2, setReportsLevel2] = useState("none");
@@ -10182,6 +10184,35 @@ const handlePhotoQuickUpload = async (event) => {
     : [];
   const reportsSelectedEmployeeSummary = summarizeReportsRows(reportsSelectedEmployeeRows);
   const reportsEmployeeCostCenterGroups = buildReportsGroups(reportsSelectedEmployeeRows, "cost_center");
+  const reportsViewLabel = (dim) => {
+    if (dim === "project") return "Project View";
+    if (dim === "employee") return "Employee View";
+    if (dim === "cost_center") return "Cost Center View";
+    return "View";
+  };
+  const filterReportsRowsByStack = (rows, stack) =>
+    (Array.isArray(rows) ? rows : []).filter((row) =>
+      (Array.isArray(stack) ? stack : []).every(
+        (step) => step?.dim && getReportsDimForRow(step.dim, row).key === step.key
+      )
+    );
+  const reportsSafeDrillStack = Array.isArray(reportsDrillStack) ? reportsDrillStack : [];
+  const reportsDrillRows = filterReportsRowsByStack(reportsRowsFilteredForUi, reportsSafeDrillStack);
+  const reportsDrillSummary = summarizeReportsRows(reportsDrillRows);
+  const reportsUsedDims = new Set(reportsSafeDrillStack.map((step) => step.dim));
+  const reportsAvailableDims = REPORT_DIMS.filter((dim) => !reportsUsedDims.has(dim));
+  const reportsCurrentViewBy = reportsAvailableDims.includes(reportsDrillViewBy)
+    ? reportsDrillViewBy
+    : reportsAvailableDims[0] || "project";
+  const reportsCurrentGroups =
+    reportsAvailableDims.length > 0 ? buildReportsGroups(reportsDrillRows, reportsCurrentViewBy) : [];
+  const reportsContextCards = reportsSafeDrillStack.map((step, index) => {
+    const stackSlice = reportsSafeDrillStack.slice(0, index + 1);
+    return {
+      ...step,
+      summary: summarizeReportsRows(filterReportsRowsByStack(reportsRowsFilteredForUi, stackSlice)),
+    };
+  });
 
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
@@ -11994,6 +12025,231 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
+            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
+              <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">
+                        {reportsSafeDrillStack.length
+                          ? reportsSafeDrillStack[reportsSafeDrillStack.length - 1]?.label || "Report detail"
+                          : "Reports"}
+                      </h2>
+                      <p className="mt-2 text-[14px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
+                    </div>
+                    {reportsSafeDrillStack.length ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-black text-slate-800 shadow-sm"
+                        onClick={() => {
+                          const next = reportsSafeDrillStack.slice(0, -1);
+                          setReportsDrillStack(next);
+                          const remaining = REPORT_DIMS.filter((dim) => !new Set(next.map((step) => step.dim)).has(dim));
+                          setReportsDrillViewBy(remaining[0] || "project");
+                        }}
+                      >
+                        Back
+                      </button>
+                    ) : (
+                      <div className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-700 shadow-sm">
+                        {reportsTotalEntries} entries
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {!reportsSafeDrillStack.length ? (
+                  <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {reportsQuickRangeOptions.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
+                            reportsRangePreset === p.id
+                              ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                              : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
+                          }`}
+                          onClick={() => {
+                            const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
+                            if (from && to) {
+                              setReportsDateFrom(from);
+                              setReportsDateTo(to);
+                              setReportsRangePreset(p.id);
+                              setReportsDrillStack([]);
+                              setReportsDrillViewBy("project");
+                            }
+                          }}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        From
+                        <input
+                          type="date"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                          value={reportsDateFrom}
+                          onChange={(e) => {
+                            setReportsDateFrom(e.target.value);
+                            setReportsRangePreset(null);
+                            setReportsDrillStack([]);
+                            setReportsDrillViewBy("project");
+                          }}
+                        />
+                      </label>
+                      <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        To
+                        <input
+                          type="date"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                          value={reportsDateTo}
+                          onChange={(e) => {
+                            setReportsDateTo(e.target.value);
+                            setReportsRangePreset(null);
+                            setReportsDrillStack([]);
+                            setReportsDrillViewBy("project");
+                          }}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ) : null}
+
+                {reportsScreenLoading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">
+                    Loading reports...
+                  </div>
+                ) : null}
+                {reportsScreenError ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-[14px] font-bold text-amber-900 leading-snug break-words">
+                    {reportsScreenError}
+                  </div>
+                ) : null}
+                {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom > reportsDateTo ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-[14px] font-bold text-red-800 leading-snug">
+                    Date from must be before Date to.
+                  </div>
+                ) : null}
+
+                {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-300">Total hours</p>
+                        <p className="mt-2 text-[26px] font-black tabular-nums leading-none">
+                          {formatDuration(reportsSafeDrillStack.length ? reportsDrillSummary.minutes : reportsAggregates.totalMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Total amount</p>
+                        <p className="mt-2 text-[22px] font-black tabular-nums leading-none text-slate-950">
+                          {formatMoney(reportsSafeDrillStack.length ? reportsDrillSummary.cost : reportsAggregates.totalCost)}
+                        </p>
+                      </div>
+                    </div>
+
+                    {reportsContextCards.length ? (
+                      <div className="space-y-2">
+                        {reportsContextCards.map((card, index) => (
+                          <div key={`${card.dim}-${card.key}-${index}`} className="rounded-[22px] border border-slate-200 bg-white p-3 shadow-sm">
+                            <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                              {reportsViewLabel(card.dim)}
+                            </p>
+                            <p className="mt-1 text-[18px] font-black leading-snug text-slate-950 break-words">{card.label}</p>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Hours</p>
+                                <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(card.summary.minutes)}</p>
+                              </div>
+                              <div className="rounded-2xl bg-slate-50 px-3 py-2">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-500">Amount</p>
+                                <p className="text-[15px] font-black tabular-nums text-slate-950">{formatMoney(card.summary.cost)}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {reportsAvailableDims.length ? (
+                      <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                        <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                          View by
+                          <select
+                            className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[16px] font-black text-slate-950"
+                            value={reportsCurrentViewBy}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
+                            }}
+                          >
+                            {reportsAvailableDims.map((dim) => (
+                              <option key={dim} value={dim}>
+                                {reportsViewLabel(dim)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-2">
+                      {reportsCurrentGroups.length === 0 ? (
+                        <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                          {reportsAvailableDims.length ? "No detail in this view." : "No more breakdown levels."}
+                        </p>
+                      ) : (
+                        reportsCurrentGroups.map((row) => {
+                          const nextStack = [
+                            ...reportsSafeDrillStack,
+                            { dim: reportsCurrentViewBy, key: row.key, label: row.label },
+                          ];
+                          const remainingAfterClick = REPORT_DIMS.filter(
+                            (dim) => !new Set(nextStack.map((step) => step.dim)).has(dim)
+                          );
+                          const canDrill = remainingAfterClick.length > 0;
+                          const Tag = canDrill ? "button" : "div";
+                          return (
+                            <Tag
+                              key={`${reportsCurrentViewBy}-${row.key}`}
+                              type={canDrill ? "button" : undefined}
+                              className="w-full rounded-[22px] border border-slate-200 bg-white p-3 text-left shadow-sm"
+                              onClick={
+                                canDrill
+                                  ? () => {
+                                      setReportsDrillStack(nextStack);
+                                      setReportsDrillViewBy(remainingAfterClick[0]);
+                                    }
+                                  : undefined
+                              }
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="mt-1 text-[13px] font-bold text-slate-500">
+                                    {row.rows.length} entries{canDrill ? " - tap for details" : ""}
+                                  </p>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="text-[15px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                  <p className="text-[13px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                </div>
+                              </div>
+                            </Tag>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
+                ) : null}
+              </CardContent>
+            </Card>
+          )}
+
+          {false && activeTab === "reports" && isAdmin && (
             <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
