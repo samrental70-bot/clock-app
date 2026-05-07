@@ -3395,6 +3395,31 @@ export default function EmployeeClockApp() {
     return Number.isFinite(raw) ? raw : 0;
   };
 
+  const isCompletedReportTimesheet = (record) => {
+    if (!record?.clockIn || !record?.clockOut) return false;
+    const t0 = parseStoredInstant(record.clockIn).getTime();
+    const t1 = parseStoredInstant(record.clockOut).getTime();
+    return Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0;
+  };
+
+  const getReportWorkedMinutes = (record) => {
+    if (!isCompletedReportTimesheet(record)) return 0;
+    const total = minutesBetween(record.clockIn, record.clockOut);
+    const breakTotal =
+      record.breakStart && record.breakEnd ? minutesBetween(record.breakStart, record.breakEnd) : 0;
+    return Math.max(0, total - breakTotal);
+  };
+
+  const getReportLabourCost = (record) => {
+    if (!isCompletedReportTimesheet(record)) return 0;
+    if (record.labour_cost != null && record.labour_cost !== "") {
+      const stored = Number(record.labour_cost);
+      if (Number.isFinite(stored)) return stored;
+    }
+    const raw = computeLabourCostFromWallTimes(record.clockIn, record.clockOut, Number(record.hourlyRate ?? 0));
+    return Number.isFinite(raw) ? raw : 0;
+  };
+
   const visibleRecords = isAdmin
     ? records
     : records.filter((record) => (record.userId || record.user_id || record.employeeId) === authUser?.id);
@@ -3584,7 +3609,7 @@ export default function EmployeeClockApp() {
   }, [reportsScreenRows]);
 
   const reportsRowsFilteredForUi = useMemo(() => {
-    return reportsScreenRows;
+    return (Array.isArray(reportsScreenRows) ? reportsScreenRows : []).filter(isCompletedReportTimesheet);
   }, [reportsScreenRows]);
 
   const REPORT_DIMS = ["employee", "project", "cost_center"];
@@ -3631,8 +3656,8 @@ export default function EmployeeClockApp() {
     for (const r of rows) {
       const k1 = getDim(d1, r);
       const k1s = String(k1.key);
-      const wm = getWorkedMinutes(r);
-      const lc = getLabourCost(r);
+      const wm = getReportWorkedMinutes(r);
+      const lc = getReportLabourCost(r);
 
       if (!l1Map[k1s]) {
         l1Map[k1s] = { key: k1s, label: k1.label, minutes: 0, cost: 0, children: {} };
@@ -3690,8 +3715,8 @@ export default function EmployeeClockApp() {
     reportsLevel2,
     reportsLevel3,
     reportsRowsFilteredForUi,
-    getWorkedMinutes,
-    getLabourCost,
+    getReportWorkedMinutes,
+    getReportLabourCost,
     profileFullName,
     authUser,
     teamProfileFullNameByUserId,
@@ -3726,8 +3751,8 @@ export default function EmployeeClockApp() {
     const empMap = {};
     const projMap = {};
     for (const r of rows) {
-      const wm = getWorkedMinutes(r);
-      const lc = getLabourCost(r);
+      const wm = getReportWorkedMinutes(r);
+      const lc = getReportLabourCost(r);
       totalMinutes += wm;
       totalCost += lc;
       if (!r.clockOut) missingOut += 1;
@@ -3764,8 +3789,8 @@ export default function EmployeeClockApp() {
     isAdmin,
     activeTab,
     reportsRowsFilteredForUi,
-    getWorkedMinutes,
-    getLabourCost,
+    getReportWorkedMinutes,
+    getReportLabourCost,
     profileFullName,
     authUser,
     teamProfileFullNameByUserId,
@@ -10669,8 +10694,8 @@ const handlePhotoQuickUpload = async (event) => {
     let cost = 0;
     let missingOut = 0;
     for (const row of Array.isArray(rows) ? rows : []) {
-      minutes += getWorkedMinutes(row);
-      cost += getLabourCost(row);
+      minutes += getReportWorkedMinutes(row);
+      cost += getReportLabourCost(row);
       if (!row?.clockOut) missingOut += 1;
     }
     return { minutes, cost, missingOut, count: Array.isArray(rows) ? rows.length : 0 };
@@ -10685,8 +10710,8 @@ const handlePhotoQuickUpload = async (event) => {
         map[d.key] = { key: d.key, label: d.label, rows: [], minutes: 0, cost: 0, missingOut: 0 };
       }
       map[d.key].rows.push(row);
-      map[d.key].minutes += getWorkedMinutes(row);
-      map[d.key].cost += getLabourCost(row);
+      map[d.key].minutes += getReportWorkedMinutes(row);
+      map[d.key].cost += getReportLabourCost(row);
       if (!row?.clockOut) map[d.key].missingOut += 1;
     }
     return Object.values(map).sort(
