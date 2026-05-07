@@ -4548,6 +4548,32 @@ export default function EmployeeClockApp() {
         location: mediaItem.location || null,
       };
 
+      const saveViaApi = async (reason) => {
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData?.session?.access_token;
+          if (!token) return null;
+          console.log("[PROJECT_MEDIA] saving metadata via api", reason || "");
+          const response = await fetch("/api/project-media", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ row }),
+          });
+          const json = await response.json().catch(() => ({}));
+          if (!response.ok || !json?.ok) {
+            console.warn("[PROJECT_MEDIA] api metadata save failed", json);
+            return null;
+          }
+          return json.id || null;
+        } catch (err) {
+          console.warn("[PROJECT_MEDIA] api metadata save exception", err);
+          return null;
+        }
+      };
+
       try {
         const { data, error } = await supabase
           .from("project_media")
@@ -4556,6 +4582,11 @@ export default function EmployeeClockApp() {
           .single();
         if (error) {
           console.warn("[PROJECT_MEDIA] metadata insert failed", error);
+          const apiId = await saveViaApi(error.message || "direct insert failed");
+          if (apiId) {
+            setProjectMediaSyncError("");
+            return apiId;
+          }
           const message = "Media uploaded, but shared database metadata did not save. Run the project_media SQL migration, then try again.";
           setProjectMediaSyncError(message);
           setPhotoStatus(message);
@@ -4565,6 +4596,11 @@ export default function EmployeeClockApp() {
         return data?.id || null;
       } catch (err) {
         console.warn("[PROJECT_MEDIA] metadata insert exception", err);
+        const apiId = await saveViaApi(getErrorMessage(err));
+        if (apiId) {
+          setProjectMediaSyncError("");
+          return apiId;
+        }
         const message = "Media uploaded, but shared database metadata did not save. Local copy remains safe.";
         setProjectMediaSyncError(message);
         setPhotoStatus(message);
