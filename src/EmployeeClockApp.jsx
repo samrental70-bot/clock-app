@@ -882,7 +882,7 @@ function reportsCostCentreKeyFromRow(row) {
 function reportDimensionLabel(value) {
   if (value === "employee") return "Employee";
   if (value === "project") return "Project";
-  if (value === "cost_center") return "Cost Centre";
+  if (value === "cost_center") return "Task";
   return "None";
 }
 
@@ -1624,7 +1624,7 @@ function buildScheduleAssignmentDisplay(task, companyTimeZone) {
     `Task: ${taskTitle}`,
     whenDisp ? `When: ${whenDisp}` : "",
     projectName ? `Project: ${projectName}` : "",
-    costCentre ? `Cost centre: ${costCentre}` : "",
+    costCentre ? `Task: ${costCentre}` : "",
     notes ? `Notes: ${notes}` : "",
   ].filter(Boolean);
   return {
@@ -2013,6 +2013,9 @@ export default function EmployeeClockApp() {
   const [clockListImageDraft, setClockListImageDraft] = useState(null);
   const [clockProjectLists, setClockProjectLists] = useState(() =>
     normalizeClockProjectListsState(safeRead("orp_clock_project_lists", { task: {}, material: {} }))
+  );
+  const [clockScheduledTaskListDone, setClockScheduledTaskListDone] = useState(() =>
+    safeRead("orp_clock_scheduled_task_list_done", {})
   );
   const clockProjectListsRef = useRef(clockProjectLists);
   const clockProjectListsBootstrappedRef = useRef(false);
@@ -3144,7 +3147,7 @@ export default function EmployeeClockApp() {
         }
         const { data: taskRows, error: tErr } = await supabase
           .from("scheduled_tasks")
-          .select("id, task_title, start_time, project_id, project_name, cost_centre")
+          .select("id, task_title, start_time, end_time, duration_minutes, project_id, project_name, cost_centre")
           .eq("company_id", userCompany.id)
           .in("id", idSet)
           .order("start_time", { ascending: true });
@@ -3506,7 +3509,7 @@ export default function EmployeeClockApp() {
     };
   }, [authUser?.id, userCompany?.id, companyChecked, runAutoClockOutSweep]);
 
-  // V2.1: company projects + cost centres (Supabase-backed)
+  // V2.1: company projects + tasks (Supabase-backed)
   const [companyProjects, setCompanyProjects] = useState([]); // [{ id, name }]
   const [costCentresByProjectId, setCostCentresByProjectId] = useState({}); // { [projectId]: string[] }
   const [projectsLoading, setProjectsLoading] = useState(false);
@@ -3525,7 +3528,7 @@ export default function EmployeeClockApp() {
   const [companyProjectsRefreshKey, setCompanyProjectsRefreshKey] = useState(0);
   /** Active project_ids from project_assignments for the signed-in employee (Clock filter only). */
   const [employeeClockAssignedProjectIds, setEmployeeClockAssignedProjectIds] = useState([]);
-  /** Employee Clock only: project_id -> assigned active cost centre names (from project_cost_centre_assignments). */
+  /** Employee Clock only: project_id -> assigned active task names (from project_cost_centre_assignments). */
   const [employeeClockAssignedCostNamesByProjectId, setEmployeeClockAssignedCostNamesByProjectId] = useState({});
 
   const [projectsAddFormOpen, setProjectsAddFormOpen] = useState(false);
@@ -3546,7 +3549,7 @@ export default function EmployeeClockApp() {
   const [assignmentsEditorLoading, setAssignmentsEditorLoading] = useState(false);
   const [assignmentsEditorMembers, setAssignmentsEditorMembers] = useState([]);
   const [assignmentsEditorChecks, setAssignmentsEditorChecks] = useState({});
-  /** Active cost centres for the assignment editor project (id + name). */
+  /** Active tasks for the assignment editor project (id + name). */
   const [assignmentsEditorCostCentres, setAssignmentsEditorCostCentres] = useState([]);
   /** `${userId}::${costCentreId}` -> checked */
   const [assignmentsEditorCcChecks, setAssignmentsEditorCcChecks] = useState({});
@@ -3583,7 +3586,7 @@ export default function EmployeeClockApp() {
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
 
-  /** Clock tab Start Shift / Change Task: admins see all active cost centres; employees see assigned centres only. */
+  /** Clock tab Start Shift / Change Task: admins see all active tasks; employees see assigned centres only. */
   const clockCostCentreOptionsForProject = useCallback(
     (pid) => {
       const all =
@@ -4203,7 +4206,7 @@ export default function EmployeeClockApp() {
     const message =
       clockSelectableProjects.length === 0
         ? "No projects assigned. Please contact your supervisor."
-        : "Select project and cost center first.";
+        : "Select project and task first.";
     if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
     setPhotoStatus("");
     setLocationStatus(message);
@@ -5284,6 +5287,10 @@ export default function EmployeeClockApp() {
     safeWrite("orp_clock_project_lists", clockProjectLists);
   }, [clockProjectLists]);
 
+  useEffect(() => {
+    safeWrite("orp_clock_scheduled_task_list_done", clockScheduledTaskListDone);
+  }, [clockScheduledTaskListDone]);
+
   const saveProjectListItemToSupabase = useCallback(
     async ({ kind, item, storageKey, status = "active" }) => {
       if (!authUser?.id || !userCompany?.id || !item?.id || !storageKey) return false;
@@ -6106,7 +6113,7 @@ export default function EmployeeClockApp() {
       if (!isAdmin) {
         setLocationStatus(
           mode === "costCentre"
-            ? "Ask a supervisor to add the cost centre."
+            ? "Ask a supervisor to add the task."
             : "Ask a supervisor to add the project."
         );
         setTimeout(() => setLocationStatus(""), 5000);
@@ -6446,7 +6453,7 @@ export default function EmployeeClockApp() {
 
         if (line.dbId != null) {
           if (!ccName) {
-            setProjectEditError("Cost centre name cannot be empty.");
+            setProjectEditError("Task name cannot be empty.");
             return;
           }
           const { error: uErr } = await supabase
@@ -6848,10 +6855,10 @@ const handleClockIn = async () => {
       }
       if (!isAdmin && allActiveOnProject.length > 0) {
         setLocationStatus(
-          "No cost centres assigned for this project. Please contact your supervisor."
+          "No tasks assigned for this project. Please contact your supervisor."
         );
       } else {
-        setLocationStatus("No cost centres available for this project.");
+        setLocationStatus("No tasks available for this project.");
       }
       return;
     }
@@ -7706,7 +7713,7 @@ const handlePhotoQuickUpload = async (event) => {
     async (file, index = 1, total = 1) => {
       const mediaContext = clockMediaContext;
       if (!file || !mediaContext || !authUser) {
-        throw new Error("Select project and cost center before uploading photos.");
+        throw new Error("Select project and task before uploading photos.");
       }
 
       const folderName = getProjectFolderName(mediaContext.project || "");
@@ -7931,7 +7938,7 @@ const handlePhotoQuickUpload = async (event) => {
     async (file, source = "gallery", knownDurationSeconds = null) => {
       if (!file) return false;
       if (!clockMediaContext || !authUser) {
-        setVideoStatus("Select project and cost center before recording video.");
+        setVideoStatus("Select project and task before recording video.");
         return false;
       }
       if (!file.type?.startsWith("video/")) {
@@ -8092,7 +8099,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
     const mediaContext = clockMediaContext;
     if (!mediaContext || !authUser) {
-      setVideoStatus("Select project and cost center before uploading video.");
+      setVideoStatus("Select project and task before uploading video.");
       return;
     }
     if (videoUploading) return;
@@ -8491,7 +8498,7 @@ const handlePhotoQuickUpload = async (event) => {
     if (centres.length === 0) {
       setDashboardActionFeedback({
         type: "error",
-        text: "No cost centres available for this project.",
+        text: "No tasks available for this project.",
       });
       return;
     }
@@ -8676,7 +8683,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
     const centres = costCentresForEditProject(proj.id);
     if (centres.length > 0 && (!editCostCenter || !centres.includes(editCostCenter))) {
-      alert("Pick a cost centre for this project.");
+      alert("Pick a task for this project.");
       return;
     }
 
@@ -10604,7 +10611,7 @@ const handlePhotoQuickUpload = async (event) => {
             <p className="text-[13px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
           )}
           <p className="mt-1 text-[14px] font-bold text-slate-600">{record.project || "No project"}</p>
-          <p className="text-[13px] font-semibold text-slate-500">Cost Centre: {record.costCenter || "Not selected"}</p>
+          <p className="text-[13px] font-semibold text-slate-500">Task: {record.costCenter || "Not selected"}</p>
         </div>
         <span className={`rounded-full px-3 py-1 text-[12px] font-black h-fit ${statusBadgeClass}`}>
           {statusBadgeLabel}
@@ -10678,7 +10685,7 @@ const handlePhotoQuickUpload = async (event) => {
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-[13px] text-slate-500">Cost centre</label>
+            <label className="text-[13px] text-slate-500">Task</label>
             <select
               className="w-full rounded-lg border py-2 px-2 text-[14px]"
               value={editCostCenter}
@@ -11266,7 +11273,7 @@ const handlePhotoQuickUpload = async (event) => {
     const proj = String(task?.project_name ?? "").trim();
     const projLine = proj.length > 0 ? proj : "No project selected";
     const cc = String(task?.cost_centre ?? "").trim();
-    const ccLine = cc.length > 0 ? cc : "No cost centre";
+    const ccLine = cc.length > 0 ? cc : "No task";
     const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
     const endRaw = task?.end_time;
     const durRaw = task?.duration_minutes;
@@ -11306,7 +11313,7 @@ const handlePhotoQuickUpload = async (event) => {
           {projLine}
         </p>
         <p className="text-[12px] text-slate-700">
-          <span className="font-semibold text-slate-600">Cost centre: </span>
+          <span className="font-semibold text-slate-600">Task: </span>
           {ccLine}
         </p>
         <p className="text-[12px] text-slate-800">
@@ -11523,7 +11530,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const isClockSetupWarningStatus =
-    locationStatus === "Select project and cost center first." ||
+    locationStatus === "Select project and task first." ||
     locationStatus === "No projects assigned. Please contact your supervisor.";
 
   const clockListContext = {
@@ -11543,6 +11550,66 @@ const handlePhotoQuickUpload = async (event) => {
     clockListContext.projectId || getProjectFolderName(clockListContext.projectName || "project"),
     clockListContext.costCenter || "cost",
   ].join("|");
+  const clockProjectListProjectPrefix = [
+    authUser?.id || "anonymous",
+    userCompany?.id || "company",
+    clockListContext.projectId || getProjectFolderName(clockListContext.projectName || "project"),
+    "",
+  ].join("|");
+
+  const clockTodayScheduleTaskItems = useMemo(() => {
+    if (!authUser?.id || !userCompany?.id) return [];
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    if (!todayKey) return [];
+    const done = clockScheduledTaskListDone || {};
+    return (Array.isArray(clockEmployeeScheduledTasks) ? clockEmployeeScheduledTasks : [])
+      .filter((task) => calendarDateKeyInTimeZone(task?.start_time, companyTimeZone) === todayKey)
+      .map((task) => {
+        const projectId = task?.project_id != null ? String(task.project_id) : "";
+        const projectName = String(task?.project_name || "").trim();
+        const taskName = String(task?.task_title || "").trim() || "Scheduled task";
+        const taskNameForUi = String(task?.task_title || "").trim() || "Scheduled task";
+        const taskCost = String(task?.cost_centre || "").trim();
+        const itemId = `scheduled:${userCompany.id}:${authUser.id}:${String(task?.id || "")}:${todayKey}`;
+        const startLabel = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "";
+        const endLabel = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "";
+        const timeLabel = startLabel && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+        const storageKey = makeClockProjectListKey({
+          userId: authUser.id,
+          companyId: userCompany.id,
+          projectId,
+          projectName,
+          costCenter: taskCost || "project",
+        });
+        return {
+          id: itemId,
+          text: [timeLabel, taskNameForUi].filter(Boolean).join(" - "),
+          projectId,
+          projectName,
+          costCenter: taskCost,
+          createdAt: task?.start_time || new Date().toISOString(),
+          scheduledTaskId: task?.id,
+          sourceKey: storageKey,
+          sourceCostCenter: taskCost,
+          isScheduledListItem: true,
+          rawTitle: taskName,
+        };
+      })
+      .filter((item) => item.scheduledTaskId != null && !done?.[item.id])
+      .sort((a, b) => String(a?.createdAt || "").localeCompare(String(b?.createdAt || "")));
+  }, [
+    authUser?.id,
+    userCompany?.id,
+    clockEmployeeScheduledTasks,
+    clockScheduledTaskListDone,
+    companyTimeZone,
+    now,
+  ]);
+
+  const getClockScheduledTaskItemsForClockContext = () =>
+    (clockTodayScheduleTaskItems || []).filter((item) =>
+      String(item?.sourceKey || "").startsWith(clockProjectListProjectPrefix)
+    );
 
   const clockListUndoStack = Array.isArray(clockListUndo)
     ? clockListUndo
@@ -11561,7 +11628,9 @@ const handlePhotoQuickUpload = async (event) => {
   const getClockProjectListItems = (kind, completed = clockListShowCompleted) => {
     const bucket = completed ? clockProjectLists?.completed?.[kind] || {} : clockProjectLists?.[kind] || {};
     const rows = bucket?.[clockProjectListKey] || [];
-    return Array.isArray(rows) ? rows : [];
+    const savedRows = Array.isArray(rows) ? rows : [];
+    if (kind !== "task" || completed) return savedRows;
+    return [...getClockScheduledTaskItemsForClockContext(), ...savedRows];
   };
 
   const activeClockListItems = clockListModal ? getClockProjectListItems(clockListModal) : [];
@@ -11643,6 +11712,18 @@ const handlePhotoQuickUpload = async (event) => {
     if (undoIndex < 0) return;
     const undo = clockListUndoStack[undoIndex] || latestClockListUndo;
     if (!undo?.kind || !undo?.key || !undo?.item) return;
+    if (undo.item?.isScheduledListItem) {
+      setClockScheduledTaskListDone((prev) => {
+        const next = { ...(prev || {}) };
+        delete next[String(undo.item.id)];
+        return next;
+      });
+      setClockListUndo((prev) => {
+        const stack = Array.isArray(prev) ? prev : prev ? [prev] : [];
+        return stack.filter((_, index) => index !== undoIndex);
+      });
+      return;
+    }
     setClockProjectLists((prev) => {
       const next = normalizeClockProjectListsState(prev);
       const rows = Array.isArray(next[undo.kind]?.[undo.key]) ? next[undo.kind][undo.key] : [];
@@ -11722,6 +11803,16 @@ const handlePhotoQuickUpload = async (event) => {
 
   const completeClockProjectListItem = (kind, itemId) => {
     if (!kind || !itemId) return;
+    if (kind === "task") {
+      const scheduledItem = getClockScheduledTaskItemsForClockContext().find(
+        (item) => String(item?.id) === String(itemId)
+      );
+      if (scheduledItem) {
+        pushClockListUndo({ kind: "task", key: clockProjectListKey, item: scheduledItem });
+        setClockScheduledTaskListDone((prev) => ({ ...(prev || {}), [String(scheduledItem.id)]: true }));
+        return;
+      }
+    }
     const existingNow = Array.isArray(clockProjectLists?.[kind]?.[clockProjectListKey])
       ? clockProjectLists[kind][clockProjectListKey]
       : [];
@@ -11956,7 +12047,7 @@ const handlePhotoQuickUpload = async (event) => {
     const bucket = listShowCompleted
       ? clockProjectLists?.completed?.[listType] || {}
       : clockProjectLists?.[listType] || {};
-    return Object.entries(bucket)
+    const savedItems = Object.entries(bucket)
       .filter(([key, rows]) => key.startsWith(listStoragePrefix) && Array.isArray(rows))
       .flatMap(([sourceKey, rows]) =>
         rows.map((item) => ({
@@ -11964,7 +12055,14 @@ const handlePhotoQuickUpload = async (event) => {
           sourceKey,
           sourceCostCenter: String(item?.costCenter || sourceKey.split("|")[3] || "").trim(),
         }))
-      )
+      );
+    const scheduledItems =
+      listType === "task" && !listShowCompleted
+        ? (clockTodayScheduleTaskItems || []).filter((item) =>
+            String(item?.sourceKey || "").startsWith(listStoragePrefix)
+          )
+        : [];
+    return [...scheduledItems, ...savedItems]
       .sort((a, b) => String(b?.createdAt || "").localeCompare(String(a?.createdAt || "")));
   })();
 
@@ -12009,6 +12107,16 @@ const handlePhotoQuickUpload = async (event) => {
 
   const completeListPageItem = (sourceKey, itemId) => {
     if (!sourceKey || !itemId) return;
+    if (listType === "task") {
+      const scheduledItem = (clockTodayScheduleTaskItems || []).find(
+        (item) => String(item?.sourceKey) === String(sourceKey) && String(item?.id) === String(itemId)
+      );
+      if (scheduledItem) {
+        pushClockListUndo({ kind: "task", key: sourceKey, item: scheduledItem });
+        setClockScheduledTaskListDone((prev) => ({ ...(prev || {}), [String(scheduledItem.id)]: true }));
+        return;
+      }
+    }
     const rowsNow = Array.isArray(clockProjectLists?.[listType]?.[sourceKey])
       ? clockProjectLists[listType][sourceKey]
       : [];
@@ -12153,7 +12261,7 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsViewLabel = (dim) => {
     if (dim === "project") return "Project View";
     if (dim === "employee") return "Employee View";
-    if (dim === "cost_center") return "Cost Center View";
+    if (dim === "cost_center") return "Task View";
     return "View";
   };
   const filterReportsRowsByStack = (rows, stack) =>
@@ -12384,7 +12492,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
                   <div className="min-w-0">
                     <h2 className="font-black text-[21px] leading-tight text-slate-950">Start Shift</h2>
-                    <p className="text-[14px] font-semibold text-slate-500 leading-snug">Choose project and cost center</p>
+                    <p className="text-[14px] font-semibold text-slate-500 leading-snug">Choose project and task</p>
                   </div>
                 </div>
 
@@ -12418,7 +12526,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
                   <div>
                       <p className="text-[16px] font-semibold">Add Project</p>
-                      <p className="text-[14px] text-slate-500">Add a project and cost centres (comma-separated).</p>
+                      <p className="text-[14px] text-slate-500">Add a project and tasks (comma-separated).</p>
                   </div>
 
                     <div className="space-y-1">
@@ -12434,7 +12542,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                     <div className="space-y-1">
-                      <label className="text-[14px] font-medium">Cost centres</label>
+                      <label className="text-[14px] font-medium">Tasks</label>
                       <input
                         type="text"
                         className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11"
@@ -12455,50 +12563,6 @@ const handlePhotoQuickUpload = async (event) => {
                     </Button>
                   </form>
                 )}
-
-                <div className="space-y-1">
-                  <label className="text-[14px] font-medium">Scheduled Task</label>
-                  <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
-                    disabled={clockEmployeeScheduleLoading}
-                    value={clockSelectedScheduledTaskId}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setClockSelectedScheduledTaskId(v);
-                      if (!v) return;
-                      const task = (clockEmployeeScheduledTasks || []).find(
-                        (t) => String(t?.id) === String(v)
-                      );
-                      if (!task) return;
-                      const pid = task.project_id != null ? String(task.project_id) : "";
-                      const nameFromRow = String(task.project_name ?? "").trim();
-                      const ccRaw = String(task.cost_centre ?? "").trim();
-                      let project =
-                        pid &&
-                        clockSelectableProjects.find((p) => String(p.id) === pid);
-                      if (!project && nameFromRow) {
-                        const lower = nameFromRow.toLowerCase();
-                        project = clockSelectableProjects.find(
-                          (p) => String(p.name).trim().toLowerCase() === lower
-                        );
-                      }
-                      if (project) {
-                        handleProjectChange(String(project.id));
-                        const centres = clockCostCentreOptionsForProject(project.id);
-                        if (ccRaw && centres.includes(ccRaw)) {
-                          setCostCenter(ccRaw);
-                        }
-                      }
-                    }}
-                  >
-                    <option value="">No scheduled task / Manual clock-in</option>
-                    {(clockEmployeeScheduledTasks || []).map((t) => (
-                      <option key={String(t.id)} value={String(t.id)}>
-                        {formatClockScheduledTaskOptionLabel(t, companyTimeZone)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
 
                 <div className="space-y-1">
                   <label className="text-[14px] font-medium">Project / Job Site</label>
@@ -12526,7 +12590,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[14px] font-medium">Cost Center</label>
+                  <label className="text-[14px] font-medium">Task</label>
                   <select
                     className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     value={costCenter}
@@ -12544,9 +12608,9 @@ const handlePhotoQuickUpload = async (event) => {
                     }}
                   >
                     <option value="">
-                      {clockSelectedProject ? "Select cost center" : "Select project first"}
+                      {clockSelectedProject ? "Select task" : "Select project first"}
                     </option>
-                    {clockSelectedProject ? <option value="__add_cost_centre__">+ Add cost center</option> : null}
+                    {clockSelectedProject ? <option value="__add_cost_centre__">+ Add task</option> : null}
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
@@ -12563,8 +12627,8 @@ const handlePhotoQuickUpload = async (event) => {
                       effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
                       []
                     ).length > 0
-                      ? "No cost centres assigned for this project. Please contact your supervisor."
-                      : "No cost centres available for this project."}
+                      ? "No tasks assigned for this project. Please contact your supervisor."
+                      : "No tasks available for this project."}
                   </p>
                 )}
 
@@ -12898,7 +12962,7 @@ const handlePhotoQuickUpload = async (event) => {
                         setCostCenter(e.target.value);
                       }}
                     >
-                      <option value="__add_cost_centre__">+ Add cost center</option>
+                      <option value="__add_cost_centre__">+ Add task</option>
                       {clockCostCentresActive.map((c) => (
                         <option key={c} value={c}>
                           {c}
@@ -12913,8 +12977,8 @@ const handlePhotoQuickUpload = async (event) => {
                           effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
                           []
                         ).length > 0
-                          ? "No cost centres assigned for this project. Please contact your supervisor."
-                          : "No cost centres available for this project."}
+                          ? "No tasks assigned for this project. Please contact your supervisor."
+                          : "No tasks available for this project."}
                       </p>
                     )}
                     <div className="grid grid-cols-2 gap-1.5">
@@ -13414,7 +13478,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </div>
                                 <div className="p-2 text-[12px] text-slate-600">
                                   <p className="font-semibold text-slate-900 truncate">{photo.employee || "Employee"}</p>
-                                  <p className="truncate">{photo.costCenter || "No cost centre"}</p>
+                                  <p className="truncate">{photo.costCenter || "No task"}</p>
                                   <p>{photo.capturedAt ? formatDate(new Date(photo.capturedAt), companyTimeZone) : ""}</p>
                                   {isVideoMedia ? (
                                     <p>Video{photo.durationSeconds || photo.duration_seconds ? ` - ${formatVideoDuration(photo.durationSeconds || photo.duration_seconds)}` : ""}</p>
@@ -13736,6 +13800,9 @@ const handlePhotoQuickUpload = async (event) => {
                               <p className="mt-0.5 text-[12px] font-bold text-slate-500">
                                 {item.sourceCostCenter}
                               </p>
+                            ) : null}
+                            {item?.isScheduledListItem ? (
+                              <p className="mt-0.5 text-[12px] font-bold text-blue-700">Scheduled today</p>
                             ) : null}
                           </div>
                           {imageUrl ? (
@@ -14246,7 +14313,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </span>
                               </div>
                               <p className="mt-3 rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm">
-                                {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
+                                {[rep?.project || "No project", rep?.costCenter || "No task"].join(" - ")}
                               </p>
                               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                                 <button
@@ -14423,7 +14490,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 Clocked in {clockInDisp}
                               </p>
                               <p className="mt-2 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-2 text-[15px] font-bold text-slate-700 leading-snug break-words">
-                                {[rep?.project || "No project", rep?.costCenter || "No cost centre"].join(" - ")}
+                                {[rep?.project || "No project", rep?.costCenter || "No task"].join(" - ")}
                               </p>
                             </div>
                             <div className="hidden">
@@ -14776,7 +14843,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       </select>
                                     </label>
                                     <label className="block min-w-0 text-[10px] font-medium text-slate-600">
-                                      Cost centre
+                                      Task
                                       <select
                                         className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
                                         value={pick.costCenter}
@@ -14816,7 +14883,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     pickProjectId &&
                                     centresForPick.length === 0 && (
                                       <p className="text-[10px] text-amber-900 leading-snug">
-                                        No cost centres available for this project.
+                                        No tasks available for this project.
                                       </p>
                                     )}
                                   <Button
@@ -15021,7 +15088,7 @@ const handlePhotoQuickUpload = async (event) => {
                               ? "Project view"
                               : reportsCurrentViewBy === "employee"
                                 ? "Employee view"
-                                : "Cost center view"}
+                                : "Task view"}
                           </p>
                         </div>
                         <p className="text-right text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">
@@ -15385,7 +15452,7 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <option value="project">Project</option>
                               <option value="employee">Employee</option>
-                              <option value="cost_center">Cost Centre</option>
+                              <option value="cost_center">Task</option>
                             </select>
                           </label>
                         </div>
@@ -15450,7 +15517,7 @@ const handlePhotoQuickUpload = async (event) => {
                               }}
                             >
                               <option value="employee">Employee</option>
-                              <option value="cost_center">Cost Centre</option>
+                              <option value="cost_center">Task</option>
                             </select>
                           </label>
                         </div>
@@ -15481,7 +15548,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     <div className="min-w-0 flex-1">
                                       <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
                                       <p className="mt-1 text-[13px] font-bold text-slate-500">
-                                        {row.rows.length} entries{canOpenEmployee ? " - tap for cost centres" : ""}
+                                        {row.rows.length} entries{canOpenEmployee ? " - tap for tasks" : ""}
                                       </p>
                                     </div>
                                     <div className="shrink-0 text-right">
@@ -15505,7 +15572,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                         {reportsEmployeeCostCenterGroups.length === 0 ? (
                           <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
-                            No cost centre detail for this employee.
+                            No task detail for this employee.
                           </p>
                         ) : (
                           reportsEmployeeCostCenterGroups.map((row) => (
@@ -15747,7 +15814,7 @@ const handlePhotoQuickUpload = async (event) => {
                               >
                                 <option value="employee">Employee</option>
                                 <option value="project">Project</option>
-                                <option value="cost_center">Cost Centre</option>
+                                <option value="cost_center">Task</option>
                               </select>
                             </label>
                             <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500 min-w-0">
@@ -15815,7 +15882,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ? "Employee"
                             : reportsBreakdownTree.d1 === "project"
                               ? "Project"
-                              : "Cost Centre"}
+                              : "Task"}
                           {reportsBreakdownTree.d2 !== "none" && (
                             <>
                               {" "}
@@ -15824,7 +15891,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 ? "Employee"
                                 : reportsBreakdownTree.d2 === "project"
                                   ? "Project"
-                                  : "Cost Centre"}
+                                  : "Task"}
                             </>
                           )}
                           {reportsBreakdownTree.d3 !== "none" && (
@@ -15835,7 +15902,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 ? "Employee"
                                 : reportsBreakdownTree.d3 === "project"
                                   ? "Project"
-                                  : "Cost Centre"}
+                                  : "Task"}
                             </>
                           )}
                           </p>
@@ -16597,7 +16664,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <div className="space-y-1">
                         <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-cc">
-                          Cost centre / task
+                          Task
                         </label>
                         <select
                           id="sched-cc"
@@ -16607,7 +16674,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={scheduleSaving || !scheduleDraft.projectId}
                         >
                           <option value="">
-                            {scheduleDraft.projectId ? "— Select cost centre —" : "Pick a project first"}
+                            {scheduleDraft.projectId ? "— Select task —" : "Pick a project first"}
                           </option>
                           {(scheduleCostCentreOptions || []).map((name) => (
                             <option key={String(name)} value={String(name)}>
@@ -17157,7 +17224,7 @@ const handlePhotoQuickUpload = async (event) => {
                               const proj = String(task?.project_name ?? "").trim();
                               const projLine = proj.length > 0 ? proj : "No project selected";
                               const cc = String(task?.cost_centre ?? "").trim();
-                              const ccLine = cc.length > 0 ? cc : "No cost centre";
+                              const ccLine = cc.length > 0 ? cc : "No task";
                               const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
                               const endRaw = task?.end_time;
                               const durRaw = task?.duration_minutes;
@@ -17339,7 +17406,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         </div>
                                         <div className="space-y-1">
                                           <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-cc-${tidKey}`}>
-                                            Cost centre / task
+                                            Task
                                           </label>
                                           <select
                                             id={`sched-edit-cc-${tidKey}`}
@@ -17659,7 +17726,7 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <div className="min-w-0">
                     <h2 className="font-black text-[23px] leading-tight text-slate-950">Projects</h2>
-                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and cost centres</p>
+                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and tasks</p>
                   </div>
                   {!projectsAddFormOpen && (
                     <Button
@@ -17711,7 +17778,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="space-y-1">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-add-cc">
-                        Cost centres
+                        Tasks
                       </label>
                       <input
                         id="projects-add-cc"
@@ -17719,7 +17786,7 @@ const handlePhotoQuickUpload = async (event) => {
                         className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
                         value={projectsAddCostCentres}
                         onChange={(e) => setProjectsAddCostCentres(e.target.value)}
-                        placeholder="Uses all existing cost centres. Add more with commas."
+                        placeholder="Uses all existing tasks. Add more with commas."
                         disabled={projectsAddSaving}
                       />
                     </div>
@@ -17866,7 +17933,7 @@ const handlePhotoQuickUpload = async (event) => {
                               </div>
                               <div className="space-y-1.5">
                                 <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                                  Cost centres
+                                  Tasks
                                 </p>
                                 {projectEditDraft.lines.length === 0 && (
                                   <p className="text-xs text-slate-500">None — add one below if needed.</p>
@@ -17968,7 +18035,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     })
                                   }
                                 >
-                                  + Add cost centre
+                                  + Add task
                                 </Button>
                               </div>
                               {projectEditError && (
@@ -18026,7 +18093,7 @@ const handlePhotoQuickUpload = async (event) => {
                               </div>
                               <div className="border-t border-slate-100 pt-2 space-y-1">
                                 <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                                  Cost centres
+                                  Tasks
                                 </p>
                                 {proj.costCentres.length === 0 ? (
                                   <p className="text-xs text-slate-500">None</p>
@@ -18085,7 +18152,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         {s.costCentreLabels && s.costCentreLabels.length > 0 ? (
                                           <span className="text-slate-600"> · {s.costCentreLabels.join(", ")}</span>
                                         ) : (
-                                          <span className="text-amber-800 font-medium"> · No cost centres assigned</span>
+                                          <span className="text-amber-800 font-medium"> · No tasks assigned</span>
                                         )}
                                       </li>
                                     ))}
@@ -18148,7 +18215,7 @@ const handlePhotoQuickUpload = async (event) => {
                                                 {projectAssigned && assignmentsEditorCostCentres.length > 0 && (
                                                   <div className="pl-6 space-y-1.5 border-t border-slate-100 pt-2">
                                                     <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                                                      Cost centres
+                                                      Tasks
                                                     </p>
                                                     {assignmentsEditorCostCentres.map((cc) => (
                                                       <label
@@ -18179,12 +18246,12 @@ const handlePhotoQuickUpload = async (event) => {
                                                   assignmentsEditorCostCentres.length > 0 &&
                                                   !anyCcChecked && (
                                                     <p className="text-[10px] text-amber-800 leading-snug pl-6">
-                                                      No cost centres assigned
+                                                      No tasks assigned
                                                     </p>
                                                   )}
                                                 {projectAssigned && assignmentsEditorCostCentres.length === 0 && (
                                                   <p className="text-[10px] text-slate-500 leading-snug pl-6">
-                                                    No active cost centres on this project.
+                                                    No active tasks on this project.
                                                   </p>
                                                 )}
                                               </div>
@@ -19349,9 +19416,14 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-label={`Complete ${itemTitle}`}
                         />
                       )}
-                      <p className="min-w-0 flex-1 break-words text-[17px] font-black leading-snug text-slate-950">
-                        {itemTitle}
-                      </p>
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-[17px] font-black leading-snug text-slate-950">
+                          {itemTitle}
+                        </p>
+                        {item?.isScheduledListItem ? (
+                          <p className="mt-0.5 text-[12px] font-bold text-blue-700">Scheduled today</p>
+                        ) : null}
+                      </div>
                       {imageUrl ? (
                         <button
                           type="button"
@@ -19418,8 +19490,8 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="text-[15px] font-black text-slate-900">{clockMediaContext?.project || "Selected project"}</p>
                     </div>
                     <div>
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Cost centre</p>
-                      <p className="text-[15px] font-black text-slate-900">{clockMediaContext?.costCenter || "Selected cost centre"}</p>
+                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Task</p>
+                      <p className="text-[15px] font-black text-slate-900">{clockMediaContext?.costCenter || "Selected task"}</p>
                     </div>
                   </div>
                   <label className="block space-y-1 text-[14px] font-bold text-slate-700">
@@ -19632,7 +19704,7 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="p-3 space-y-3">
                   <div className="min-w-0">
                     <p className="text-[15px] font-bold text-slate-900 truncate">{item?.employee || "Employee"}</p>
-                    <p className="text-[14px] text-slate-600 truncate">{item?.costCenter || "No cost centre"}</p>
+                    <p className="text-[14px] text-slate-600 truncate">{item?.costCenter || "No task"}</p>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <button
