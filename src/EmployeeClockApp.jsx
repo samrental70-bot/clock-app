@@ -88,6 +88,9 @@ function normalizeClockProjectListsState(value) {
 }
 
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
+const AUTO_CLOCK_OUT_HOURS = 24;
+const AUTO_CLOCK_OUT_MS = AUTO_CLOCK_OUT_HOURS * 60 * 60 * 1000;
+const AUTO_TIMED_OUT_STATUS = "Auto timed out";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
@@ -1014,6 +1017,18 @@ function computeLabourCostFromWallTimes(clockInIso, clockOutIso, hourlyRate) {
   return hours * rate;
 }
 
+function isAutoTimedOutStatus(status) {
+  return normalizeStatus(status) === normalizeStatus(AUTO_TIMED_OUT_STATUS);
+}
+
+function isAutoClockOutDue(record, nowMs = Date.now()) {
+  if (!record) return false;
+  const hasClockOut = record.clockOut != null && String(record.clockOut).trim() !== "";
+  if (hasClockOut) return false;
+  const t0 = new Date(record.clockIn).getTime();
+  return Number.isFinite(t0) && nowMs - t0 >= AUTO_CLOCK_OUT_MS;
+}
+
 /**
  * Build Supabase timesheets update for clock-out with profile hourly_rate fallback when timesheet rate is missing/0.
  */
@@ -1907,6 +1922,7 @@ export default function EmployeeClockApp() {
   const userCompanyRef = useRef(null);
   const companyCheckedRef = useRef(false);
   const scheduleRouteHandledRef = useRef(false);
+  const autoClockOutSweepRunningRef = useRef(false);
   /** Once per login session: land employees on Schedule after company/role resolve (no repeated overrides). */
   const employeeScheduleLandingAppliedRef = useRef(false);
   /** Once per login session: land supervisors/owners on Employees > Live Dashboard. */
@@ -3112,6 +3128,82 @@ export default function EmployeeClockApp() {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     fetchTimesheetsFromSupabase();
   }, [authUser?.id, userCompany?.id, userCompanyRole, fetchTimesheetsFromSupabase]);
+
+  const runAutoClockOutSweep = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    if (autoClockOutSweepRunningRef.current) return;
+    autoClockOutSweepRunningRef.current = true;
+    try {
+      const res = await fetch("/api/auto-clockout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      let payload = null;
+      try {
+        payload = await res.json();
+      } catch {
+        payload = null;
+      }
+      if (!res.ok) {
+        console.warn("[AUTO_CLOCK_OUT] sweep failed", res.status, payload);
+        return;
+      }
+
+      const updatedIds = new Set(
+        (Array.isArray(payload?.updated_ids) ? payload.updated_ids : [])
+          .map((id) => String(id || "").trim())
+          .filter(Boolean)
+      );
+      const updatedCount = Number(payload?.updated || 0);
+      if (updatedCount > 0) {
+        console.log("[AUTO_CLOCK_OUT] sweep completed", payload);
+        const currentShiftId = currentShift?.supabaseTimesheetId ?? currentShift?.id;
+        const shouldClearLocalShift =
+          (currentShiftId && updatedIds.has(String(currentShiftId))) ||
+          (!currentShiftId && isAutoClockOutDue(currentShift));
+        if (shouldClearLocalShift) {
+          if (watchId != null && typeof navigator !== "undefined" && navigator.geolocation) {
+            navigator.geolocation.clearWatch(watchId);
+            setWatchId(null);
+          }
+          setCurrentShift(null);
+        }
+        setDashboardRefreshKey((key) => key + 1);
+        await fetchTimesheetsFromSupabase();
+      }
+    } catch (err) {
+      console.warn("[AUTO_CLOCK_OUT] sweep exception", err);
+    } finally {
+      autoClockOutSweepRunningRef.current = false;
+    }
+  }, [
+    authUser?.id,
+    userCompany?.id,
+    companyChecked,
+    currentShift,
+    watchId,
+    fetchTimesheetsFromSupabase,
+  ]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    const run = () => {
+      void runAutoClockOutSweep();
+    };
+    run();
+    const intervalId = window.setInterval(run, 5 * 60 * 1000);
+    const handleFocus = () => run();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [authUser?.id, userCompany?.id, companyChecked, runAutoClockOutSweep]);
 
   // V2.1: company projects + cost centres (Supabase-backed)
   const [companyProjects, setCompanyProjects] = useState([]); // [{ id, name }]
@@ -9521,14 +9613,21 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderTimesheetCard = (record, allowEdit = true) => {
     const st = normalizeStatus(record.status);
+    const autoTimedOut = isAutoTimedOutStatus(record.status);
     const statusBadgeLabel =
-      st === "active"
+      autoTimedOut
+        ? AUTO_TIMED_OUT_STATUS
+        : st === "active"
         ? "Active"
         : st === "submitted"
           ? "Submitted"
           : (String(record.status ?? "").trim() || "Submitted");
     const statusBadgeClass =
-      st === "admin approval required" ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700";
+      autoTimedOut
+        ? "bg-amber-100 text-amber-800"
+        : st === "admin approval required"
+          ? "bg-red-100 text-red-700"
+          : "bg-green-100 text-green-700";
 
     const recordRowId = record.supabaseTimesheetId ?? record.id;
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
@@ -9740,6 +9839,11 @@ const handlePhotoQuickUpload = async (event) => {
           )}
           {submittedMissingClockOut && (
             <p className="mt-1 text-[13px] text-amber-700">No clock-out on file for this submitted row.</p>
+          )}
+          {autoTimedOut && (
+            <p className="mt-1 text-[13px] font-semibold text-amber-700">
+              Auto timed out after 24 hours.
+            </p>
           )}
           {showCloseShift && (
             <Button
