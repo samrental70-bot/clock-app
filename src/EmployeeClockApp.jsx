@@ -6122,10 +6122,12 @@ const handlePhotoQuickUpload = async (event) => {
   }, []);
 
   const scrollClockMediaIntoView = useCallback((target = "tools") => {
-    setTimeout(() => {
+    const scroll = () => {
       const node = target === "upload" ? photoUploadActionsRef.current : photoToolsRef.current;
       (node || photoToolsRef.current)?.scrollIntoView?.({ behavior: "smooth", block: "end" });
-    }, 120);
+    };
+    setTimeout(scroll, 120);
+    if (target === "upload") setTimeout(scroll, 420);
   }, []);
 
   useEffect(() => {
@@ -6135,6 +6137,10 @@ const handlePhotoQuickUpload = async (event) => {
   useEffect(() => {
     if (activeTab === "clock" && photoDrafts.length > 0) scrollClockMediaIntoView("upload");
   }, [activeTab, photoDrafts.length, scrollClockMediaIntoView]);
+
+  useEffect(() => {
+    if (activeTab === "clock" && photoCameraOpen) scrollClockMediaIntoView("upload");
+  }, [activeTab, photoCameraOpen, photoCameraMode, scrollClockMediaIntoView]);
 
   useEffect(() => {
     return () => {
@@ -6270,7 +6276,7 @@ const handlePhotoQuickUpload = async (event) => {
       setPhotoCameraMode(nextMode);
       setPhotoCameraOpen(true);
       setPhotoStatus(readyMessage);
-      scrollClockMediaIntoView("tools");
+      scrollClockMediaIntoView("upload");
       return true;
     } catch (err) {
       console.warn("Camera start failed:", err);
@@ -10054,6 +10060,29 @@ const handlePhotoQuickUpload = async (event) => {
     });
   };
 
+  const renderClockListActionRow = () => (
+    <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm">
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white"
+          onClick={() => openClockProjectList("task")}
+        >
+          <span className="block text-[15px] font-black leading-tight text-slate-950">Task List</span>
+          <span className="mt-0.5 block text-[12px] font-bold leading-tight text-slate-500">Project tasks</span>
+        </button>
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white"
+          onClick={() => openClockProjectList("material")}
+        >
+          <span className="block text-[15px] font-black leading-tight text-slate-950">Material List</span>
+          <span className="mt-0.5 block text-[12px] font-bold leading-tight text-slate-500">Project materials</span>
+        </button>
+      </div>
+    </div>
+  );
+
   const reportsQuickRangeOptions = [
     { id: "weekly", label: "Week" },
     { id: "monthly", label: "Month" },
@@ -10400,10 +10429,10 @@ const handlePhotoQuickUpload = async (event) => {
                       {locationStatus}
                     </p>
                   ) : null}
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      className={`w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
+                      className={`w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
                           ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                           : "border-slate-900 bg-slate-900 text-white"
@@ -10419,6 +10448,7 @@ const handlePhotoQuickUpload = async (event) => {
                           stopVideoRecording();
                           setPhotoCameraMode("photo");
                           setPhotoStatus("Camera ready. Capture photos, then upload all.");
+                          scrollClockMediaIntoView("upload");
                         } else {
                           void startPhotoCamera({ allowFallback: false, mode: "photo" });
                         }
@@ -10430,7 +10460,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className={`block w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
+                      className={`block w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
                           ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                           : "border-green-700 bg-green-700 text-white"
@@ -10446,6 +10476,7 @@ const handlePhotoQuickUpload = async (event) => {
                           stopVideoRecording();
                           setPhotoCameraMode("receipt");
                           setPhotoStatus("Receipt camera ready. Capture receipt.");
+                          scrollClockMediaIntoView("upload");
                         } else {
                           void startPhotoCamera({
                             allowFallback: false,
@@ -10458,20 +10489,6 @@ const handlePhotoQuickUpload = async (event) => {
                       aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                     >
                       Receipt
-                    </button>
-                    <button
-                      type="button"
-                      className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
-                      onClick={() => openClockProjectList("task")}
-                    >
-                      Task List
-                    </button>
-                    <button
-                      type="button"
-                      className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
-                      onClick={() => openClockProjectList("material")}
-                    >
-                      Material List
                     </button>
                   </div>
 
@@ -10666,6 +10683,7 @@ const handlePhotoQuickUpload = async (event) => {
                 >
                   ✅ Clock In
                 </Button>
+                {renderClockListActionRow()}
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
                 )}
@@ -10753,10 +10771,10 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-1.5">
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
-                      <div className="grid grid-cols-4 gap-1.5">
+                      <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          className={`w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
+                          className={`w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "photo"
                               ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                               : "border-slate-900 bg-slate-900 text-white"
@@ -10768,6 +10786,7 @@ const handlePhotoQuickUpload = async (event) => {
                               stopVideoRecording();
                               setPhotoCameraMode("photo");
                               setPhotoStatus("Camera ready. Capture photos, then upload all.");
+                              scrollClockMediaIntoView("upload");
                             } else {
                               void startPhotoCamera({ allowFallback: false, mode: "photo" });
                             }
@@ -10779,7 +10798,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className={`block w-full rounded-2xl h-11 border text-center text-[12px] sm:text-[13px] font-black transition disabled:opacity-50 ${
+                          className={`block w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "receipt"
                               ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                               : "border-green-700 bg-green-700 text-white"
@@ -10791,6 +10810,7 @@ const handlePhotoQuickUpload = async (event) => {
                               stopVideoRecording();
                               setPhotoCameraMode("receipt");
                               setPhotoStatus("Receipt camera ready. Capture receipt.");
+                              scrollClockMediaIntoView("upload");
                             } else {
                               void startPhotoCamera({
                                 allowFallback: false,
@@ -10803,20 +10823,6 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                         >
                           Receipt
-                        </button>
-                        <button
-                          type="button"
-                          className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
-                          onClick={() => openClockProjectList("task")}
-                        >
-                          Task List
-                        </button>
-                        <button
-                          type="button"
-                          className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-center text-[12px] sm:text-[13px] font-black text-slate-900 transition active:bg-slate-100"
-                          onClick={() => openClockProjectList("material")}
-                        >
-                          Material List
                         </button>
                       </div>
 
@@ -11041,6 +11047,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     ) : null}
                     <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>🚪 Clock Out</Button>
+                    {renderClockListActionRow()}
                     {locationStatus && (
                       <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
                     )}
