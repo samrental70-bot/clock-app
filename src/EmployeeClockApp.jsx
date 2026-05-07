@@ -6411,71 +6411,72 @@ export default function EmployeeClockApp() {
       }
       const projStatus = projectEditDraft.status === "archived" ? "archived" : "active";
 
-      const { error: pErr } = await supabase
-        .from("projects")
-        .update({ name, status: projStatus })
-        .eq("id", editingProjectId)
-        .eq("company_id", userCompany.id);
-      if (pErr) throw pErr;
+      const lines = (projectEditDraft.lines || []).map((line) => ({
+        dbId: line.dbId ?? null,
+        name: String(line.name || "").trim(),
+        status: projStatus === "archived" ? "archived" : line.status === "archived" ? "archived" : "active",
+        isNew: Boolean(line.isNew),
+      }));
+      const emptyExistingLine = lines.find((line) => line.dbId != null && !line.name);
+      if (emptyExistingLine) {
+        setProjectEditError("Task name cannot be empty.");
+        return;
+      }
 
-      const initialIds = projectEditDraft.initialCcIds || [];
-      const lines = projectEditDraft.lines || [];
-      const currentDbIds = new Set(
-        lines.filter((l) => l.dbId != null).map((l) => String(l.dbId))
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (sessionErr) throw sessionErr;
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) throw new Error("Not signed in.");
+
+      const res = await fetch("/api/update-project", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          company_id: userCompany.id,
+          project_id: editingProjectId,
+          name,
+          status: projStatus,
+          initial_cost_centre_ids: projectEditDraft.initialCcIds || [],
+          lines,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof json.error === "string" ? json.error : "Could not save project.");
+      }
+
+      const editingProjectIdStr = String(editingProjectId);
+      const localTaskRows = lines
+        .filter((line) => line.dbId != null || line.name)
+        .map((line) => ({
+          id: line.dbId ?? `new-${line.name}`,
+          name: line.name,
+          status: projStatus === "archived" ? "archived" : line.status,
+        }));
+      setProjectsScreenRows((prev) =>
+        (prev || []).map((row) =>
+          String(row.id) === editingProjectIdStr
+            ? { ...row, name, status: projStatus, costCentres: localTaskRows }
+            : row
+        )
       );
-
-      for (const cid of initialIds) {
-        if (!currentDbIds.has(String(cid))) {
-          const { error: archErr } = await supabase
-            .from("cost_centres")
-            .update({ status: "archived" })
-            .eq("id", cid)
-            .eq("project_id", editingProjectId);
-          if (archErr) throw archErr;
+      if (projStatus === "archived") {
+        setCompanyProjects((prev) => (prev || []).filter((p) => String(p.id) !== editingProjectIdStr));
+        setCostCentresByProjectId((prev) => {
+          const next = { ...(prev || {}) };
+          delete next[editingProjectIdStr];
+          delete next[Number(editingProjectId)];
+          return next;
+        });
+        if (String(projectId) === editingProjectIdStr) {
+          setProjectId("");
+          setCostCenter("");
         }
+        setProjectsListFilter("archived");
       }
-
-      const { data: maxOrdRows, error: maxErr } = await supabase
-        .from("cost_centres")
-        .select("display_order")
-        .eq("project_id", editingProjectId)
-        .order("display_order", { ascending: false })
-        .limit(1);
-      if (maxErr) throw maxErr;
-      let nextOrder =
-        maxOrdRows?.[0]?.display_order != null && Number.isFinite(Number(maxOrdRows[0].display_order))
-          ? Number(maxOrdRows[0].display_order) + 1
-          : 0;
-
-      for (const line of lines) {
-        const ccName = String(line.name || "").trim();
-        const ccStatus = line.status === "archived" ? "archived" : "active";
-
-        if (line.dbId != null) {
-          if (!ccName) {
-            setProjectEditError("Task name cannot be empty.");
-            return;
-          }
-          const { error: uErr } = await supabase
-            .from("cost_centres")
-            .update({ name: ccName, status: ccStatus })
-            .eq("id", line.dbId)
-            .eq("project_id", editingProjectId);
-          if (uErr) throw uErr;
-        } else if (line.isNew && ccName) {
-          const { error: iErr } = await supabase.from("cost_centres").insert({
-            company_id: userCompany.id,
-            project_id: editingProjectId,
-            name: ccName,
-            status: ccStatus,
-            display_order: nextOrder,
-            created_by: authUser.id,
-          });
-          if (iErr) throw iErr;
-          nextOrder += 1;
-        }
-      }
-
       setCompanyProjectsRefreshKey((k) => k + 1);
       setProjectsScreenRefreshKey((k) => k + 1);
       setEditingProjectId(null);
