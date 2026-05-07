@@ -13157,7 +13157,7 @@ const handlePhotoQuickUpload = async (event) => {
                     }}
                   >
                     <option value="">Select project</option>
-                    <option value="__add_project__">+ Add project</option>
+                    {isAdmin ? <option value="__add_project__">+ Add project</option> : null}
                     {clockSelectableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
@@ -13187,7 +13187,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <option value="">
                       {clockSelectedProject ? "Select task" : "Select project first"}
                     </option>
-                    {clockSelectedProject ? <option value="__add_cost_centre__">+ Add task</option> : null}
+                    {isAdmin && clockSelectedProject ? <option value="__add_cost_centre__">+ Add task</option> : null}
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
@@ -13520,7 +13520,7 @@ const handlePhotoQuickUpload = async (event) => {
                         handleProjectChange(e.target.value);
                       }}
                     >
-                      <option value="__add_project__">+ Add project</option>
+                      {isAdmin ? <option value="__add_project__">+ Add project</option> : null}
                       {clockSelectableProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -13539,7 +13539,7 @@ const handlePhotoQuickUpload = async (event) => {
                         setCostCenter(e.target.value);
                       }}
                     >
-                      <option value="__add_cost_centre__">+ Add task</option>
+                      {isAdmin ? <option value="__add_cost_centre__">+ Add task</option> : null}
                       {clockCostCentresActive.map((c) => (
                         <option key={c} value={c}>
                           {c}
