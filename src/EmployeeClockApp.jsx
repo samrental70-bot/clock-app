@@ -2020,6 +2020,7 @@ export default function EmployeeClockApp() {
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
+  const [reportsViewMode, setReportsViewMode] = useState("overview");
   /** Reports breakdown dimensions: Level 1 required; Level 2/3 optional (none). */
   const [reportsLevel1, setReportsLevel1] = useState("project");
   const [reportsLevel2, setReportsLevel2] = useState("none");
@@ -10053,6 +10054,33 @@ const handlePhotoQuickUpload = async (event) => {
     });
   };
 
+  const reportsQuickRangeOptions = [
+    { id: "weekly", label: "Week" },
+    { id: "monthly", label: "Month" },
+    { id: "yearly", label: "Year" },
+    { id: "last_year", label: "Last Year" },
+  ];
+
+  const reportsDateRangeLabel =
+    reportsDateFrom && reportsDateTo
+      ? `${reportsDateFrom} - ${reportsDateTo}`
+      : "Choose dates";
+
+  const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
+    ? reportsRowsFilteredForUi.length
+    : 0;
+
+  const reportsTopProjects = [...(reportsAggregates.byProject || [])]
+    .sort((a, b) => Number(b.minutes || 0) - Number(a.minutes || 0))
+    .slice(0, 4);
+  const reportsTopEmployees = [...(reportsAggregates.byEmployee || [])]
+    .sort((a, b) => Number(b.minutes || 0) - Number(a.minutes || 0))
+    .slice(0, 4);
+  const reportsTopProjectMax = Math.max(
+    1,
+    ...reportsTopProjects.map((row) => Number(row.minutes || 0))
+  );
+
   return (
     <div className="min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-neutral-950 flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-slate-50 shadow-2xl relative flex flex-col overflow-hidden">
@@ -11886,27 +11914,50 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-3xl shadow-sm">
-              <CardContent className="p-4 sm:p-5 space-y-5">
-                <div>
-                  <h2 className="font-bold text-lg">Reports</h2>
+            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
+              <CardContent className="p-3 sm:p-5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.95)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">Reports</h2>
+                      <p className="mt-2 text-[14px] font-bold text-slate-500">{reportsDateRangeLabel}</p>
+                    </div>
+                    <div className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-black text-slate-700 shadow-sm">
+                      {reportsTotalEntries} entries
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <p className="text-xs font-semibold text-slate-700">Quick range</p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { id: "weekly", label: "Weekly" },
-                      { id: "monthly", label: "Monthly" },
-                      { id: "yearly", label: "Yearly" },
-                      { id: "last_year", label: "Last Year" },
-                    ].map((p) => (
+
+                <div className="grid grid-cols-2 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1 shadow-inner">
+                  {[
+                    { id: "overview", label: "Overview" },
+                    { id: "detail", label: "Detailed" },
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={`rounded-2xl py-2.5 text-[15px] font-black transition ${
+                        reportsViewMode === mode.id
+                          ? "bg-slate-950 text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                          : "text-slate-700 active:bg-white"
+                      }`}
+                      onClick={() => setReportsViewMode(mode.id)}
+                    >
+                      {mode.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {reportsQuickRangeOptions.map((p) => (
                       <button
                         key={p.id}
                         type="button"
-                        className={`rounded-full px-3.5 py-2 text-sm font-semibold border transition-colors leading-none ${
+                        className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
                           reportsRangePreset === p.id
-                            ? "bg-slate-900 text-white border-slate-900"
-                            : "bg-white text-slate-800 border-slate-200 active:bg-slate-50"
+                            ? "bg-slate-950 text-white border-slate-950 shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                            : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
                         }`}
                         onClick={() => {
                           const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
@@ -11914,6 +11965,8 @@ const handlePhotoQuickUpload = async (event) => {
                             setReportsDateFrom(from);
                             setReportsDateTo(to);
                             setReportsRangePreset(p.id);
+                            setReportsExpandedL1({});
+                            setReportsExpandedL2({});
                           }
                         }}
                       >
@@ -11921,106 +11974,36 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     ))}
                   </div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold text-slate-800">Breakdown setup</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Main
-                      <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0"
-                        value={reportsLevel1}
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      From
+                      <input
+                        type="date"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        value={reportsDateFrom}
                         onChange={(e) => {
-                          const v = e.target.value;
-                          if (!REPORT_DIMS.includes(v)) return;
-                          setReportsLevel1(v);
-                          setReportsLevel2((p) => (p === v ? "none" : p));
-                          setReportsLevel3((p) => (p === v ? "none" : p));
+                          setReportsDateFrom(e.target.value);
+                          setReportsRangePreset(null);
                           setReportsExpandedL1({});
                           setReportsExpandedL2({});
                         }}
-                      >
-                        <option value="employee">Employee</option>
-                        <option value="project">Project</option>
-                        <option value="cost_center">Cost Centre</option>
-                      </select>
+                      />
                     </label>
-                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Then
-                      <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0"
-                        value={reportsLevel2}
+                    <label className="space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      To
+                      <input
+                        type="date"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[15px] font-bold text-slate-950"
+                        value={reportsDateTo}
                         onChange={(e) => {
-                          const v = e.target.value;
-                          setReportsLevel2(v);
-                          if (v === "none") setReportsLevel3("none");
-                          else
-                            setReportsLevel3((p) =>
-                              p === v || p === reportsLevel1 ? "none" : p
-                            );
+                          setReportsDateTo(e.target.value);
+                          setReportsRangePreset(null);
                           setReportsExpandedL1({});
                           setReportsExpandedL2({});
                         }}
-                      >
-                        <option value="none">None</option>
-                        {REPORT_DIMS.filter((d) => d !== reportsLevel1).map((d) => (
-                          <option key={d} value={d}>
-                            {reportDimensionLabel(d)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="space-y-1 text-xs font-medium text-slate-700 min-w-0">
-                      Detail
-                      <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[13px] font-normal min-w-0 disabled:bg-slate-100 disabled:text-slate-500"
-                        disabled={reportsLevel2 === "none"}
-                        value={reportsLevel2 === "none" ? "none" : reportsLevel3}
-                        onChange={(e) => {
-                          setReportsLevel3(e.target.value);
-                          setReportsExpandedL1({});
-                          setReportsExpandedL2({});
-                        }}
-                      >
-                        <option value="none">None</option>
-                        {REPORT_DIMS.filter((d) => d !== reportsLevel1 && d !== reportsLevel2).map((d) => (
-                          <option key={d} value={d}>
-                            {reportDimensionLabel(d)}
-                          </option>
-                        ))}
-                      </select>
+                      />
                     </label>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="space-y-1 text-xs font-medium text-slate-700">
-                    Date from
-                    <input
-                      type="date"
-                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
-                      value={reportsDateFrom}
-                      onChange={(e) => {
-                        setReportsDateFrom(e.target.value);
-                        setReportsRangePreset(null);
-                        setReportsExpandedL1({});
-                        setReportsExpandedL2({});
-                      }}
-                    />
-                  </label>
-                  <label className="space-y-1 text-xs font-medium text-slate-700">
-                    Date to
-                    <input
-                      type="date"
-                      className="w-full rounded-xl border bg-white px-2 py-2 text-sm font-normal"
-                      value={reportsDateTo}
-                      onChange={(e) => {
-                        setReportsDateTo(e.target.value);
-                        setReportsRangePreset(null);
-                        setReportsExpandedL1({});
-                        setReportsExpandedL2({});
-                      }}
-                    />
-                  </label>
                 </div>
                 {reportsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -12032,30 +12015,183 @@ const handlePhotoQuickUpload = async (event) => {
                     {reportsScreenError}
                   </div>
                 )}
+                {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom > reportsDateTo ? (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-3 text-[14px] font-bold text-red-800 leading-snug">
+                    Date from must be before Date to.
+                  </div>
+                ) : null}
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Total hours</p>
-                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">
+                      <div className="col-span-2 rounded-[24px] bg-slate-950 px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-300">Total hours</p>
+                        <p className="mt-2 text-[34px] font-black tabular-nums leading-none">
                           {formatDuration(reportsAggregates.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Labour cost</p>
-                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">
+                      <div className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Labour</p>
+                        <p className="mt-1 text-[20px] font-black text-slate-950 tabular-nums leading-tight">
                           {formatMoney(reportsAggregates.totalCost)}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">Missing clock-out</p>
-                        <p className="text-lg font-bold text-slate-950 tabular-nums leading-snug">{reportsAggregates.missingOut}</p>
+                      <div className="rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm">
+                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-wide">Missing out</p>
+                        <p className="mt-1 text-[20px] font-black text-slate-950 tabular-nums leading-tight">{reportsAggregates.missingOut}</p>
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <h3 className="text-base font-bold text-slate-950 leading-snug">
-                        Breakdown
-                        <span className="text-sm font-semibold text-slate-600 block sm:inline sm:ml-1.5 mt-1 sm:mt-0 leading-snug">
+                    {reportsViewMode === "overview" ? (
+                      <div className="space-y-3">
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-[18px] font-black text-slate-950 leading-tight">Project view</h3>
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                              Top hours
+                            </span>
+                          </div>
+                          {reportsTopProjects.length === 0 ? (
+                            <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                              No timesheets in this range.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {reportsTopProjects.map((row) => {
+                                const pct = Math.max(7, Math.round((Number(row.minutes || 0) / reportsTopProjectMax) * 100));
+                                return (
+                                  <div key={row.key} className="rounded-2xl border border-slate-100 bg-slate-50 p-3 space-y-2">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <p className="min-w-0 flex-1 text-[15px] font-black leading-snug text-slate-950 break-words">{row.project}</p>
+                                      <div className="shrink-0 text-right">
+                                        <p className="text-[14px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                        <p className="text-[12px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                      </div>
+                                    </div>
+                                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                                      <div className="h-full rounded-full bg-blue-600" style={{ width: `${pct}%` }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-[18px] font-black text-slate-950 leading-tight">Team view</h3>
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                              {reportsTopEmployees.length} people
+                            </span>
+                          </div>
+                          {reportsTopEmployees.length === 0 ? (
+                            <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                              No employee hours in this range.
+                            </p>
+                          ) : (
+                            <div className="space-y-2">
+                              {reportsTopEmployees.map((row) => (
+                                <div key={row.key} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50 px-3 py-3">
+                                  <p className="min-w-0 flex-1 truncate text-[15px] font-black text-slate-950">{row.name || "Employee"}</p>
+                                  <div className="shrink-0 text-right">
+                                    <p className="text-[14px] font-black tabular-nums text-slate-950">{formatDuration(row.minutes)}</p>
+                                    <p className="text-[12px] font-bold tabular-nums text-slate-500">{formatMoney(row.cost)}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h3 className="text-[18px] font-black text-slate-950 leading-tight">Build report</h3>
+                            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                              Drill down
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2">
+                            <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500 min-w-0">
+                              Group
+                              <select
+                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[13px] font-bold text-slate-950 min-w-0"
+                                value={reportsLevel1}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  if (!REPORT_DIMS.includes(v)) return;
+                                  setReportsLevel1(v);
+                                  setReportsLevel2((p) => (p === v ? "none" : p));
+                                  setReportsLevel3((p) => (p === v ? "none" : p));
+                                  setReportsExpandedL1({});
+                                  setReportsExpandedL2({});
+                                }}
+                              >
+                                <option value="employee">Employee</option>
+                                <option value="project">Project</option>
+                                <option value="cost_center">Cost Centre</option>
+                              </select>
+                            </label>
+                            <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500 min-w-0">
+                              Split
+                              <select
+                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[13px] font-bold text-slate-950 min-w-0"
+                                value={reportsLevel2}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setReportsLevel2(v);
+                                  if (v === "none") setReportsLevel3("none");
+                                  else
+                                    setReportsLevel3((p) =>
+                                      p === v || p === reportsLevel1 ? "none" : p
+                                    );
+                                  setReportsExpandedL1({});
+                                  setReportsExpandedL2({});
+                                }}
+                              >
+                                <option value="none">None</option>
+                                {REPORT_DIMS.filter((d) => d !== reportsLevel1).map((d) => (
+                                  <option key={d} value={d}>
+                                    {reportDimensionLabel(d)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500 min-w-0">
+                              Detail
+                              <select
+                                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[13px] font-bold text-slate-950 min-w-0 disabled:bg-slate-100 disabled:text-slate-400"
+                                disabled={reportsLevel2 === "none"}
+                                value={reportsLevel2 === "none" ? "none" : reportsLevel3}
+                                onChange={(e) => {
+                                  setReportsLevel3(e.target.value);
+                                  setReportsExpandedL1({});
+                                  setReportsExpandedL2({});
+                                }}
+                              >
+                                <option value="none">None</option>
+                                {REPORT_DIMS.filter((d) => d !== reportsLevel1 && d !== reportsLevel2).map((d) => (
+                                  <option key={d} value={d}>
+                                    {reportDimensionLabel(d)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                      <div className="flex items-end justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="text-[18px] font-black text-slate-950 leading-tight">Breakdown</h3>
+                          <p className="mt-1 text-[13px] font-bold text-slate-500 leading-snug">
+                            {[
+                              reportDimensionLabel(reportsBreakdownTree.d1),
+                              reportsBreakdownTree.d2 !== "none" ? reportDimensionLabel(reportsBreakdownTree.d2) : "",
+                              reportsBreakdownTree.d3 !== "none" ? reportDimensionLabel(reportsBreakdownTree.d3) : "",
+                            ].filter(Boolean).join(" / ")}
+                          </p>
+                          <p className="hidden">
                           ·{" "}
                           {reportsBreakdownTree.d1 === "employee"
                             ? "Employee"
@@ -12084,13 +12220,17 @@ const handlePhotoQuickUpload = async (event) => {
                                   : "Cost Centre"}
                             </>
                           )}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                          {reportsBreakdownTree.level1Rows.length} rows
                         </span>
-                      </h3>
+                      </div>
 
                       {reportsBreakdownTree.level1Rows.length === 0 ? (
                         <p className="text-sm text-slate-600 py-1 leading-snug">No timesheets in this range.</p>
                       ) : (
-                        <div className="rounded-2xl border border-slate-200 overflow-x-hidden divide-y divide-slate-100 bg-white min-w-0">
+                        <div className="rounded-[24px] border border-slate-200 overflow-x-hidden divide-y divide-slate-100 bg-white min-w-0 shadow-sm">
                           {reportsBreakdownTree.level1Rows.map((n1) => {
                             const l1Key = String(n1.key);
                             const l2List = Array.isArray(n1.children) ? n1.children : [];
@@ -12237,7 +12377,9 @@ const handlePhotoQuickUpload = async (event) => {
                           })}
                         </div>
                       )}
-                    </div>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </CardContent>
