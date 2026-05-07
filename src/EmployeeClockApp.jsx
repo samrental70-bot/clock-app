@@ -2354,6 +2354,10 @@ export default function EmployeeClockApp() {
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
+  const [reportsDatePickerOpen, setReportsDatePickerOpen] = useState(false);
+  const [reportsDatePickerMode, setReportsDatePickerMode] = useState("weekly");
+  const [reportsDraftDateFrom, setReportsDraftDateFrom] = useState("");
+  const [reportsDraftDateTo, setReportsDraftDateTo] = useState("");
   const [reportsDrillPage, setReportsDrillPage] = useState("main");
   const [reportsSelectedProject, setReportsSelectedProject] = useState(null);
   const [reportsSelectedEmployee, setReportsSelectedEmployee] = useState(null);
@@ -11982,9 +11986,54 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsVisibleEntryCount = reportsSafeDrillStack.length
     ? reportsDrillSummary.count
     : reportsTotalEntries;
+  const reportsVisibleRows = reportsSafeDrillStack.length ? reportsDrillRows : reportsRowsFilteredForUi;
+  const reportsVisibleEmployeeCount = new Set(
+    (reportsVisibleRows || []).map((row) => String(row?.userId ?? row?.employeeId ?? "")).filter(Boolean)
+  ).size;
+  const reportsVisibleProjectCount = new Set(
+    (reportsVisibleRows || []).map((row) => getReportsDimForRow("project", row).key).filter(Boolean)
+  ).size;
   const reportsCurrentTitle = reportsSafeDrillStack.length
     ? reportsSafeDrillStack.map((step) => step.label).join(" / ")
     : "All reports";
+  const reportsSelectedRangeLabel =
+    reportsRangePreset === "today"
+      ? "Today"
+      : reportsRangePreset === "weekly"
+        ? "Week"
+        : reportsRangePreset === "monthly"
+          ? "Month"
+          : "Custom";
+  const resetReportsDrilldownView = () => {
+    setReportsDrillStack([]);
+    setReportsDrillViewBy("project");
+  };
+  const applyReportsPreset = (preset) => {
+    const { from, to } = computeReportsQuickRange(preset, new Date(), companyTimeZone);
+    if (!from || !to) return;
+    setReportsDateFrom(from);
+    setReportsDateTo(to);
+    setReportsRangePreset(preset);
+    resetReportsDrilldownView();
+  };
+  const openReportsDatePicker = () => {
+    setReportsDraftDateFrom(reportsDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setReportsDraftDateTo(reportsDateTo || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setReportsDatePickerMode(reportsRangePreset || "weekly");
+    setReportsDatePickerOpen(true);
+  };
+  const applyReportsDatePicker = () => {
+    if (reportsDatePickerMode === "custom") {
+      setReportsDateFrom(reportsDraftDateFrom);
+      setReportsDateTo(reportsDraftDateTo);
+      setReportsRangePreset(null);
+      resetReportsDrilldownView();
+      setReportsDatePickerOpen(false);
+      return;
+    }
+    applyReportsPreset(reportsDatePickerMode);
+    setReportsDatePickerOpen(false);
+  };
 
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
@@ -14556,17 +14605,16 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[32px] border border-white/80 bg-[#f6f8fb] shadow-[0_24px_58px_rgba(15,23,42,0.13)] overflow-hidden">
+            <Card className="rounded-[32px] border border-white/80 bg-[#f2f5f9] shadow-[0_24px_58px_rgba(15,23,42,0.13)] overflow-hidden">
               <CardContent className="p-2.5 sm:p-4 space-y-2.5">
-                <div className="relative overflow-hidden rounded-[28px] border border-white bg-white px-3.5 py-3.5 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
+                <div className="relative overflow-hidden rounded-[30px] border border-white bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_58%,#fff8ed_100%)] px-3.5 py-3.5 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
                   <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-slate-300/80 to-transparent" />
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">Reports</p>
-                      <h2 className="mt-0.5 text-[23px] font-black leading-[1.03] text-slate-950 break-words">
+                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Reports</p>
+                      <h2 className="mt-0.5 text-[22px] font-black leading-[1.03] text-slate-950 break-words">
                         {reportsCurrentTitle}
                       </h2>
-                      <p className="mt-1 text-[14px] font-extrabold leading-snug text-slate-600">{reportsDateRangeLabel}</p>
                     </div>
                     {reportsSafeDrillStack.length ? (
                       <button
@@ -14582,74 +14630,42 @@ const handlePhotoQuickUpload = async (event) => {
                         Back
                       </button>
                     ) : (
-                      <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                      <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
                         {reportsVisibleEntryCount} entries
                       </span>
                     )}
                   </div>
 
-                  <div className="mt-3 grid grid-cols-3 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1 shadow-inner">
-                    {reportsQuickRangeOptions.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        className={`rounded-[14px] px-2 py-2 text-[13px] font-black transition-colors leading-tight ${
-                          reportsRangePreset === p.id
-                            ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.18)]"
-                            : "text-slate-700 active:bg-white"
-                        }`}
-                        onClick={() => {
-                          const { from, to } = computeReportsQuickRange(p.id, new Date(), companyTimeZone);
-                          if (from && to) {
-                            setReportsDateFrom(from);
-                            setReportsDateTo(to);
-                            setReportsRangePreset(p.id);
-                            setReportsDrillStack([]);
-                            setReportsDrillViewBy("project");
-                          }
-                        }}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-2.5 grid grid-cols-2 gap-2">
-                    <label className="block min-w-0 space-y-1 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
-                      From
-                      <input
-                        type="date"
-                        className="block h-11 w-full min-w-0 appearance-none rounded-[16px] border border-slate-200 bg-white px-2.5 text-[16px] font-black leading-none text-slate-950 outline-none [color-scheme:light] focus:border-slate-400"
-                        value={reportsDateFrom}
-                        onChange={(e) => {
-                          setReportsDateFrom(e.target.value);
-                          setReportsRangePreset(null);
-                          setReportsDrillStack([]);
-                          setReportsDrillViewBy("project");
-                        }}
-                      />
-                    </label>
-                    <label className="block min-w-0 space-y-1 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
-                      To
-                      <input
-                        type="date"
-                        className="block h-11 w-full min-w-0 appearance-none rounded-[16px] border border-slate-200 bg-white px-2.5 text-[16px] font-black leading-none text-slate-950 outline-none [color-scheme:light] focus:border-slate-400"
-                        value={reportsDateTo}
-                        onChange={(e) => {
-                          setReportsDateTo(e.target.value);
-                          setReportsRangePreset(null);
-                          setReportsDrillStack([]);
-                          setReportsDrillViewBy("project");
-                        }}
-                      />
-                    </label>
+                  <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                    <button
+                      type="button"
+                      className="min-w-0 rounded-[20px] border border-blue-100 bg-white px-3 py-2.5 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
+                      onClick={openReportsDatePicker}
+                    >
+                      <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                        Date range
+                      </span>
+                      <span className="mt-0.5 flex min-w-0 items-center gap-2">
+                        <span className="shrink-0 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-black text-white">
+                          {reportsSelectedRangeLabel}
+                        </span>
+                        <span className="truncate text-[14px] font-black text-slate-950">{reportsDateRangeLabel}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-[20px] border border-slate-200 bg-white px-3 text-[13px] font-black text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.07)]"
+                      onClick={openReportsDatePicker}
+                    >
+                      Change
+                    </button>
                   </div>
 
                   {reportsAvailableDims.length ? (
-                    <label className="mt-2.5 block space-y-1 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">
-                      View by
+                    <label className="mt-2.5 grid grid-cols-[auto_1fr] items-center gap-2 rounded-[20px] border border-slate-200 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 shadow-[0_10px_22px_rgba(15,23,42,0.06)]">
+                      <span>View by</span>
                       <select
-                        className="h-11 w-full rounded-[16px] border border-slate-200 bg-white px-3 text-[15px] font-black text-slate-950 outline-none focus:border-slate-400"
+                        className="h-9 min-w-0 rounded-[14px] border border-slate-100 bg-slate-50 px-2 text-[14px] font-black normal-case tracking-normal text-slate-950 outline-none focus:border-slate-300"
                         value={reportsCurrentViewBy}
                         onChange={(e) => {
                           const v = e.target.value;
@@ -14684,39 +14700,69 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="rounded-[26px] border border-white bg-white p-3 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
-                      <div className="flex items-center justify-between gap-3 pb-2.5">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Current total</p>
-                          <p className="mt-0.5 text-[13px] font-bold text-slate-500">
-                            {reportsSafeDrillStack.length ? "Filtered view" : "All entries"}
-                          </p>
+                    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M4 19V5M8 19V9M12 19V7M16 19v-5M20 19V4" />
+                            </svg>
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-700">Team hours</p>
+                            <p className="text-[11px] font-bold text-slate-400">
+                              {reportsSafeDrillStack.length ? "Filtered view" : "All entries"}
+                            </p>
+                          </div>
                         </div>
-                        <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-black text-slate-700">
-                          {reportsVisibleEntryCount} entries
+                        <p className="shrink-0 text-[24px] font-black leading-none tabular-nums text-slate-950">
+                          {formatDuration(reportsVisibleSummary.minutes)}
                         </p>
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="min-w-0 rounded-[22px] bg-slate-950 px-3 py-3.5 text-white shadow-[0_14px_26px_rgba(15,23,42,0.24)]">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-300">Hours</p>
-                          <p className="mt-1.5 text-[clamp(22px,6.8vw,28px)] font-black tabular-nums leading-[1.02] text-white break-words">
+                      <div className="grid grid-cols-2 gap-px bg-slate-100">
+                        <div className="bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600">Regular</p>
+                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">
                             {formatDuration(reportsVisibleSummary.minutes)}
                           </p>
                         </div>
-                        <div className="min-w-0 rounded-[22px] border border-slate-200 bg-[linear-gradient(145deg,#ffffff_0%,#f8fafc_100%)] px-3 py-3.5 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">Amount</p>
-                          <p className="mt-1.5 text-[clamp(21px,6.5vw,27px)] font-black tabular-nums leading-[1.02] text-slate-950 break-words">
-                            {formatMoneyWhole(reportsVisibleSummary.cost)}
-                          </p>
+                        <div className="bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-amber-500">Entries</p>
+                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleEntryCount}</p>
                         </div>
+                        <div className="bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-orange-500">Employees</p>
+                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleEmployeeCount}</p>
+                        </div>
+                        <div className="bg-white px-4 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Projects</p>
+                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleProjectCount}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M4 7h16v10H4z" />
+                              <path d="M8 11h.01M16 13h.01M12 12a2 2 0 1 0 0 .01" />
+                            </svg>
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-700">Est pay</p>
+                            <p className="text-[11px] font-bold text-slate-400">{reportsVisibleEntryCount} entries</p>
+                          </div>
+                        </div>
+                        <p className="shrink-0 text-[24px] font-black leading-none tabular-nums text-slate-950">
+                          {formatMoneyWhole(reportsVisibleSummary.cost)}
+                        </p>
                       </div>
                     </div>
 
-                    <div className="rounded-[26px] border border-white bg-white p-2.5 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
-                      <div className="flex items-center justify-between gap-3 px-2 pb-2">
+                    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
                         <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Breakdown</p>
-                          <p className="mt-0.5 text-[15px] font-black text-slate-950">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-700">Breakdown</p>
+                          <p className="mt-0.5 text-[15px] font-black text-slate-950 leading-tight">
                             {reportsCurrentViewBy === "project"
                               ? "Project view"
                               : reportsCurrentViewBy === "employee"
@@ -14729,11 +14775,11 @@ const handlePhotoQuickUpload = async (event) => {
                         </p>
                       </div>
                       {reportsCurrentGroups.length === 0 ? (
-                        <p className="rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
+                        <p className="m-3 rounded-2xl bg-slate-50 px-3 py-4 text-center text-[14px] font-bold text-slate-500">
                           {reportsAvailableDims.length ? "No detail in this view." : "No more breakdown levels."}
                         </p>
                       ) : (
-                        <div className="space-y-2">
+                        <div className="divide-y divide-slate-100">
                           {reportsCurrentGroups.map((row) => {
                           const nextStack = [
                             ...reportsSafeDrillStack,
@@ -14748,7 +14794,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <Tag
                               key={`${reportsCurrentViewBy}-${row.key}`}
                               type={canDrill ? "button" : undefined}
-                              className="w-full rounded-[22px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#fbfdff_100%)] px-3.5 py-3.5 text-left shadow-[0_8px_18px_rgba(15,23,42,0.06)] active:bg-slate-50"
+                              className="w-full bg-white px-4 py-3 text-left active:bg-slate-50"
                               onClick={
                                 canDrill
                                   ? () => {
@@ -14760,17 +14806,17 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[17px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
-                                  <p className="mt-1 text-[12px] font-bold text-slate-500">
+                                  <p className="text-[16px] font-black leading-snug text-slate-950 break-words">{row.label}</p>
+                                  <p className="mt-0.5 text-[12px] font-bold text-slate-500">
                                     {row.rows.length} entries{canDrill ? " - tap for details" : ""}
                                   </p>
                                 </div>
                                 <div className="shrink-0 text-right max-w-[42%]">
-                                  <p className="text-[16px] font-black tabular-nums leading-tight text-slate-950">{formatDuration(row.minutes)}</p>
+                                  <p className="text-[15px] font-black tabular-nums leading-tight text-slate-950">{formatDuration(row.minutes)}</p>
                                   <p className="mt-1 text-[13px] font-black tabular-nums leading-tight text-slate-500 break-words">{formatMoneyWhole(row.cost)}</p>
                                 </div>
                               </div>
-                              <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                              <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
                                 <div
                                   className="h-full rounded-full bg-gradient-to-r from-slate-950 via-blue-700 to-emerald-500 shadow-[0_0_14px_rgba(37,99,235,0.24)] transition-all"
                                   style={{
@@ -14789,6 +14835,119 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </>
                 ) : null}
+                {reportsDatePickerOpen && (
+                  <div
+                    className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-3 backdrop-blur-[2px]"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={() => setReportsDatePickerOpen(false)}
+                  >
+                    <div
+                      className="w-full max-w-sm rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_28px_80px_rgba(15,23,42,0.34)]"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Date range</p>
+                          <h3 className="mt-1 text-[22px] font-black leading-tight text-slate-950">
+                            {reportsDatePickerMode === "custom"
+                              ? "Custom dates"
+                              : reportsDatePickerMode === "monthly"
+                                ? "This month"
+                                : reportsDatePickerMode === "today"
+                                  ? "Today"
+                                  : "This week"}
+                          </h3>
+                        </div>
+                        <button
+                          type="button"
+                          className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
+                          onClick={() => setReportsDatePickerOpen(false)}
+                          aria-label="Close date range"
+                        >
+                          x
+                        </button>
+                      </div>
+                      <div className="mt-4 grid grid-cols-4 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1">
+                        {[...reportsQuickRangeOptions, { id: "custom", label: "Custom" }].map((option) => (
+                          <button
+                            key={`reports-range-${option.id}`}
+                            type="button"
+                            className={`rounded-[14px] px-1.5 py-2 text-[12px] font-black leading-tight ${
+                              reportsDatePickerMode === option.id
+                                ? "bg-blue-600 text-white shadow-[0_10px_20px_rgba(37,99,235,0.22)]"
+                                : "text-slate-700 active:bg-white"
+                            }`}
+                            onClick={() => {
+                              setReportsDatePickerMode(option.id);
+                              if (option.id !== "custom") {
+                                const { from, to } = computeReportsQuickRange(option.id, new Date(), companyTimeZone);
+                                if (from) setReportsDraftDateFrom(from);
+                                if (to) setReportsDraftDateTo(to);
+                              }
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected range</p>
+                        <p className="mt-1 text-[20px] font-black leading-tight text-slate-950">
+                          {formatReportDateRangeLabel(reportsDraftDateFrom, reportsDraftDateTo)}
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                            From
+                            <input
+                              type="date"
+                              className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                              value={reportsDraftDateFrom}
+                              disabled={reportsDatePickerMode !== "custom"}
+                              onChange={(event) => setReportsDraftDateFrom(event.target.value)}
+                            />
+                          </label>
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+                            To
+                            <input
+                              type="date"
+                              className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                              value={reportsDraftDateTo}
+                              disabled={reportsDatePickerMode !== "custom"}
+                              onChange={(event) => setReportsDraftDateTo(event.target.value)}
+                            />
+                          </label>
+                        </div>
+                      </div>
+                      {reportsDatePickerMode === "custom" && reportsDraftDateFrom && reportsDraftDateTo && reportsDraftDateFrom > reportsDraftDateTo ? (
+                        <p className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+                          Start date must be before end date.
+                        </p>
+                      ) : null}
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-black text-slate-900"
+                          onClick={() => setReportsDatePickerOpen(false)}
+                        >
+                          Cancel
+                        </button>
+                        <Button
+                          type="button"
+                          className="rounded-2xl px-4 py-3 text-[15px] font-black"
+                          disabled={
+                            reportsDatePickerMode === "custom" &&
+                            (!reportsDraftDateFrom || !reportsDraftDateTo || reportsDraftDateFrom > reportsDraftDateTo)
+                          }
+                          onClick={applyReportsDatePicker}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )}
