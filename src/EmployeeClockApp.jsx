@@ -2069,6 +2069,14 @@ export default function EmployeeClockApp() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+  const [firstLoginPasswordPromptOpen, setFirstLoginPasswordPromptOpen] = useState(false);
+  const [firstLoginPasswordPromptSaving, setFirstLoginPasswordPromptSaving] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [changePasswordDraft, setChangePasswordDraft] = useState("");
+  const [changePasswordConfirmDraft, setChangePasswordConfirmDraft] = useState("");
+  const [changePasswordSaving, setChangePasswordSaving] = useState(false);
+  const [changePasswordMessage, setChangePasswordMessage] = useState("");
+  const firstLoginPasswordPromptUserRef = useRef("");
 
   // Auth / onboarding flow
   const [authStep, setAuthStep] = useState("login"); // login | signup | company_choice | create_company | join_company | company_created
@@ -2114,6 +2122,27 @@ export default function EmployeeClockApp() {
     const invitedEmail = String(params.get("loginEmail") || params.get("email") || "").trim();
     if (invitedEmail) setLoginEmail((prev) => prev || invitedEmail);
   }, []);
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      firstLoginPasswordPromptUserRef.current = "";
+      setFirstLoginPasswordPromptOpen(false);
+      setChangePasswordOpen(false);
+      setChangePasswordDraft("");
+      setChangePasswordConfirmDraft("");
+      setChangePasswordMessage("");
+      return;
+    }
+    const metadata = authUser.user_metadata || {};
+    const shouldAsk =
+      metadata.should_change_password === true ||
+      String(metadata.should_change_password || "").toLowerCase() === "true";
+    if (!shouldAsk) return;
+    if (firstLoginPasswordPromptUserRef.current === String(authUser.id)) return;
+    firstLoginPasswordPromptUserRef.current = String(authUser.id);
+    setChangePasswordMessage("");
+    setFirstLoginPasswordPromptOpen(true);
+  }, [authUser?.id, authUser?.user_metadata?.should_change_password]);
 
   useEffect(() => {
     if (!authUser?.id) {
@@ -9449,7 +9478,7 @@ const handlePhotoQuickUpload = async (event) => {
       "OPERA.AI login",
       `Open app: ${appUrl}`,
       `User ID: ${shareInfo.email}`,
-      `Temporary password: ${shareInfo.password}`,
+      `Password: ${shareInfo.password}`,
     ].join("\n");
     try {
       if (typeof navigator !== "undefined" && navigator.share) {
@@ -9807,6 +9836,102 @@ const handlePhotoQuickUpload = async (event) => {
       setSettingsProfileMessage(getErrorMessage(err));
     } finally {
       setSettingsProfileSaving(false);
+    }
+  };
+
+  const updateCurrentUserPasswordMetadata = async (metadataPatch = {}) => {
+    if (!authUser?.id) return null;
+    const currentMetadata =
+      authUser.user_metadata && typeof authUser.user_metadata === "object" ? authUser.user_metadata : {};
+    const nextMetadata = {
+      ...currentMetadata,
+      ...metadataPatch,
+    };
+    const { data, error } = await supabase.auth.updateUser({ data: nextMetadata });
+    if (error) throw error;
+    if (data?.user) {
+      setAuthUser(data.user);
+      return data.user;
+    }
+    setAuthUser((prev) => (prev ? { ...prev, user_metadata: nextMetadata } : prev));
+    return null;
+  };
+
+  const handleSkipFirstLoginPasswordChange = async () => {
+    if (!authUser?.id) {
+      setFirstLoginPasswordPromptOpen(false);
+      return;
+    }
+    setFirstLoginPasswordPromptSaving(true);
+    setChangePasswordMessage("");
+    try {
+      await updateCurrentUserPasswordMetadata({
+        should_change_password: false,
+        password_prompt_answer: "no",
+        password_prompt_answered_at: new Date().toISOString(),
+      });
+      setFirstLoginPasswordPromptOpen(false);
+    } catch (err) {
+      setChangePasswordMessage(getErrorMessage(err));
+    } finally {
+      setFirstLoginPasswordPromptSaving(false);
+    }
+  };
+
+  const handleOpenFirstLoginPasswordChange = () => {
+    setFirstLoginPasswordPromptOpen(false);
+    setChangePasswordDraft("");
+    setChangePasswordConfirmDraft("");
+    setChangePasswordMessage("");
+    setChangePasswordOpen(true);
+  };
+
+  const handleCancelPasswordChange = () => {
+    setChangePasswordOpen(false);
+    setChangePasswordDraft("");
+    setChangePasswordConfirmDraft("");
+    setChangePasswordMessage("");
+  };
+
+  const handleSavePasswordChange = async (event) => {
+    event.preventDefault();
+    if (!authUser?.id) return;
+    const nextPassword = String(changePasswordDraft || "");
+    const confirmPassword = String(changePasswordConfirmDraft || "");
+    if (nextPassword.length < 6) {
+      setChangePasswordMessage("Password must be at least 6 characters.");
+      return;
+    }
+    if (nextPassword !== confirmPassword) {
+      setChangePasswordMessage("Passwords do not match.");
+      return;
+    }
+    setChangePasswordSaving(true);
+    setChangePasswordMessage("");
+    try {
+      const currentMetadata =
+        authUser.user_metadata && typeof authUser.user_metadata === "object" ? authUser.user_metadata : {};
+      const nextMetadata = {
+        ...currentMetadata,
+        should_change_password: false,
+        password_changed_at: new Date().toISOString(),
+      };
+      const { data, error } = await supabase.auth.updateUser({
+        password: nextPassword,
+        data: nextMetadata,
+      });
+      if (error) throw error;
+      if (data?.user) setAuthUser(data.user);
+      else setAuthUser((prev) => (prev ? { ...prev, user_metadata: nextMetadata } : prev));
+      setChangePasswordDraft("");
+      setChangePasswordConfirmDraft("");
+      setChangePasswordOpen(false);
+      setFirstLoginPasswordPromptOpen(false);
+      setSettingsProfileMessage("Password updated.");
+    } catch (err) {
+      setChangePasswordMessage(getErrorMessage(err));
+    } finally {
+      setChangePasswordSaving(false);
     }
   };
 
@@ -10261,17 +10386,17 @@ const handlePhotoQuickUpload = async (event) => {
           <form onSubmit={handleLogin} className="p-5 space-y-4">
             <div>
               <h2 className="text-xl font-bold">Login</h2>
-              <p className="text-sm text-slate-500 mt-1">Enter your employee email and password.</p>
+              <p className="text-sm text-slate-500 mt-1">Enter your user ID and password.</p>
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm font-medium">Email</label>
+              <label className="text-sm font-medium">User ID</label>
               <input
                 type="email"
                 className="w-full rounded-2xl border bg-white p-3 text-sm"
                 value={loginEmail}
                 onChange={(event) => setLoginEmail(event.target.value)}
-                placeholder="employee@email.com"
+                placeholder="user ID"
                 autoComplete="email"
                 required
               />
@@ -16946,7 +17071,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="rounded-2xl bg-white/85 border border-emerald-100 p-2 text-[12px] font-bold text-slate-800 space-y-1">
                       <p className="break-all">App: {teamAddShareInfo.appUrl}</p>
                       <p className="break-all">User ID: {teamAddShareInfo.email}</p>
-                      <p>Temporary password: {teamAddShareInfo.password}</p>
+                      <p>Password: {teamAddShareInfo.password}</p>
                     </div>
                     {teamAddShareMessage ? (
                       <p className="text-[12px] font-bold text-emerald-800">{teamAddShareMessage}</p>
@@ -17035,7 +17160,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                         <div className="space-y-1">
                           <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-password">
-                            Temporary password
+                            Password
                           </label>
                           <div className="flex gap-2">
                             <input
@@ -17604,6 +17729,110 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
         </div>
+
+        {firstLoginPasswordPromptOpen && (
+          <div className="fixed inset-0 z-[82] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true">
+            <div className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4">
+              <div className="space-y-1">
+                <p className="text-[22px] font-black text-slate-950 leading-tight">Change password?</p>
+                <p className="text-[15px] font-semibold text-slate-600 leading-snug">
+                  Do you want to change your password now?
+                </p>
+              </div>
+              {changePasswordMessage ? (
+                <p className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+                  {changePasswordMessage}
+                </p>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  className="rounded-2xl h-12 text-[15px] font-black"
+                  onClick={handleOpenFirstLoginPasswordChange}
+                  disabled={firstLoginPasswordPromptSaving}
+                >
+                  Yes
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-2xl h-12 text-[15px] font-black !bg-white !text-slate-900 border border-slate-300"
+                  onClick={() => void handleSkipFirstLoginPasswordChange()}
+                  disabled={firstLoginPasswordPromptSaving}
+                >
+                  {firstLoginPasswordPromptSaving ? "Saving..." : "No"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {changePasswordOpen && (
+          <div className="fixed inset-0 z-[83] flex items-center justify-center bg-slate-950/55 p-4" role="dialog" aria-modal="true">
+            <form
+              className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4"
+              onSubmit={(event) => void handleSavePasswordChange(event)}
+            >
+              <div className="space-y-1">
+                <p className="text-[22px] font-black text-slate-950 leading-tight">Change Password</p>
+                <p className="text-[15px] font-semibold text-slate-600 leading-snug">
+                  Choose a password you will remember.
+                </p>
+              </div>
+              <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                New password
+                <input
+                  type="password"
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[16px] font-semibold text-slate-950 outline-none focus:border-slate-500"
+                  value={changePasswordDraft}
+                  onChange={(event) => setChangePasswordDraft(event.target.value)}
+                  autoComplete="new-password"
+                  minLength={6}
+                  required
+                />
+              </label>
+              <label className="block space-y-1 text-[14px] font-bold text-slate-700">
+                Confirm password
+                <input
+                  type="password"
+                  className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[16px] font-semibold text-slate-950 outline-none focus:border-slate-500"
+                  value={changePasswordConfirmDraft}
+                  onChange={(event) => setChangePasswordConfirmDraft(event.target.value)}
+                  autoComplete="new-password"
+                  minLength={6}
+                  required
+                />
+              </label>
+              {changePasswordMessage ? (
+                <p
+                  className={`rounded-2xl border px-3 py-2 text-[13px] font-bold ${
+                    changePasswordMessage.toLowerCase().includes("updated")
+                      ? "border-emerald-100 bg-emerald-50 text-emerald-700"
+                      : "border-red-100 bg-red-50 text-red-700"
+                  }`}
+                >
+                  {changePasswordMessage}
+                </p>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                <Button
+                  type="submit"
+                  className="rounded-2xl h-12 text-[15px] font-black"
+                  disabled={changePasswordSaving}
+                >
+                  {changePasswordSaving ? "Saving..." : "Save"}
+                </Button>
+                <Button
+                  type="button"
+                  className="rounded-2xl h-12 text-[15px] font-black !bg-white !text-slate-900 border border-slate-300"
+                  onClick={handleCancelPasswordChange}
+                  disabled={changePasswordSaving}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          </div>
+        )}
 
         {clockListModal && (
           <div className="fixed inset-0 z-[73] bg-black/50 p-4 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true">

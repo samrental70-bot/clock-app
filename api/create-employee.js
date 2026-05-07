@@ -152,7 +152,11 @@ export default async function handler(req, res) {
     email,
     password,
     email_confirm: true,
-    user_metadata: { full_name },
+    user_metadata: {
+      full_name,
+      should_change_password: true,
+      password_prompt_created_at: new Date().toISOString(),
+    },
   });
 
   if (createErr) {
