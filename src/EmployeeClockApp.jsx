@@ -10560,6 +10560,55 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
+  const clockTodayScheduleTaskItems = useMemo(() => {
+    if (!authUser?.id || !userCompany?.id) return [];
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    if (!todayKey) return [];
+    const done = clockScheduledTaskListDone || {};
+    return (Array.isArray(clockEmployeeScheduledTasks) ? clockEmployeeScheduledTasks : [])
+      .filter((task) => calendarDateKeyInTimeZone(task?.start_time, companyTimeZone) === todayKey)
+      .map((task) => {
+        const projectId = task?.project_id != null ? String(task.project_id) : "";
+        const projectName = String(task?.project_name || "").trim();
+        const taskName = String(task?.task_title || "").trim() || "Scheduled task";
+        const taskNameForUi = String(task?.task_title || "").trim() || "Scheduled task";
+        const taskCost = String(task?.cost_centre || "").trim();
+        const itemId = `scheduled:${userCompany.id}:${authUser.id}:${String(task?.id || "")}:${todayKey}`;
+        const startLabel = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "";
+        const endLabel = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "";
+        const timeLabel = startLabel && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
+        const storageKey = makeClockProjectListKey({
+          userId: authUser.id,
+          companyId: userCompany.id,
+          projectId,
+          projectName,
+          costCenter: taskCost || "project",
+        });
+        return {
+          id: itemId,
+          text: [timeLabel, taskNameForUi].filter(Boolean).join(" - "),
+          projectId,
+          projectName,
+          costCenter: taskCost,
+          createdAt: task?.start_time || new Date().toISOString(),
+          scheduledTaskId: task?.id,
+          sourceKey: storageKey,
+          sourceCostCenter: taskCost,
+          isScheduledListItem: true,
+          rawTitle: taskName,
+        };
+      })
+      .filter((item) => item.scheduledTaskId != null && !done?.[item.id])
+      .sort((a, b) => String(a?.createdAt || "").localeCompare(String(b?.createdAt || "")));
+  }, [
+    authUser?.id,
+    userCompany?.id,
+    clockEmployeeScheduledTasks,
+    clockScheduledTaskListDone,
+    companyTimeZone,
+    now,
+  ]);
+
   const renderTimesheetCard = (record, allowEdit = true) => {
     const st = normalizeStatus(record.status);
     const autoTimedOut = isAutoTimedOutStatus(record.status);
@@ -11578,55 +11627,6 @@ const handlePhotoQuickUpload = async (event) => {
     clockListContext.projectId || getProjectFolderName(clockListContext.projectName || "project"),
     "",
   ].join("|");
-
-  const clockTodayScheduleTaskItems = useMemo(() => {
-    if (!authUser?.id || !userCompany?.id) return [];
-    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
-    if (!todayKey) return [];
-    const done = clockScheduledTaskListDone || {};
-    return (Array.isArray(clockEmployeeScheduledTasks) ? clockEmployeeScheduledTasks : [])
-      .filter((task) => calendarDateKeyInTimeZone(task?.start_time, companyTimeZone) === todayKey)
-      .map((task) => {
-        const projectId = task?.project_id != null ? String(task.project_id) : "";
-        const projectName = String(task?.project_name || "").trim();
-        const taskName = String(task?.task_title || "").trim() || "Scheduled task";
-        const taskNameForUi = String(task?.task_title || "").trim() || "Scheduled task";
-        const taskCost = String(task?.cost_centre || "").trim();
-        const itemId = `scheduled:${userCompany.id}:${authUser.id}:${String(task?.id || "")}:${todayKey}`;
-        const startLabel = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "";
-        const endLabel = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "";
-        const timeLabel = startLabel && endLabel ? `${startLabel} - ${endLabel}` : startLabel;
-        const storageKey = makeClockProjectListKey({
-          userId: authUser.id,
-          companyId: userCompany.id,
-          projectId,
-          projectName,
-          costCenter: taskCost || "project",
-        });
-        return {
-          id: itemId,
-          text: [timeLabel, taskNameForUi].filter(Boolean).join(" - "),
-          projectId,
-          projectName,
-          costCenter: taskCost,
-          createdAt: task?.start_time || new Date().toISOString(),
-          scheduledTaskId: task?.id,
-          sourceKey: storageKey,
-          sourceCostCenter: taskCost,
-          isScheduledListItem: true,
-          rawTitle: taskName,
-        };
-      })
-      .filter((item) => item.scheduledTaskId != null && !done?.[item.id])
-      .sort((a, b) => String(a?.createdAt || "").localeCompare(String(b?.createdAt || "")));
-  }, [
-    authUser?.id,
-    userCompany?.id,
-    clockEmployeeScheduledTasks,
-    clockScheduledTaskListDone,
-    companyTimeZone,
-    now,
-  ]);
 
   const getClockScheduledTaskItemsForClockContext = () =>
     (clockTodayScheduleTaskItems || []).filter((item) =>
