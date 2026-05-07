@@ -76,6 +76,23 @@ function safeWrite(key, value) {
   }
 }
 
+function normalizeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeMediaBuckets(value) {
+  const source = normalizeObject(value);
+  const out = {};
+  for (const [folder, items] of Object.entries(source)) {
+    out[folder] = Array.isArray(items) ? items : [];
+  }
+  return out;
+}
+
 function normalizeClockProjectListsState(value) {
   return {
     task: { ...(value?.task || {}) },
@@ -1929,11 +1946,11 @@ export default function EmployeeClockApp() {
   const [costCenter, setCostCenter] = useState("");
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
   const [records, setRecords] = useState(() => []);
-  const localTimesheetBackupRef = useRef(safeRead("orp_timesheet_records", sampleRecords));
+  const localTimesheetBackupRef = useRef(normalizeArray(safeRead("orp_timesheet_records", sampleRecords)));
   const [timesheetsLoading, setTimesheetsLoading] = useState(false);
   const [timesheetsError, setTimesheetsError] = useState("");
-  const [projectPhotos, setProjectPhotos] = useState(() => safeRead("orp_project_photos", {}));
-  const [projectReceipts, setProjectReceipts] = useState(() => safeRead("orp_project_receipts", {}));
+  const [projectPhotos, setProjectPhotos] = useState(() => normalizeMediaBuckets(safeRead("orp_project_photos", {})));
+  const [projectReceipts, setProjectReceipts] = useState(() => normalizeMediaBuckets(safeRead("orp_project_receipts", {})));
   const [now, setNow] = useState(new Date());
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -2206,22 +2223,24 @@ export default function EmployeeClockApp() {
   }, [authUser?.id, companyChecked, userCompany?.id, isAdmin, activeTab]);
 
   const scopedProjectPhotos = useMemo(() => {
-    if (!isEmployeeRole || !authUser?.id) return projectPhotos;
+    const buckets = normalizeMediaBuckets(projectPhotos);
+    if (!isEmployeeRole || !authUser?.id) return buckets;
     const uid = String(authUser.id);
     const out = {};
-    for (const [folder, photos] of Object.entries(projectPhotos || {})) {
-      const filtered = (photos || []).filter((p) => String(p.employeeId) === uid);
+    for (const [folder, photos] of Object.entries(buckets)) {
+      const filtered = normalizeArray(photos).filter((p) => String(p?.employeeId) === uid);
       if (filtered.length > 0) out[folder] = filtered;
     }
     return out;
   }, [isEmployeeRole, authUser?.id, projectPhotos]);
 
   const scopedProjectReceipts = useMemo(() => {
-    if (!isEmployeeRole || !authUser?.id) return projectReceipts;
+    const buckets = normalizeMediaBuckets(projectReceipts);
+    if (!isEmployeeRole || !authUser?.id) return buckets;
     const uid = String(authUser.id);
     const out = {};
-    for (const [folder, receipts] of Object.entries(projectReceipts || {})) {
-      const filtered = (receipts || []).filter((r) => String(r.employeeId) === uid);
+    for (const [folder, receipts] of Object.entries(buckets)) {
+      const filtered = normalizeArray(receipts).filter((r) => String(r?.employeeId) === uid);
       if (filtered.length > 0) out[folder] = filtered;
     }
     return out;
@@ -4950,7 +4969,7 @@ export default function EmployeeClockApp() {
   const receiptFolders = Object.keys(scopedProjectReceipts);
   const visibleReceiptFolders = selectedReceiptFolder === "all" ? receiptFolders : receiptFolders.filter((folder) => folder === selectedReceiptFolder);
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
-    return total + (scopedProjectReceipts[folder] || []).reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+    return total + normalizeArray(scopedProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
   }, 0);
 
   useEffect(() => {
@@ -13411,7 +13430,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {photoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No project photos yet.</p>}
                 <div className="space-y-4">
                   {visiblePhotoFolders.map((folder) => {
-                    const folderItems = scopedProjectPhotos[folder] || [];
+                    const folderItems = normalizeArray(scopedProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
                     const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
                     return (
@@ -13516,7 +13535,7 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
                 <div className="space-y-4">
                   {visibleReceiptFolders.map((folder) => {
-                    const folderReceipts = scopedProjectReceipts[folder] || [];
+                    const folderReceipts = normalizeArray(scopedProjectReceipts[folder]);
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
                       <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
