@@ -5060,6 +5060,38 @@ export default function EmployeeClockApp() {
     setCostCenter("");
   };
 
+  const openProjectManagementFromClock = useCallback(
+    (mode = "project") => {
+      setClockSelectedScheduledTaskId("");
+      if (!isAdmin) {
+        setLocationStatus(
+          mode === "costCentre"
+            ? "Ask a supervisor to add the cost centre."
+            : "Ask a supervisor to add the project."
+        );
+        setTimeout(() => setLocationStatus(""), 5000);
+        return;
+      }
+      setProjectsEditSuccess("");
+      setProjectsAddSuccess("");
+      setProjectsAddError("");
+      setProjectEditError("");
+      setAssignmentsSuccess("");
+      setAssignmentsEditorError("");
+      setProjectsListFilter("active");
+      setMenuPanel("settings");
+      setIsMenuOpen(false);
+      if (mode === "project") {
+        setEditingProjectId(null);
+        setProjectEditDraft(null);
+        setAssignmentsManageProjectId(null);
+        setProjectsAddFormOpen(true);
+      }
+      setActiveTab("projects");
+    },
+    [isAdmin]
+  );
+
   const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
     const name = String(projectName || "").trim();
     if (!name) {
@@ -10330,13 +10362,18 @@ const handlePhotoQuickUpload = async (event) => {
                   <select
                     className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
                     value={projectId}
-                    disabled={clockSelectableProjects.length === 0}
+                    disabled={projectsLoading}
                     onChange={(event) => {
+                      if (event.target.value === "__add_project__") {
+                        openProjectManagementFromClock("project");
+                        return;
+                      }
                       setClockSelectedScheduledTaskId("");
                       handleProjectChange(event.target.value);
                     }}
                   >
                     <option value="">Select project</option>
+                    <option value="__add_project__">+ Add project</option>
                     {clockSelectableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
@@ -10352,10 +10389,13 @@ const handlePhotoQuickUpload = async (event) => {
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
-                      clockSelectableProjects.length === 0 ||
-                      clockCostCentresActive.length === 0
+                      clockSelectableProjects.length === 0
                     }
                     onChange={(event) => {
+                      if (event.target.value === "__add_cost_centre__") {
+                        openProjectManagementFromClock("costCentre");
+                        return;
+                      }
                       setClockSelectedScheduledTaskId("");
                       setCostCenter(event.target.value);
                     }}
@@ -10363,6 +10403,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <option value="">
                       {clockSelectedProject ? "Select cost center" : "Select project first"}
                     </option>
+                    {clockSelectedProject ? <option value="__add_cost_centre__">+ Add cost center</option> : null}
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
@@ -10668,7 +10709,18 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {isChangingTask ? (
                   <div className="space-y-1.5">
-                    <select className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11" value={projectId} onChange={(e) => handleProjectChange(e.target.value)}>
+                    <select
+                      className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11"
+                      value={projectId}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_project__") {
+                          openProjectManagementFromClock("project");
+                          return;
+                        }
+                        handleProjectChange(e.target.value);
+                      }}
+                    >
+                      <option value="__add_project__">+ Add project</option>
                       {clockSelectableProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -10678,9 +10730,16 @@ const handlePhotoQuickUpload = async (event) => {
                     <select
                       className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11"
                       value={costCenter}
-                      disabled={clockCostCentresActive.length === 0}
-                      onChange={(e) => setCostCenter(e.target.value)}
+                      disabled={!clockSelectedProject}
+                      onChange={(e) => {
+                        if (e.target.value === "__add_cost_centre__") {
+                          openProjectManagementFromClock("costCentre");
+                          return;
+                        }
+                        setCostCenter(e.target.value);
+                      }}
                     >
+                      <option value="__add_cost_centre__">+ Add cost center</option>
                       {clockCostCentresActive.map((c) => (
                         <option key={c} value={c}>
                           {c}
@@ -15339,26 +15398,26 @@ const handlePhotoQuickUpload = async (event) => {
 
         {isMenuOpen && (
           <div
-            className="fixed inset-0 z-[60] bg-black/40"
+            className="fixed inset-0 z-[60] bg-slate-950/45 backdrop-blur-[2px]"
             onClick={() => {
               setIsMenuOpen(false);
               setMenuPanel("main");
             }}
           >
             <div
-              className="h-full w-80 max-w-[88vw] bg-white shadow-2xl p-4 flex flex-col gap-4"
+              className="h-full w-80 max-w-[88vw] bg-slate-50 shadow-2xl p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-black text-xl tracking-tight">
-                    {menuPanel === "employees" ? "Employees" : menuPanel === "settings" ? "Settings" : "Menu"}
+                  <h2 className="font-black text-[22px] tracking-tight leading-tight text-slate-950">
+                    {menuPanel === "settings" ? "Settings" : "Menu"}
                   </h2>
-                  <p className="text-sm font-medium text-slate-500 truncate">{(profileFullName || "").trim() || "User"}</p>
+                  <p className="text-[13px] font-bold text-slate-500 truncate">{(profileFullName || "").trim() || "User"}</p>
                 </div>
                 <button
                   type="button"
-                  className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-bold text-slate-700"
+                  className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-black text-slate-700"
                   onClick={() => {
                     setIsMenuOpen(false);
                     setMenuPanel("main");
@@ -15372,7 +15431,7 @@ const handlePhotoQuickUpload = async (event) => {
               {menuPanel !== "main" && (
                 <button
                   type="button"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-[16px] font-bold text-slate-800"
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-[16px] font-black text-slate-800 shadow-sm"
                   onClick={() => setMenuPanel("main")}
                 >
                   ← Back
@@ -15387,14 +15446,15 @@ const handlePhotoQuickUpload = async (event) => {
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
                       onClick={() => openMenuTab("schedule")}
                     >
-                      Schedule
+                      <span className="block text-[17px] font-black text-slate-950">Schedule</span>
+                      <span className="block text-[13px] font-bold text-slate-500">Tasks and calendar</span>
                     </button>
                     <button
                       type="button"
                       className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900 flex items-center justify-between"
-                      onClick={() => setMenuPanel("employees")}
+                      onClick={() => openMenuTab("timesheet")}
                     >
-                      <span>Employees</span>
+                      <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
                       <span className="text-slate-400">›</span>
                     </button>
                     <button
@@ -15429,40 +15489,12 @@ const handlePhotoQuickUpload = async (event) => {
                         <button
                           type="button"
                           className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
-                          onClick={() => openMenuTab("projects")}
-                        >
-                          Projects
-                        </button>
-                        <button
-                          type="button"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
                           onClick={() => openMenuTab("reports")}
                         >
                           Reports
                         </button>
                       </>
                     )}
-                  </>
-                )}
-
-                {menuPanel === "employees" && (
-                  <>
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
-                        onClick={() => openMenuTab("dashboard")}
-                      >
-                        Live Dashboard
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
-                      onClick={() => openMenuTab("timesheet")}
-                    >
-                      Timesheet
-                    </button>
                   </>
                 )}
 
@@ -15476,13 +15508,22 @@ const handlePhotoQuickUpload = async (event) => {
                       Profile
                     </button>
                     {isAdmin && (
-                      <button
-                        type="button"
-                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
-                        onClick={() => openMenuTab("team")}
-                      >
-                        Team
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          onClick={() => openMenuTab("team")}
+                        >
+                          Team
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-left font-black text-slate-900"
+                          onClick={() => openMenuTab("projects")}
+                        >
+                          Projects
+                        </button>
+                      </>
                     )}
                   </>
                 )}
@@ -15490,7 +15531,7 @@ const handlePhotoQuickUpload = async (event) => {
 
               <button
                 type="button"
-                className="w-full rounded-2xl border border-red-100 bg-red-50 px-4 py-4 text-left text-[17px] font-black text-red-700"
+                className="w-full rounded-[22px] border border-red-100 bg-red-50 px-4 py-4 text-left text-[17px] font-black text-red-700 shadow-sm"
                 onClick={handleLogout}
               >
                 Logout
@@ -15502,7 +15543,16 @@ const handlePhotoQuickUpload = async (event) => {
         <div
           className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-sm border-t bg-white/95 backdrop-blur px-3 pt-1.5 z-50 shadow-lg pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
-          <div className={`grid gap-1.5 ${isAdmin ? "grid-cols-1" : "grid-cols-2"}`}>
+          <div className="grid grid-cols-2 gap-1.5">
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("dashboard")}
+                className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
+              >
+                Live
+              </button>
+            )}
             {!isAdmin && (
               <button
                 type="button"
