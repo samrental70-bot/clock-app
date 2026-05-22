@@ -5,6 +5,7 @@ import process from "node:process";
 const root = process.cwd();
 const errors = [];
 const warnings = [];
+const isVercelBuild = Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
 
 function readText(relativePath) {
   const fullPath = path.join(root, relativePath);
@@ -49,7 +50,9 @@ const viteText = readText("vite.config.js");
 const cssText = readText("src/index.css");
 const envExampleText = fs.existsSync(path.join(root, ".env.example")) ? readText(".env.example") : "";
 const employeeClockText = readText("src/EmployeeClockApp.jsx");
-const vercelProject = readJson(".vercel/project.json");
+const vercelProject = fs.existsSync(path.join(root, ".vercel/project.json"))
+  ? readJson(".vercel/project.json")
+  : null;
 
 const wrongProjectMarkers = [
   { label: "AuraCut", regex: /AuraCut/i },
@@ -79,7 +82,7 @@ for (const [relativePath, text] of [
   assertNotContains(relativePath, text, wrongProjectMarkers);
 }
 
-if (vercelProject?.projectName !== "project-rui1d") {
+if (!isVercelBuild && vercelProject?.projectName !== "project-rui1d") {
   errors.push(`.vercel/project.json must point to project-rui1d, found ${vercelProject?.projectName || "unknown"}`);
 }
 
