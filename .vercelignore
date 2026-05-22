@@ -1,4 +1,14 @@
 # OPERA.AI deployment safety.
+# Standard local/build files that must never be uploaded.
+node_modules/
+dist/
+dist-ssr/
+.git/
+.vercel/
+.env
+.env.*
+*.log
+
 # These paths are from other local experiments and must not ship with the clock app.
 census-tenant-form-2026/
 charts/
