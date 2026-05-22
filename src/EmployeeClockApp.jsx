@@ -953,6 +953,46 @@ function normalizeDocumentationType(value, mediaType = "photo") {
   return "daily_progress";
 }
 
+const DOCUMENTATION_TYPE_OPTIONS = [
+  { id: "daily_progress", label: "Daily Progress" },
+  { id: "before", label: "Before" },
+  { id: "after", label: "After" },
+  { id: "receipt", label: "Receipt" },
+  { id: "video", label: "Video" },
+  { id: "clockout", label: "Clock-out" },
+  { id: "document", label: "Document" },
+  { id: "other", label: "Other" },
+];
+
+function documentationTypeLabel(value, mediaType = "photo") {
+  const normalized = normalizeDocumentationType(value, mediaType);
+  return DOCUMENTATION_TYPE_OPTIONS.find((option) => option.id === normalized)?.label || "Daily Progress";
+}
+
+function mediaTypeLabel(value) {
+  const normalized = normalizeProjectMediaType(value);
+  if (normalized === "video") return "Video";
+  if (normalized === "receipt") return "Receipt";
+  if (normalized === "document") return "Document";
+  return "Photo";
+}
+
+function mediaItemMediaType(item) {
+  return normalizeProjectMediaType(item?.media_type || item?.mediaType || item?.type);
+}
+
+function mediaItemDocumentationType(item) {
+  return normalizeDocumentationType(item?.documentation_type || item?.documentationType, mediaItemMediaType(item));
+}
+
+function mediaItemProjectName(item) {
+  return String(item?.project || item?.project_name || mediaItemFolder(item) || "Project").trim() || "Project";
+}
+
+function mediaItemEmployeeName(item) {
+  return String(item?.employee || item?.employeeName || item?.employee_name || "Employee").trim() || "Employee";
+}
+
 function projectMediaRowToLocalItem(row) {
   const mediaType = normalizeProjectMediaType(row?.media_type);
   const projectName = row?.project_name || row?.project || "Project";
@@ -985,6 +1025,22 @@ function projectMediaRowToLocalItem(row) {
     documentation_type: normalizeDocumentationType(row?.documentation_type, mediaType),
     documentationType: normalizeDocumentationType(row?.documentation_type, mediaType),
     notes: row?.notes || "",
+    ai_extracted_json: row?.ai_extracted_json || null,
+    aiExtractedJson: row?.ai_extracted_json || null,
+    ai_tags: Array.isArray(row?.ai_tags) ? row.ai_tags : [],
+    aiTags: Array.isArray(row?.ai_tags) ? row.ai_tags : [],
+    ai_category: row?.ai_category || "",
+    aiCategory: row?.ai_category || "",
+    ai_summary: row?.ai_summary || "",
+    aiSummary: row?.ai_summary || "",
+    ai_review_status: row?.ai_review_status || "",
+    aiReviewStatus: row?.ai_review_status || "",
+    ai_processed_at: row?.ai_processed_at || null,
+    aiProcessedAt: row?.ai_processed_at || null,
+    ai_confidence: row?.ai_confidence ?? null,
+    aiConfidence: row?.ai_confidence ?? null,
+    ai_error: row?.ai_error || "",
+    aiError: row?.ai_error || "",
     dataUrl: "",
   };
 
@@ -1105,6 +1161,108 @@ function filterMediaBucketsByDocumentationFilters(buckets, filters = {}) {
     if (filtered.length) out[folder] = filtered;
   }
   return out;
+}
+
+function flattenMediaBuckets(buckets) {
+  const rows = [];
+  for (const [folder, items] of Object.entries(normalizeMediaBuckets(buckets))) {
+    normalizeArray(items).forEach((item, index) => {
+      rows.push({
+        ...item,
+        folderName: item?.folderName || folder,
+        _folder: folder,
+        _itemId: mediaItemId(item, index),
+      });
+    });
+  }
+  return rows;
+}
+
+function buildProjectDocumentationRows(photoBuckets, receiptBuckets) {
+  const map = new Map();
+  const ensure = (folder, item) => {
+    const key = folder || mediaItemFolder(item);
+    if (!map.has(key)) {
+      map.set(key, {
+        folder: key,
+        projectName: mediaItemProjectName(item) || key,
+        photos: 0,
+        videos: 0,
+        receipts: 0,
+        documents: 0,
+        total: 0,
+        latestAt: "",
+        employees: new Set(),
+        items: [],
+      });
+    }
+    return map.get(key);
+  };
+  const add = (buckets) => {
+    for (const [folder, items] of Object.entries(normalizeMediaBuckets(buckets))) {
+      for (const item of normalizeArray(items)) {
+        const row = ensure(folder, item);
+        const type = mediaItemMediaType(item);
+        if (type === "video") row.videos += 1;
+        else if (type === "receipt") row.receipts += 1;
+        else if (type === "document") row.documents += 1;
+        else row.photos += 1;
+        row.total += 1;
+        const employee = mediaItemEmployeeName(item);
+        if (employee) row.employees.add(employee);
+        const captured = item?.capturedAt || item?.captured_at || item?.timestamp || "";
+        if (captured && (!row.latestAt || new Date(captured) > new Date(row.latestAt))) row.latestAt = captured;
+        row.items.push(item);
+      }
+    }
+  };
+  add(photoBuckets);
+  add(receiptBuckets);
+  return [...map.values()]
+    .map((row) => ({
+      ...row,
+      employees: [...row.employees].sort((a, b) => a.localeCompare(b)),
+      items: row.items.sort((a, b) => mediaItemCapturedAtMs(b) - mediaItemCapturedAtMs(a)),
+    }))
+    .sort((a, b) => new Date(b.latestAt || 0) - new Date(a.latestAt || 0));
+}
+
+function buildProjectDocumentationTimeline(photoBuckets, receiptBuckets) {
+  return [...flattenMediaBuckets(photoBuckets), ...flattenMediaBuckets(receiptBuckets)]
+    .sort((a, b) => mediaItemCapturedAtMs(b) - mediaItemCapturedAtMs(a));
+}
+
+function summarizeProjectDocumentationRows(rows) {
+  return normalizeArray(rows).reduce(
+    (acc, row) => {
+      acc.projects += 1;
+      acc.photos += Number(row?.photos || 0);
+      acc.videos += Number(row?.videos || 0);
+      acc.receipts += Number(row?.receipts || 0);
+      acc.documents += Number(row?.documents || 0);
+      acc.total += Number(row?.total || 0);
+      return acc;
+    },
+    { projects: 0, photos: 0, videos: 0, receipts: 0, documents: 0, total: 0 }
+  );
+}
+
+function aiTagsForItem(item) {
+  const tags = item?.aiTags || item?.ai_tags;
+  return Array.isArray(tags) ? tags.filter(Boolean) : [];
+}
+
+function updateMediaBucketsItem(buckets, mediaId, updates) {
+  const target = String(mediaId || "");
+  if (!target) return buckets;
+  const next = {};
+  for (const [folder, items] of Object.entries(normalizeMediaBuckets(buckets))) {
+    next[folder] = normalizeArray(items).map((item) => {
+      const itemId = String(item?.dbId || item?.id || "");
+      return itemId === target ? { ...item, ...updates } : item;
+    });
+  }
+  return next;
 }
 
 function encodeSharePayload(payload) {
@@ -2202,6 +2360,7 @@ export default function EmployeeClockApp() {
   const [photoDrafts, setPhotoDrafts] = useState([]);
   const [photoCameraOpen, setPhotoCameraOpen] = useState(false);
   const [photoCameraMode, setPhotoCameraMode] = useState("photo");
+  const [photoDocumentationType, setPhotoDocumentationType] = useState("daily_progress");
   const [photoCameraError, setPhotoCameraError] = useState("");
   const [photoFlashSupported, setPhotoFlashSupported] = useState(false);
   const [photoFlashOn, setPhotoFlashOn] = useState(false);
@@ -2287,6 +2446,15 @@ export default function EmployeeClockApp() {
   const [mediaFilterCostCentre, setMediaFilterCostCentre] = useState("all");
   const [mediaFilterMediaType, setMediaFilterMediaType] = useState("all");
   const [mediaFilterDocumentationType, setMediaFilterDocumentationType] = useState("all");
+  const [projectDocsView, setProjectDocsView] = useState("projects");
+  const [fieldAiStatus, setFieldAiStatus] = useState({
+    checked: false,
+    configured: false,
+    message: "AI not checked",
+  });
+  const [fieldAiWorkingKey, setFieldAiWorkingKey] = useState("");
+  const [fieldAiSavingKey, setFieldAiSavingKey] = useState("");
+  const [fieldAiPanel, setFieldAiPanel] = useState(null);
   const [projectMediaLoading, setProjectMediaLoading] = useState(false);
   const [projectMediaSyncError, setProjectMediaSyncError] = useState("");
   const [selectedPhotoIdsByFolder, setSelectedPhotoIdsByFolder] = useState({});
@@ -2541,6 +2709,26 @@ export default function EmployeeClockApp() {
     ]
   );
 
+  const filteredDocumentationReceipts = useMemo(() => {
+    if (mediaFilterMediaType !== "all" && mediaFilterMediaType !== "receipt") return {};
+    return filterMediaBucketsByDocumentationFilters(scopedProjectReceipts, {
+      dateFrom: mediaFilterDateFrom,
+      dateTo: mediaFilterDateTo,
+      employeeId: mediaFilterEmployeeId,
+      costCentre: mediaFilterCostCentre,
+      mediaType: "receipt",
+      documentationType: mediaFilterDocumentationType,
+    });
+  }, [
+    mediaFilterCostCentre,
+    mediaFilterDateFrom,
+    mediaFilterDateTo,
+    mediaFilterDocumentationType,
+    mediaFilterEmployeeId,
+    mediaFilterMediaType,
+    scopedProjectReceipts,
+  ]);
+
   const [settingsTzDraft, setSettingsTzDraft] = useState(DEFAULT_COMPANY_TIME_ZONE);
   const [settingsCompanyNameDraft, setSettingsCompanyNameDraft] = useState("");
   const [settingsCompanyEditOpen, setSettingsCompanyEditOpen] = useState(false);
@@ -2671,6 +2859,7 @@ export default function EmployeeClockApp() {
   const [reportsScreenLoading, setReportsScreenLoading] = useState(false);
   const [reportsScreenError, setReportsScreenError] = useState("");
   const [reportsRangePreset, setReportsRangePreset] = useState(null);
+  const [reportsViewMode, setReportsViewMode] = useState("overview");
   const [reportsDatePickerOpen, setReportsDatePickerOpen] = useState(false);
   const [reportsDatePickerMode, setReportsDatePickerMode] = useState("weekly");
   const [reportsDraftDateFrom, setReportsDraftDateFrom] = useState("");
@@ -5473,6 +5662,30 @@ export default function EmployeeClockApp() {
   const visiblePhotoFolders = selectedPhotoFolder === "all" ? photoFolders : photoFolders.filter((folder) => folder === selectedPhotoFolder);
   const receiptFolders = Object.keys(filteredProjectReceipts);
   const visibleReceiptFolders = selectedReceiptFolder === "all" ? receiptFolders : receiptFolders.filter((folder) => folder === selectedReceiptFolder);
+  const documentationProjectFolders = useMemo(() => {
+    const folders = new Set([...Object.keys(filteredProjectPhotos), ...Object.keys(filteredDocumentationReceipts)]);
+    return [...folders].sort((a, b) => a.localeCompare(b));
+  }, [filteredDocumentationReceipts, filteredProjectPhotos]);
+  const visibleDocumentationPhotoBuckets = useMemo(() => {
+    if (selectedPhotoFolder === "all") return filteredProjectPhotos;
+    return filteredProjectPhotos[selectedPhotoFolder] ? { [selectedPhotoFolder]: filteredProjectPhotos[selectedPhotoFolder] } : {};
+  }, [filteredProjectPhotos, selectedPhotoFolder]);
+  const visibleDocumentationReceiptBuckets = useMemo(() => {
+    if (selectedPhotoFolder === "all") return filteredDocumentationReceipts;
+    return filteredDocumentationReceipts[selectedPhotoFolder] ? { [selectedPhotoFolder]: filteredDocumentationReceipts[selectedPhotoFolder] } : {};
+  }, [filteredDocumentationReceipts, selectedPhotoFolder]);
+  const projectDocumentationRows = useMemo(
+    () => buildProjectDocumentationRows(visibleDocumentationPhotoBuckets, visibleDocumentationReceiptBuckets),
+    [visibleDocumentationPhotoBuckets, visibleDocumentationReceiptBuckets]
+  );
+  const projectDocumentationTimeline = useMemo(
+    () => buildProjectDocumentationTimeline(visibleDocumentationPhotoBuckets, visibleDocumentationReceiptBuckets),
+    [visibleDocumentationPhotoBuckets, visibleDocumentationReceiptBuckets]
+  );
+  const projectDocumentationTotals = useMemo(
+    () => summarizeProjectDocumentationRows(projectDocumentationRows),
+    [projectDocumentationRows]
+  );
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
     return total + normalizeArray(filteredProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
   }, 0);
@@ -7747,13 +7960,13 @@ const handlePhotoQuickUpload = async (event) => {
       imageUrl: photoUrl,
       storagePath: filePath,
       storageBucket: "project-photos",
-      documentation_type: "daily_progress",
+      documentation_type: normalizeDocumentationType(photoDocumentationType, "photo"),
       type: "photo",
     };
 
     const metadataId = await insertProjectMediaMetadata(photo, {
       mediaType: "photo",
-      documentationType: "daily_progress",
+      documentationType: normalizeDocumentationType(photoDocumentationType, "photo"),
       source: "gallery",
     });
     if (metadataId) photo.dbId = metadataId;
@@ -8345,6 +8558,7 @@ const handlePhotoQuickUpload = async (event) => {
       const capturedAt = new Date().toISOString();
       const isClockOutPhoto =
         Boolean(visibleCurrentShift) && Number(visibleCurrentShift?.photosTaken || 0) < 1;
+      const selectedDocumentationType = normalizeDocumentationType(photoDocumentationType, "photo");
       const photo = {
         id: Date.now() + index,
         companyId: userCompany?.id || null,
@@ -8361,7 +8575,7 @@ const handlePhotoQuickUpload = async (event) => {
         imageUrl: photoUrl,
         storagePath: filePath,
         storageBucket: "project-photos",
-        documentation_type: isClockOutPhoto ? "clockout" : "daily_progress",
+        documentation_type: isClockOutPhoto ? "clockout" : selectedDocumentationType,
         source: isClockOutPhoto ? "clockout" : source,
         relatedTimesheetId: mediaContext.supabaseTimesheetId ?? null,
         type: "photo",
@@ -8369,7 +8583,7 @@ const handlePhotoQuickUpload = async (event) => {
 
       const metadataId = await insertProjectMediaMetadata(photo, {
         mediaType: "photo",
-        documentationType: isClockOutPhoto ? "clockout" : "daily_progress",
+        documentationType: isClockOutPhoto ? "clockout" : selectedDocumentationType,
         source: isClockOutPhoto ? "clockout" : source,
       });
       if (metadataId) photo.dbId = metadataId;
@@ -8395,7 +8609,7 @@ const handlePhotoQuickUpload = async (event) => {
       setUploadProgress(total > 1 ? Math.round((index / total) * 100) : 100);
       return photo;
     },
-    [authUser, clockMediaContext, insertProjectMediaMetadata, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
+    [authUser, clockMediaContext, insertProjectMediaMetadata, photoDocumentationType, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
   );
 
   const uploadAllPhotoDrafts = useCallback(async () => {
@@ -9715,6 +9929,18 @@ const handlePhotoQuickUpload = async (event) => {
     setPhotoViewer({ folder, index: Math.max(0, Math.min(Number(index) || 0, items.length - 1)) });
   };
 
+  const openPhotoItemInViewer = (item) => {
+    const folder = item?._folder || mediaItemFolder(item);
+    const items = filteredProjectPhotos[folder] || [];
+    if (!folder || !items.length) return;
+    const targetId = String(item?.dbId || item?.id || item?._itemId || "");
+    const targetIndex = items.findIndex((candidate, index) => {
+      const candidateIds = [candidate?.dbId, candidate?.id, mediaItemId(candidate, index)].map((value) => String(value || ""));
+      return candidateIds.includes(targetId);
+    });
+    openPhotoViewer(folder, targetIndex >= 0 ? targetIndex : 0);
+  };
+
   const movePhotoViewer = (delta) => {
     setPhotoViewer((prev) => {
       if (!prev?.folder) return prev;
@@ -9782,6 +10008,269 @@ const handlePhotoQuickUpload = async (event) => {
         await navigator.clipboard.writeText(shareUrl);
       } catch {}
       setTimeout(() => setPhotoShareMessage(""), 6000);
+    }
+  };
+
+  const buildFieldAiFiltersPayload = () => ({
+    dateFrom: mediaFilterDateFrom || "",
+    dateTo: mediaFilterDateTo || "",
+    projectName: selectedPhotoFolder === "all" ? "all" : selectedPhotoFolder,
+    employeeId: mediaFilterEmployeeId || "all",
+    costCentre: mediaFilterCostCentre || "all",
+    mediaType: mediaFilterMediaType || "all",
+    documentationType: mediaFilterDocumentationType || "all",
+  });
+
+  const callFieldAi = useCallback(async (action, payload = {}) => {
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (sessionError || !token) throw new Error("Sign in again before using AI.");
+    const response = await fetch("/api/ai-field-docs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result?.error || result?.message || "AI request failed.");
+    return result;
+  }, []);
+
+  const checkFieldAiStatus = useCallback(async () => {
+    try {
+      const result = await callFieldAi("status");
+      setFieldAiStatus({
+        checked: true,
+        configured: Boolean(result?.configured),
+        message: result?.message || (result?.configured ? "AI configured" : "AI not configured yet."),
+      });
+    } catch (err) {
+      setFieldAiStatus({
+        checked: true,
+        configured: false,
+        message: getErrorMessage(err) || "AI status unavailable.",
+      });
+    }
+  }, [callFieldAi]);
+
+  useEffect(() => {
+    if (activeTab !== "photos" || !isAdmin || !authUser?.id) return;
+    if (fieldAiStatus.checked) return;
+    void checkFieldAiStatus();
+  }, [activeTab, authUser?.id, checkFieldAiStatus, fieldAiStatus.checked, isAdmin]);
+
+  const runFieldAiForMedia = async (item, mode) => {
+    const mediaId = item?.dbId || item?.id;
+    if (!mediaId || !userCompany?.id) {
+      setFieldAiPanel({
+        mode,
+        title: "AI review",
+        error: "This media item is not synced to project_media yet.",
+        item,
+      });
+      return;
+    }
+    const action = mode === "receipt" ? "receipt_ocr" : "photo_tags";
+    const key = `${action}:${mediaId}`;
+    if (activeTab !== "photos") {
+      setProjectDocsView("timeline");
+      setActiveTab("photos");
+    }
+    setFieldAiWorkingKey(key);
+    setFieldAiPanel({
+      mode,
+      title: mode === "receipt" ? "AI receipt reading" : "AI media tags",
+      item,
+      loading: true,
+    });
+    try {
+      const result = await callFieldAi(action, { companyId: userCompany.id, mediaId });
+      setFieldAiStatus({
+        checked: true,
+        configured: Boolean(result?.configured),
+        message: result?.configured ? "AI configured" : result?.message || "AI not configured yet.",
+      });
+      setFieldAiPanel({
+        mode,
+        title: mode === "receipt" ? "AI receipt reading" : "AI media tags",
+        item,
+        result,
+        json: result?.json || null,
+        text: result?.text || result?.message || "",
+        error: result?.ok === false ? result?.message || "AI request failed." : "",
+      });
+    } catch (err) {
+      setFieldAiPanel({
+        mode,
+        title: mode === "receipt" ? "AI receipt reading" : "AI media tags",
+        item,
+        error: getErrorMessage(err),
+      });
+    } finally {
+      setFieldAiWorkingKey("");
+    }
+  };
+
+  const runFieldAiSummary = async (mode) => {
+    if (!userCompany?.id) return;
+    const action =
+      mode === "customer_update" ? "customer_update" : mode === "alerts" ? "alerts" : "daily_summary";
+    const key = `summary:${action}`;
+    setFieldAiWorkingKey(key);
+    setFieldAiPanel({
+      mode: action,
+      title:
+        action === "customer_update"
+          ? "AI customer update draft"
+          : action === "alerts"
+            ? "AI documentation alerts"
+            : "AI daily work summary",
+      loading: true,
+    });
+    try {
+      const result = await callFieldAi(action, {
+        companyId: userCompany.id,
+        filters: buildFieldAiFiltersPayload(),
+      });
+      setFieldAiStatus({
+        checked: true,
+        configured: Boolean(result?.configured),
+        message: result?.configured ? "AI configured" : result?.message || "AI not configured yet.",
+      });
+      setFieldAiPanel({
+        mode: action,
+        title:
+          action === "customer_update"
+            ? "AI customer update draft"
+            : action === "alerts"
+              ? "AI documentation alerts"
+              : "AI daily work summary",
+        result,
+        json: result?.json || null,
+        text: result?.text || result?.message || "",
+        error: result?.ok === false ? result?.message || "AI request failed." : "",
+      });
+    } catch (err) {
+      setFieldAiPanel({
+        mode: action,
+        title: "AI documentation",
+        error: getErrorMessage(err),
+      });
+    } finally {
+      setFieldAiWorkingKey("");
+    }
+  };
+
+  const saveFieldAiReceiptExtraction = async () => {
+    const panel = fieldAiPanel;
+    const item = panel?.item;
+    const mediaId = item?.dbId || item?.id;
+    const extracted = panel?.json || {};
+    if (!mediaId || !userCompany?.id) return;
+    setFieldAiSavingKey(String(mediaId));
+    try {
+      const rawAmount = extracted.total_amount ?? extracted.total ?? extracted.amount ?? item?.amount;
+      const amount = Number(rawAmount);
+      const confidence = Number(extracted.confidence);
+      const payload = {
+        supplier: String(extracted.supplier || item?.supplier || "").trim() || null,
+        amount: Number.isFinite(amount) ? amount : null,
+        notes: String(extracted.notes || item?.notes || "").trim() || null,
+        ai_extracted_json: extracted,
+        ai_category: String(extracted.likely_category || extracted.category || "").trim() || null,
+        ai_review_status: "confirmed",
+        ai_processed_at: new Date().toISOString(),
+        ai_confidence: Number.isFinite(confidence) ? confidence : null,
+        ai_error: null,
+      };
+      const { error } = await supabase
+        .from("project_media")
+        .update(payload)
+        .eq("company_id", userCompany.id)
+        .eq("id", mediaId);
+      if (error) throw error;
+      const localUpdates = {
+        supplier: payload.supplier || "",
+        amount: payload.amount ?? item?.amount ?? 0,
+        category: payload.supplier || item?.category || "Receipt",
+        ai_extracted_json: extracted,
+        aiExtractedJson: extracted,
+        ai_category: payload.ai_category || "",
+        aiCategory: payload.ai_category || "",
+        ai_review_status: "confirmed",
+        aiReviewStatus: "confirmed",
+        ai_processed_at: payload.ai_processed_at,
+        aiProcessedAt: payload.ai_processed_at,
+        ai_confidence: payload.ai_confidence,
+        aiConfidence: payload.ai_confidence,
+      };
+      setProjectReceipts((previous) => updateMediaBucketsItem(previous, mediaId, localUpdates));
+      setFieldAiPanel((previous) => ({ ...previous, saved: true, error: "" }));
+    } catch (err) {
+      setFieldAiPanel((previous) => ({
+        ...previous,
+        error: `${getErrorMessage(err)}. If this mentions an AI column, run the AI project_media SQL migration.`,
+      }));
+    } finally {
+      setFieldAiSavingKey("");
+    }
+  };
+
+  const saveFieldAiTags = async () => {
+    const panel = fieldAiPanel;
+    const item = panel?.item;
+    const mediaId = item?.dbId || item?.id;
+    const result = panel?.json || {};
+    if (!mediaId || !userCompany?.id) return;
+    const mediaType = mediaItemMediaType(item);
+    const suggestedDocType = normalizeDocumentationType(result.likely_documentation_type, mediaType);
+    const tags = Array.isArray(result.tags)
+      ? result.tags.map((tag) => String(tag || "").trim()).filter(Boolean).slice(0, 12)
+      : [];
+    const confidence = Number(result.confidence);
+    setFieldAiSavingKey(String(mediaId));
+    try {
+      const payload = {
+        ai_tags: tags,
+        ai_category: String(result.likely_category || result.category || "").trim() || null,
+        documentation_type: suggestedDocType,
+        ai_review_status: "confirmed",
+        ai_processed_at: new Date().toISOString(),
+        ai_confidence: Number.isFinite(confidence) ? confidence : null,
+        ai_error: null,
+      };
+      const { error } = await supabase
+        .from("project_media")
+        .update(payload)
+        .eq("company_id", userCompany.id)
+        .eq("id", mediaId);
+      if (error) throw error;
+      const localUpdates = {
+        ai_tags: tags,
+        aiTags: tags,
+        ai_category: payload.ai_category || "",
+        aiCategory: payload.ai_category || "",
+        documentation_type: suggestedDocType,
+        documentationType: suggestedDocType,
+        ai_review_status: "confirmed",
+        aiReviewStatus: "confirmed",
+        ai_processed_at: payload.ai_processed_at,
+        aiProcessedAt: payload.ai_processed_at,
+        ai_confidence: payload.ai_confidence,
+        aiConfidence: payload.ai_confidence,
+      };
+      setProjectPhotos((previous) => updateMediaBucketsItem(previous, mediaId, localUpdates));
+      setProjectReceipts((previous) => updateMediaBucketsItem(previous, mediaId, localUpdates));
+      setFieldAiPanel((previous) => ({ ...previous, saved: true, error: "" }));
+    } catch (err) {
+      setFieldAiPanel((previous) => ({
+        ...previous,
+        error: `${getErrorMessage(err)}. If this mentions an AI column, run the AI project_media SQL migration.`,
+      }));
+    } finally {
+      setFieldAiSavingKey("");
     }
   };
 
@@ -13613,6 +14102,21 @@ const handlePhotoQuickUpload = async (event) => {
                       {locationStatus}
                     </p>
                   ) : null}
+                  <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                    Photo type
+                    <select
+                      className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+                      value={photoDocumentationType}
+                      onChange={(event) => setPhotoDocumentationType(event.target.value)}
+                      disabled={photoBatchUploading}
+                    >
+                      {DOCUMENTATION_TYPE_OPTIONS.filter((option) =>
+                        ["daily_progress", "before", "after", "other"].includes(option.id)
+                      ).map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -13972,6 +14476,21 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-1.5">
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
+                      <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                        Photo type
+                        <select
+                          className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+                          value={photoDocumentationType}
+                          onChange={(event) => setPhotoDocumentationType(event.target.value)}
+                          disabled={photoBatchUploading}
+                        >
+                          {DOCUMENTATION_TYPE_OPTIONS.filter((option) =>
+                            ["daily_progress", "before", "after", "other"].includes(option.id)
+                          ).map((option) => (
+                            <option key={option.id} value={option.id}>{option.label}</option>
+                          ))}
+                        </select>
+                      </label>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -14493,9 +15012,9 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Project Photos</h2>
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Project Documentation</h2>
                   <p className="mt-1 text-[14px] font-semibold text-slate-500">
-                    {projectMediaLoading ? "Refreshing shared media..." : "Open, select, and share project photos."}
+                    {projectMediaLoading ? "Refreshing shared media..." : "Photos, videos, receipts, and field records from project_media."}
                   </p>
                 </div>
                 {projectMediaSyncError ? (
@@ -14504,8 +15023,8 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
                 <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
-                  <option value="all">All Project Folders</option>
-                  {photoFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
+                  <option value="all">All Projects</option>
+                  {documentationProjectFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
                 </select>
                 <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
                   <div className="grid grid-cols-2 gap-2">
@@ -14530,27 +15049,316 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterMediaType} onChange={(e) => setMediaFilterMediaType(e.target.value)}>
-                      <option value="all">Photos + videos</option>
+                      <option value="all">All media</option>
                       <option value="photo">Photos only</option>
                       <option value="video">Videos only</option>
+                      <option value="receipt">Receipts only</option>
                     </select>
                     <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDocumentationType} onChange={(e) => setMediaFilterDocumentationType(e.target.value)}>
                       <option value="all">All documentation</option>
-                      <option value="daily_progress">Daily progress</option>
-                      <option value="clockout">Clock-out photos</option>
-                      <option value="before">Before</option>
-                      <option value="after">After</option>
-                      <option value="video">Video</option>
+                      {DOCUMENTATION_TYPE_OPTIONS.map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>
+                <div className="grid grid-cols-4 gap-2">
+                  {[
+                    { label: "Projects", value: projectDocumentationTotals.projects },
+                    { label: "Photos", value: projectDocumentationTotals.photos },
+                    { label: "Videos", value: projectDocumentationTotals.videos },
+                    { label: "Receipts", value: projectDocumentationTotals.receipts },
+                  ].map((metric) => (
+                    <div key={metric.label} className="rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center shadow-sm">
+                      <p className="text-[18px] font-black text-slate-950 tabular-nums">{metric.value}</p>
+                      <p className="mt-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500">{metric.label}</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="grid grid-cols-2 gap-2 rounded-[22px] border border-slate-200 bg-white p-1 shadow-sm">
+                  <button
+                    type="button"
+                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-black ${projectDocsView === "projects" ? "bg-slate-950 text-white" : "text-slate-700"}`}
+                    onClick={() => setProjectDocsView("projects")}
+                  >
+                    Projects
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-black ${projectDocsView === "timeline" ? "bg-slate-950 text-white" : "text-slate-700"}`}
+                    onClick={() => setProjectDocsView("timeline")}
+                  >
+                    Timeline
+                  </button>
+                </div>
+                {isAdmin ? (
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">AI Assistant</p>
+                        <p className="text-[13px] font-bold text-slate-600">{fieldAiStatus.message}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-800"
+                        onClick={() => void checkFieldAiStatus()}
+                      >
+                        Check
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[12px] font-black text-slate-900 disabled:opacity-50"
+                        onClick={() => void runFieldAiSummary("daily_summary")}
+                        disabled={Boolean(fieldAiWorkingKey)}
+                      >
+                        Summary
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[12px] font-black text-slate-900 disabled:opacity-50"
+                        onClick={() => void runFieldAiSummary("customer_update")}
+                        disabled={Boolean(fieldAiWorkingKey)}
+                      >
+                        Customer Draft
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-2xl bg-slate-950 px-2 py-2.5 text-[12px] font-black text-white disabled:opacity-50"
+                        onClick={() => void runFieldAiSummary("alerts")}
+                        disabled={Boolean(fieldAiWorkingKey)}
+                      >
+                        Alerts
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
                 {photoShareMessage ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] font-semibold text-slate-700">
                     {photoShareMessage}
                   </div>
                 ) : null}
-                {photoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No project photos yet.</p>}
-                <div className="space-y-4">
+                {fieldAiPanel ? (
+                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[17px] font-black text-slate-950">{fieldAiPanel.title || "AI review"}</p>
+                        {fieldAiPanel.item ? (
+                          <p className="mt-0.5 truncate text-[13px] font-bold text-slate-500">
+                            {[mediaItemProjectName(fieldAiPanel.item), fieldAiPanel.item.costCenter || fieldAiPanel.item.cost_centre].filter(Boolean).join(" - ")}
+                          </p>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        className="h-9 w-9 rounded-2xl bg-slate-100 text-[18px] font-black text-slate-700"
+                        onClick={() => setFieldAiPanel(null)}
+                        aria-label="Close AI panel"
+                      >
+                        X
+                      </button>
+                    </div>
+                    {fieldAiPanel.loading ? (
+                      <p className="rounded-2xl bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">AI is reviewing documentation...</p>
+                    ) : null}
+                    {fieldAiPanel.error ? (
+                      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                        {fieldAiPanel.error}
+                      </p>
+                    ) : null}
+                    {fieldAiPanel.result?.warning ? (
+                      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
+                        {fieldAiPanel.result.warning}
+                      </p>
+                    ) : null}
+                    {fieldAiPanel.saved ? (
+                      <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] font-bold text-emerald-800">
+                        AI result saved to project_media.
+                      </p>
+                    ) : null}
+                    {fieldAiPanel.json ? (
+                      <div className="rounded-2xl bg-slate-50 p-3 text-[13px] font-semibold text-slate-700 space-y-1">
+                        {fieldAiPanel.mode === "receipt" ? (
+                          <>
+                            <p><span className="text-slate-500">Supplier:</span> {fieldAiPanel.json.supplier || "Not visible"}</p>
+                            <p><span className="text-slate-500">Total:</span> {fieldAiPanel.json.total_amount != null ? formatMoney(Number(fieldAiPanel.json.total_amount)) : "Not visible"}</p>
+                            <p><span className="text-slate-500">Category:</span> {fieldAiPanel.json.likely_category || "Other"}</p>
+                          </>
+                        ) : fieldAiPanel.mode === "tag" ? (
+                          <>
+                            <p><span className="text-slate-500">Tags:</span> {(fieldAiPanel.json.tags || []).join(", ") || "None"}</p>
+                            <p><span className="text-slate-500">Documentation:</span> {documentationTypeLabel(fieldAiPanel.json.likely_documentation_type, mediaItemMediaType(fieldAiPanel.item))}</p>
+                          </>
+                        ) : fieldAiPanel.mode === "alerts" && Array.isArray(fieldAiPanel.json.alerts) ? (
+                          fieldAiPanel.json.alerts.length > 0 ? fieldAiPanel.json.alerts.map((alert, index) => (
+                            <div key={`${alert?.title || "alert"}-${index}`} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                              <p className="font-black text-slate-950">{alert?.title || "Alert"}</p>
+                              <p className="mt-0.5 text-slate-600">{alert?.detail || ""}</p>
+                            </div>
+                          )) : <p>No documentation alerts found for this filter.</p>
+                        ) : (
+                          <pre className="max-h-52 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify(fieldAiPanel.json, null, 2)}</pre>
+                        )}
+                      </div>
+                    ) : fieldAiPanel.text ? (
+                      <div className="rounded-2xl bg-slate-50 p-3 text-[14px] font-semibold leading-snug text-slate-700 whitespace-pre-wrap">
+                        {fieldAiPanel.text}
+                      </div>
+                    ) : null}
+                    {fieldAiPanel.mode === "receipt" && fieldAiPanel.json ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
+                        onClick={() => void saveFieldAiReceiptExtraction()}
+                        disabled={fieldAiSavingKey === String(fieldAiPanel.item?.dbId || fieldAiPanel.item?.id || "")}
+                      >
+                        {fieldAiSavingKey ? "Saving..." : "Save confirmed receipt data"}
+                      </button>
+                    ) : null}
+                    {fieldAiPanel.mode === "tag" && fieldAiPanel.json ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
+                        onClick={() => void saveFieldAiTags()}
+                        disabled={fieldAiSavingKey === String(fieldAiPanel.item?.dbId || fieldAiPanel.item?.id || "")}
+                      >
+                        {fieldAiSavingKey ? "Saving..." : "Save confirmed tags"}
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                {projectDocsView === "projects" ? (
+                  <div className="space-y-3">
+                    {projectDocumentationRows.map((row) => (
+                      <div key={row.folder} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-[18px] font-black text-slate-950">{row.projectName}</p>
+                            <p className="mt-0.5 text-[13px] font-bold text-slate-500">
+                              {row.latestAt ? `Latest ${formatDate(new Date(row.latestAt), companyTimeZone)}` : "No uploads yet"}
+                            </p>
+                          </div>
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[12px] font-black text-slate-700">
+                            {row.total} items
+                          </span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-4 gap-2">
+                          {[
+                            ["Photo", row.photos],
+                            ["Video", row.videos],
+                            ["Receipt", row.receipts],
+                            ["Other", row.documents],
+                          ].map(([label, count]) => (
+                            <div key={label} className="rounded-2xl bg-slate-50 px-2 py-2 text-center">
+                              <p className="text-[16px] font-black text-slate-950">{count}</p>
+                              <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">{label}</p>
+                            </div>
+                          ))}
+                        </div>
+                        {row.employees.length > 0 ? (
+                          <p className="mt-3 truncate text-[13px] font-bold text-slate-600">
+                            Uploaded by {row.employees.slice(0, 4).join(", ")}{row.employees.length > 4 ? ` +${row.employees.length - 4}` : ""}
+                          </p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {projectDocsView === "timeline" ? (
+                  <div className="space-y-3">
+                    {projectDocumentationTimeline.map((item, index) => {
+                      const type = mediaItemMediaType(item);
+                      const url = mediaItemUrl(item);
+                      const isVideoMedia = type === "video";
+                      const isReceiptMedia = type === "receipt";
+                      const key = `${item?._itemId || mediaItemId(item, index)}-${index}`;
+                      return (
+                        <div key={key} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                          <div className="flex gap-3">
+                            <button
+                              type="button"
+                              className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-slate-100"
+                              onClick={() => {
+                                if (!isReceiptMedia) openPhotoItemInViewer(item);
+                              }}
+                            >
+                              {url ? (
+                                isVideoMedia ? (
+                                  <video src={url} className="h-full w-full object-cover bg-slate-950" muted playsInline preload="metadata" />
+                                ) : (
+                                  <img src={url} alt="" className="h-full w-full object-cover" />
+                                )
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-[12px] font-black text-slate-500">{mediaTypeLabel(type)}</span>
+                              )}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="truncate text-[16px] font-black text-slate-950">{mediaItemProjectName(item)}</p>
+                                  <p className="truncate text-[13px] font-bold text-slate-600">{item.costCenter || item.cost_centre || "No task"}</p>
+                                </div>
+                                <span className="shrink-0 rounded-full bg-slate-950 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">
+                                  {documentationTypeLabel(mediaItemDocumentationType(item), type)}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-[12px] font-bold text-slate-500">
+                                {mediaItemEmployeeName(item)} - {item.capturedAt ? formatDate(new Date(item.capturedAt), companyTimeZone) : ""}
+                              </p>
+                              {isReceiptMedia ? (
+                                <p className="mt-1 text-[13px] font-black text-slate-900">
+                                  {item.supplier || "Receipt"} {item.amount != null ? `- ${formatMoney(Number(item.amount || 0))}` : ""}
+                                </p>
+                              ) : isVideoMedia && (item.durationSeconds || item.duration_seconds) ? (
+                                <p className="mt-1 text-[13px] font-bold text-slate-600">
+                                  Duration {formatVideoDuration(item.durationSeconds || item.duration_seconds)}
+                                </p>
+                              ) : null}
+                              {aiTagsForItem(item).length > 0 ? (
+                                <p className="mt-1 truncate text-[12px] font-bold text-blue-700">
+                                  {aiTagsForItem(item).join(", ")}
+                                </p>
+                              ) : null}
+                            </div>
+                          </div>
+                          {isAdmin ? (
+                            <div className="mt-2 grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-900 disabled:opacity-50"
+                                onClick={() => void runFieldAiForMedia(item, "tag")}
+                                disabled={Boolean(fieldAiWorkingKey)}
+                              >
+                                AI Tag
+                              </button>
+                              {isReceiptMedia ? (
+                                <button
+                                  type="button"
+                                  className="rounded-2xl bg-slate-950 px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
+                                  onClick={() => void runFieldAiForMedia(item, "receipt")}
+                                  disabled={Boolean(fieldAiWorkingKey)}
+                                >
+                                  AI Read Receipt
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700"
+                                  onClick={() => openPhotoItemInViewer(item)}
+                                >
+                                  Open
+                                </button>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {projectDocumentationTotals.total === 0 && <p className="text-sm text-slate-500 text-center py-8">No project documentation yet.</p>}
+                <div className={projectDocsView === "timeline" ? "hidden" : "space-y-4"}>
                   {visiblePhotoFolders.map((folder) => {
                     const folderItems = normalizeArray(filteredProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
@@ -14714,6 +15522,16 @@ const handlePhotoQuickUpload = async (event) => {
                                 <p>{formatDate(new Date(receipt.capturedAt), companyTimeZone)}</p>
                                 {receipt.location ? (
                                   <button className="underline text-blue-700 font-semibold" onClick={() => openMap(receipt.location)}>Map</button>
+                                ) : null}
+                                {isAdmin ? (
+                                  <button
+                                    type="button"
+                                    className="mt-2 w-full rounded-2xl bg-slate-950 px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
+                                    onClick={() => void runFieldAiForMedia(receipt, "receipt")}
+                                    disabled={Boolean(fieldAiWorkingKey)}
+                                  >
+                                    AI Read Receipt
+                                  </button>
                                 ) : null}
                               </div>
                             </div>

@@ -1,33 +1,5 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-.vercel
-.env*.local
-
-# Non-OPERA files accidentally dropped into this workspace.
-# Keep these out of commits and Vercel deployments.
+# OPERA.AI deployment safety.
+# These paths are from other local experiments and must not ship with the clock app.
 census-tenant-form-2026/
 charts/
 public/audio/
