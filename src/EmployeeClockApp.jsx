@@ -233,9 +233,11 @@ function flattenClockProjectListsForSupabase(state, { userId, companyId }) {
 }
 
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
-const AUTO_CLOCK_OUT_HOURS = 24;
-const AUTO_CLOCK_OUT_MS = AUTO_CLOCK_OUT_HOURS * 60 * 60 * 1000;
+const DEFAULT_AUTO_CLOCK_OUT_TIME = "12:00";
 const AUTO_TIMED_OUT_STATUS = "Auto timed out";
+const COMPANY_SETTINGS_SELECT =
+  "id, name, code, time_zone, auto_clock_out_time, assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects";
+const COMPANY_BASE_SELECT = "id, name, code, time_zone";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
@@ -253,6 +255,54 @@ function normalizeCompanyMemberRole(role) {
 function normalizeEmploymentStatus(raw) {
   const s = raw != null ? String(raw).trim().toLowerCase() : "active";
   return s === "archived" ? "archived" : "active";
+}
+
+function normalizeAutoClockOutTime(value) {
+  const s = String(value || "").trim();
+  const match = s.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return match ? `${match[1]}:${match[2]}` : DEFAULT_AUTO_CLOCK_OUT_TIME;
+}
+
+function companySettingEnabled(value, fallback = true) {
+  if (value === false) return false;
+  if (value === true) return true;
+  if (value == null || value === "") return fallback;
+  const s = String(value).trim().toLowerCase();
+  if (["false", "0", "off", "no"].includes(s)) return false;
+  if (["true", "1", "on", "yes"].includes(s)) return true;
+  return fallback;
+}
+
+function withCompanySettingDefaults(company) {
+  if (!company) return null;
+  return {
+    ...company,
+    auto_clock_out_time: normalizeAutoClockOutTime(company.auto_clock_out_time),
+    assign_all_projects_to_all_employees: companySettingEnabled(
+      company.assign_all_projects_to_all_employees,
+      true
+    ),
+    assign_all_tasks_to_all_projects: companySettingEnabled(company.assign_all_tasks_to_all_projects, true),
+  };
+}
+
+function isMissingCompanySettingsColumnError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return (
+    msg.includes("column") &&
+    (msg.includes("auto_clock_out_time") ||
+      msg.includes("assign_all_projects_to_all_employees") ||
+      msg.includes("assign_all_tasks_to_all_projects"))
+  );
+}
+
+async function fetchCompanyWithSettings(client, queryBuilder) {
+  let { data, error } = await queryBuilder(COMPANY_SETTINGS_SELECT);
+  if (error && isMissingCompanySettingsColumnError(error)) {
+    ({ data, error } = await queryBuilder(COMPANY_BASE_SELECT));
+  }
+  if (error) throw error;
+  return withCompanySettingDefaults(data);
 }
 
 const TEAM_ADD_INITIAL_DRAFT = {
@@ -1313,6 +1363,41 @@ function isTimesheetRowActiveForLiveDashboard(record) {
   return normalizeStatus(record.status) === "active";
 }
 
+function dashboardTimesheetUserKey(record) {
+  const raw =
+    record?.userId ??
+    record?.user_id ??
+    record?.employeeId ??
+    record?.employee_id ??
+    record?.supabaseTimesheetId ??
+    record?.id;
+  return raw == null ? "" : String(raw);
+}
+
+function dashboardTimesheetActiveRangeMs(record, { isToday, currentMs }) {
+  const inMs = parseStoredInstant(record?.clockIn).getTime();
+  if (!Number.isFinite(inMs)) return null;
+  const outRaw = record?.clockOut;
+  const hasOut = outRaw != null && String(outRaw).trim() !== "";
+  if (hasOut) {
+    const outMs = parseStoredInstant(outRaw).getTime();
+    if (!Number.isFinite(outMs) || outMs <= inMs) return null;
+    return { inMs, outMs };
+  }
+  if (!isToday || !isTimesheetRowActiveForLiveDashboard(record)) return null;
+  const safeCurrentMs = Number.isFinite(Number(currentMs)) ? Number(currentMs) : Date.now();
+  const outMs = Math.max(safeCurrentMs, inMs + 60000);
+  if (outMs <= inMs) return null;
+  return { inMs, outMs };
+}
+
+function dashboardTimesheetOverlapsSlot(record, startMs, endMs, ctx) {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return false;
+  const range = dashboardTimesheetActiveRangeMs(record, ctx);
+  if (!range) return false;
+  return range.inMs < endMs && range.outMs > startMs;
+}
+
 function pickLatestActiveTimesheetForLiveDashboard(userRows) {
   const list = Array.isArray(userRows) ? userRows : [];
   const active = list.filter(isTimesheetRowActiveForLiveDashboard);
@@ -1354,16 +1439,10 @@ function teamAttendanceStatusForRecord(record, ctx) {
   const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
 
   if (st === "active" && !hasOut) {
-    if (selectedDateKey < todayKey) {
+    if (selectedDateKey && todayKey && selectedDateKey < todayKey) {
       return { label: "Missing clock-out", code: "missing_out" };
     }
-    if (authUser?.id && String(record.userId) === String(authUser.id)) {
-      if (visibleCurrentShift && isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone)) {
-        return { label: "Clocked in", code: "clocked_in" };
-      }
-      return { label: "Missing clock-out", code: "missing_out" };
-    }
-    return { label: "Clocked in", code: "clocked_in" };
+    return { label: "Working", code: "clocked_in" };
   }
   if (hasOut) {
     return { label: "Clocked out", code: "clocked_out" };
@@ -1384,6 +1463,8 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
       outDisp: "—",
       totalDisp: "—",
       labourDisp: "—",
+      totalMinutes: 0,
+      labourCost: 0,
       projectDisp,
       costDisp,
     };
@@ -1409,8 +1490,10 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
   return {
     inDisp,
     outDisp,
-    totalDisp: formatDuration(sumMin),
+    totalDisp: formatHoursDecimal(sumMin),
     labourDisp: formatMoney(sumLab),
+    totalMinutes: sumMin,
+    labourCost: sumLab,
     projectDisp,
     costDisp,
   };
@@ -1481,6 +1564,12 @@ function formatDuration(minutes) {
   return `${h}h ${m}m`;
 }
 
+function formatHoursDecimal(minutes) {
+  const raw = Number(minutes);
+  const safeMin = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  return `${(safeMin / 60).toFixed(2)}h`;
+}
+
 function formatTimer(seconds) {
   const h = Math.floor(seconds / 3600).toString().padStart(2, "0");
   const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0");
@@ -1538,35 +1627,57 @@ function computeLabourCostFromWallTimes(clockInIso, clockOutIso, hourlyRate) {
   return hours * rate;
 }
 
+function workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEndIso) {
+  const total = minutesBetween(clockInIso, clockOutIso);
+  const breakTotal =
+    breakStartIso && breakEndIso ? minutesBetween(breakStartIso, breakEndIso) : 0;
+  return Math.max(0, total - breakTotal);
+}
+
 function isAutoTimedOutStatus(status) {
   return normalizeStatus(status) === normalizeStatus(AUTO_TIMED_OUT_STATUS);
 }
 
-function isAutoClockOutDue(record, nowMs = Date.now()) {
+function autoClockOutIsoForShift(clockInIso, timeZone, autoClockOutTime) {
+  const clockInMs = new Date(clockInIso).getTime();
+  if (!Number.isFinite(clockInMs)) return null;
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const time = normalizeAutoClockOutTime(autoClockOutTime);
+  const clockInKey = calendarDateKeyInTimeZone(clockInIso, tz);
+  if (!clockInKey) return null;
+  const sameDayIso = wallDateTimeToUtcIso(clockInKey, `${time}:00`, tz);
+  const sameDayMs = sameDayIso ? new Date(sameDayIso).getTime() : NaN;
+  const dueDateKey =
+    Number.isFinite(sameDayMs) && sameDayMs > clockInMs
+      ? clockInKey
+      : addWallDaysInTimeZone(clockInKey, 1, tz);
+  return dueDateKey ? wallDateTimeToUtcIso(dueDateKey, `${time}:00`, tz) : null;
+}
+
+function isAutoClockOutDue(record, nowMs = Date.now(), timeZone = DEFAULT_COMPANY_TIME_ZONE, autoClockOutTime = DEFAULT_AUTO_CLOCK_OUT_TIME) {
   if (!record) return false;
   const hasClockOut = record.clockOut != null && String(record.clockOut).trim() !== "";
   if (hasClockOut) return false;
-  const t0 = new Date(record.clockIn).getTime();
-  return Number.isFinite(t0) && nowMs - t0 >= AUTO_CLOCK_OUT_MS;
+  const dueIso = autoClockOutIsoForShift(record.clockIn, timeZone, autoClockOutTime);
+  const dueMs = dueIso ? new Date(dueIso).getTime() : NaN;
+  return Number.isFinite(dueMs) && nowMs >= dueMs;
 }
 
 /**
  * Build Supabase timesheets update for clock-out with profile hourly_rate fallback when timesheet rate is missing/0.
  */
-async function buildTimesheetClockOutUpdate(supabase, { userId, clockInIso, clockOutIso, timesheetHourlyRate }) {
+async function buildTimesheetClockOutUpdate(supabase, { userId, clockInIso, clockOutIso, timesheetHourlyRate, breakStartIso, breakEndIso, status = "Submitted" }) {
   let rate = Number(timesheetHourlyRate);
   if (!Number.isFinite(rate) || rate <= 0) {
     const { data: prof } = await supabase.from("profiles").select("hourly_rate").eq("id", userId).maybeSingle();
     rate = hourlyRateFromProfileValue(prof?.hourly_rate);
   }
-  const labourCost = computeLabourCostFromWallTimes(clockInIso, clockOutIso, rate);
-  const t0 = new Date(clockInIso).getTime();
-  const t1 = new Date(clockOutIso).getTime();
-  const hours =
-    Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0 ? (t1 - t0) / 3600000 : 0;
+  const workedMinutes = workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEndIso);
+  const hours = workedMinutes / 60;
+  const labourCost = hours * rate;
   const update = {
     clock_out: clockOutIso,
-    status: "Submitted",
+    status,
     labour_cost: labourCost,
   };
   const rawTs = Number(timesheetHourlyRate);
@@ -2552,6 +2663,15 @@ export default function EmployeeClockApp() {
   const isAdmin = isOwner || isSupervisor;
   const isProfileArchived = normalizeEmploymentStatus(profileEmploymentStatus) === "archived";
   const companyTimeZone = userCompany?.time_zone || "America/Toronto";
+  const companyAutoClockOutTime = normalizeAutoClockOutTime(userCompany?.auto_clock_out_time);
+  const companyAssignAllProjectsToAllEmployees = companySettingEnabled(
+    userCompany?.assign_all_projects_to_all_employees,
+    true
+  );
+  const companyAssignAllTasksToAllProjects = companySettingEnabled(
+    userCompany?.assign_all_tasks_to_all_projects,
+    true
+  );
   const publicPhotoShare = useMemo(() => {
     if (typeof window === "undefined") return null;
     const raw = new URLSearchParams(window.location.search).get("photoShare");
@@ -2739,6 +2859,10 @@ export default function EmployeeClockApp() {
   const [closingShiftId, setClosingShiftId] = useState(null);
   const [settingsTzMessage, setSettingsTzMessage] = useState("");
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
+  const [settingsAutoClockOutDraft, setSettingsAutoClockOutDraft] = useState(DEFAULT_AUTO_CLOCK_OUT_TIME);
+  const [settingsAssignAllProjectsDraft, setSettingsAssignAllProjectsDraft] = useState(true);
+  const [settingsAssignAllTasksDraft, setSettingsAssignAllTasksDraft] = useState(true);
+  const [autoClockOutNotice, setAutoClockOutNotice] = useState("");
 
   const [teamRows, setTeamRows] = useState([]);
   const [teamLoading, setTeamLoading] = useState(false);
@@ -2882,7 +3006,17 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
     setSettingsCompanyNameDraft(userCompany?.name || "");
-  }, [userCompany?.id, userCompany?.time_zone, userCompany?.name]);
+    setSettingsAutoClockOutDraft(normalizeAutoClockOutTime(userCompany?.auto_clock_out_time));
+    setSettingsAssignAllProjectsDraft(companySettingEnabled(userCompany?.assign_all_projects_to_all_employees, true));
+    setSettingsAssignAllTasksDraft(companySettingEnabled(userCompany?.assign_all_tasks_to_all_projects, true));
+  }, [
+    userCompany?.id,
+    userCompany?.time_zone,
+    userCompany?.name,
+    userCompany?.auto_clock_out_time,
+    userCompany?.assign_all_projects_to_all_employees,
+    userCompany?.assign_all_tasks_to_all_projects,
+  ]);
 
   useEffect(() => {
     setSettingsProfileNameDraft((profileFullName || "").trim());
@@ -3973,6 +4107,10 @@ export default function EmployeeClockApp() {
       const res = await fetch("/api/auto-clockout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_id: userCompany.id,
+          user_id: authUser.id,
+        }),
       });
       let payload = null;
       try {
@@ -3996,12 +4134,18 @@ export default function EmployeeClockApp() {
         const currentShiftId = currentShift?.supabaseTimesheetId ?? currentShift?.id;
         const shouldClearLocalShift =
           (currentShiftId && updatedIds.has(String(currentShiftId))) ||
-          (!currentShiftId && isAutoClockOutDue(currentShift));
+          (!currentShiftId &&
+            isAutoClockOutDue(currentShift, Date.now(), companyTimeZone, companyAutoClockOutTime));
         if (shouldClearLocalShift) {
           if (watchId != null && typeof navigator !== "undefined" && navigator.geolocation) {
             navigator.geolocation.clearWatch(watchId);
             setWatchId(null);
           }
+          const autoIso = autoClockOutIsoForShift(currentShift?.clockIn, companyTimeZone, companyAutoClockOutTime);
+          const autoTimeText = autoIso ? formatTime(autoIso, companyTimeZone) : companyAutoClockOutTime;
+          setAutoClockOutNotice(
+            `You were automatically clocked out at ${autoTimeText}. If you are still working, please clock in again.`
+          );
           setCurrentShift(null);
         }
         setDashboardRefreshKey((key) => key + 1);
@@ -4017,6 +4161,8 @@ export default function EmployeeClockApp() {
     userCompany?.id,
     companyChecked,
     currentShift,
+    companyAutoClockOutTime,
+    companyTimeZone,
     watchId,
     fetchTimesheetsFromSupabase,
   ]);
@@ -4069,6 +4215,12 @@ export default function EmployeeClockApp() {
   const [projectsAddSaving, setProjectsAddSaving] = useState(false);
   const [projectsAddError, setProjectsAddError] = useState("");
   const [projectsAddSuccess, setProjectsAddSuccess] = useState("");
+  const [projectsTaskFormOpen, setProjectsTaskFormOpen] = useState(false);
+  const [projectsTaskProjectId, setProjectsTaskProjectId] = useState("");
+  const [projectsTaskName, setProjectsTaskName] = useState("");
+  const [projectsTaskSaving, setProjectsTaskSaving] = useState(false);
+  const [projectsTaskError, setProjectsTaskError] = useState("");
+  const [projectsTaskSuccess, setProjectsTaskSuccess] = useState("");
 
   const [projectsListFilter, setProjectsListFilter] = useState("active"); // active | archived | all
   const [editingProjectId, setEditingProjectId] = useState(null);
@@ -4118,14 +4270,14 @@ export default function EmployeeClockApp() {
     return costCentresByProjectId;
   }, [useProjectFallback, costCentresByProjectId]);
 
-  /** Clock tab Start Shift / Change Task: admins see all active tasks; employees see assigned centres only. */
+  /** Clock tab Start Shift / Change Task: admins see all active tasks; employees follow company assignment settings. */
   const clockCostCentreOptionsForProject = useCallback(
     (pid) => {
       const all =
         effectiveCostCentresByProjectId[String(pid)] ||
         effectiveCostCentresByProjectId[Number(pid)] ||
         [];
-      if (isAdmin) return all;
+      if (isAdmin || companyAssignAllTasksToAllProjects) return all;
       const assigned =
         employeeClockAssignedCostNamesByProjectId[String(pid)] ||
         employeeClockAssignedCostNamesByProjectId[Number(pid)] ||
@@ -4133,7 +4285,7 @@ export default function EmployeeClockApp() {
       const allSet = new Set(all);
       return assigned.filter((n) => allSet.has(n)).sort((a, b) => a.localeCompare(b));
     },
-    [isAdmin, effectiveCostCentresByProjectId, employeeClockAssignedCostNamesByProjectId]
+    [companyAssignAllTasksToAllProjects, isAdmin, effectiveCostCentresByProjectId, employeeClockAssignedCostNamesByProjectId]
   );
 
   const scheduleCostCentreOptions = useMemo(() => {
@@ -4252,16 +4404,24 @@ export default function EmployeeClockApp() {
     );
   }, []);
 
-  /** Clock tab only: employees see assigned active projects; admins see all active company projects. */
+  /** Clock tab only: employees see assigned active projects unless company setting opens all projects. */
   const clockSelectableProjects = useMemo(() => {
     if (useProjectFallback) {
       if (isAdmin) return effectiveProjects;
       return [];
     }
     if (isAdmin) return companyProjects;
+    if (companyAssignAllProjectsToAllEmployees) return companyProjects;
     const ids = new Set((employeeClockAssignedProjectIds || []).map((id) => String(id)));
     return companyProjects.filter((p) => ids.has(String(p.id)));
-  }, [useProjectFallback, isAdmin, effectiveProjects, companyProjects, employeeClockAssignedProjectIds]);
+  }, [
+    useProjectFallback,
+    isAdmin,
+    companyAssignAllProjectsToAllEmployees,
+    effectiveProjects,
+    companyProjects,
+    employeeClockAssignedProjectIds,
+  ]);
 
   const clockSelectedProject = useMemo(() => {
     const list = clockSelectableProjects;
@@ -4288,6 +4448,15 @@ export default function EmployeeClockApp() {
     const rows = Array.isArray(dashboardRows) ? dashboardRows : [];
     return rows.filter((r) => r?.employmentStatus !== "archived");
   }, [dashboardRows]);
+
+  const dashboardAttendanceByUserId = useMemo(() => {
+    const byId = {};
+    for (const row of Array.isArray(dashboardRowsForAttendance) ? dashboardRowsForAttendance : []) {
+      if (row?.userId == null) continue;
+      byId[String(row.userId)] = row;
+    }
+    return byId;
+  }, [dashboardRowsForAttendance]);
 
   const dashboardLiveLocationByUserId = useMemo(() => {
     const m = {};
@@ -4366,7 +4535,9 @@ export default function EmployeeClockApp() {
       for (const r of dashboardRowsForAttendance) {
         const uid = String(r.userId);
         const assignedIds = new Set((dashboardAssignmentsByUserId[uid] || []).map((id) => String(id)));
-        const options = effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
+        const options = companyAssignAllProjectsToAllEmployees
+          ? effectiveProjects
+          : effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
         const defPid = options[0] ? String(options[0].id) : "";
         const defCc = defPid ? ccFor(defPid)[0] || "" : "";
         if (!options.length) {
@@ -4397,26 +4568,34 @@ export default function EmployeeClockApp() {
     effectiveProjects,
     effectiveCostCentresByProjectId,
     dashboardAssignmentsByUserId,
+    companyAssignAllProjectsToAllEmployees,
   ]);
 
   const getWorkedMinutes = (record) => {
-    const total = minutesBetween(record.clockIn, record.clockOut || new Date());
+    if (record == null) return 0;
+    let clockOut = record.clockOut || null;
+    if (!clockOut) {
+      const dueIso = autoClockOutIsoForShift(record.clockIn, companyTimeZone, companyAutoClockOutTime);
+      const dueMs = dueIso ? new Date(dueIso).getTime() : NaN;
+      const nowMs = Date.now();
+      clockOut = Number.isFinite(dueMs) && nowMs >= dueMs ? dueIso : new Date(nowMs).toISOString();
+    }
+    const total = minutesBetween(record.clockIn, clockOut);
     const breakTotal = record.breakStart && record.breakEnd ? minutesBetween(record.breakStart, record.breakEnd) : 0;
     return Math.max(0, total - breakTotal);
   };
 
   const getLabourCost = (record) => {
     if (record == null) return 0;
-    const hasOut = Boolean(record.clockOut);
-    const st = normalizeStatus(record.status);
-    const closed = st === "submitted" || hasOut;
-    if (closed && record.labour_cost != null && record.labour_cost !== "") {
+    const rate = hourlyRateFromProfileValue(record.hourlyRate ?? 0);
+    const minutes = getWorkedMinutes(record);
+    const calculated = (minutes / 60) * rate;
+    if (Number.isFinite(calculated) && (rate > 0 || minutes > 0)) return calculated;
+    if (record.labour_cost != null && record.labour_cost !== "") {
       const stored = Number(record.labour_cost);
       if (Number.isFinite(stored)) return stored;
     }
-    const end = hasOut ? record.clockOut : new Date();
-    const raw = computeLabourCostFromWallTimes(record.clockIn, end, Number(record.hourlyRate ?? 0));
-    return Number.isFinite(raw) ? raw : 0;
+    return 0;
   };
 
   const isCompletedReportTimesheet = (record) => {
@@ -4452,9 +4631,11 @@ export default function EmployeeClockApp() {
     : null;
 
   const dashboardTodayWorkedCards = useMemo(() => {
-    if (!isAdmin || !dashboardViewDate) return [];
+    if (!isAdmin) return [];
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    if (!todayKey) return [];
     const ctx = {
-      selectedDateKey: dashboardViewDate,
+      selectedDateKey: todayKey,
       companyTimeZone,
       now,
       authUser,
@@ -4464,7 +4645,7 @@ export default function EmployeeClockApp() {
     for (const row of dashboardRowsForAttendance) {
       if (!row?.userId) continue;
       const uid = String(row.userId);
-      const userDayRows = dashboardDaySheets.filter((t) => String(t.userId) === uid);
+      const userDayRows = dashboardTodaySheets.filter((t) => String(t.userId) === uid);
       if (!userDayRows.length) continue;
       const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
       const att = teamAttendanceStatusForRecord(rep, ctx);
@@ -4497,9 +4678,8 @@ export default function EmployeeClockApp() {
     return cards;
   }, [
     isAdmin,
-    dashboardViewDate,
     dashboardRowsForAttendance,
-    dashboardDaySheets,
+    dashboardTodaySheets,
     companyTimeZone,
     now,
     authUser,
@@ -4510,6 +4690,38 @@ export default function EmployeeClockApp() {
     () => (dashboardTodayWorkedCards || []).filter((card) => card?.att?.code !== "clocked_in"),
     [dashboardTodayWorkedCards]
   );
+
+  const dashboardWorkedTodaySummary = useMemo(() => {
+    const cards = Array.isArray(dashboardTodayWorkedCards) ? dashboardTodayWorkedCards : [];
+    let shiftCount = 0;
+    let totalMinutes = 0;
+    let totalCost = 0;
+    for (const card of cards) {
+      shiftCount += Number(card?.shiftCount) || 0;
+      totalMinutes += Number(card?.metrics?.totalMinutes) || 0;
+      totalCost += Number(card?.metrics?.labourCost) || 0;
+    }
+    return {
+      employeeCount: cards.length,
+      shiftCount,
+      totalMinutes,
+      totalCost,
+    };
+  }, [dashboardTodayWorkedCards]);
+
+  const openDashboardTodayTimesheets = useCallback(() => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    if (todayKey) {
+      setTimesheetViewMode("day");
+      setTimesheetDateKey(todayKey);
+      setTimesheetDateFrom(todayKey);
+      setTimesheetDateTo(todayKey);
+    }
+    setActiveTab("timesheet");
+    if (typeof fetchTimesheetsFromSupabase === "function") {
+      void fetchTimesheetsFromSupabase();
+    }
+  }, [companyTimeZone, fetchTimesheetsFromSupabase]);
 
   const dashboardCoverageBars = useMemo(() => {
     if (!isAdmin || !dashboardViewDate) return [];
@@ -4568,21 +4780,21 @@ export default function EmployeeClockApp() {
       }
       const users = new Set();
       const names = [];
+      const isSelectedToday = dashboardViewDate === todayKey;
       for (const row of rows) {
-        const inMs = parseStoredInstant(row?.clockIn).getTime();
-        const outMs = row?.clockOut
-          ? parseStoredInstant(row.clockOut).getTime()
-          : dashboardViewDate === todayKey
-            ? currentMs
-            : endMs;
-        if (!Number.isFinite(inMs) || !Number.isFinite(outMs)) continue;
-        if (inMs < endMs && outMs > startMs) {
-          const uid = row?.userId ?? row?.employeeId ?? row?.user_id ?? row?.employee_id ?? row?.supabaseTimesheetId ?? row?.id;
-          const key = uid != null ? String(uid) : String(row?.supabaseTimesheetId ?? row?.id ?? names.length);
-          if (users.has(key)) continue;
-          users.add(key);
-          names.push(row?.employeeName || row?.employee || row?.profileDisplayName || shortUserLabel(uid));
-        }
+        if (!dashboardTimesheetOverlapsSlot(row, startMs, endMs, { isToday: isSelectedToday, currentMs })) continue;
+        const key = dashboardTimesheetUserKey(row);
+        const userKey = key || String(row?.supabaseTimesheetId ?? row?.id ?? names.length);
+        if (users.has(userKey)) continue;
+        users.add(userKey);
+        const attendanceRow = key ? dashboardAttendanceByUserId?.[key] : null;
+        names.push(
+          attendanceRow?.displayName ||
+            row?.employeeName ||
+            row?.employee ||
+            row?.profileDisplayName ||
+            shortUserLabel(userKey)
+        );
       }
       return {
         hour,
@@ -4602,6 +4814,7 @@ export default function EmployeeClockApp() {
     dashboardDaySheets,
     dashboardTodaySheets,
     dashboardLiveWorkingCards,
+    dashboardAttendanceByUserId,
     dashboardViewDate,
     companyTimeZone,
     now,
@@ -4895,7 +5108,9 @@ export default function EmployeeClockApp() {
   const showClockSetupRequired = useCallback(() => {
     const message =
       clockSelectableProjects.length === 0
-        ? "No projects assigned. Please contact your supervisor."
+        ? companyAssignAllProjectsToAllEmployees
+          ? "No active projects available. Please contact your supervisor."
+          : "No projects assigned. Please contact your supervisor."
         : "Select project and task first.";
     if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
     setPhotoStatus("");
@@ -4904,7 +5119,7 @@ export default function EmployeeClockApp() {
       if (latestLocationStatusRef.current === message) setLocationStatus("");
       clockSetupWarningTimerRef.current = null;
     }, 5000);
-  }, [clockSelectableProjects.length]);
+  }, [clockSelectableProjects.length, companyAssignAllProjectsToAllEmployees]);
 
   const refreshClockLocationPermission = useCallback(async () => {
     const state = await readGeolocationPermissionState();
@@ -5479,8 +5694,10 @@ export default function EmployeeClockApp() {
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "projects") setActiveTab("clock");
-  }, [isAdmin, activeTab]);
+    if (!isAdmin && activeTab === "projects" && !companyAssignAllProjectsToAllEmployees) {
+      setActiveTab("clock");
+    }
+  }, [companyAssignAllProjectsToAllEmployees, isAdmin, activeTab]);
 
   useEffect(() => {
     if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
@@ -5778,6 +5995,20 @@ export default function EmployeeClockApp() {
       setEmployeeClockAssignedCostNamesByProjectId({});
       return;
     }
+    const allProjectIds = (companyProjects || []).map((p) => p?.id).filter(Boolean);
+    const allTaskNamesByProject = {};
+    for (const pid of allProjectIds) {
+      const names =
+        effectiveCostCentresByProjectId[String(pid)] ||
+        effectiveCostCentresByProjectId[Number(pid)] ||
+        [];
+      allTaskNamesByProject[String(pid)] = [...new Set(names)].sort((a, b) => a.localeCompare(b));
+    }
+    if (companyAssignAllProjectsToAllEmployees && companyAssignAllTasksToAllProjects) {
+      setEmployeeClockAssignedProjectIds(allProjectIds);
+      setEmployeeClockAssignedCostNamesByProjectId(allTaskNamesByProject);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const { data, error } = await supabase
@@ -5792,7 +6023,18 @@ export default function EmployeeClockApp() {
         setEmployeeClockAssignedCostNamesByProjectId({});
         return;
       }
-      setEmployeeClockAssignedProjectIds((data || []).map((r) => r.project_id).filter(Boolean));
+      const assignedProjectIds = (data || []).map((r) => r.project_id).filter(Boolean);
+      setEmployeeClockAssignedProjectIds(companyAssignAllProjectsToAllEmployees ? allProjectIds : assignedProjectIds);
+
+      if (companyAssignAllTasksToAllProjects) {
+        const visibleProjectIds = companyAssignAllProjectsToAllEmployees ? allProjectIds : assignedProjectIds;
+        const byProject = {};
+        for (const pid of visibleProjectIds) {
+          byProject[String(pid)] = allTaskNamesByProject[String(pid)] || [];
+        }
+        setEmployeeClockAssignedCostNamesByProjectId(byProject);
+        return;
+      }
 
       const { data: pccaRows, error: pccaErr } = await supabase
         .from("project_cost_centre_assignments")
@@ -5839,10 +6081,26 @@ export default function EmployeeClockApp() {
     return () => {
       cancelled = true;
     };
-  }, [userCompany?.id, authUser?.id, isAdmin, companyProjectsRefreshKey, projectsScreenRefreshKey]);
+  }, [
+    userCompany?.id,
+    authUser?.id,
+    isAdmin,
+    companyAssignAllProjectsToAllEmployees,
+    companyAssignAllTasksToAllProjects,
+    companyProjects,
+    effectiveCostCentresByProjectId,
+    companyProjectsRefreshKey,
+    projectsScreenRefreshKey,
+  ]);
 
   useEffect(() => {
-    if (activeTab !== "projects" || !isAdmin || !userCompany?.id) return;
+    if (
+      activeTab !== "projects" ||
+      (!isAdmin && !companyAssignAllProjectsToAllEmployees) ||
+      !userCompany?.id
+    ) {
+      return;
+    }
 
     let cancelled = false;
 
@@ -5882,6 +6140,19 @@ export default function EmployeeClockApp() {
             name: c.name,
             status: c.status,
           });
+        }
+
+        if (!isAdmin) {
+          if (!cancelled) {
+            setProjectsScreenRows(
+              projectList.map((p) => ({
+                ...p,
+                costCentres: byProjectId[String(p.id)] || [],
+                assignedSummaries: [],
+              }))
+            );
+          }
+          return;
         }
 
         const { data: pas, error: pasErr } = await supabase
@@ -5975,7 +6246,7 @@ export default function EmployeeClockApp() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, userCompany?.id, projectsScreenRefreshKey]);
+  }, [activeTab, isAdmin, companyAssignAllProjectsToAllEmployees, userCompany?.id, projectsScreenRefreshKey]);
 
   useEffect(() => {
     // Keep manual Clock selections valid without auto-selecting a job for the user.
@@ -6287,17 +6558,17 @@ export default function EmployeeClockApp() {
           return;
         }
 
-        const { data: company, error: companyError } = await withTimeout(
-          supabase
-            .from("companies")
-            .select("id, name, code, time_zone")
-            .eq("id", member.company_id)
-            .single(),
+        const company = await withTimeout(
+          fetchCompanyWithSettings(supabase, (selectCols) =>
+            supabase
+              .from("companies")
+              .select(selectCols)
+              .eq("id", member.company_id)
+              .single()
+          ),
           12000,
           "Company fetch timed out"
         );
-
-        if (companyError) throw companyError;
 
         setUserCompany(company || null);
         setUserCompanyRole(normalizeCompanyMemberRole(member.role));
@@ -6533,13 +6804,13 @@ export default function EmployeeClockApp() {
         if (memberError) throw memberError;
 
         if (member?.company_id) {
-          const { data: company, error: companyError } = await supabase
-            .from("companies")
-            .select("id, name, code, time_zone")
-            .eq("id", member.company_id)
-            .single();
-
-          if (companyError) throw companyError;
+          const company = await fetchCompanyWithSettings(supabase, (selectCols) =>
+            supabase
+              .from("companies")
+              .select(selectCols)
+              .eq("id", member.company_id)
+              .single()
+          );
 
           setUserCompany(company || null);
           setUserCompanyRole(normalizeCompanyMemberRole(member.role));
@@ -6707,7 +6978,7 @@ export default function EmployeeClockApp() {
         const { data, error } = await supabase
           .from("companies")
           .insert([{ name, code, created_by: uid, time_zone: DEFAULT_COMPANY_TIME_ZONE }])
-          .select("id, name, code, time_zone")
+          .select(COMPANY_BASE_SELECT)
           .single();
 
         if (!error && data) {
@@ -6739,7 +7010,7 @@ export default function EmployeeClockApp() {
       );
       setAuthRole("supervisor");
 
-      setUserCompany(created);
+          setUserCompany(withCompanySettingDefaults(created));
       setUserCompanyRole("owner");
       setCompanyChecked(true);
       setActiveTab("dashboard");
@@ -6767,14 +7038,17 @@ export default function EmployeeClockApp() {
         return;
       }
 
-      const { data: company, error: companyError } = await supabase
-        .from("companies")
-        .select("id, name, code, time_zone")
-        .eq("code", code)
-        .single();
-
-      if (companyError) {
-        setCompanyError(companyError.message);
+      let company = null;
+      try {
+        company = await fetchCompanyWithSettings(supabase, (selectCols) =>
+          supabase
+            .from("companies")
+            .select(selectCols)
+            .eq("code", code)
+            .single()
+        );
+      } catch (companyError) {
+        setCompanyError(getErrorMessage(companyError));
         setCompanyLoading(false);
         return;
       }
@@ -6908,10 +7182,18 @@ export default function EmployeeClockApp() {
         setProjectEditDraft(null);
         setAssignmentsManageProjectId(null);
         setProjectsAddFormOpen(true);
+        setProjectsTaskFormOpen(false);
+      } else {
+        setEditingProjectId(null);
+        setProjectEditDraft(null);
+        setAssignmentsManageProjectId(null);
+        setProjectsAddFormOpen(false);
+        setProjectsTaskFormOpen(true);
+        setProjectsTaskProjectId(String(projectId || clockSelectedProject?.id || ""));
       }
       setActiveTab("projects");
     },
-    [isAdmin]
+    [clockSelectedProject?.id, isAdmin, projectId]
   );
 
   const fetchCompanyDefaultCostCentreNames = async (companyId) => {
@@ -7045,12 +7327,14 @@ export default function EmployeeClockApp() {
       createdCentres = insertedCentres || [];
     }
 
-    await assignNewProjectToActiveMembers({
-      companyId,
-      projectId: created.id,
-      costCentreRows: createdCentres,
-      assignedBy: userId,
-    });
+    if (companyAssignAllProjectsToAllEmployees) {
+      await assignNewProjectToActiveMembers({
+        companyId,
+        projectId: created.id,
+        costCentreRows: companyAssignAllTasksToAllProjects ? createdCentres : [],
+        assignedBy: userId,
+      });
+    }
 
     return created;
   };
@@ -7096,6 +7380,96 @@ export default function EmployeeClockApp() {
     setProjectsAddCostCentres("");
     setProjectsAddError("");
     setProjectsAddSuccess("");
+  };
+
+  const cancelProjectsTaskForm = () => {
+    setProjectsTaskFormOpen(false);
+    setProjectsTaskProjectId("");
+    setProjectsTaskName("");
+    setProjectsTaskError("");
+    setProjectsTaskSuccess("");
+    setProjectsTaskSaving(false);
+  };
+
+  const handleProjectsScreenSaveNewTask = async (event) => {
+    event.preventDefault();
+    if (!authUser?.id || !userCompany?.id) {
+      setProjectsTaskError("Company/user missing. Please logout and login again.");
+      return;
+    }
+    if (!isAdmin) return;
+
+    const taskName = String(projectsTaskName || "").trim();
+    if (!taskName) {
+      setProjectsTaskError("Task name is required.");
+      return;
+    }
+
+    const activeProjects = (companyProjects || []).filter((project) => project?.id != null);
+    const targetProjectIds = companyAssignAllTasksToAllProjects
+      ? activeProjects.map((project) => project.id)
+      : [projectsTaskProjectId].filter(Boolean);
+
+    if (targetProjectIds.length === 0) {
+      setProjectsTaskError(
+        companyAssignAllTasksToAllProjects
+          ? "Add an active project before adding a task."
+          : "Choose a project for this task."
+      );
+      return;
+    }
+
+    setProjectsTaskSaving(true);
+    setProjectsTaskError("");
+    setProjectsTaskSuccess("");
+    setProjectsAddSuccess("");
+    setProjectsEditSuccess("");
+    setAssignmentsSuccess("");
+    try {
+      const { data: existingRows, error: existingError } = await supabase
+        .from("cost_centres")
+        .select("project_id, name, status")
+        .eq("company_id", userCompany.id)
+        .in("project_id", targetProjectIds);
+      if (existingError) throw existingError;
+
+      const wantedNameKey = taskName.toLowerCase();
+      const existingActive = new Set(
+        (existingRows || [])
+          .filter((row) => String(row?.status || "active").toLowerCase() !== "archived")
+          .map((row) => `${String(row.project_id)}::${String(row.name || "").trim().toLowerCase()}`)
+      );
+      const rows = targetProjectIds
+        .filter((projectId) => !existingActive.has(`${String(projectId)}::${wantedNameKey}`))
+        .map((projectId, index) => ({
+          company_id: userCompany.id,
+          project_id: projectId,
+          name: taskName,
+          status: "active",
+          display_order: 1000 + index,
+          created_by: authUser.id,
+        }));
+
+      if (rows.length > 0) {
+        const { error: insertError } = await supabase.from("cost_centres").insert(rows);
+        if (insertError) throw insertError;
+      }
+
+      setProjectsTaskName("");
+      setProjectsTaskProjectId("");
+      setProjectsTaskFormOpen(false);
+      setCompanyProjectsRefreshKey((key) => key + 1);
+      setProjectsScreenRefreshKey((key) => key + 1);
+      setProjectsTaskSuccess(
+        rows.length > 0
+          ? `Task added to ${rows.length} project${rows.length === 1 ? "" : "s"}.`
+          : "Task already exists for the selected project."
+      );
+    } catch (err) {
+      setProjectsTaskError(getErrorMessage(err));
+    } finally {
+      setProjectsTaskSaving(false);
+    }
   };
 
   const handleProjectsScreenSaveNewProject = async (event) => {
@@ -7145,6 +7519,9 @@ export default function EmployeeClockApp() {
     setAssignmentsSuccess("");
     setProjectEditError("");
     setProjectsAddFormOpen(false);
+    setProjectsTaskFormOpen(false);
+    setProjectsTaskError("");
+    setProjectsTaskSuccess("");
     setAssignmentsManageProjectId(null);
     setAssignmentsEditorMembers([]);
     setAssignmentsEditorChecks({});
@@ -9258,6 +9635,8 @@ const handlePhotoQuickUpload = async (event) => {
         clockInIso: visibleCurrentShift.clockIn,
         clockOutIso: clockOutTime,
         timesheetHourlyRate: visibleCurrentShift.hourlyRate,
+        breakStartIso: visibleCurrentShift.breakStart,
+        breakEndIso: visibleCurrentShift.breakEnd,
       });
       console.log("[LABOUR] clockOut", {
         clockIn: labourDebug.clockInIso,
@@ -9553,6 +9932,8 @@ const handlePhotoQuickUpload = async (event) => {
       clockInIso: rep.clockIn,
       clockOutIso: clockOutTime,
       timesheetHourlyRate: rep.hourlyRate,
+      breakStartIso: rep.breakStart,
+      breakEndIso: rep.breakEnd,
     });
     console.log("[LABOUR] clockOut", {
       clockIn: labourDebug.clockInIso,
@@ -9690,6 +10071,8 @@ const handlePhotoQuickUpload = async (event) => {
         clockInIso,
         clockOutIso,
         timesheetHourlyRate: record.hourlyRate,
+        breakStartIso: record.breakStart,
+        breakEndIso: record.breakEnd,
       });
       const { error } = await supabase
         .from("timesheets")
@@ -10283,6 +10666,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const openMenuTab = (tabName) => {
     const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
+    if (companyAssignAllProjectsToAllEmployees) employeeAllowedTabs.add("projects");
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
       setIsMenuOpen(false);
@@ -11767,14 +12151,48 @@ const handlePhotoQuickUpload = async (event) => {
     setSettingsTzSaving(true);
     setSettingsTzMessage("");
     try {
-      const { error } = await supabase
+      const payload = {
+        name: nameDraft,
+        time_zone: settingsTzDraft,
+        auto_clock_out_time: normalizeAutoClockOutTime(settingsAutoClockOutDraft),
+        assign_all_projects_to_all_employees: Boolean(settingsAssignAllProjectsDraft),
+        assign_all_tasks_to_all_projects: Boolean(settingsAssignAllTasksDraft),
+      };
+      let { error } = await supabase
         .from("companies")
-        .update({ name: nameDraft, time_zone: settingsTzDraft })
+        .update(payload)
         .eq("id", userCompany.id);
+      let savedSettings = true;
+      if (error && isMissingCompanySettingsColumnError(error)) {
+        savedSettings = false;
+        ({ error } = await supabase
+          .from("companies")
+          .update({ name: nameDraft, time_zone: settingsTzDraft })
+          .eq("id", userCompany.id));
+      }
       if (error) throw error;
-      setUserCompany((prev) => (prev ? { ...prev, name: nameDraft, time_zone: settingsTzDraft } : prev));
+      setUserCompany((prev) =>
+        prev
+          ? withCompanySettingDefaults({
+              ...prev,
+              name: nameDraft,
+              time_zone: settingsTzDraft,
+              ...(savedSettings
+                ? {
+                    auto_clock_out_time: payload.auto_clock_out_time,
+                    assign_all_projects_to_all_employees: payload.assign_all_projects_to_all_employees,
+                    assign_all_tasks_to_all_projects: payload.assign_all_tasks_to_all_projects,
+                  }
+                : {}),
+            })
+          : prev
+      );
       setSettingsCompanyEditOpen(false);
-      setSettingsTzMessage("Company profile saved.");
+      setSettingsTzMessage(
+        savedSettings
+          ? "Company profile saved."
+          : "Company profile saved. Run the B.1-fix-2 company settings SQL to save auto clock-out and assignment toggles."
+      );
     } catch (err) {
       setSettingsTzMessage(getErrorMessage(err));
     } finally {
@@ -12039,8 +12457,10 @@ const handlePhotoQuickUpload = async (event) => {
     let showCloseShift = false;
 
     if (st === "active" && !record.clockOut) {
-      if (isLiveOpen) {
-        outText = "Still clocked in";
+      const rowDateKey = calendarDateKeyInTimeZone(record.clockIn, companyTimeZone);
+      const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+      if (isLiveOpen || (rowDateKey && todayKey && rowDateKey >= todayKey)) {
+        outText = "Working";
       } else {
         outText = "Missing clock-out";
         outClass = "font-semibold text-amber-700";
@@ -12095,7 +12515,7 @@ const handlePhotoQuickUpload = async (event) => {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mt-3 text-[13px] text-slate-600">
-        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Hours</p><p className="font-black text-slate-900 leading-tight">{formatDuration(getWorkedMinutes(record))}</p></div>
+        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Hours</p><p className="font-black text-slate-900 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p></div>
         <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Rate</p><p className="font-black text-slate-900 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p></div>
         <div className="rounded-2xl bg-slate-50 p-2">
           <p className="font-black uppercase text-[10px]">Cost</p>
@@ -12247,7 +12667,7 @@ const handlePhotoQuickUpload = async (event) => {
           )}
           {autoTimedOut && (
             <p className="mt-1 text-[13px] font-semibold text-amber-700">
-              Auto timed out after 24 hours.
+              Auto clock-out applied.
             </p>
           )}
           {showCloseShift && (
@@ -13907,6 +14327,21 @@ const handlePhotoQuickUpload = async (event) => {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+          ) : null}
+
+          {autoClockOutNotice ? (
+            <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-[14px] font-bold leading-snug text-amber-900 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <span>{autoClockOutNotice}</span>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-xl border border-amber-200 bg-white px-2 py-1 text-[12px] font-black text-amber-900"
+                  onClick={() => setAutoClockOutNotice("")}
+                >
+                  OK
+                </button>
               </div>
             </div>
           ) : null}
@@ -16076,7 +16511,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-sky-500" />
                       <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team hours</p>
                       <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
-                        {formatDuration(dashboardSummary.totalMinutes)}
+                        {formatHoursDecimal(dashboardSummary.totalMinutes)}
                       </p>
                       <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
                     </div>
@@ -16334,31 +16769,81 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Today</p>
                         <h3 className="mt-1 text-[19px] font-black text-slate-950">Worked today</h3>
                       </div>
-                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
-                        {dashboardTodayWorkedCards.length}
-                      </p>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700 active:scale-[0.98]"
+                        onClick={openDashboardTodayTimesheets}
+                      >
+                        View timesheets
+                      </button>
                     </div>
+                    <button
+                      type="button"
+                      className="mb-3 grid w-full grid-cols-3 gap-2 text-left"
+                      onClick={openDashboardTodayTimesheets}
+                      aria-label="Open today's timesheet details"
+                    >
+                      <span className="rounded-[20px] bg-slate-950 px-3 py-3 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]">
+                        <span className="block text-[9px] font-black uppercase tracking-wide text-slate-300">Employees</span>
+                        <span className="mt-1 block text-[22px] font-black tabular-nums leading-none">
+                          {dashboardWorkedTodaySummary.employeeCount}
+                        </span>
+                      </span>
+                      <span className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3">
+                        <span className="block text-[9px] font-black uppercase tracking-wide text-slate-500">Entries</span>
+                        <span className="mt-1 block text-[22px] font-black tabular-nums leading-none text-slate-950">
+                          {dashboardWorkedTodaySummary.shiftCount}
+                        </span>
+                      </span>
+                      <span className="rounded-[20px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                        <span className="block text-[9px] font-black uppercase tracking-wide text-emerald-700">Labour</span>
+                        <span className="mt-1 block text-[clamp(14px,3.8vw,18px)] font-black tabular-nums leading-none text-slate-950">
+                          {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
+                        </span>
+                      </span>
+                    </button>
                     {dashboardTodayWorkedCards.length === 0 ? (
                       <p className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-[15px] font-bold text-slate-600">
-                        No one has worked today yet.
+                        No timesheets for today yet.
                       </p>
                     ) : (
                       <div className="space-y-2.5">
-                        {dashboardTodayWorkedCards.slice(0, 8).map((card) => (
-                          <div key={`premium-worked-${card.uid}`} className="rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="text-[15px] font-black text-slate-950 break-words">{card.displayName}</p>
-                                <p className="mt-0.5 text-[12px] font-bold text-slate-500 break-words">
-                                  {[card.metrics.projectDisp, card.metrics.costDisp].filter(Boolean).join(" - ")}
+                        {dashboardTodayWorkedCards.slice(0, 8).map((card) => {
+                          const statusText =
+                            card.att?.code === "clocked_in"
+                              ? "Working"
+                              : card.att?.code === "missing_out"
+                                ? "Missing out"
+                                : "Clocked out";
+                          return (
+                            <button
+                              key={`premium-worked-${card.uid}`}
+                              type="button"
+                              className="w-full rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3 text-left active:scale-[0.99]"
+                              onClick={openDashboardTodayTimesheets}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[15px] font-black text-slate-950 break-words">{card.displayName}</p>
+                                  <p className="mt-0.5 text-[12px] font-bold text-slate-500 break-words">
+                                    {[card.metrics.projectDisp, card.metrics.costDisp].filter(Boolean).join(" - ")}
+                                  </p>
+                                </div>
+                                <p className="shrink-0 text-right text-[13px] font-black tabular-nums text-slate-950">
+                                  {card.metrics.totalDisp}
                                 </p>
                               </div>
-                              <p className="shrink-0 text-right text-[13px] font-black tabular-nums text-slate-950">
-                                {card.metrics.totalDisp}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
+                              <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] font-black text-slate-700">
+                                <span className="rounded-2xl bg-white px-3 py-2 shadow-sm">
+                                  {card.metrics.inDisp} - {card.metrics.outDisp}
+                                </span>
+                                <span className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm">
+                                  {statusText} - {card.metrics.labourDisp}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </section>
@@ -16424,7 +16909,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
                         <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Today hours</p>
                         <p className="text-[clamp(15px,4vw,19px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
-                          {formatDuration(dashboardSummary.totalMinutes)}
+                          {formatHoursDecimal(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
@@ -16568,7 +17053,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {dashboardTodayWorkedCards.map((card) => {
                             const statusText =
                               card.att?.code === "clocked_in"
-                                ? "Clocked in"
+                                ? "Working"
                                 : card.att?.code === "missing_out"
                                   ? "Missing out"
                                   : "Clocked out";
@@ -16654,7 +17139,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                         <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Total Hours</p>
                         <p className="text-[20px] font-bold text-slate-900 tabular-nums leading-tight">
-                          {formatDuration(dashboardSummary.totalMinutes)}
+                          {formatHoursDecimal(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
@@ -19709,7 +20194,7 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {activeTab === "projects" && isAdmin && (
+          {activeTab === "projects" && (isAdmin || companyAssignAllProjectsToAllEmployees) && (
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
@@ -19717,27 +20202,64 @@ const handlePhotoQuickUpload = async (event) => {
                     <h2 className="font-black text-[23px] leading-tight text-slate-950">Projects</h2>
                     <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and tasks</p>
                   </div>
-                  {!projectsAddFormOpen && (
-                    <Button
-                      type="button"
-                      className="shrink-0 rounded-2xl h-10 px-3 text-[13px] font-black"
-                      onClick={() => {
-                        setProjectsEditSuccess("");
-                        setEditingProjectId(null);
-                        setProjectEditDraft(null);
-                        setProjectEditError("");
-                        setProjectsAddSuccess("");
-                        setProjectsAddError("");
-                        setAssignmentsManageProjectId(null);
-                        setAssignmentsEditorMembers([]);
-                        setAssignmentsEditorChecks({});
-                        setAssignmentsEditorError("");
-                        setAssignmentsSuccess("");
-                        setProjectsAddFormOpen(true);
-                      }}
-                    >
-                      Add Project
-                    </Button>
+                  {isAdmin && (
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      {!projectsAddFormOpen && (
+                        <Button
+                          type="button"
+                          className="rounded-2xl h-10 px-3 text-[13px] font-black"
+                          onClick={() => {
+                            setProjectsEditSuccess("");
+                            setEditingProjectId(null);
+                            setProjectEditDraft(null);
+                            setProjectEditError("");
+                            setProjectsAddSuccess("");
+                            setProjectsAddError("");
+                            setProjectsTaskSuccess("");
+                            setProjectsTaskError("");
+                            setProjectsTaskFormOpen(false);
+                            setAssignmentsManageProjectId(null);
+                            setAssignmentsEditorMembers([]);
+                            setAssignmentsEditorChecks({});
+                            setAssignmentsEditorError("");
+                            setAssignmentsSuccess("");
+                            setProjectsAddFormOpen(true);
+                          }}
+                        >
+                          Add Project
+                        </Button>
+                      )}
+                      {!projectsTaskFormOpen && (
+                        <Button
+                          type="button"
+                          className="rounded-2xl h-10 px-3 text-[13px] font-black !bg-white !text-slate-950 border border-slate-300"
+                          onClick={() => {
+                            setProjectsEditSuccess("");
+                            setEditingProjectId(null);
+                            setProjectEditDraft(null);
+                            setProjectEditError("");
+                            setProjectsAddSuccess("");
+                            setProjectsAddError("");
+                            setProjectsAddFormOpen(false);
+                            setProjectsTaskSuccess("");
+                            setProjectsTaskError("");
+                            setAssignmentsManageProjectId(null);
+                            setAssignmentsEditorMembers([]);
+                            setAssignmentsEditorChecks({});
+                            setAssignmentsEditorError("");
+                            setAssignmentsSuccess("");
+                            setProjectsTaskProjectId(
+                              companyAssignAllTasksToAllProjects
+                                ? ""
+                                : String(displayedProjectsScreenRows.find((p) => String(p.status || "active").toLowerCase() !== "archived")?.id || "")
+                            );
+                            setProjectsTaskFormOpen(true);
+                          }}
+                        >
+                          Add Task
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
                 {projectsAddFormOpen && (
@@ -19803,6 +20325,82 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </form>
                 )}
+                {projectsTaskFormOpen && isAdmin && (
+                  <form
+                    onSubmit={(e) => void handleProjectsScreenSaveNewTask(e)}
+                    className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2.5 shadow-sm"
+                  >
+                    <p className="text-xs font-semibold text-slate-800">New task</p>
+                    {!companyAssignAllTasksToAllProjects ? (
+                      <div className="space-y-1">
+                        <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-task-project">
+                          Project
+                        </label>
+                        <select
+                          id="projects-task-project"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                          value={projectsTaskProjectId}
+                          onChange={(e) => setProjectsTaskProjectId(e.target.value)}
+                          disabled={projectsTaskSaving}
+                          required
+                        >
+                          <option value="">Select project</option>
+                          {(companyProjects || []).map((project) => (
+                            <option key={String(project.id)} value={String(project.id)}>
+                              {project.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
+                        Company setting is ON, so this task will be available under every active project.
+                      </div>
+                    )}
+                    <div className="space-y-1">
+                      <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-task-name">
+                        Task name
+                      </label>
+                      <input
+                        id="projects-task-name"
+                        type="text"
+                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                        value={projectsTaskName}
+                        onChange={(e) => setProjectsTaskName(e.target.value)}
+                        placeholder="e.g. Framing"
+                        disabled={projectsTaskSaving}
+                        required
+                      />
+                    </div>
+                    {projectsTaskError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                        {projectsTaskError}
+                      </div>
+                    )}
+                    <div className="flex gap-2 pt-0.5">
+                      <Button
+                        type="submit"
+                        className="flex-1 rounded-lg h-9 text-xs font-semibold"
+                        disabled={projectsTaskSaving}
+                      >
+                        {projectsTaskSaving ? "Saving..." : "Save Task"}
+                      </Button>
+                      <Button
+                        type="button"
+                        className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                        disabled={projectsTaskSaving}
+                        onClick={cancelProjectsTaskForm}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                )}
+                {projectsTaskSuccess && (
+                  <div className="rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
+                    {projectsTaskSuccess}
+                  </div>
+                )}
                 {projectsAddSuccess && (
                   <div className="rounded-2xl border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-900">
                     {projectsAddSuccess}
@@ -19838,6 +20436,8 @@ const handlePhotoQuickUpload = async (event) => {
                         disabled={
                           Boolean(projectEditSaving) ||
                           Boolean(projectsAddSaving) ||
+                          Boolean(projectsTaskSaving) ||
+                          projectsTaskFormOpen ||
                           Boolean(assignmentsEditorSaving)
                         }
                       >
@@ -20063,21 +20663,25 @@ const handlePhotoQuickUpload = async (event) => {
                                       ? String(proj.status).replace(/_/g, " ")
                                       : "—"}
                                   </span>
-                                  <Button
-                                    type="button"
-                                    className="rounded-lg h-8 px-2.5 text-[11px] font-semibold"
-                                    disabled={
-                                      Boolean(projectsAddSaving) ||
-                                      Boolean(projectEditSaving) ||
-                                      projectsAddFormOpen ||
-                                      assignmentsManageProjectId != null ||
-                                      (editingProjectId != null &&
-                                        String(editingProjectId) !== String(proj.id))
-                                    }
-                                    onClick={() => beginProjectEdit(proj)}
-                                  >
-                                    Edit
-                                  </Button>
+                                  {isAdmin ? (
+                                    <Button
+                                      type="button"
+                                      className="rounded-lg h-8 px-2.5 text-[11px] font-semibold"
+                                      disabled={
+                                        Boolean(projectsAddSaving) ||
+                                        Boolean(projectsTaskSaving) ||
+                                        Boolean(projectEditSaving) ||
+                                        projectsAddFormOpen ||
+                                        projectsTaskFormOpen ||
+                                        assignmentsManageProjectId != null ||
+                                        (editingProjectId != null &&
+                                          String(editingProjectId) !== String(proj.id))
+                                      }
+                                      onClick={() => beginProjectEdit(proj)}
+                                    >
+                                      Edit
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </div>
                               <div className="border-t border-slate-100 pt-2 space-y-1">
@@ -20106,7 +20710,14 @@ const handlePhotoQuickUpload = async (event) => {
                                   </ul>
                                 )}
                               </div>
-                              <div className="border-t border-slate-100 pt-2 space-y-2">
+                              {companyAssignAllProjectsToAllEmployees ? (
+                                <div className="border-t border-slate-100 pt-2">
+                                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
+                                    All employees can see and use this project.
+                                  </div>
+                                </div>
+                              ) : null}
+                              <div className={`border-t border-slate-100 pt-2 space-y-2 ${companyAssignAllProjectsToAllEmployees ? "hidden" : ""}`}>
                                 <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
                                   <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
                                     Assigned employees
@@ -20116,8 +20727,10 @@ const handlePhotoQuickUpload = async (event) => {
                                     className="shrink-0 rounded-lg h-8 px-2.5 text-[11px] font-semibold"
                                     disabled={
                                       Boolean(projectsAddSaving) ||
+                                      Boolean(projectsTaskSaving) ||
                                       Boolean(projectEditSaving) ||
                                       projectsAddFormOpen ||
+                                      projectsTaskFormOpen ||
                                       Boolean(assignmentsEditorSaving) ||
                                       Boolean(assignmentsEditorLoading) ||
                                       editingProjectId != null ||
@@ -20148,7 +20761,8 @@ const handlePhotoQuickUpload = async (event) => {
                                   </ul>
                                 )}
                               </div>
-                              {assignmentsManageProjectId != null &&
+                              {!companyAssignAllProjectsToAllEmployees &&
+                                assignmentsManageProjectId != null &&
                                 String(assignmentsManageProjectId) === String(proj.id) && (
                                   <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 space-y-2.5">
                                     <p className="text-xs font-semibold text-slate-900">Assignment editor</p>
@@ -20161,6 +20775,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             const uid = String(m.userId);
                                             const projectAssigned = Boolean(assignmentsEditorChecks[uid]);
                                             const anyCcChecked =
+                                              companyAssignAllTasksToAllProjects ||
                                               assignmentsEditorCostCentres.some((cc) =>
                                                 Boolean(assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)])
                                               );
@@ -20201,7 +20816,12 @@ const handlePhotoQuickUpload = async (event) => {
                                                     </span>
                                                   </span>
                                                 </label>
-                                                {projectAssigned && assignmentsEditorCostCentres.length > 0 && (
+                                                {projectAssigned && companyAssignAllTasksToAllProjects && (
+                                                  <p className="text-[10px] text-blue-950 leading-snug pl-6">
+                                                    All active tasks are available for this project.
+                                                  </p>
+                                                )}
+                                                {projectAssigned && !companyAssignAllTasksToAllProjects && assignmentsEditorCostCentres.length > 0 && (
                                                   <div className="pl-6 space-y-1.5 border-t border-slate-100 pt-2">
                                                     <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
                                                       Tasks
@@ -20232,6 +20852,7 @@ const handlePhotoQuickUpload = async (event) => {
                                                   </div>
                                                 )}
                                                 {projectAssigned &&
+                                                  !companyAssignAllTasksToAllProjects &&
                                                   assignmentsEditorCostCentres.length > 0 &&
                                                   !anyCcChecked && (
                                                     <p className="text-[10px] text-amber-800 leading-snug pl-6">
@@ -20937,6 +21558,43 @@ const handlePhotoQuickUpload = async (event) => {
                           ))}
                         </select>
                       </label>
+                      <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                        Auto clock-out time
+                        <input
+                          type="time"
+                          className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                          value={settingsAutoClockOutDraft}
+                          onChange={(e) => setSettingsAutoClockOutDraft(normalizeAutoClockOutTime(e.target.value))}
+                        />
+                      </label>
+                      <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[14px] font-bold text-slate-900">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                          checked={settingsAssignAllProjectsDraft}
+                          onChange={(e) => setSettingsAssignAllProjectsDraft(e.target.checked)}
+                        />
+                        <span>
+                          <span className="block">Assign all projects to all employees</span>
+                          <span className="block pt-0.5 text-[12px] font-semibold text-slate-500">
+                            When ON, employees can select every active company project.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[14px] font-bold text-slate-900">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                          checked={settingsAssignAllTasksDraft}
+                          onChange={(e) => setSettingsAssignAllTasksDraft(e.target.checked)}
+                        />
+                        <span>
+                          <span className="block">Assign all tasks to all projects</span>
+                          <span className="block pt-0.5 text-[12px] font-semibold text-slate-500">
+                            When ON, every active task is available under every project.
+                          </span>
+                        </span>
+                      </label>
                       {settingsTzMessage && (
                         <div
                           className={`rounded-2xl border p-3 text-xs ${
@@ -20961,6 +21619,22 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Time zone</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">{companyTimeZone}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Auto clock-out</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{companyAutoClockOutTime}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Projects</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                          {companyAssignAllProjectsToAllEmployees ? "All employees" : "Manual assignment"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Tasks</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                          {companyAssignAllTasksToAllProjects ? "All projects" : "Manual assignment"}
+                        </span>
                       </div>
                       {isAdmin ? (
                         <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">

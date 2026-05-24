@@ -39,7 +39,7 @@ function buildGeneratedEmployeeEmail(fullName, companyId) {
   return `${namePart}.${companyPart}.${stamp}${randomPart}@login.opera-ai.app`;
 }
 
-async function assignUserToAllActiveProjects(supabase, { companyId, userId, assignedBy }) {
+async function assignUserToAllActiveProjects(supabase, { companyId, userId, assignedBy, assignCostCentres = true }) {
   const { data: projects, error: projectsErr } = await supabase
     .from("projects")
     .select("id")
@@ -60,6 +60,10 @@ async function assignUserToAllActiveProjects(supabase, { companyId, userId, assi
 
   const { error: paErr } = await supabase.from("project_assignments").insert(projectAssignmentRows);
   if (paErr) throw paErr;
+
+  if (!assignCostCentres) {
+    return { projects: projectAssignmentRows.length, costCentres: 0 };
+  }
 
   const { data: centres, error: centresErr } = await supabase
     .from("cost_centres")
@@ -88,6 +92,31 @@ async function assignUserToAllActiveProjects(supabase, { companyId, userId, assi
   }
 
   return { projects: projectAssignmentRows.length, costCentres: costCentreRows.length };
+}
+
+function isMissingCompanySettingsColumnError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return (
+    msg.includes("column") &&
+    (msg.includes("assign_all_projects_to_all_employees") ||
+      msg.includes("assign_all_tasks_to_all_projects"))
+  );
+}
+
+async function getCompanyAssignmentSettings(supabase, companyId) {
+  let { data, error } = await supabase
+    .from("companies")
+    .select("assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error && isMissingCompanySettingsColumnError(error)) {
+    return { assignAllProjects: true, assignAllTasks: true };
+  }
+  if (error) throw error;
+  return {
+    assignAllProjects: data?.assign_all_projects_to_all_employees !== false,
+    assignAllTasks: data?.assign_all_tasks_to_all_projects !== false,
+  };
 }
 
 export default async function handler(req, res) {
@@ -262,11 +291,15 @@ export default async function handler(req, res) {
 
   let defaultAssignments = { projects: 0, costCentres: 0 };
   try {
-    defaultAssignments = await assignUserToAllActiveProjects(supabase, {
-      companyId: company_id,
-      userId: newUserId,
-      assignedBy: callerId,
-    });
+    const assignmentSettings = await getCompanyAssignmentSettings(supabase, company_id);
+    if (assignmentSettings.assignAllProjects) {
+      defaultAssignments = await assignUserToAllActiveProjects(supabase, {
+        companyId: company_id,
+        userId: newUserId,
+        assignedBy: callerId,
+        assignCostCentres: assignmentSettings.assignAllTasks,
+      });
+    }
   } catch (assignErr) {
     console.warn("[CREATE_EMPLOYEE] default project assignment failed", assignErr);
   }

@@ -17,6 +17,31 @@ function cleanRole(value) {
   return "employee";
 }
 
+function isMissingCompanySettingsColumnError(error) {
+  const msg = String(error?.message || "").toLowerCase();
+  return (
+    msg.includes("column") &&
+    (msg.includes("assign_all_projects_to_all_employees") ||
+      msg.includes("assign_all_tasks_to_all_projects"))
+  );
+}
+
+async function getCompanyAssignmentSettings(supabase, companyId) {
+  let { data, error } = await supabase
+    .from("companies")
+    .select("assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (error && isMissingCompanySettingsColumnError(error)) {
+    return { assignAllProjects: true, assignAllTasks: true };
+  }
+  if (error) throw error;
+  return {
+    assignAllProjects: data?.assign_all_projects_to_all_employees !== false,
+    assignAllTasks: data?.assign_all_tasks_to_all_projects !== false,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -100,6 +125,18 @@ export default async function handler(req, res) {
     return;
   }
 
+  let assignmentSettings;
+  try {
+    assignmentSettings = await getCompanyAssignmentSettings(supabase, companyId);
+  } catch (settingsErr) {
+    res.status(500).json({ error: settingsErr.message || "Could not load company settings" });
+    return;
+  }
+  if (!assignmentSettings.assignAllProjects) {
+    res.status(200).json({ success: true, projects: 0, cost_centres: 0, skipped: "manual_project_assignment" });
+    return;
+  }
+
   const { data: projects, error: projectsErr } = await supabase
     .from("projects")
     .select("id")
@@ -163,6 +200,16 @@ export default async function handler(req, res) {
       res.status(500).json({ error: paInsertErr.message });
       return;
     }
+  }
+
+  if (!assignmentSettings.assignAllTasks) {
+    res.status(200).json({
+      success: true,
+      projects: paInsertRows.length + archivedPaIds.length,
+      cost_centres: 0,
+      skipped: "manual_task_assignment",
+    });
+    return;
   }
 
   const { data: centres, error: centresErr } = await supabase
