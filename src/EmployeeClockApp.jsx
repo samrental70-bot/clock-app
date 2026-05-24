@@ -2901,6 +2901,9 @@ export default function EmployeeClockApp() {
   const [timesheetDateFrom, setTimesheetDateFrom] = useState("");
   const [timesheetDateTo, setTimesheetDateTo] = useState("");
   const [timesheetCompletedOnly, setTimesheetCompletedOnly] = useState(false);
+  const [timesheetEmployeeFilter, setTimesheetEmployeeFilter] = useState("all");
+  const [timesheetProjectFilter, setTimesheetProjectFilter] = useState("all");
+  const [timesheetShareMessage, setTimesheetShareMessage] = useState("");
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -3330,7 +3333,7 @@ export default function EmployeeClockApp() {
 
   useEffect(() => {
     if (
-      activeTab !== "dashboard" ||
+      (activeTab !== "dashboard" && activeTab !== "team") ||
       !isAdmin ||
       !userCompany?.id ||
       !authUser?.id ||
@@ -4539,14 +4542,15 @@ export default function EmployeeClockApp() {
   }, [isAdmin, teamRows, authUser?.id, teamListFilter]);
 
   useEffect(() => {
-    if (activeTab !== "dashboard" || !isAdmin) return;
+    if ((activeTab !== "dashboard" && activeTab !== "team") || !isAdmin) return;
     setDashboardClockPick((prev) => {
       const next = { ...prev };
       const ccFor = (pid) =>
         effectiveCostCentresByProjectId[String(pid)] ||
         effectiveCostCentresByProjectId[Number(pid)] ||
         [];
-      for (const r of dashboardRowsForAttendance) {
+      const rowsForClockPick = activeTab === "team" ? displayedTeamRows : dashboardRowsForAttendance;
+      for (const r of rowsForClockPick) {
         const uid = String(r.userId);
         const assignedIds = new Set((dashboardAssignmentsByUserId[uid] || []).map((id) => String(id)));
         const options = companyAssignAllProjectsToAllEmployees
@@ -4578,6 +4582,7 @@ export default function EmployeeClockApp() {
   }, [
     activeTab,
     isAdmin,
+    displayedTeamRows,
     dashboardRowsForAttendance,
     effectiveProjects,
     effectiveCostCentresByProjectId,
@@ -4640,6 +4645,20 @@ export default function EmployeeClockApp() {
   const visibleRecords = isAdmin
     ? records
     : records.filter((record) => (record.userId || record.user_id || record.employeeId) === authUser?.id);
+  const teamActiveShiftByUserId = useMemo(() => {
+    const grouped = {};
+    for (const record of normalizeArray(visibleRecords)) {
+      const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
+      if (!uid || !isTimesheetRowActiveForLiveDashboard(record)) continue;
+      if (!grouped[uid]) grouped[uid] = [];
+      grouped[uid].push(record);
+    }
+    const activeByUser = {};
+    for (const [uid, rows] of Object.entries(grouped)) {
+      activeByUser[uid] = pickLatestActiveTimesheetForLiveDashboard(rows);
+    }
+    return activeByUser;
+  }, [visibleRecords]);
   const visibleCurrentShift = currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
     ? currentShift
     : null;
@@ -5301,12 +5320,58 @@ export default function EmployeeClockApp() {
     return { from: anchor || "", to: anchor || "" };
   }, [timesheetViewMode, timesheetDateKey, timesheetDateFrom, timesheetDateTo, companyTimeZone]);
 
+  const timesheetEmployeeOptions = useMemo(() => {
+    const people = new Map();
+    for (const record of normalizeArray(visibleRecords)) {
+      const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
+      if (!uid) continue;
+      const name = resolveTimesheetEmployeeTitle(record, {
+        profileFullName,
+        authUser,
+        teamProfileFullNameByUserId,
+      });
+      people.set(uid, name || shortUserLabel(uid));
+    }
+    return [...people.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [authUser, profileFullName, teamProfileFullNameByUserId, visibleRecords]);
+
+  const timesheetProjectOptions = useMemo(() => {
+    const projects = new Map();
+    for (const record of normalizeArray(visibleRecords)) {
+      const projectName = String(record?.project || record?.project_name || "").trim();
+      const projectIdRaw = record?.projectId ?? record?.project_id;
+      const key =
+        projectIdRaw != null && projectIdRaw !== ""
+          ? String(projectIdRaw)
+          : projectName;
+      if (!key || !projectName) continue;
+      projects.set(key, projectName);
+    }
+    return [...projects.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [visibleRecords]);
+
   const visibleTimesheetRecords = useMemo(() => {
     const rows = Array.isArray(visibleRecords) ? visibleRecords : [];
     const from = timesheetRangeBounds.from;
     const to = timesheetRangeBounds.to;
     if (!from || !to || from > to) return [];
     return rows.filter((record) => {
+      if (timesheetEmployeeFilter !== "all") {
+        const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
+        if (uid !== String(timesheetEmployeeFilter)) return false;
+      }
+      if (timesheetProjectFilter !== "all") {
+        const projectIdRaw = record?.projectId ?? record?.project_id;
+        const projectIdKey = projectIdRaw != null && projectIdRaw !== "" ? String(projectIdRaw) : "";
+        const projectNameKey = String(record?.project || record?.project_name || "").trim();
+        if (String(timesheetProjectFilter) !== projectIdKey && String(timesheetProjectFilter) !== projectNameKey) {
+          return false;
+        }
+      }
       const key = calendarDateKeyInTimeZone(record?.clockIn, companyTimeZone);
       if (!key || key < from || key > to) return false;
       if (!timesheetCompletedOnly) return true;
@@ -5314,7 +5379,114 @@ export default function EmployeeClockApp() {
       const outKey = calendarDateKeyInTimeZone(record?.clockOut, companyTimeZone);
       return outKey && outKey >= from && outKey <= to;
     });
-  }, [visibleRecords, timesheetRangeBounds.from, timesheetRangeBounds.to, companyTimeZone, timesheetCompletedOnly]);
+  }, [
+    visibleRecords,
+    timesheetRangeBounds.from,
+    timesheetRangeBounds.to,
+    companyTimeZone,
+    timesheetCompletedOnly,
+    timesheetEmployeeFilter,
+    timesheetProjectFilter,
+  ]);
+
+  const buildTimesheetShareText = useCallback(() => {
+    const rangeLabel =
+      timesheetRangeBounds.from && timesheetRangeBounds.to
+        ? timesheetRangeBounds.from === timesheetRangeBounds.to
+          ? timesheetRangeBounds.from
+          : `${timesheetRangeBounds.from} to ${timesheetRangeBounds.to}`
+        : "Selected range";
+    const employeeLabel =
+      timesheetEmployeeFilter === "all"
+        ? "All Employees"
+        : timesheetEmployeeOptions.find((employee) => String(employee.id) === String(timesheetEmployeeFilter))?.name || "Selected Employee";
+    const projectLabel =
+      timesheetProjectFilter === "all"
+        ? "All Projects"
+        : timesheetProjectOptions.find((project) => String(project.id) === String(timesheetProjectFilter))?.name || "Selected Project";
+    const lines = [
+      `${userCompany?.name || "OPERA.AI"} Timesheet Report`,
+      `Date: ${rangeLabel}`,
+      `Employee: ${employeeLabel}`,
+      `Project: ${projectLabel}`,
+      `Records: ${visibleTimesheetRecords.length}`,
+      "",
+    ];
+    if (visibleTimesheetRecords.length === 0) {
+      lines.push("No timesheet records for this selection.");
+      return lines.join("\n");
+    }
+    for (const record of visibleTimesheetRecords) {
+      const employee = resolveTimesheetEmployeeTitle(record, {
+        profileFullName,
+        authUser,
+        teamProfileFullNameByUserId,
+      });
+      const clockIn = record?.clockIn
+        ? `${formatDate(record.clockIn, companyTimeZone)} ${formatTime(record.clockIn, companyTimeZone)}`
+        : "No clock in";
+      const clockOut = record?.clockOut
+        ? `${formatDate(record.clockOut, companyTimeZone)} ${formatTime(record.clockOut, companyTimeZone)}`
+        : isTimesheetRowActiveForLiveDashboard(record)
+          ? "Working"
+          : "Missing clock out";
+      const task = record?.costCenter || record?.cost_centre || "No task";
+      lines.push(
+        [
+          employee || "Employee",
+          record?.project || "No project",
+          task,
+          `${clockIn} - ${clockOut}`,
+          formatHoursDecimal(getWorkedMinutes(record)),
+          formatMoney(getLabourCost(record)),
+        ].join(" | ")
+      );
+    }
+    return lines.join("\n");
+  }, [
+    authUser,
+    companyTimeZone,
+    getLabourCost,
+    getWorkedMinutes,
+    profileFullName,
+    teamProfileFullNameByUserId,
+    timesheetEmployeeFilter,
+    timesheetEmployeeOptions,
+    timesheetProjectFilter,
+    timesheetProjectOptions,
+    timesheetRangeBounds.from,
+    timesheetRangeBounds.to,
+    userCompany?.name,
+    visibleTimesheetRecords,
+  ]);
+
+  const handleShareTimesheetReport = useCallback(async () => {
+    const text = buildTimesheetShareText();
+    const title = `${userCompany?.name || "OPERA.AI"} Timesheet Report`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title, text });
+        setTimesheetShareMessage("Report shared.");
+      } else if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        setTimesheetShareMessage("Report copied.");
+      } else {
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "timesheet-report.txt";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setTimesheetShareMessage("Report downloaded.");
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+      setTimesheetShareMessage(`Share failed: ${getErrorMessage(err)}`);
+    }
+  }, [buildTimesheetShareText, userCompany?.name]);
 
   const pendingTimesheetRequests = useMemo(
     () => normalizeArray(timesheetRequests).filter((request) => request?.status === "pending"),
@@ -5987,10 +6159,20 @@ export default function EmployeeClockApp() {
   const visiblePhotoFolders = selectedPhotoFolder === "all" ? photoFolders : photoFolders.filter((folder) => folder === selectedPhotoFolder);
   const receiptFolders = Object.keys(filteredProjectReceipts);
   const visibleReceiptFolders = selectedReceiptFolder === "all" ? receiptFolders : receiptFolders.filter((folder) => folder === selectedReceiptFolder);
-  const documentationProjectFolders = useMemo(() => {
-    const folders = new Set([...Object.keys(filteredProjectPhotos), ...Object.keys(filteredDocumentationReceipts)]);
-    return [...folders].sort((a, b) => a.localeCompare(b));
-  }, [filteredDocumentationReceipts, filteredProjectPhotos]);
+  const pictureProjectOptions = useMemo(() => {
+    const byFolder = new Map();
+    const collect = (buckets) => {
+      for (const [folder, items] of Object.entries(normalizeMediaBuckets(buckets))) {
+        const first = normalizeArray(items)[0];
+        byFolder.set(folder, mediaItemProjectName(first) || folder);
+      }
+    };
+    collect(scopedProjectPhotos);
+    collect(scopedProjectReceipts);
+    return [...byFolder.entries()]
+      .map(([folder, label]) => ({ folder, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [scopedProjectPhotos, scopedProjectReceipts]);
   const visibleDocumentationPhotoBuckets = useMemo(() => {
     if (selectedPhotoFolder === "all") return filteredProjectPhotos;
     return filteredProjectPhotos[selectedPhotoFolder] ? { [selectedPhotoFolder]: filteredProjectPhotos[selectedPhotoFolder] } : {};
@@ -6014,6 +6196,14 @@ export default function EmployeeClockApp() {
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
     return total + normalizeArray(filteredProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
   }, 0);
+
+  useEffect(() => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    if (!todayKey) return;
+    const fromKey = addWallDaysInTimeZone(todayKey, -365, companyTimeZone) || todayKey;
+    setMediaFilterDateFrom((prev) => prev || fromKey);
+    setMediaFilterDateTo((prev) => prev || todayKey);
+  }, [companyTimeZone]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -9906,6 +10096,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const handleDashboardEmployeeClockIn = async (row) => {
     if (!isAdmin || !authUser?.id || !userCompany?.id) return;
+    const uid = String(row.userId);
     if (row.employmentStatus === "archived") {
       setDashboardActionFeedback({
         type: "error",
@@ -9913,10 +10104,22 @@ const handlePhotoQuickUpload = async (event) => {
       });
       return;
     }
+    const existingActive = normalizeArray(records).find((record) => {
+      const recordUid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
+      return recordUid === uid && isTimesheetRowActiveForLiveDashboard(record);
+    });
+    if (existingActive) {
+      setDashboardActionFeedback({
+        type: "error",
+        text: "This employee is already clocked in.",
+      });
+      return;
+    }
     if (!window.confirm("Clock in this employee now?")) return;
-    const uid = String(row.userId);
     const assignedIds = new Set((dashboardAssignmentsByUserId[uid] || []).map((id) => String(id)));
-    const rowProjects = effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
+    const rowProjects = companyAssignAllProjectsToAllEmployees
+      ? effectiveProjects
+      : effectiveProjects.filter((p) => assignedIds.has(String(p.id)));
     if (rowProjects.length === 0) {
       setDashboardActionFeedback({
         type: "error",
@@ -15569,6 +15772,38 @@ const handlePhotoQuickUpload = async (event) => {
                         : `${timesheetRangeBounds.from} to ${timesheetRangeBounds.to}`}
                     </p>
                   )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="space-y-1 text-[13px] font-semibold text-slate-700">
+                      Employee
+                      <select
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px] font-bold"
+                        value={timesheetEmployeeFilter}
+                        onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
+                      >
+                        <option value="all">All Employees</option>
+                        {timesheetEmployeeOptions.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-[13px] font-semibold text-slate-700">
+                      Project
+                      <select
+                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px] font-bold"
+                        value={timesheetProjectFilter}
+                        onChange={(event) => setTimesheetProjectFilter(event.target.value)}
+                      >
+                        <option value="all">All Projects</option>
+                        {timesheetProjectOptions.map((project) => (
+                          <option key={project.id} value={project.id}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                   {timesheetCompletedOnly ? (
                     <div className="flex items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2">
                       <p className="text-[13px] font-black text-emerald-900">Completed shifts only</p>
@@ -15580,6 +15815,18 @@ const handlePhotoQuickUpload = async (event) => {
                         Clear
                       </button>
                     </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)]"
+                    onClick={() => void handleShareTimesheetReport()}
+                  >
+                    Share Report
+                  </button>
+                  {timesheetShareMessage ? (
+                    <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-bold text-slate-700">
+                      {timesheetShareMessage}
+                    </p>
                   ) : null}
                 </div>
                 <div className="space-y-3">
@@ -15596,9 +15843,9 @@ const handlePhotoQuickUpload = async (event) => {
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Project Documentation</h2>
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Pictures</h2>
                   <p className="mt-1 text-[14px] font-semibold text-slate-500">
-                    {projectMediaLoading ? "Refreshing shared media..." : "Photos, videos, receipts, and field records from project_media."}
+                    {projectMediaLoading ? "Refreshing media..." : "Photos and videos by project."}
                   </p>
                 </div>
                 {projectMediaSyncError ? (
@@ -15606,10 +15853,15 @@ const handlePhotoQuickUpload = async (event) => {
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
-                  <option value="all">All Projects</option>
-                  {documentationProjectFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
-                </select>
+                <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                  Project
+                  <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
+                    <option value="all">All Projects</option>
+                    {pictureProjectOptions.map((project) => (
+                      <option key={project.folder} value={project.folder}>{project.label}</option>
+                    ))}
+                  </select>
+                </label>
                 <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
@@ -15639,7 +15891,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <option value="receipt">Receipts only</option>
                     </select>
                     <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDocumentationType} onChange={(e) => setMediaFilterDocumentationType(e.target.value)}>
-                      <option value="all">All documentation</option>
+                      <option value="all">All types</option>
                       {DOCUMENTATION_TYPE_OPTIONS.map((option) => (
                         <option key={option.id} value={option.id}>{option.label}</option>
                       ))}
@@ -15941,7 +16193,7 @@ const handlePhotoQuickUpload = async (event) => {
                     })}
                   </div>
                 ) : null}
-                {projectDocumentationTotals.total === 0 && <p className="text-sm text-slate-500 text-center py-8">No project documentation yet.</p>}
+                {projectDocumentationTotals.total === 0 && <p className="text-sm text-slate-500 text-center py-8">No pictures or videos yet.</p>}
                 <div className={projectDocsView === "timeline" ? "hidden" : "space-y-4"}>
                   {visiblePhotoFolders.map((folder) => {
                     const folderItems = normalizeArray(filteredProjectPhotos[folder]);
@@ -21287,6 +21539,17 @@ const handlePhotoQuickUpload = async (event) => {
                     {teamRoleFeedback.text}
                   </div>
                 )}
+                {dashboardActionFeedback && (
+                  <div
+                    className={`rounded-2xl border p-3 text-xs font-bold ${
+                      dashboardActionFeedback.type === "success"
+                        ? "bg-green-50 border-green-100 text-green-800"
+                        : "bg-red-50 border-red-100 text-red-700"
+                    }`}
+                  >
+                    {dashboardActionFeedback.text}
+                  </div>
+                )}
                 {teamSchemaWarning && (
                   <div className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-[11px] text-amber-950 leading-snug">
                     {teamSchemaWarning}
@@ -21514,6 +21777,33 @@ const handlePhotoQuickUpload = async (event) => {
                     const empArchived = row.employmentStatus === "archived";
                     const ownerLoginLocked =
                       isOwnerMember && String(authUser?.id) !== String(row.userId);
+                    const uid = String(row.userId);
+                    const activeRep = teamActiveShiftByUserId[uid] || null;
+                    const rowSaving = dashboardSavingUserId === uid;
+                    const assignedIds = new Set(
+                      (dashboardAssignmentsByUserId[uid] || []).map((id) => String(id))
+                    );
+                    const clockProjectsForRow = companyAssignAllProjectsToAllEmployees
+                      ? effectiveProjects
+                      : effectiveProjects.filter((project) => assignedIds.has(String(project.id)));
+                    const rawClockPick =
+                      dashboardClockPick[uid] || {
+                        projectId: String(clockProjectsForRow[0]?.id ?? ""),
+                        costCenter: costCentresForEditProject(clockProjectsForRow[0]?.id)[0] || "",
+                      };
+                    const clockPickProjectId = clockProjectsForRow.some((project) => String(project.id) === String(rawClockPick.projectId))
+                      ? String(rawClockPick.projectId)
+                      : String(clockProjectsForRow[0]?.id ?? "");
+                    const clockPickCentres = costCentresForEditProject(clockPickProjectId);
+                    const clockPickCost =
+                      rawClockPick.costCenter && clockPickCentres.includes(rawClockPick.costCenter)
+                        ? rawClockPick.costCenter
+                        : clockPickCentres[0] || "";
+                    const clockActionBlocked =
+                      empArchived ||
+                      clockProjectsForRow.length === 0 ||
+                      !clockPickProjectId ||
+                      clockPickCentres.length === 0;
                     return (
                       <div
                         key={row.memberRowId}
@@ -21545,14 +21835,30 @@ const handlePhotoQuickUpload = async (event) => {
                             </p>
                           </div>
                           {isAdmin && !isEditing && (
-                            <Button
-                              type="button"
-                              className="shrink-0 rounded-lg h-8 px-3 text-xs font-semibold"
-                              onClick={() => beginTeamMemberEdit(row)}
-                              disabled={Boolean(teamSavingMemberRowId)}
-                            >
-                              Edit
-                            </Button>
+                            <div className="shrink-0 flex items-center gap-2">
+                              <Button
+                                type="button"
+                                className={`rounded-lg h-8 px-3 text-xs font-semibold ${
+                                  activeRep ? "!bg-slate-950 !text-white" : ""
+                                }`}
+                                onClick={() =>
+                                  activeRep
+                                    ? void handleDashboardEmployeeClockOutOrFix(row, activeRep, "clock_out")
+                                    : void handleDashboardEmployeeClockIn(row)
+                                }
+                                disabled={rowSaving || (!activeRep && clockActionBlocked)}
+                              >
+                                {rowSaving ? "..." : activeRep ? "Clock Out" : "Clock In"}
+                              </Button>
+                              <Button
+                                type="button"
+                                className="rounded-lg h-8 px-3 text-xs font-semibold"
+                                onClick={() => beginTeamMemberEdit(row)}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                              >
+                                Edit
+                              </Button>
+                            </div>
                           )}
                         </div>
                         {isEditing && teamEditDraft ? (
@@ -21779,6 +22085,81 @@ const handlePhotoQuickUpload = async (event) => {
                               <span className="text-slate-500 shrink-0">Joining date</span>
                               <span className="font-medium text-slate-700 text-right">{joinDisp}</span>
                             </div>
+                            {isAdmin && activeRep ? (
+                              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                                <p className="font-black text-emerald-900">
+                                  Working since {activeRep.clockIn ? formatTime(activeRep.clockIn, companyTimeZone) : "now"}
+                                </p>
+                                <p className="mt-0.5 text-[11px] font-bold text-emerald-800">
+                                  {activeRep.project || "No project"} - {activeRep.costCenter || "No task"}
+                                </p>
+                              </div>
+                            ) : null}
+                            {isAdmin && !activeRep && !empArchived ? (
+                              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <label className="block min-w-0 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                                    Project
+                                    <select
+                                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs font-semibold text-slate-900"
+                                      value={clockPickProjectId}
+                                      disabled={rowSaving || clockProjectsForRow.length === 0}
+                                      onChange={(event) => {
+                                        const pid = event.target.value;
+                                        const centres = costCentresForEditProject(pid);
+                                        setDashboardClockPick((prev) => ({
+                                          ...prev,
+                                          [uid]: { projectId: pid, costCenter: centres[0] || "" },
+                                        }));
+                                      }}
+                                    >
+                                      {clockProjectsForRow.length === 0 ? (
+                                        <option value="">No projects</option>
+                                      ) : (
+                                        clockProjectsForRow.map((project) => (
+                                          <option key={project.id} value={String(project.id)}>
+                                            {project.name}
+                                          </option>
+                                        ))
+                                      )}
+                                    </select>
+                                  </label>
+                                  <label className="block min-w-0 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                                    Task
+                                    <select
+                                      className="mt-1 w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs font-semibold text-slate-900"
+                                      value={clockPickCost}
+                                      disabled={rowSaving || clockActionBlocked}
+                                      onChange={(event) =>
+                                        setDashboardClockPick((prev) => ({
+                                          ...prev,
+                                          [uid]: {
+                                            ...(prev[uid] || { projectId: clockPickProjectId }),
+                                            projectId: clockPickProjectId,
+                                            costCenter: event.target.value,
+                                          },
+                                        }))
+                                      }
+                                    >
+                                      {clockPickCentres.length === 0 ? (
+                                        <option value="">No tasks</option>
+                                      ) : (
+                                        clockPickCentres.map((task) => (
+                                          <option key={task} value={task}>
+                                            {task}
+                                          </option>
+                                        ))
+                                      )}
+                                    </select>
+                                  </label>
+                                </div>
+                                {clockActionBlocked ? (
+                                  <p className="text-[11px] font-bold text-amber-800">
+                                    Select an available project and task before clocking in.
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
                         )}
                       </div>
