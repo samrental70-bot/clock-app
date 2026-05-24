@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-10
+- Current development version: B.1-fix-11A
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -160,6 +160,40 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1 Release QA Preparation
+- B.1 release QA is now pending real mobile testing.
+- B.1-fix-6 through B.1-fix-10 are locked for QA unless a clear QA-blocking bug is found.
+- SQL settings are marked completed by the user before this QA preparation step.
+- Development app for QA: https://project-rui1d-development.vercel.app
+- Production/main remains untouched.
+- Mobile QA checklist location: `docs/B1_RELEASE_MOBILE_QA_CHECKLIST.md`
+- QA checklist covers Owner/Admin, Supervisor, Employee, and core regression flows.
+- QA preparation build status: Passed on develop.
+- Development deployment not required because only docs/report files changed.
+- Non-blocking warnings remain documented: Vite bundle-size warning and old Auracut docs verifier warning.
+
+## B.1-fix-11A Enterprise Mobile Redesign Phase 1
+- Bottom navigation updated from Activities / Clock / More to Home / Schedule / Clock / More.
+- Bottom Clock tab is navigation only; clock in/out remains inside Clock/Home actions.
+- Global app header kept compact with smaller controls and lighter notification badge.
+- Admin Home label/hierarchy simplified and duplicate in-page refresh removed because the global header refresh remains.
+- Admin Home live operations KPI strip added with Active, Hours, Labour, and Issues.
+- Admin Home redundant section labels reduced across Active Team, Worked Today, Team Events, Shift Coverage, and Live Job Sites.
+- Employee Home state added on the Home tab with current shift, elapsed time, earned amount, quick clock, camera/receipt entry, next scheduled task, and personal activity.
+- Clock pre-clock-in screen simplified around Project, Task, compact Add Project/Add Task actions, primary Clock In, and secondary Camera/Receipt tools.
+- Clock active-shift screen changed from a giant timer card to a structured current shift card with project/task, elapsed, earned, and sync status.
+- Clock active-shift action row cleaned into compact Camera, Receipt, Task, Break, and Clock Out actions.
+- Task List and Material List controls were reduced to secondary linked sections.
+- Existing clock/location/photo/receipt/project-task setting logic was preserved.
+- No SQL, database, or AI changes were made.
+
+## B.1-fix-11A Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -179,6 +213,7 @@
 - B.1-fix-8 does not require new SQL.
 - B.1-fix-9 does not require new SQL.
 - B.1-fix-10 does not require new SQL.
+- B.1-fix-11A does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

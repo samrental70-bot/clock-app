@@ -14316,21 +14316,21 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const renderClockListActionRow = () => (
-    <div className="rounded-[24px] border border-slate-200/90 bg-white p-2.5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]">
+    <div className="rounded-[18px] border border-slate-200 bg-white p-2 shadow-sm">
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          className="rounded-[20px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-3 py-4 text-center transition shadow-sm active:bg-white active:shadow-inner"
+          className="rounded-[14px] border border-blue-100 bg-blue-50 px-3 py-2.5 text-center transition active:bg-white"
           onClick={() => openClockProjectList("task")}
         >
-          <span className="block text-[16px] font-black leading-tight text-blue-950">Task List</span>
+          <span className="block text-[13px] font-black leading-tight text-blue-950">Task List</span>
         </button>
         <button
           type="button"
-          className="rounded-[20px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-3 py-4 text-center transition shadow-sm active:bg-white active:shadow-inner"
+          className="rounded-[14px] border border-emerald-100 bg-emerald-50 px-3 py-2.5 text-center transition active:bg-white"
           onClick={() => openClockProjectList("material")}
         >
-          <span className="block text-[16px] font-black leading-tight text-emerald-950">Material List</span>
+          <span className="block text-[13px] font-black leading-tight text-emerald-950">Material List</span>
         </button>
       </div>
     </div>
@@ -15112,9 +15112,20 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
 
                 <div className="space-y-1">
-                  <label className="text-[14px] font-black text-slate-700">Project / Job Site</label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-[13px] font-black text-slate-700">Project / Job Site</label>
+                    {canCreateProjectTaskFromClock ? (
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-slate-50"
+                        onClick={() => openProjectManagementFromClock("project")}
+                      >
+                        Add Project
+                      </button>
+                    ) : null}
+                  </div>
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
+                    className="w-full rounded-[16px] border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
                     value={projectId}
                     disabled={projectsLoading}
                     onChange={(event) => {
@@ -15137,9 +15148,21 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[14px] font-black text-slate-700">Task</label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-[13px] font-black text-slate-700">Task</label>
+                    {canCreateProjectTaskFromClock ? (
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-slate-50 disabled:opacity-50"
+                        onClick={() => openProjectManagementFromClock("costCentre")}
+                        disabled={!clockSelectedProject && !companyAssignAllTasksToAllProjects}
+                      >
+                        Add Task
+                      </button>
+                    ) : null}
+                  </div>
                   <select
-                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
+                    className="w-full rounded-[16px] border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -15179,27 +15202,14 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
-                {canCreateProjectTaskFromClock ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-900 shadow-sm active:bg-slate-50"
-                      onClick={() => openProjectManagementFromClock("project")}
-                    >
-                      Add Project
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-900 shadow-sm active:bg-slate-50 disabled:opacity-50"
-                      onClick={() => openProjectManagementFromClock("costCentre")}
-                      disabled={!clockSelectedProject && !companyAssignAllTasksToAllProjects}
-                    >
-                      Add Task
-                    </button>
-                  </div>
-                ) : null}
+                <Button
+                  className="w-full rounded-[16px] h-12 sm:h-14 text-[16px] font-black !bg-slate-950 !text-white"
+                  onClick={handleClockIn}
+                >
+                  Clock In
+                </Button>
 
-                <div ref={photoToolsRef} className="rounded-[24px] border border-slate-200 bg-white p-2.5 space-y-2.5 shadow-sm">
+                <div ref={photoToolsRef} className="rounded-[20px] border border-slate-200 bg-slate-50 p-2.5 space-y-2.5">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
@@ -15208,7 +15218,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      className={`w-full rounded-[20px] h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                      className={`w-full rounded-[16px] h-11 border text-center text-[14px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
                           ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                           : "border-slate-950 bg-slate-950 text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
@@ -15236,7 +15246,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className={`block w-full rounded-[20px] h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                      className={`block w-full rounded-[16px] h-11 border text-center text-[14px] font-black transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
                           ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                           : "border-emerald-700 bg-emerald-700 text-white shadow-[0_10px_18px_rgba(4,120,87,0.16)]"
@@ -15458,14 +15468,6 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                {isAdmin ? (
-                  <Button
-                    className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
-                    onClick={handleClockIn}
-                  >
-                    Clock In
-                  </Button>
-                ) : null}
                 {renderClockListActionRow()}
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
@@ -15475,18 +15477,40 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-[28px] border-emerald-100 bg-gradient-to-br from-white to-emerald-50/70 overflow-hidden">
+            <Card className="rounded-[22px] border border-slate-200 bg-white shadow-sm overflow-hidden">
               <CardContent className="p-3.5 flex flex-col gap-3">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="rounded-[24px] border border-emerald-100 bg-white px-4 py-5 text-center shadow-[0_14px_30px_rgba(5,150,105,0.08)]">
-                  <p className="text-[13px] font-black uppercase text-emerald-700">Live Timer</p>
-                  <p className="mt-1 text-5xl sm:text-6xl font-black tabular-nums leading-none text-slate-950">{formatTimer(liveSeconds)}</p>
-                  <p className="mt-2 text-xl sm:text-2xl font-black text-emerald-700">{formatMoney(liveEarnings)}</p>
-                  <p className="text-[14px] font-semibold text-slate-500">Money earned</p>
+                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Current shift</p>
+                      <h2 className="mt-1 truncate text-[20px] font-black leading-tight text-slate-950" title={visibleCurrentShift.project || "Project"}>
+                        {visibleCurrentShift.project || "Project"}
+                      </h2>
+                      <p className="mt-0.5 truncate text-[13px] font-bold text-slate-500" title={visibleCurrentShift.costCenter || "Task"}>
+                        {visibleCurrentShift.costCenter || "Task"}
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${
+                      visibleCurrentShift.supabaseTimesheetId ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                    }`}>
+                      {visibleCurrentShift.supabaseTimesheetId ? "Synced" : "Sync pending"}
+                    </span>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <div className="rounded-[16px] bg-slate-950 px-3 py-2.5 text-white">
+                      <p className="text-[9px] font-black uppercase tracking-wide text-slate-300">Elapsed</p>
+                      <p className="mt-1 text-[22px] font-black tabular-nums leading-none">{formatTimer(liveSeconds)}</p>
+                    </div>
+                    <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
+                      <p className="text-[9px] font-black uppercase tracking-wide text-emerald-700">Earned</p>
+                      <p className="mt-1 text-[22px] font-black tabular-nums leading-none text-slate-950">{formatMoney(liveEarnings)}</p>
+                    </div>
+                  </div>
                 </div>
 
                 {isChangingTask ? (
@@ -15540,7 +15564,7 @@ const handlePhotoQuickUpload = async (event) => {
                           : "No tasks available for this project."}
                       </p>
                     )}
-                    <div className="grid grid-cols-2 gap-1.5">
+                    <div className="hidden">
                       <Button
                         className="h-11 rounded-xl text-[15px] font-bold"
                         disabled={clockCostCentresActive.length === 0 || !costCenter}
@@ -15553,11 +15577,11 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : (
                   <div className="space-y-1.5">
-                    <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
+                    <div ref={photoToolsRef} className="rounded-[20px] border border-slate-200 bg-slate-50 p-2 space-y-2">
+                      <div className="grid grid-cols-5 gap-1.5">
                         <button
                           type="button"
-                          className={`w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                          className={`w-full rounded-[14px] h-11 border text-center text-[11px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "photo"
                               ? "border-slate-950 bg-white text-slate-950 shadow-inner ring-2 ring-slate-950/20"
                               : "border-slate-900 bg-slate-900 text-white"
@@ -15581,7 +15605,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className={`block w-full rounded-2xl h-12 border text-center text-[15px] font-black transition disabled:opacity-50 ${
+                          className={`block w-full rounded-[14px] h-11 border text-center text-[11px] font-black transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "receipt"
                               ? "border-green-900 bg-white text-green-900 shadow-inner ring-2 ring-green-900/20"
                               : "border-green-700 bg-green-700 text-white"
@@ -15606,6 +15630,27 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                         >
                           {photoCameraOpen && photoCameraMode === "receipt" ? "Receipt Off" : "Receipt"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[14px] h-11 border border-slate-200 bg-white px-1 text-[11px] font-black text-slate-800 active:bg-slate-50"
+                          onClick={handleChangeTask}
+                        >
+                          Task
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[14px] h-11 border border-slate-200 bg-white px-1 text-[11px] font-black text-slate-800 active:bg-slate-50"
+                          onClick={handleBreak}
+                        >
+                          {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End" : "Done"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[14px] h-11 bg-slate-950 px-1 text-[11px] font-black text-white active:bg-slate-800"
+                          onClick={handleClockOut}
+                        >
+                          Out
                         </button>
                       </div>
 
@@ -15835,7 +15880,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleChangeTask}>🔄 Change Task</Button>
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
-                    {isAdmin ? (
+                    {false && isAdmin ? (
                       <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>
                         Clock Out
                       </Button>
@@ -16962,24 +17007,128 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "activities" && (
-            <Card className="rounded-[28px] overflow-hidden">
+            <Card className="rounded-[22px] border border-slate-200 bg-white shadow-sm overflow-hidden">
               <CardContent className="p-3.5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Activities</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Clock events, uploads, and requests</p>
+                {!isAdmin ? (
+                  <>
+                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-[22px] font-black leading-tight text-slate-950">Home</h2>
+                          <p className="mt-1 truncate text-[13px] font-bold text-slate-500">
+                            {(profileFullName || "").trim() || "Field user"}
+                          </p>
+                        </div>
+                        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${
+                          visibleCurrentShift ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"
+                        }`}>
+                          {visibleCurrentShift ? "Working" : "Off shift"}
+                        </span>
+                      </div>
+                      <div className="mt-3 rounded-[18px] border border-slate-200 bg-slate-50 p-3">
+                        <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Current shift</p>
+                        {visibleCurrentShift ? (
+                          <>
+                            <p className="mt-1 truncate text-[17px] font-black text-slate-950" title={visibleCurrentShift.project || "Current project"}>
+                              {visibleCurrentShift.project || "Current project"}
+                            </p>
+                            <p className="mt-0.5 truncate text-[13px] font-bold text-slate-500" title={visibleCurrentShift.costCenter || "Current task"}>
+                              {visibleCurrentShift.costCenter || "Current task"}
+                            </p>
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-[16px] bg-white px-3 py-2">
+                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">Elapsed</p>
+                                <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{formatTimer(liveSeconds)}</p>
+                              </div>
+                              <div className="rounded-[16px] bg-white px-3 py-2">
+                                <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">Earned</p>
+                                <p className="mt-1 text-[18px] font-black tabular-nums text-emerald-700">{formatMoney(liveEarnings)}</p>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <p className="mt-1 text-[15px] font-bold text-slate-700">Ready for your next shift.</p>
+                        )}
+                      </div>
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          className="rounded-[16px] bg-slate-950 px-3 py-2.5 text-[13px] font-black text-white"
+                          onClick={handleEmployeeBottomClockAction}
+                        >
+                          {employeeClockActionLabel}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-black text-slate-800"
+                          onClick={() => {
+                            setActiveTab("clock");
+                            window.setTimeout(() => photoToolsRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 90);
+                          }}
+                        >
+                          Camera
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-black text-slate-800"
+                          onClick={() => {
+                            setActiveTab("clock");
+                            window.setTimeout(() => photoToolsRef.current?.scrollIntoView?.({ behavior: "smooth", block: "center" }), 90);
+                          }}
+                        >
+                          Receipt
+                        </button>
+                      </div>
+                    </div>
+                    <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-[16px] font-black text-slate-950">Next scheduled task</h3>
+                        <button
+                          type="button"
+                          className="rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-[11px] font-black text-blue-700"
+                          onClick={() => setActiveTab("schedule")}
+                        >
+                          Schedule
+                        </button>
+                      </div>
+                      {clockTodayScheduleTaskItems[0] ? (
+                        <div className="mt-3 rounded-[16px] bg-slate-50 px-3 py-2.5">
+                          <p className="truncate text-[14px] font-black text-slate-950">{clockTodayScheduleTaskItems[0].rawTitle || clockTodayScheduleTaskItems[0].text}</p>
+                          <p className="mt-0.5 truncate text-[12px] font-bold text-slate-500">
+                            {[clockTodayScheduleTaskItems[0].projectName, clockTodayScheduleTaskItems[0].costCenter].filter(Boolean).join(" / ") || "Project task"}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="mt-3 rounded-[16px] bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">
+                          No scheduled task remaining today.
+                        </p>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Home</h2>
+                    <p className="mt-1 text-[13px] font-bold text-slate-500">Clock events, uploads, and requests</p>
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="text-[16px] font-black text-slate-950">{isAdmin ? "Activity feed" : "Personal activity"}</h3>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                    {dashboardActivityFeedItems.length}
+                  </span>
                 </div>
                 {dashboardActivityFeedItems.length === 0 ? (
-                  <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+                  <div className="rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
                     <p className="text-[15px] font-black text-slate-700">No recent activity yet.</p>
                   </div>
                 ) : (
-                  <div className="space-y-2.5">
+                  <div className="space-y-2">
                     {dashboardActivityFeedItems.map((item) => (
                       <div
                         key={`activity-tab-${item.id}`}
-                        className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm"
+                        className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[18px] border border-slate-200 bg-white px-3 py-3 shadow-sm"
                       >
-                        <span className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border text-[11px] font-black ${item.tone}`}>
+                        <span className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-[14px] border text-[11px] font-black ${item.tone}`}>
                           {String(item.kind || "A").slice(0, 1).toUpperCase()}
                         </span>
                         <div className="min-w-0">
@@ -17015,28 +17164,11 @@ const handlePhotoQuickUpload = async (event) => {
               <section className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-[0_10px_26px_rgba(15,23,42,0.07)]">
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Dashboard</p>
-                    <h2 className="mt-0.5 truncate text-[21px] font-black leading-[1.05] text-slate-950" title={userCompany?.name || "Company"}>
-                      {userCompany?.name || "Company"}
-                    </h2>
+                    <h2 className="truncate text-[21px] font-black leading-[1.05] text-slate-950">Home</h2>
                     <p className="mt-1 truncate text-[12px] font-bold text-slate-500">
                       {dashboardSelectedDateLabel || "Today"} / {(profileFullName || "").trim() || "User"}
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[15px] border border-slate-200 bg-slate-50 text-slate-800 active:bg-white disabled:opacity-60"
-                    onClick={() => setDashboardRefreshKey((key) => key + 1)}
-                    disabled={dashboardLoading}
-                    aria-label="Refresh dashboard"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12a9 9 0 0 1-15.5 6.3" />
-                      <path d="M3 12a9 9 0 0 1 15.5-6.3" />
-                      <path d="M3 18v-5h5" />
-                      <path d="M21 6v5h-5" />
-                    </svg>
-                  </button>
                 </div>
 
                 <div className="relative mt-3 grid grid-cols-4 gap-2">
@@ -17135,25 +17267,34 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex flex-col gap-3">
                   <section className="order-1 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Live summary</p>
-                        <h3 className="text-[18px] font-black leading-tight text-slate-950">Working now</h3>
-                      </div>
-                      <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] font-black tabular-nums text-white">
-                        {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
+                      <h3 className="text-[18px] font-black leading-tight text-slate-950">Live operations</h3>
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">
+                        Live
                       </span>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <div className="rounded-[18px] border border-slate-200 bg-slate-950 px-2 py-2.5 text-white">
+                        <p className="text-[8px] font-black uppercase tracking-wide text-slate-300">Active</p>
+                        <p className="mt-1 text-[18px] font-black leading-none tabular-nums">
+                          {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
+                        </p>
+                      </div>
                       <div className="rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2.5">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">Active hours</p>
-                        <p className="mt-1 text-[20px] font-black leading-none tabular-nums text-slate-950">
+                        <p className="text-[8px] font-black uppercase tracking-wide text-blue-700">Hours</p>
+                        <p className="mt-1 text-[clamp(13px,3.7vw,18px)] font-black leading-none tabular-nums text-slate-950">
                           {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
-                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Active labour</p>
-                        <p className="mt-1 text-[20px] font-black leading-none tabular-nums text-slate-950">
+                      <div className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-2 py-2.5">
+                        <p className="text-[8px] font-black uppercase tracking-wide text-emerald-700">Labour</p>
+                        <p className="mt-1 text-[clamp(13px,3.6vw,18px)] font-black leading-none tabular-nums text-slate-950">
                           {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
+                        </p>
+                      </div>
+                      <div className="rounded-[18px] border border-amber-100 bg-amber-50 px-2 py-2.5">
+                        <p className="text-[8px] font-black uppercase tracking-wide text-amber-700">Issues</p>
+                        <p className="mt-1 text-[18px] font-black leading-none tabular-nums text-slate-950">
+                          {pendingTimesheetRequests.length}
                         </p>
                       </div>
                     </div>
@@ -17161,10 +17302,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-4 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team pulse</p>
-                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Shift coverage</h3>
-                      </div>
+                      <h3 className="text-[18px] font-black text-slate-950">Shift coverage</h3>
                       <button
                         type="button"
                         className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700"
@@ -17295,10 +17433,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-6 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Activities</p>
-                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Team events</h3>
-                      </div>
+                      <h3 className="text-[18px] font-black text-slate-950">Team events</h3>
                       <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
                         {dashboardActivityFeedItems.length}
                       </span>
@@ -17332,10 +17467,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-5 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team radar</p>
-                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Live job sites</h3>
-                      </div>
+                      <h3 className="text-[18px] font-black text-slate-950">Live job sites</h3>
                       <button
                         type="button"
                         className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700 disabled:opacity-50"
@@ -17398,10 +17530,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-2 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Working now</p>
-                        <h3 className="mt-0.5 text-[18px] font-black text-slate-950">Active team</h3>
-                      </div>
+                      <h3 className="text-[18px] font-black text-slate-950">Active team</h3>
                       <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
                         {(dashboardLiveWorkingCards || []).length}
                       </p>
@@ -17486,10 +17615,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-3 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Today</p>
-                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Worked today</h3>
-                      </div>
+                      <h3 className="text-[18px] font-black text-slate-950">Worked today</h3>
                       <button
                         type="button"
                         className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-black text-slate-700 active:scale-[0.98]"
@@ -23488,7 +23614,7 @@ const handlePhotoQuickUpload = async (event) => {
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
-          <div className="grid grid-cols-3 gap-1">
+          <div className="grid grid-cols-4 gap-1">
             {isAdmin ? (
               <>
                 <button
@@ -23496,7 +23622,14 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => setActiveTab("dashboard")}
                   className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${activeTab === "dashboard" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
                 >
-                  Activities
+                  Home
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("schedule")}
+                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${activeTab === "schedule" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
+                >
+                  Schedule
                 </button>
                 <button
                   type="button"
@@ -23527,11 +23660,22 @@ const handlePhotoQuickUpload = async (event) => {
                       : "text-slate-500 active:bg-slate-100"
                   }`}
                 >
-                  Activities
+                  Home
                 </button>
                 <button
                   type="button"
-                  onClick={handleEmployeeBottomClockAction}
+                  onClick={() => setActiveTab("schedule")}
+                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${
+                    activeTab === "schedule"
+                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
+                      : "text-slate-500 active:bg-slate-100"
+                  }`}
+                >
+                  Schedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("clock")}
                   className={`rounded-[18px] py-2.5 px-2 text-[14px] font-black transition ${
                     activeTab === "clock"
                       ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
@@ -23540,7 +23684,7 @@ const handlePhotoQuickUpload = async (event) => {
                         : "text-slate-500 active:bg-slate-100"
                   }`}
                 >
-                  {employeeClockActionLabel}
+                  Clock
                 </button>
                 <button
                   type="button"
