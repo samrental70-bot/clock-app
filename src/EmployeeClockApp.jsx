@@ -14910,8 +14910,8 @@ const handlePhotoQuickUpload = async (event) => {
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
-        <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
-          <div className="rounded-[24px] bg-white border border-slate-200/90 px-2.5 py-2 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+        <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
+          <div className="rounded-[20px] bg-white border border-slate-200/90 px-2.5 py-1.5 shadow-[0_8px_22px_rgba(15,23,42,0.07)]">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -14919,32 +14919,31 @@ const handlePhotoQuickUpload = async (event) => {
                   setMenuPanel("main");
                   setIsMenuOpen(true);
                 }}
-                className="h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                className="h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
                 style={{ fontSize: 0, lineHeight: 0 }}
                 aria-label="Open menu"
               >
-                <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                   <path d="M5 7h14" />
                   <path d="M5 12h14" />
                   <path d="M5 17h14" />
                 </svg>
-                ☰
               </button>
               <div className="flex flex-1 min-w-0 items-center gap-2">
-                <img src={OPERA_APP_ICON} alt="" className="h-8 w-8 shrink-0 rounded-xl shadow-sm" />
+                <img src={OPERA_APP_ICON} alt="" className="h-7 w-7 shrink-0 rounded-[10px]" />
                 <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <h1 className="truncate text-[16px] font-black leading-tight text-slate-950">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <h1 className="truncate text-[15px] font-black leading-tight text-slate-950">
                       {userCompany?.name || "Company"}
                     </h1>
                     {IS_OPERA_DEVELOPMENT_APP && (
-                      <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700">
+                      <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-blue-700">
                         Development
                       </span>
                     )}
                   </div>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500 leading-snug">{appHeaderDateLabel}</p>
-                  <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-700 leading-snug truncate">
+                  <p className="mt-0.5 truncate text-[10px] font-bold text-slate-500 leading-snug">{appHeaderDateLabel}</p>
+                  <p className="mt-0.5 border-b border-slate-100 pb-0.5 text-[11px] font-bold text-slate-600 leading-snug truncate">
                     Logged in: {(profileFullName || "").trim() || "User"}
                   </p>
                 </div>
@@ -14953,12 +14952,12 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={handleHeaderRefresh}
-                  className="h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                  className="h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white disabled:opacity-60"
                   style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Refresh"
                   disabled={dashboardLoading || timesheetsLoading}
                 >
-                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 12a9 9 0 0 1-15.5 6.3" />
                     <path d="M3 12a9 9 0 0 1 15.5-6.3" />
                     <path d="M3 18v-5h5" />
@@ -14969,17 +14968,16 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className="relative h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
+                  className="relative h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
                   style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Notifications"
                 >
-                  <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
                     <path d="M10 21h4" />
                   </svg>
-                  🔔
                   {inAppNotifUnread > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[1.125rem] h-[1.125rem] px-0.5 rounded-full bg-red-600 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-red-600 text-white text-[8px] font-black flex items-center justify-center leading-none">
                       {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
                     </span>
                   )}
@@ -17014,37 +17012,43 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "dashboard" && isAdmin && (
             <div className="space-y-3">
-              <section className="relative overflow-hidden rounded-[34px] border border-white bg-white px-3.5 py-4 shadow-[0_24px_58px_rgba(15,23,42,0.12)]">
-                <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_92%_10%,rgba(14,165,233,0.14),transparent_32%),radial-gradient(circle_at_18%_0%,rgba(245,158,11,0.13),transparent_30%),radial-gradient(circle_at_70%_92%,rgba(16,185,129,0.10),transparent_30%)]" />
+              <section className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-[0_10px_26px_rgba(15,23,42,0.07)]">
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-[0.2em] text-slate-950">Dashboard</p>
-                    <h2 className="mt-1 text-[23px] font-black leading-[1.02] text-slate-950 break-words">
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Dashboard</p>
+                    <h2 className="mt-0.5 truncate text-[21px] font-black leading-[1.05] text-slate-950" title={userCompany?.name || "Company"}>
                       {userCompany?.name || "Company"}
                     </h2>
-                    <p className="mt-1 text-[14px] font-bold text-slate-500">{dashboardSelectedDateLabel || "Today"}</p>
+                    <p className="mt-1 truncate text-[12px] font-bold text-slate-500">
+                      {dashboardSelectedDateLabel || "Today"} / {(profileFullName || "").trim() || "User"}
+                    </p>
                   </div>
                   <button
                     type="button"
-                    className="shrink-0 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700 shadow-[0_10px_22px_rgba(15,23,42,0.10)]"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[15px] border border-slate-200 bg-slate-50 text-slate-800 active:bg-white disabled:opacity-60"
                     onClick={() => setDashboardRefreshKey((key) => key + 1)}
                     disabled={dashboardLoading}
+                    aria-label="Refresh dashboard"
                   >
-                    Refresh
+                    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12a9 9 0 0 1-15.5 6.3" />
+                      <path d="M3 12a9 9 0 0 1 15.5-6.3" />
+                      <path d="M3 18v-5h5" />
+                      <path d="M21 6v5h-5" />
+                    </svg>
                   </button>
                 </div>
 
-                <div className="relative mt-4 grid grid-cols-4 gap-2">
+                <div className="relative mt-3 grid grid-cols-4 gap-2">
                   {[
                     {
                       label: "Schedule",
                       action: () => setActiveTab("schedule"),
-                      tone: "from-blue-500 to-sky-600",
-                      surface: "from-blue-50 to-sky-50 border-blue-100",
+                      tone: "bg-blue-600",
+                      surface: "bg-blue-50 border-blue-100",
                       text: "text-blue-950",
-                      shadow: "shadow-[0_14px_26px_rgba(37,99,235,0.24)]",
                       icon: (
-                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M7 3v4M17 3v4" />
                           <path d="M4 8h16" />
                           <path d="M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
@@ -17055,12 +17059,11 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Pictures",
                       action: openPhotosTab,
-                      tone: "from-violet-500 to-fuchsia-600",
-                      surface: "from-violet-50 to-fuchsia-50 border-violet-100",
+                      tone: "bg-violet-600",
+                      surface: "bg-violet-50 border-violet-100",
                       text: "text-violet-950",
-                      shadow: "shadow-[0_14px_26px_rgba(124,58,237,0.24)]",
                       icon: (
-                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
                           <path d="m4 16 4-4 3 3 4-5 5 6" />
                           <path d="M8 9h.01" />
@@ -17070,12 +17073,11 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Receipts",
                       action: () => setActiveTab("receipts"),
-                      tone: "from-amber-400 to-orange-500",
-                      surface: "from-amber-50 to-orange-50 border-amber-100",
+                      tone: "bg-orange-500",
+                      surface: "bg-orange-50 border-orange-100",
                       text: "text-amber-950",
-                      shadow: "shadow-[0_14px_26px_rgba(245,158,11,0.24)]",
                       icon: (
-                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
                           <path d="M9 8h6M9 12h6M9 16h3" />
                         </svg>
@@ -17084,12 +17086,11 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Employees",
                       action: () => setActiveTab("team"),
-                      tone: "from-emerald-500 to-teal-600",
-                      surface: "from-emerald-50 to-teal-50 border-emerald-100",
+                      tone: "bg-teal-600",
+                      surface: "bg-teal-50 border-teal-100",
                       text: "text-emerald-950",
-                      shadow: "shadow-[0_14px_26px_rgba(16,185,129,0.24)]",
                       icon: (
-                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" />
                           <path d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
                           <path d="M20 19v-1a4 4 0 0 0-3-3.8M17 4.3a3 3 0 0 1 0 5.4" />
@@ -17100,13 +17101,13 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       key={item.label}
                       type="button"
-                      className={`min-w-0 rounded-[22px] border bg-gradient-to-br ${item.surface} px-1 py-3 text-center shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]`}
+                      className={`min-w-0 rounded-[18px] border ${item.surface} px-1 py-2.5 text-center shadow-sm active:scale-[0.98]`}
                       onClick={item.action}
                     >
-                      <span className={`mx-auto flex h-11 w-11 items-center justify-center rounded-[17px] bg-gradient-to-br ${item.tone} text-white ${item.shadow}`}>
+                      <span className={`mx-auto flex h-9 w-9 items-center justify-center rounded-[14px] ${item.tone} text-white shadow-sm`}>
                         {item.icon}
                       </span>
-                      <span className={`mt-2 block text-center text-[10px] font-black leading-tight ${item.text}`}>{item.label}</span>
+                      <span className={`mt-1.5 block text-center text-[10px] font-black leading-tight ${item.text}`}>{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -17132,33 +17133,33 @@ const handlePhotoQuickUpload = async (event) => {
 
               {userCompany?.id && companyChecked ? (
                 <div className="flex flex-col gap-3">
-                  <section className="order-1 rounded-[28px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+                  <section className="order-1 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="mb-2 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Live summary</p>
                         <h3 className="text-[18px] font-black leading-tight text-slate-950">Working now</h3>
                       </div>
-                      <span className="rounded-full bg-slate-950 px-3 py-1.5 text-[12px] font-black tabular-nums text-white">
+                      <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] font-black tabular-nums text-white">
                         {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-[22px] border border-blue-100 bg-blue-50 px-3 py-3">
+                      <div className="rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2.5">
                         <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">Active hours</p>
-                        <p className="mt-1 text-[22px] font-black leading-none tabular-nums text-slate-950">
+                        <p className="mt-1 text-[20px] font-black leading-none tabular-nums text-slate-950">
                           {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-[22px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                      <div className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
                         <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Active labour</p>
-                        <p className="mt-1 text-[22px] font-black leading-none tabular-nums text-slate-950">
+                        <p className="mt-1 text-[20px] font-black leading-none tabular-nums text-slate-950">
                           {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
                         </p>
                       </div>
                     </div>
                   </section>
 
-                  <section className="order-4 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-4 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team pulse</p>
@@ -17173,7 +17174,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-3">
-                      <div className="rounded-[22px] bg-slate-50 p-3">
+                      <div className="rounded-[18px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
                           <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">In</p>
                           <p className="text-[22px] font-black tabular-nums text-slate-950">
@@ -17195,7 +17196,7 @@ const handlePhotoQuickUpload = async (event) => {
                           )}
                         </div>
                       </div>
-                      <div className="rounded-[22px] bg-slate-50 p-3">
+                      <div className="rounded-[18px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
                           <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">Out</p>
                           <p className="text-[22px] font-black tabular-nums text-slate-950">
@@ -17218,7 +17219,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-3 pb-3">
+                    <div className="mt-4 rounded-[20px] border border-slate-100 bg-white px-3 pt-3 pb-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees Logged by Hour</p>
                         <p className="shrink-0 text-[11px] font-black text-slate-400">
@@ -17249,7 +17250,7 @@ const handlePhotoQuickUpload = async (event) => {
                           ? `${left},${top + graphH} ${linePoints} ${left + graphW},${top + graphH}`
                           : "";
                         return (
-                          <div className="mt-2 rounded-[22px] border border-slate-100 bg-white px-2 py-2">
+                          <div className="mt-2 rounded-[18px] border border-slate-100 bg-white px-2 py-2">
                             {hasData ? (
                               <svg viewBox={`0 0 ${width} ${height}`} className="h-40 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
                                 {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
@@ -17395,13 +17396,13 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-2 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-2 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Working now</p>
-                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Active team</h3>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Working now</p>
+                        <h3 className="mt-0.5 text-[18px] font-black text-slate-950">Active team</h3>
                       </div>
-                      <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                      <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
                         {(dashboardLiveWorkingCards || []).length}
                       </p>
                     </div>
@@ -17413,14 +17414,14 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[15px] font-black text-slate-700">No employees are clocked in.</p>
                       </div>
                     ) : null}
-                    <div className="mt-3 space-y-2.5">
+                    <div className="mt-3 space-y-2">
                       {!dashboardLoading &&
                         (dashboardLiveWorkingCards || []).map((card) => {
                           const { row, rep, uid, displayName } = card || {};
                           if (!rep || !uid) return null;
                           const liveMinutes = getWorkedMinutes(rep);
                           const liveCost = getLabourCost(rep);
-                          const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" • ");
+                          const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" / ");
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                           const fallbackLoc = rep?.clockInLocation || null;
@@ -17434,37 +17435,35 @@ const handlePhotoQuickUpload = async (event) => {
                           return (
                             <div
                               key={`premium-live-${String(uid)}`}
-                              className="rounded-[24px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3.5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]"
+                              className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm"
                             >
-                              <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[17px] font-black leading-tight text-slate-950" title={displayName || "Employee"}>
+                                  <p className="truncate text-[16px] font-black leading-tight text-slate-950" title={displayName || "Employee"}>
                                     {displayName || "Employee"}
                                   </p>
-                                  <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-bold text-slate-500 tabular-nums">
+                                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] font-bold text-slate-500 tabular-nums">
                                     <span>Clocked in {clockInDisp}</span>
-                                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-700">
                                       Working
                                     </span>
                                   </p>
                                 </div>
-                                <div className="shrink-0 rounded-[18px] bg-slate-950 px-3 py-2 text-right text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]">
-                                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Time</p>
-                                  <p className="mt-0.5 text-[14px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
-                                  <p className="mt-1.5 text-[10px] font-black uppercase tracking-wide text-slate-300">Cost</p>
-                                  <p className="mt-0.5 text-[14px] font-black leading-none tabular-nums">{formatMoney(liveCost)}</p>
+                                <div className="shrink-0 rounded-[14px] bg-slate-950 px-2.5 py-1.5 text-right text-white shadow-sm">
+                                  <p className="text-[13px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
+                                  <p className="mt-1 text-[12px] font-black leading-none tabular-nums text-slate-200">{formatMoney(liveCost)}</p>
                                 </div>
                               </div>
                               <p
-                                className="mt-3 truncate rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm"
+                                className="mt-2 truncate text-[13px] font-bold leading-snug text-slate-600"
                                 title={projectTaskLine}
                               >
                                 {projectTaskLine}
                               </p>
-                              <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
+                              <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
                                 <button
                                   type="button"
-                                  className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-800 disabled:opacity-50"
+                                  className="rounded-[14px] border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-800 disabled:opacity-50"
                                   disabled={!hasLiveGps}
                                   onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
                                 >
@@ -17472,7 +17471,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </button>
                                 <Button
                                   type="button"
-                                  className="rounded-2xl px-4 py-2 text-[13px] font-black !bg-slate-950 !text-white"
+                                  className="rounded-[14px] px-3 py-2 text-[12px] font-black !bg-slate-950 !text-white"
                                   disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                                 >
@@ -17485,7 +17484,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-3 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-3 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Today</p>
@@ -17493,7 +17492,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <button
                         type="button"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700 active:scale-[0.98]"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-black text-slate-700 active:scale-[0.98]"
                         onClick={openDashboardTodayTimesheets}
                       >
                         View timesheets
@@ -17505,19 +17504,19 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's timesheet details"
                     >
-                      <span className="rounded-[20px] bg-slate-950 px-3 py-3 text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]">
+                      <span className="rounded-[18px] bg-slate-950 px-3 py-2.5 text-white shadow-sm">
                         <span className="block text-[9px] font-black uppercase tracking-wide text-slate-300">Employees</span>
                         <span className="mt-1 block text-[22px] font-black tabular-nums leading-none">
                           {dashboardWorkedTodaySummary.employeeCount}
                         </span>
                       </span>
-                      <span className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3">
+                      <span className="rounded-[18px] border border-slate-200 bg-slate-50 px-3 py-2.5">
                         <span className="block text-[9px] font-black uppercase tracking-wide text-slate-500">Entries</span>
                         <span className="mt-1 block text-[22px] font-black tabular-nums leading-none text-slate-950">
                           {dashboardWorkedTodaySummary.shiftCount}
                         </span>
                       </span>
-                      <span className="rounded-[20px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                      <span className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
                         <span className="block text-[9px] font-black uppercase tracking-wide text-emerald-700">Labour</span>
                         <span className="mt-1 block text-[clamp(14px,3.8vw,18px)] font-black tabular-nums leading-none text-slate-950">
                           {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
@@ -17526,7 +17525,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="mb-3 w-full rounded-[24px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.06)] active:scale-[0.99]"
+                      className="mb-3 w-full rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-left shadow-sm active:scale-[0.99]"
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's completed time and cost"
                     >
@@ -17552,7 +17551,7 @@ const handlePhotoQuickUpload = async (event) => {
                         {dashboardTodayWorkedCards.slice(0, 8).map((card) => {
                           const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
                             .filter(Boolean)
-                            .join(" • ");
+                            .join(" / ");
                           return (
                             <button
                               key={`premium-worked-${card.uid}`}
@@ -23466,7 +23465,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         <div
-          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[23rem] -translate-x-1/2 rounded-[28px] border border-white/80 bg-white/[0.92] px-2 py-2 shadow-[0_24px_58px_rgba(15,23,42,0.24)] backdrop-blur-xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
+          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-white/75 bg-white/80 px-1.5 py-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.16)] backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
           <div className="hidden">
             {isAdmin && (
@@ -23489,20 +23488,20 @@ const handlePhotoQuickUpload = async (event) => {
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-3 gap-1">
             {isAdmin ? (
               <>
                 <button
                   type="button"
                   onClick={() => setActiveTab("dashboard")}
-                  className={`rounded-[22px] py-3 px-1 text-[clamp(12px,3.4vw,15px)] font-black transition ${activeTab === "dashboard" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
+                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${activeTab === "dashboard" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   Activities
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("clock")}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "clock" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
+                  className={`rounded-[18px] py-2.5 px-2 text-[14px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
                 >
                   Clock
                 </button>
@@ -23512,7 +23511,7 @@ const handlePhotoQuickUpload = async (event) => {
                     setMenuPanel("main");
                     setIsMenuOpen(true);
                   }}
-                  className="rounded-[22px] py-3 px-2 text-[15px] font-black text-slate-500 transition active:bg-slate-100"
+                  className="rounded-[18px] py-2.5 px-2 text-[14px] font-black text-slate-500 transition active:bg-slate-100"
                 >
                   More
                 </button>
@@ -23522,9 +23521,9 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={() => setActiveTab("activities")}
-                  className={`rounded-[22px] py-3 px-1 text-[clamp(12px,3.4vw,15px)] font-black transition ${
+                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${
                     activeTab === "activities"
-                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
+                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
                       : "text-slate-500 active:bg-slate-100"
                   }`}
                 >
@@ -23533,9 +23532,9 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={handleEmployeeBottomClockAction}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${
+                  className={`rounded-[18px] py-2.5 px-2 text-[14px] font-black transition ${
                     activeTab === "clock"
-                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
+                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
                       : visibleCurrentShift
                         ? "bg-emerald-50 text-emerald-800 active:bg-emerald-100"
                         : "text-slate-500 active:bg-slate-100"
@@ -23549,7 +23548,7 @@ const handlePhotoQuickUpload = async (event) => {
                     setMenuPanel("main");
                     setIsMenuOpen(true);
                   }}
-                  className="rounded-[22px] py-3 px-2 text-[15px] font-black text-slate-500 transition active:bg-slate-100"
+                  className="rounded-[18px] py-2.5 px-2 text-[14px] font-black text-slate-500 transition active:bg-slate-100"
                 >
                   More
                 </button>

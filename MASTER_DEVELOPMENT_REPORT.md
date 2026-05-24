@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-9
+- Current development version: B.1-fix-10
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -140,6 +140,25 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-10 Dashboard Polish V1
+- App header vertical padding reduced and notification badge size tightened.
+- Dashboard hero header flattened with cleaner company title truncation and compact refresh icon button.
+- Dashboard typography hierarchy adjusted so primary company text is stronger and secondary date/user text is quieter.
+- Dashboard quick action cards reduced in size and saturation while preserving Schedule, Pictures, Receipts, Employees order.
+- Quick action shadows and glow effects flattened for a more enterprise SaaS feel.
+- Active Team cards redesigned into compact rows with employee name, inline live time/cost, project/task, live location, and clock-out action.
+- Active Team timer/status pill sizing reduced without changing live time/labour calculation logic.
+- Worked Today and dashboard card surfaces flattened to reduce bubble/glow styling.
+- Bottom navigation height and selected pill size reduced with a subtler glass-style surface.
+- No SQL, database, or business-logic changes were made.
+
+## B.1-fix-10 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -158,6 +177,7 @@
     ```
 - B.1-fix-8 does not require new SQL.
 - B.1-fix-9 does not require new SQL.
+- B.1-fix-10 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
