@@ -154,8 +154,9 @@
 
 ## B.1-fix-10 Build / Deployment
 - Local build status: Passed on develop.
-- Development preview deployment: Pending.
+- Development preview deployment: Completed.
 - Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-bsaviyzs5-samrental70-7859s-projects.vercel.app
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
