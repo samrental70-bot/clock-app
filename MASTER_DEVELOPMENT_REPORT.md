@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-5
+- Current development version: B.1-fix-6
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -71,11 +71,29 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-6 Dashboard Mobile Polish
+- Dashboard shortcuts reordered to Schedule, Pictures, Receipts, and Employees.
+- Employees shortcut label adjusted so it is fully visible on mobile.
+- Active live totals now fall back to active timesheet records and employee profile hourly rate when today dashboard rows are incomplete.
+- Active summary card compacted to reduce top clutter while preserving live active hours and live active labour.
+- Individual Active Team employee cards no longer show duplicate Live Hours / Live Labour boxes.
+- Active Team cards now focus on employee, clock-in time, Working status, project/task, live location, and manager clock-out.
+- Dashboard content ordering updated so Activities appears last after operational cards.
+- Employees Logged by Hour graph spacing and labels cleaned up for mobile readability.
+
+## B.1-fix-6 Build / Deployment
+- Local build status: Passed.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
   - `supabase/migrations/20260523133000_correct_auto_clock_out_default_midnight.sql`
 - B.1-fix-4 does not require new SQL.
+- B.1-fix-6 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

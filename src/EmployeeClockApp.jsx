@@ -1561,8 +1561,8 @@ function formatTime(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 }
 
 function minutesBetween(start, end) {
-  const t0 = new Date(start).getTime();
-  const t1 = new Date(end).getTime();
+  const t0 = parseStoredInstant(start).getTime();
+  const t1 = parseStoredInstant(end).getTime();
   if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
   return Math.max(0, Math.round((t1 - t0) / 60000));
 }
@@ -4484,6 +4484,26 @@ export default function EmployeeClockApp() {
     return m;
   }, [dashboardLiveLocations]);
 
+  const dashboardActiveShiftByUserId = useMemo(() => {
+    const grouped = {};
+    const sourceRows = isAdmin
+      ? normalizeArray(records)
+      : normalizeArray(records).filter((record) =>
+          String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "") === String(authUser?.id || "")
+        );
+    for (const record of sourceRows) {
+      const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
+      if (!uid || !isTimesheetRowActiveForLiveDashboard(record)) continue;
+      if (!grouped[uid]) grouped[uid] = [];
+      grouped[uid].push(record);
+    }
+    const activeByUser = {};
+    for (const [uid, rows] of Object.entries(grouped)) {
+      activeByUser[uid] = pickLatestActiveTimesheetForLiveDashboard(rows);
+    }
+    return activeByUser;
+  }, [authUser?.id, isAdmin, records]);
+
   /** Clocked-in employees today for live strip (defensive arrays). */
   const dashboardLiveWorkingCards = useMemo(() => {
     if (!isAdmin) return [];
@@ -4501,17 +4521,25 @@ export default function EmployeeClockApp() {
     for (const row of attendance) {
       if (row == null || row.userId == null) continue;
       const uid = String(row.userId);
-      const rep = pickLatestActiveTimesheetForLiveDashboard(byUid[uid]);
+      const rep = pickLatestActiveTimesheetForLiveDashboard(byUid[uid]) || dashboardActiveShiftByUserId?.[uid];
       if (!rep) continue;
+      const rowRate = hourlyRateFromProfileValue(row.hourlyRate);
+      const repRate = hourlyRateFromProfileValue(rep.hourlyRate);
+      const mergedRep = {
+        ...rep,
+        hourlyRate: repRate > 0 ? repRate : rowRate,
+        employeeName: rep.employeeName || row.displayName || row.fullName || "",
+        employee: rep.employee || row.displayName || row.fullName || "",
+      };
       const displayName =
         (row.displayName && String(row.displayName).trim()) || shortUserLabel(row.userId);
-      cards.push({ row, rep, uid, displayName });
+      cards.push({ row, rep: mergedRep, uid, displayName });
     }
     cards.sort((a, b) =>
       String(a.displayName || "").localeCompare(String(b.displayName || ""), undefined, { sensitivity: "base" })
     );
     return cards;
-  }, [isAdmin, dashboardRowsForAttendance, dashboardTodaySheets]);
+  }, [isAdmin, dashboardRowsForAttendance, dashboardTodaySheets, dashboardActiveShiftByUserId]);
 
   const updateLiveLocationOnce = useCallback(
     async ({ status, projectName, costCentre, coords }) => {
@@ -16848,20 +16876,6 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="relative mt-4 grid grid-cols-4 gap-2">
                   {[
                     {
-                      label: "Receipts",
-                      action: () => setActiveTab("receipts"),
-                      tone: "from-amber-400 to-orange-500",
-                      surface: "from-amber-50 to-orange-50 border-amber-100",
-                      text: "text-amber-950",
-                      shadow: "shadow-[0_14px_26px_rgba(245,158,11,0.24)]",
-                      icon: (
-                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
-                          <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
-                          <path d="M9 8h6M9 12h6M9 16h3" />
-                        </svg>
-                      ),
-                    },
-                    {
                       label: "Schedule",
                       action: () => setActiveTab("schedule"),
                       tone: "from-blue-500 to-sky-600",
@@ -16893,6 +16907,20 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     },
                     {
+                      label: "Receipts",
+                      action: () => setActiveTab("receipts"),
+                      tone: "from-amber-400 to-orange-500",
+                      surface: "from-amber-50 to-orange-50 border-amber-100",
+                      text: "text-amber-950",
+                      shadow: "shadow-[0_14px_26px_rgba(245,158,11,0.24)]",
+                      icon: (
+                        <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
+                          <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
+                          <path d="M9 8h6M9 12h6M9 16h3" />
+                        </svg>
+                      ),
+                    },
+                    {
                       label: "Employees",
                       action: () => setActiveTab("team"),
                       tone: "from-emerald-500 to-teal-600",
@@ -16911,13 +16939,13 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       key={item.label}
                       type="button"
-                      className={`min-w-0 rounded-[22px] border bg-gradient-to-br ${item.surface} px-1.5 py-3 text-center shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]`}
+                      className={`min-w-0 rounded-[22px] border bg-gradient-to-br ${item.surface} px-1 py-3 text-center shadow-[0_12px_24px_rgba(15,23,42,0.08)] active:scale-[0.98]`}
                       onClick={item.action}
                     >
-                      <span className={`mx-auto flex h-12 w-12 items-center justify-center rounded-[18px] bg-gradient-to-br ${item.tone} text-white ${item.shadow}`}>
+                      <span className={`mx-auto flex h-11 w-11 items-center justify-center rounded-[17px] bg-gradient-to-br ${item.tone} text-white ${item.shadow}`}>
                         {item.icon}
                       </span>
-                      <span className={`mt-2 block truncate text-[11px] font-black ${item.text}`}>{item.label}</span>
+                      <span className={`mt-2 block text-center text-[10px] font-black leading-tight ${item.text}`}>{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -16942,27 +16970,34 @@ const handlePhotoQuickUpload = async (event) => {
               ) : null}
 
               {userCompany?.id && companyChecked ? (
-                <>
-                  <section className="grid grid-cols-2 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
-                    <div className="relative overflow-hidden border-r border-slate-200 bg-gradient-to-br from-blue-50 to-white p-4">
-                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-sky-500" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Active hours</p>
-                      <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
-                        {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
-                      </p>
-                      <p className="mt-1 text-[12px] font-bold text-slate-400">Live now</p>
+                <div className="flex flex-col gap-3">
+                  <section className="order-1 rounded-[28px] border border-slate-200 bg-white p-3 shadow-[0_18px_40px_rgba(15,23,42,0.08)]">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Live summary</p>
+                        <h3 className="text-[18px] font-black leading-tight text-slate-950">Working now</h3>
+                      </div>
+                      <span className="rounded-full bg-slate-950 px-3 py-1.5 text-[12px] font-black tabular-nums text-white">
+                        {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
+                      </span>
                     </div>
-                    <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-white p-4">
-                      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">Active labour</p>
-                      <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
-                        {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
-                      </p>
-                      <p className="mt-1 text-[12px] font-bold text-slate-400">Live now</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-[22px] border border-blue-100 bg-blue-50 px-3 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-blue-700">Active hours</p>
+                        <p className="mt-1 text-[22px] font-black leading-none tabular-nums text-slate-950">
+                          {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-[22px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">Active labour</p>
+                        <p className="mt-1 text-[22px] font-black leading-none tabular-nums text-slate-950">
+                          {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
+                        </p>
+                      </div>
                     </div>
                   </section>
 
-                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-4 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team pulse</p>
@@ -17035,11 +17070,11 @@ const handlePhotoQuickUpload = async (event) => {
                         const hasData = bars.some((bar) => Number(bar.count || 0) > 0);
                         const maxCount = Math.max(1, ...bars.map((bar) => Number(bar.count || 0)));
                         const width = 320;
-                        const height = 132;
-                        const left = 30;
-                        const right = 10;
-                        const top = 12;
-                        const bottom = 24;
+                        const height = 152;
+                        const left = 34;
+                        const right = 14;
+                        const top = 22;
+                        const bottom = 32;
                         const graphW = width - left - right;
                         const graphH = height - top - bottom;
                         const points = bars.map((bar, index) => {
@@ -17055,13 +17090,13 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div className="mt-2 rounded-[22px] border border-slate-100 bg-white px-2 py-2">
                             {hasData ? (
-                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
+                              <svg viewBox={`0 0 ${width} ${height}`} className="h-40 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
                                 {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
                                   const y = top + graphH - (tick / maxCount) * graphH;
                                   return (
                                     <g key={`tick-${tick}`}>
                                       <line x1={left} x2={left + graphW} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
-                                      <text x="2" y={y + 4} fontSize="10" fontWeight="800" fill="#64748b">
+                                      <text x="4" y={y + 4} fontSize="10" fontWeight="800" fill="#64748b">
                                         {tick}
                                       </text>
                                     </g>
@@ -17069,29 +17104,24 @@ const handlePhotoQuickUpload = async (event) => {
                                 })}
                                 <line x1={left} x2={left} y1={top} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
                                 <line x1={left} x2={left + graphW} y1={top + graphH} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
-                                <polygon points={areaPoints} fill="rgba(15,23,42,0.08)" />
-                                <polyline points={linePoints} fill="none" stroke="#020617" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                                <polygon points={areaPoints} fill="rgba(37,99,235,0.08)" />
+                                <polyline points={linePoints} fill="none" stroke="#020617" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                                 {points.map((point) => (
                                   <g key={`point-${point.hour}`}>
-                                    <circle cx={point.x} cy={point.y} r="5.5" fill="#020617" stroke="#ffffff" strokeWidth="2.5" />
-                                    {Number(point.count || 0) > 0 ? (
-                                      <text x={point.x} y={point.y - 10} textAnchor="middle" fontSize="10" fontWeight="900" fill="#0f172a">
-                                        {point.count}
-                                      </text>
-                                    ) : null}
+                                    <circle cx={point.x} cy={point.y} r="4.5" fill="#020617" stroke="#ffffff" strokeWidth="2" />
                                     {point.label ? (
-                                      <text x={point.x} y={height - 4} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
+                                      <text x={point.x} y={height - 7} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
                                         {point.label}
                                       </text>
                                     ) : null}
                                   </g>
                                 ))}
-                                <text x="0" y="10" fontSize="9" fontWeight="900" fill="#475569">
-                                  Employees
+                                <text x={left} y="10" fontSize="9" fontWeight="900" fill="#475569">
+                                  Employee count
                                 </text>
                               </svg>
                             ) : (
-                              <div className="flex h-36 items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
+                              <div className="flex h-40 items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
                                 No employee login activity for this range yet.
                               </div>
                             )}
@@ -17101,7 +17131,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-6 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Activities</p>
@@ -17138,7 +17168,7 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </section>
 
-                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-5 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Team radar</p>
@@ -17204,7 +17234,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-2 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Working now</p>
@@ -17238,8 +17268,6 @@ const handlePhotoQuickUpload = async (event) => {
                               )
                             : 0;
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
-                          const liveMinutes = getWorkedMinutes(rep);
-                          const liveCost = getLabourCost(rep);
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                           const fallbackLoc = rep?.clockInLocation || null;
                           const latRaw = liveLoc?.latitude ?? liveLoc?.lat ?? fallbackLoc?.latitude;
@@ -17259,8 +17287,11 @@ const handlePhotoQuickUpload = async (event) => {
                                   <p className="text-[17px] font-black leading-tight text-slate-950 break-words">
                                     {displayName || "Employee"}
                                   </p>
-                                  <p className="mt-1 text-[13px] font-bold text-slate-500 tabular-nums">
-                                    Clocked in {clockInDisp}
+                                  <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-bold text-slate-500 tabular-nums">
+                                    <span>Clocked in {clockInDisp}</span>
+                                    <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-emerald-700">
+                                      Working
+                                    </span>
                                   </p>
                                 </div>
                                 <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-[13px] font-black tabular-nums text-white">
@@ -17270,20 +17301,6 @@ const handlePhotoQuickUpload = async (event) => {
                               <p className="mt-3 rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm">
                                 {[rep?.project || "No project", rep?.costCenter || "No task"].join(" - ")}
                               </p>
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2">
-                                  <p className="text-[9px] font-black uppercase tracking-wide text-blue-700">Live hours</p>
-                                  <p className="mt-0.5 text-[14px] font-black tabular-nums text-slate-950">
-                                    {formatHoursDecimal(liveMinutes)}
-                                  </p>
-                                </div>
-                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-right">
-                                  <p className="text-[9px] font-black uppercase tracking-wide text-emerald-700">Live labour</p>
-                                  <p className="mt-0.5 text-[14px] font-black tabular-nums text-slate-950">
-                                    {formatMoneyWhole(liveCost)}
-                                  </p>
-                                </div>
-                              </div>
                               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                                 <button
                                   type="button"
@@ -17308,7 +17325,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-3 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Today</p>
@@ -17392,7 +17409,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                     )}
                   </section>
-                </>
+                </div>
               ) : null}
             </div>
           )}
