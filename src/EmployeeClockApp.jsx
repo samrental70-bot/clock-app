@@ -14523,7 +14523,7 @@ const handlePhotoQuickUpload = async (event) => {
     setReportsDatePickerOpen(false);
   };
 
-  const appHeaderDateLabel = useMemo(() => {
+  const appHeaderDateLabel = (() => {
     try {
       return new Intl.DateTimeFormat("en-CA", {
         timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
@@ -14533,11 +14533,11 @@ const handlePhotoQuickUpload = async (event) => {
         year: "numeric",
       }).format(now instanceof Date ? now : new Date(now));
     } catch {
-      return formatDateParts(new Date(), companyTimeZone);
+      return formatDateParts(new Date(), companyTimeZone).fullDate;
     }
-  }, [companyTimeZone, now]);
+  })();
 
-  const handleHeaderRefresh = useCallback(() => {
+  const handleHeaderRefresh = () => {
     setDashboardRefreshKey((key) => key + 1);
     setTeamRefreshKey((key) => key + 1);
     setScheduleRefreshKey((key) => key + 1);
@@ -14545,7 +14545,7 @@ const handlePhotoQuickUpload = async (event) => {
     if (typeof fetchTimesheetsFromSupabase === "function") void fetchTimesheetsFromSupabase();
     if (typeof loadProjectMediaFromSupabase === "function") void loadProjectMediaFromSupabase({ silent: true });
     if (typeof pollInAppNotifications === "function") void pollInAppNotifications();
-  }, [fetchTimesheetsFromSupabase, loadProjectMediaFromSupabase, pollInAppNotifications]);
+  };
 
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
