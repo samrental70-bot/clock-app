@@ -101,7 +101,7 @@
 
 ## B.1-fix-7 Build / Deployment
 - Local build status: Passed on develop.
-- Development preview deployment: Pending.
+- Development preview deployment: Completed.
 - Development URL: https://project-rui1d-development.vercel.app
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
@@ -114,6 +114,14 @@
 - B.1-fix-6 does not require new SQL.
 - B.1-fix-7 requires this safe additive SQL before the new employee project/task permission can persist:
   - `supabase/migrations/20260523160000_add_employee_project_task_creation_setting.sql`
+  - SQL:
+    ```sql
+    alter table public.companies
+      add column if not exists allow_employee_project_task_creation boolean not null default false;
+
+    comment on column public.companies.allow_employee_project_task_creation is
+      'When true, employees may add projects and tasks from the Clock screen. Default false.';
+    ```
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
