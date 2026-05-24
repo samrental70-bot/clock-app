@@ -23,16 +23,16 @@ const Button = ({ children, className, ...props }) => (
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
     type="button"
-    className="w-full min-w-0 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
+    className="w-full min-w-0 rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
     onClick={onClick}
   >
     <span className="flex items-center justify-between gap-3">
-      <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
-      <span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-black text-white">
+      <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <span className="shrink-0 rounded-full bg-slate-950 px-2 py-0.5 text-[10px] font-black text-white">
         {presetLabel}
       </span>
     </span>
-    <span className="mt-2 block text-[18px] font-black leading-tight text-slate-950">
+    <span className="mt-1.5 block text-[15px] font-black leading-tight text-slate-950">
       {rangeLabel || "Choose dates"}
     </span>
   </button>
@@ -2985,12 +2985,11 @@ export default function EmployeeClockApp() {
         dateFrom: mediaFilterDateFrom,
         dateTo: mediaFilterDateTo,
         employeeId: mediaFilterEmployeeId,
-        costCentre: mediaFilterCostCentre,
+        costCentre: "all",
         mediaType: "receipt",
         documentationType: "receipt",
       }),
     [
-      mediaFilterCostCentre,
       mediaFilterDateFrom,
       mediaFilterDateTo,
       mediaFilterEmployeeId,
@@ -3065,6 +3064,7 @@ export default function EmployeeClockApp() {
   const [timesheetShareMessage, setTimesheetShareMessage] = useState("");
   const [timesheetRangePreset, setTimesheetRangePreset] = useState("today");
   const [timesheetDatePickerOpen, setTimesheetDatePickerOpen] = useState(false);
+  const [timesheetFilterSheetOpen, setTimesheetFilterSheetOpen] = useState(false);
   const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
   const [timesheetDraftDateFrom, setTimesheetDraftDateFrom] = useState("");
   const [timesheetDraftDateTo, setTimesheetDraftDateTo] = useState("");
@@ -13100,26 +13100,27 @@ const handlePhotoQuickUpload = async (event) => {
         : getLabourCost(record);
 
     return (
-    <div key={record.id} className="rounded-[22px] border border-slate-200 bg-white p-3.5 shadow-sm">
-      <div className="flex justify-between gap-3">
-        <div>
-          <p className="text-[17px] font-black text-slate-950 leading-snug">{timesheetTitle}</p>
+    <div key={record.id} className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[16px] font-black text-slate-950 leading-snug">{timesheetTitle}</p>
           {timesheetEmailSecondary && (
             <p className="text-[13px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
           )}
-          <p className="mt-1 text-[14px] font-bold text-slate-600">{record.project || "No project"}</p>
-          <p className="text-[13px] font-semibold text-slate-500">Task: {record.costCenter || "Not selected"}</p>
+          <p className="mt-1 truncate text-[13px] font-bold text-slate-600">
+            {record.project || "No project"} - {record.costCenter || "No task"}
+          </p>
         </div>
-        <span className={`rounded-full px-3 py-1 text-[12px] font-black h-fit ${statusBadgeClass}`}>
+        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-black h-fit ${statusBadgeClass}`}>
           {statusBadgeLabel}
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-3 text-[13px] text-slate-600">
-        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Hours</p><p className="font-black text-slate-900 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p></div>
-        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[10px]">Rate</p><p className="font-black text-slate-900 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p></div>
+      <div className="grid grid-cols-3 gap-2 mt-3 text-[12px] text-slate-600">
+        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[9px] tracking-wide">Hours</p><p className="font-black text-slate-900 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p></div>
+        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[9px] tracking-wide">Rate</p><p className="font-black text-slate-900 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p></div>
         <div className="rounded-2xl bg-slate-50 p-2">
-          <p className="font-black uppercase text-[10px]">Cost</p>
+          <p className="font-black uppercase text-[9px] tracking-wide">Cost</p>
           <p className="font-black text-slate-900 leading-tight">
             {formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record))}
           </p>
@@ -13218,11 +13219,11 @@ const handlePhotoQuickUpload = async (event) => {
           {isAdmin && !editTimesheetSaving && (
             <Button
               type="button"
-              className="w-full rounded-xl h-10 text-[14px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
+              className="w-full rounded-xl h-10 text-[14px] font-semibold border border-red-200 bg-red-50 text-red-700 shadow-none active:bg-red-100 disabled:opacity-60"
               disabled={busyDelete}
               onClick={() => void handleDeleteTimesheetRecord(record)}
             >
-              {busyDelete ? "Deleting…" : "🗑 Delete"}
+              {busyDelete ? "Deleting..." : "Delete"}
             </Button>
           )}
         </div>
@@ -13292,7 +13293,7 @@ const handlePhotoQuickUpload = async (event) => {
               {allowEdit && canEditTimesheetRecord(record) && (
                 <Button
                   type="button"
-                  className="rounded-xl h-10 text-[14px] col-span-2 sm:col-span-1"
+                  className="rounded-xl h-10 text-[14px] col-span-2 border border-slate-200 bg-white text-slate-800 shadow-none sm:col-span-1"
                   disabled={busyDelete || Boolean(pendingEditRequest)}
                   onClick={() => startEditRecord(record)}
                 >
@@ -13302,11 +13303,11 @@ const handlePhotoQuickUpload = async (event) => {
               {isAdmin && (
                 <Button
                   type="button"
-                  className="rounded-xl h-10 text-[14px] font-semibold bg-red-600 text-white border border-red-800 shadow-sm active:bg-red-700 col-span-2 sm:col-span-1 disabled:opacity-100 disabled:bg-red-500 disabled:text-white"
+                  className="rounded-xl h-10 text-[14px] font-semibold border border-red-200 bg-red-50 text-red-700 shadow-none active:bg-red-100 col-span-2 sm:col-span-1 disabled:opacity-60"
                   disabled={busyDelete || busyClose}
                   onClick={() => void handleDeleteTimesheetRecord(record)}
                 >
-                  {busyDelete ? "Deleting…" : "🗑 Delete"}
+                  {busyDelete ? "Deleting..." : "Delete"}
                 </Button>
               )}
             </div>
@@ -13772,6 +13773,53 @@ const handlePhotoQuickUpload = async (event) => {
 
   if (!hasOpenedAppRef.current) hasOpenedAppRef.current = true;
 
+  const renderScheduleViewSwitcher = (selectId) => (
+    <div className="space-y-2 rounded-[18px] border border-slate-200 bg-white p-2 shadow-sm">
+      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+        <button
+          type="button"
+          className={`rounded-xl px-3 py-2 text-[13px] font-black ${
+            scheduleViewMode === "list"
+              ? "bg-slate-950 text-white shadow-sm"
+              : "text-slate-600 active:bg-white"
+          }`}
+          onClick={() => setScheduleViewMode("list")}
+        >
+          List
+        </button>
+        <button
+          type="button"
+          className={`rounded-xl px-3 py-2 text-[13px] font-black ${
+            scheduleViewMode !== "list"
+              ? "bg-slate-950 text-white shadow-sm"
+              : "text-slate-600 active:bg-white"
+          }`}
+          onClick={() => setScheduleViewMode(scheduleViewMode === "list" ? "cal7" : scheduleViewMode)}
+        >
+          Calendar
+        </button>
+      </div>
+      {scheduleViewMode !== "list" ? (
+        <>
+          <label className="sr-only" htmlFor={selectId}>
+            Calendar range
+          </label>
+          <select
+            id={selectId}
+            className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+            value={scheduleViewMode}
+            onChange={(e) => setScheduleViewMode(e.target.value)}
+          >
+            <option value="cal1">1 Day</option>
+            <option value="cal3">3 Day</option>
+            <option value="cal7">7 Day</option>
+            <option value="cal30">30 Day</option>
+          </select>
+        </>
+      ) : null}
+    </div>
+  );
+
   const renderEmployeeScheduleTaskCard = (task, dateKey) => {
     const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
     const proj = String(task?.project_name ?? "").trim();
@@ -13944,13 +13992,13 @@ const handlePhotoQuickUpload = async (event) => {
     return (
       <div
         key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-        className="rounded-2xl border border-slate-200 bg-white px-3 py-3.5 shadow-sm min-w-0"
+        className="rounded-[18px] border border-slate-200 bg-white px-3 py-3 shadow-sm min-w-0"
       >
         <div className="min-w-0">
-          <p className="text-[19px] font-extrabold text-slate-950 leading-snug break-words">
+          <p className="text-[16px] font-black text-slate-950 leading-snug break-words">
             {ttitle}
           </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] font-semibold text-slate-700 min-w-0">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-semibold text-slate-700 min-w-0">
             <span className="shrink-0 tabular-nums">
               {startDisp} - {endDisp}
             </span>
@@ -13967,7 +14015,7 @@ const handlePhotoQuickUpload = async (event) => {
                   type="button"
                   disabled={Boolean(savingThis)}
                   onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
-                  className="flex-1 rounded-xl bg-slate-900 px-3 py-2.5 text-[15px] font-bold text-white disabled:opacity-50"
+                className="flex-1 rounded-xl bg-slate-900 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
                 >
                   {savingThis ? "Saving..." : "Accept"}
                 </button>
@@ -13979,7 +14027,7 @@ const handlePhotoQuickUpload = async (event) => {
                     setScheduleEmployeeDeclineTaskId(tidStr);
                     setScheduleEmployeeDeclineReason("");
                   }}
-                  className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-slate-800 disabled:opacity-50"
+                  className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[13px] font-bold text-slate-800 disabled:opacity-50"
                 >
                   Decline
                 </button>
@@ -14653,6 +14701,16 @@ const handlePhotoQuickUpload = async (event) => {
   const mediaSelectedRangeLabel = standardDateRangePresetLabel(mediaRangePreset);
   const timesheetDateRangeLabel = formatReportDateRangeLabel(timesheetRangeBounds.from, timesheetRangeBounds.to);
   const timesheetSelectedRangeLabel = standardDateRangePresetLabel(timesheetRangePreset);
+  const timesheetEmployeeFilterLabel =
+    timesheetEmployeeFilter === "all"
+      ? "All Employees"
+      : timesheetEmployeeOptions.find((employee) => String(employee.id) === String(timesheetEmployeeFilter))?.name ||
+        "Selected Employee";
+  const timesheetProjectFilterLabel =
+    timesheetProjectFilter === "all"
+      ? "All Projects"
+      : timesheetProjectOptions.find((project) => String(project.id) === String(timesheetProjectFilter))?.name ||
+        "Selected Project";
 
   const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
     ? reportsRowsFilteredForUi.length
@@ -15896,20 +15954,46 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "timesheet" && (
-            <Card className="rounded-[28px] overflow-hidden">
-              <CardContent className="p-3.5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <div>
-                    <h2 className="font-black text-[23px] leading-tight text-slate-950">My Timesheet</h2>
-                    <p className="mt-1 text-[14px] font-semibold text-slate-500">
-                      {isAdmin ? "All timesheets for this company" : "Only your submitted timesheets"}
+            <Card className="rounded-[24px] overflow-hidden shadow-sm">
+              <CardContent className="p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">
+                      {isAdmin ? "Timesheets" : "My Timesheet"}
+                    </h2>
+                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">
+                      {isAdmin ? "Company time records" : "Submitted and requested time"}
                     </p>
                   </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-2xl bg-slate-950 px-3.5 py-2 text-[13px] font-black text-white shadow-sm"
+                    onClick={() => void handleShareTimesheetReport()}
+                  >
+                    Share
+                  </button>
                 </div>
+                <button
+                  type="button"
+                  className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:bg-slate-50"
+                  onClick={() => setTimesheetFilterSheetOpen(true)}
+                >
+                  <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                    Filters
+                  </span>
+                  <span className="mt-1 block truncate text-[14px] font-black text-slate-950">
+                    {timesheetDateRangeLabel} - {timesheetEmployeeFilterLabel} - {timesheetProjectFilterLabel}
+                  </span>
+                  {timesheetCompletedOnly ? (
+                    <span className="mt-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-800">
+                      Completed only
+                    </span>
+                  ) : null}
+                </button>
                 {!isAdmin ? (
                   <button
                     type="button"
-                    className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-[15px] font-black text-slate-950 shadow-sm"
                     onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
                   >
                     {manualTimeOpen ? "Close manual time" : "Add manual time"}
@@ -16036,76 +16120,116 @@ const handlePhotoQuickUpload = async (event) => {
                     <span className="text-[13px] text-amber-800">{timesheetsError}</span>
                   </div>
                 )}
-                <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <DateRangeButton
-                    label="Date range"
-                    rangeLabel={timesheetDateRangeLabel}
-                    presetLabel={timesheetSelectedRangeLabel}
-                    onClick={openTimesheetDatePicker}
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[13px] font-semibold text-slate-700">
-                      Employee
-                      <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px] font-bold"
-                        value={timesheetEmployeeFilter}
-                        onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
-                      >
-                        <option value="all">All Employees</option>
-                        {timesheetEmployeeOptions.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="space-y-1 text-[13px] font-semibold text-slate-700">
-                      Project
-                      <select
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px] font-bold"
-                        value={timesheetProjectFilter}
-                        onChange={(event) => setTimesheetProjectFilter(event.target.value)}
-                      >
-                        <option value="all">All Projects</option>
-                        {timesheetProjectOptions.map((project) => (
-                          <option key={project.id} value={project.id}>
-                            {project.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  {timesheetCompletedOnly ? (
-                    <div className="flex items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2">
-                      <p className="text-[13px] font-black text-emerald-900">Completed shifts only</p>
-                      <button
-                        type="button"
-                        className="rounded-xl border border-emerald-200 bg-white px-2.5 py-1 text-[12px] font-black text-emerald-900"
-                        onClick={() => setTimesheetCompletedOnly(false)}
-                      >
-                        Clear
-                      </button>
-                    </div>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-[15px] font-black text-white shadow-[0_12px_24px_rgba(15,23,42,0.16)]"
-                    onClick={() => void handleShareTimesheetReport()}
-                  >
-                    Share Report
-                  </button>
-                  {timesheetShareMessage ? (
-                    <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-bold text-slate-700">
-                      {timesheetShareMessage}
-                    </p>
-                  ) : null}
-                </div>
+                {timesheetShareMessage ? (
+                  <p className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-bold text-slate-700">
+                    {timesheetShareMessage}
+                  </p>
+                ) : null}
                 <div className="space-y-3">
                   {!timesheetsLoading && visibleTimesheetRecords.length === 0 && (
-                    <p className="text-[15px] text-slate-500 text-center py-8">No timesheet records for this selection.</p>
+                    <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
+                      <p className="text-[15px] font-black text-slate-950">No timesheets for this range</p>
+                      <p className="mt-1 text-[13px] font-semibold text-slate-500">Change filters or date range to review more records.</p>
+                    </div>
                   )}
                   {visibleTimesheetRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
+                {timesheetFilterSheetOpen ? (
+                  <div
+                    className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/45 p-3 backdrop-blur-[2px]"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={() => setTimesheetFilterSheetOpen(false)}
+                  >
+                    <div
+                      className="w-full max-w-sm rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_24px_60px_rgba(15,23,42,0.28)]"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Timesheets</p>
+                          <h3 className="mt-1 text-[21px] font-black leading-tight text-slate-950">Filters</h3>
+                        </div>
+                        <button
+                          type="button"
+                          className="h-9 w-9 rounded-2xl border border-slate-200 bg-slate-50 text-[16px] font-black text-slate-700"
+                          onClick={() => setTimesheetFilterSheetOpen(false)}
+                          aria-label="Close filters"
+                        >
+                          x
+                        </button>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        <DateRangeButton
+                          label="Date range"
+                          rangeLabel={timesheetDateRangeLabel}
+                          presetLabel={timesheetSelectedRangeLabel}
+                          onClick={openTimesheetDatePicker}
+                        />
+                        <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                          Employee
+                          <select
+                            className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+                            value={timesheetEmployeeFilter}
+                            onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
+                          >
+                            <option value="all">All Employees</option>
+                            {timesheetEmployeeOptions.map((employee) => (
+                              <option key={employee.id} value={employee.id}>
+                                {employee.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                          Project
+                          <select
+                            className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+                            value={timesheetProjectFilter}
+                            onChange={(event) => setTimesheetProjectFilter(event.target.value)}
+                          >
+                            <option value="all">All Projects</option>
+                            {timesheetProjectOptions.map((project) => (
+                              <option key={project.id} value={project.id}>
+                                {project.name}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] font-black text-slate-800">
+                          Completed shifts only
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 rounded border-slate-300"
+                            checked={timesheetCompletedOnly}
+                            onChange={(event) => setTimesheetCompletedOnly(event.target.checked)}
+                          />
+                        </label>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-black text-slate-800"
+                            onClick={() => {
+                              setTimesheetEmployeeFilter("all");
+                              setTimesheetProjectFilter("all");
+                              setTimesheetCompletedOnly(false);
+                            }}
+                          >
+                            Reset
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-2xl bg-slate-950 px-3 py-2.5 text-[13px] font-black text-white"
+                            onClick={() => setTimesheetFilterSheetOpen(false)}
+                          >
+                            Apply
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 <StandardDateRangeModal
                   open={timesheetDatePickerOpen}
                   eyebrow="Timesheet"
@@ -16133,24 +16257,27 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "photos" && (
-            <Card className="rounded-[28px] overflow-hidden">
-              <CardContent className="p-3.5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Pictures</h2>
-                  {projectMediaLoading ? (
-                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Refreshing media...</p>
-                  ) : null}
+            <Card className="rounded-[24px] overflow-hidden shadow-sm">
+              <CardContent className="p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Pictures</h2>
+                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">
+                      {projectMediaLoading ? "Refreshing media..." : "Photos and videos"}
+                    </p>
+                  </div>
                 </div>
                 {projectMediaSyncError ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                <div className="sticky top-2 z-20 rounded-[20px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     Project
                     <select
-                      className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={selectedPhotoFolder}
                       onChange={(event) => setSelectedPhotoFolder(event.target.value)}
                     >
@@ -16163,7 +16290,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     Employee
                     <select
-                      className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={mediaFilterEmployeeId}
                       onChange={(event) => setMediaFilterEmployeeId(event.target.value)}
                     >
@@ -16173,6 +16300,7 @@ const handlePhotoQuickUpload = async (event) => {
                       ))}
                     </select>
                   </label>
+                  </div>
                   <DateRangeButton
                     label="Date range"
                     rangeLabel={mediaDateRangeLabel}
@@ -16403,34 +16531,46 @@ const handlePhotoQuickUpload = async (event) => {
                     })}
                   </div>
                 ) : null}
-                {visiblePhotoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No pictures or videos yet.</p>}
-                <div className="space-y-4">
+                {visiblePhotoFolders.length === 0 && (
+                  <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
+                    <p className="text-[15px] font-black text-slate-950">No media found</p>
+                    <p className="mt-1 text-[13px] font-semibold text-slate-500">Try a different project, employee, or date range.</p>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-2xl bg-slate-950 px-4 py-2 text-[13px] font-black text-white"
+                      onClick={() => setActiveTab("clock")}
+                    >
+                      Open Clock
+                    </button>
+                  </div>
+                )}
+                <div className="space-y-3">
                   {visiblePhotoFolders.map((folder) => {
                     const folderItems = normalizeArray(filteredProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
                     const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
                     return (
-                      <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
+                      <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                         <div className="space-y-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <p className="text-[17px] font-bold text-slate-900 break-words">{folder}</p>
-                              <p className="text-sm text-slate-500">
-                                {folderItems.length} media · {selectedIds.size} selected
+                              <p className="truncate text-[16px] font-black text-slate-950">{folder}</p>
+                              <p className="text-[12px] font-semibold text-slate-500">
+                                {folderItems.length} media{selectedIds.size > 0 ? ` - ${selectedIds.size} selected` : ""}
                               </p>
                             </div>
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <button
                               type="button"
-                              className="rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[14px] font-bold text-slate-900"
+                              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-900"
                               onClick={() => setAllProjectPhotosSelected(folder, !allSelected)}
                             >
                               {allSelected ? "Clear selected" : "Select all in project"}
                             </button>
                             <button
                               type="button"
-                              className="rounded-2xl bg-slate-900 px-3 py-2.5 text-[14px] font-bold text-white disabled:opacity-50"
+                              className="rounded-2xl bg-slate-950 px-3 py-2 text-[13px] font-black text-white disabled:opacity-50"
                               onClick={() => void shareProjectFolder(folder)}
                               disabled={selectedIds.size === 0}
                             >
@@ -16445,7 +16585,7 @@ const handlePhotoQuickUpload = async (event) => {
                             const isVideoMedia = isVideoMediaItem(photo);
                             const mediaUrl = mediaItemUrl(photo);
                             return (
-                              <div key={itemId} className={`rounded-xl overflow-hidden border bg-slate-50 ${selected ? "border-slate-900 ring-2 ring-slate-900/15" : "border-slate-200"}`}>
+                              <div key={itemId} className={`overflow-hidden rounded-[16px] border bg-slate-50 ${selected ? "border-slate-900 ring-2 ring-slate-900/15" : "border-slate-200"}`}>
                                 <div className="relative">
                                   <button
                                     type="button"
@@ -16474,8 +16614,8 @@ const handlePhotoQuickUpload = async (event) => {
                                     />
                                   </label>
                                 </div>
-                                <div className="p-2 text-[12px] text-slate-600">
-                                  <p className="font-semibold text-slate-900 truncate">{photo.employee || "Employee"}</p>
+                                <div className="p-2 text-[11px] font-semibold text-slate-500">
+                                  <p className="truncate text-[12px] font-black text-slate-950">{photo.employee || "Employee"}</p>
                                   <p className="truncate">{photo.costCenter || "No task"}</p>
                                   <p>{photo.capturedAt ? formatDate(new Date(photo.capturedAt), companyTimeZone) : ""}</p>
                                   {isVideoMedia ? (
@@ -16520,70 +16660,85 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "receipts" && (
-            <Card className="rounded-[28px] overflow-hidden">
-              <CardContent className="p-3.5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm"><h2 className="font-black text-[23px] leading-tight text-slate-950">Receipts</h2><p className="mt-1 text-[14px] font-semibold text-slate-500">Receipt photos and totals by project</p></div>
+            <Card className="rounded-[24px] overflow-hidden shadow-sm">
+              <CardContent className="p-3 space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Receipts</h2>
+                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Material spend and proof</p>
+                  </div>
+                  <div className="shrink-0 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
+                    <p className="text-[9px] font-black uppercase tracking-wide text-amber-700">Total</p>
+                    <p className="text-[15px] font-black text-slate-950">{formatMoney(receiptTotal)}</p>
+                  </div>
+                </div>
                 {projectMediaSyncError ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
-                  <option value="all">All Project Folders</option>
-                  {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
-                </select>
-                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
+                <div className="sticky top-2 z-20 rounded-[20px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
                   <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                      From
-                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateFrom} onChange={(e) => setMediaFilterDateFrom(e.target.value)} />
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Project
+                      <select className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
+                        <option value="all">All Projects</option>
+                        {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
+                      </select>
                     </label>
-                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                      To
-                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateTo} onChange={(e) => setMediaFilterDateTo(e.target.value)} />
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Employee
+                      <select className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
+                        <option value="all">All Employees</option>
+                        {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+                      </select>
                     </label>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
-                      <option value="all">All employees</option>
-                      {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-                    </select>
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterCostCentre} onChange={(e) => setMediaFilterCostCentre(e.target.value)}>
-                      <option value="all">All tasks</option>
-                      {mediaFilterOptions.costCentres.map((task) => <option key={task} value={task}>{task}</option>)}
-                    </select>
-                  </div>
+                  <DateRangeButton
+                    label="Date range"
+                    rangeLabel={mediaDateRangeLabel}
+                    presetLabel={mediaSelectedRangeLabel}
+                    onClick={openMediaDatePicker}
+                  />
                 </div>
-                <div className="rounded-[22px] border border-slate-200 bg-slate-950 p-4 text-white shadow-[0_14px_28px_rgba(15,23,42,0.16)]"><p className="text-[11px] font-black uppercase text-slate-300">Receipt Total</p><p className="mt-1 text-3xl font-black">{formatMoney(receiptTotal)}</p></div>
-                {receiptFolders.length === 0 && (
-                  <p className="text-sm text-slate-500 text-center py-8">No receipts captured yet.</p>
+                {visibleReceiptFolders.length === 0 && (
+                  <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
+                    <p className="text-[15px] font-black text-slate-950">No receipts found</p>
+                    <p className="mt-1 text-[13px] font-semibold text-slate-500">Upload a receipt from Clock to attach it to a project.</p>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-2xl bg-slate-950 px-4 py-2 text-[13px] font-black text-white"
+                      onClick={() => setActiveTab("clock")}
+                    >
+                      Open Clock
+                    </button>
+                  </div>
                 )}
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {visibleReceiptFolders.map((folder) => {
                     const folderReceipts = normalizeArray(filteredProjectReceipts[folder]);
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
                     return (
-                      <div key={folder} className="rounded-[24px] border border-slate-200 bg-white p-3.5 space-y-3 shadow-sm">
+                      <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                         <div className="flex items-center justify-between gap-3">
-                          <div><p className="font-semibold">{folder}</p><p className="text-xs text-slate-500">{folderReceipts.length} receipts</p></div>
-                          <p className="font-bold">{formatMoney(folderTotal)}</p>
+                          <div className="min-w-0"><p className="truncate text-[16px] font-black text-slate-950">{folder}</p><p className="text-xs font-semibold text-slate-500">{folderReceipts.length} receipts</p></div>
+                          <p className="shrink-0 text-[14px] font-black text-slate-950">{formatMoney(folderTotal)}</p>
                         </div>
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           {folderReceipts.map((receipt) => (
-                            <div key={receipt.id} className="rounded-xl border bg-slate-50 overflow-hidden">
+                            <div key={receipt.id} className="overflow-hidden rounded-[16px] border border-slate-200 bg-slate-50">
                               {receipt.dataUrl || receipt.imageUrl ? (
-                                <img src={receipt.dataUrl || receipt.imageUrl} alt="Receipt" className="w-full h-36 object-cover" />
+                                <img src={receipt.dataUrl || receipt.imageUrl} alt="Receipt" className="w-full h-32 object-cover" />
                               ) : (
-                                <div className="flex h-36 items-center justify-center bg-slate-100 px-4 text-center text-[14px] font-bold text-slate-500">
+                                <div className="flex h-32 items-center justify-center bg-slate-100 px-4 text-center text-[14px] font-bold text-slate-500">
                                   Receipt pending
                                 </div>
                               )}
-                              <div className="p-3 text-xs text-slate-600 space-y-1">
-                                <div className="flex justify-between"><p className="font-semibold">{receipt.category}</p><p className="font-bold text-slate-900">{formatMoney(receipt.amount)}</p></div>
-                                {receipt.supplier ? <p>Supplier: {receipt.supplier}</p> : null}
+                              <div className="p-3 text-xs font-semibold text-slate-600 space-y-1">
+                                <div className="flex justify-between gap-3"><p className="truncate font-black text-slate-950">{receipt.supplier || receipt.category || "Receipt"}</p><p className="shrink-0 font-black text-slate-950">{formatMoney(receipt.amount)}</p></div>
                                 <p>{receipt.employee} • {receipt.costCenter}</p>
                                 {receipt.status || receipt.receiptStatus ? (
-                                  <p className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-bold text-slate-800">
+                                  <p className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-800">
                                     {receipt.status || receipt.receiptStatus}
                                   </p>
                                 ) : null}
@@ -16594,7 +16749,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 {isAdmin ? (
                                   <button
                                     type="button"
-                                    className="mt-2 w-full rounded-2xl bg-slate-950 px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
+                                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-800 disabled:opacity-50"
                                     onClick={() => void runFieldAiForMedia(receipt, "receipt")}
                                     disabled={Boolean(fieldAiWorkingKey)}
                                   >
@@ -16609,6 +16764,28 @@ const handlePhotoQuickUpload = async (event) => {
                     );
                   })}
                 </div>
+                <StandardDateRangeModal
+                  open={mediaDatePickerOpen}
+                  eyebrow="Receipts"
+                  title="Choose dates"
+                  mode={mediaDatePickerMode}
+                  options={mediaDateRangeOptions}
+                  draftFrom={mediaDraftDateFrom}
+                  draftTo={mediaDraftDateTo}
+                  rangeLabel={formatReportDateRangeLabel(mediaDraftDateFrom, mediaDraftDateTo)}
+                  onModeChange={(mode) => {
+                    setMediaDatePickerMode(mode);
+                    updateDraftRangeForMode({
+                      mode,
+                      setFrom: setMediaDraftDateFrom,
+                      setTo: setMediaDraftDateTo,
+                    });
+                  }}
+                  onDraftFromChange={setMediaDraftDateFrom}
+                  onDraftToChange={setMediaDraftDateTo}
+                  onCancel={() => setMediaDatePickerOpen(false)}
+                  onApply={applyMediaDatePicker}
+                />
               </CardContent>
             </Card>
           )}
@@ -19411,11 +19588,14 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "schedule" && !isAdmin && (
-            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-2 sm:p-3 space-y-2">
+            <Card className="rounded-[24px] border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+              <CardContent className="p-3 space-y-3">
                 <div className="space-y-2">
-                  <div className="rounded-[22px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-3 py-2.5 shadow-sm">
-                    <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">Schedule</h2>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">Schedule</h2>
+                      <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Assigned work</p>
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -19429,23 +19609,7 @@ const handlePhotoQuickUpload = async (event) => {
                       {employeeNotifPermMessage}
                     </div>
                   ) : null}
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-1">
-                    <label className="sr-only" htmlFor="sched-employee-view">
-                      View
-                    </label>
-                    <select
-                      id="sched-employee-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-3 text-[15px] h-11 font-black text-slate-950"
-                      value={scheduleViewMode}
-                      onChange={(e) => setScheduleViewMode(e.target.value)}
-                    >
-                      <option value="list">List View</option>
-                      <option value="cal1">1 Day Calendar</option>
-                      <option value="cal3">3 Day Calendar</option>
-                      <option value="cal7">7 Day Calendar</option>
-                      <option value="cal30">30 Day Calendar</option>
-                    </select>
-                  </div>
+                  {renderScheduleViewSwitcher("sched-employee-view")}
                   {scheduleViewMode !== "list" ? (
                     <div className="grid grid-cols-3 gap-1 rounded-[22px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
@@ -19786,19 +19950,20 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "schedule" && isAdmin && (
-            <Card className="rounded-[28px] border border-slate-200/80 bg-white shadow-[0_22px_48px_rgba(15,23,42,0.10)] overflow-hidden">
-              <CardContent className="p-2 sm:p-3 space-y-2">
+            <Card className="rounded-[24px] border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+              <CardContent className="p-3 space-y-3">
                 <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-[22px] border border-slate-100 bg-gradient-to-br from-white via-white to-slate-50 px-3 py-2.5 shadow-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <h2 className="text-[24px] font-black leading-none tracking-normal text-slate-950">
+                      <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">
                         Schedule
                       </h2>
+                      <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Team work plan</p>
                     </div>
                     {!scheduleFormOpen && (
                       <Button
                         type="button"
-                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-slate-950 text-white shadow-[0_12px_22px_rgba(15,23,42,0.20)]"
+                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-slate-950 text-white shadow-sm"
                         onClick={() => {
                           setScheduleSaveError("");
                           setScheduleEditingTaskId(null);
@@ -19819,23 +19984,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </Button>
                     )}
                   </div>
-                  <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-1">
-                    <label className="sr-only" htmlFor="sched-admin-view">
-                      View
-                    </label>
-                    <select
-                      id="sched-admin-view"
-                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-3 text-[15px] h-11 font-black text-slate-950"
-                      value={scheduleViewMode}
-                      onChange={(e) => setScheduleViewMode(e.target.value)}
-                    >
-                      <option value="list">List View</option>
-                      <option value="cal1">1 Day Calendar</option>
-                      <option value="cal3">3 Day Calendar</option>
-                      <option value="cal7">7 Day Calendar</option>
-                      <option value="cal30">30 Day Calendar</option>
-                    </select>
-                  </div>
+                  {renderScheduleViewSwitcher("sched-admin-view")}
                   {scheduleViewMode !== "list" ? (
                     <div className="grid grid-cols-3 gap-1 rounded-[22px] border border-slate-200 bg-slate-50/90 p-1 shadow-inner">
                       <button
@@ -20541,7 +20690,28 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                 </>
                 ) : (scheduleTasksGroupedByDate || []).length === 0 ? (
-                  <p className="text-sm text-slate-600 py-4 text-center">No scheduled tasks.</p>
+                  <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
+                    <p className="text-[15px] font-black text-slate-950">No scheduled work found</p>
+                    <p className="mt-1 text-[13px] font-semibold text-slate-500">Create a task when the next job is ready.</p>
+                    <button
+                      type="button"
+                      className="mt-3 rounded-2xl bg-slate-950 px-4 py-2 text-[13px] font-black text-white"
+                      onClick={() => {
+                        setScheduleSaveError("");
+                        setScheduleEditingTaskId(null);
+                        setScheduleEditDraft(null);
+                        setScheduleEditReturnViewMode("");
+                        setScheduleDraft({
+                          ...SCHEDULE_FORM_EMPTY,
+                          assignedUserIds: [],
+                          startDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                        });
+                        setScheduleFormOpen(true);
+                      }}
+                    >
+                      New Task
+                    </button>
+                  </div>
                 ) : (
                   <div className="space-y-5">
                     {(scheduleTasksGroupedByDate || []).map(({ dateKey, tasks }) => {
@@ -20625,15 +20795,15 @@ const handlePhotoQuickUpload = async (event) => {
                                       openThisScheduleTaskEdit();
                                     }
                                   }}
-                                  className={`rounded-2xl border border-slate-200 bg-white px-3 py-3.5 space-y-2 shadow-sm min-w-0 ${
+                                  className={`rounded-[18px] border border-slate-200 bg-white px-3 py-3 space-y-2 shadow-sm min-w-0 ${
                                     !isEditingThis ? "cursor-pointer active:bg-slate-50" : ""
                                   }`}
                                 >
                                   <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
                                     <div className="min-w-0 flex-1">
-                                      <p className="text-[19px] font-extrabold text-slate-950 leading-snug break-words">{ttitle}</p>
+                                      <p className="text-[16px] font-black text-slate-950 leading-snug break-words">{ttitle}</p>
                                       {!isEditingThis ? (
-                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[16px] font-semibold text-slate-700 min-w-0">
+                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-semibold text-slate-700 min-w-0">
                                           <span className="shrink-0 tabular-nums">
                                             {startDisp} - {endDisp}
                                           </span>

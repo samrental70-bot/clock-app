@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-11A
+- Current development version: B.1-fix-11B
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -195,6 +195,31 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-11B Enterprise Mobile Redesign Phase 2
+- Schedule screen flattened into the shared enterprise mobile style.
+- Schedule New Task remains a compact header action for admin/supervisor users.
+- Schedule view control was cleaned into a compact List / Calendar segmented switch with calendar range selection only when needed.
+- Schedule list cards were made denser while preserving existing calendar/list behaviour, assignment status, and edit flows.
+- Timesheets header, Share action, and date/filter layout were compacted.
+- Timesheets filters now open from a compact summary bar into a bottom sheet while preserving date, employee, project, completed-only, and Share Report logic.
+- Timesheet cards were simplified to core employee, project/task, hours, rate, cost, clock in/out, and status data.
+- Timesheet Edit/Delete actions were reduced visually while keeping existing confirmation and RBAC safeguards.
+- Pictures screen was polished as a clean media gallery with only Project, Employee, and Date Range filters visible.
+- Pictures gallery cards were tightened and Project Documentation wording remains absent.
+- Receipts screen now uses the shared compact media/filter style with Project, Employee, and Date Range controls.
+- Receipt total was reduced from a large hero into a compact KPI in the page header.
+- Receipt cards were made more compact and scannable while preserving receipt upload/storage/project_media behaviour.
+- Standard date range modal remains reused for Pictures, Receipts, and Timesheets.
+- Empty states were polished for Schedule, Timesheets, Pictures, and Receipts.
+- No SQL, database, AI, or business-logic changes were made.
+
+## B.1-fix-11B Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -215,6 +240,7 @@
 - B.1-fix-9 does not require new SQL.
 - B.1-fix-10 does not require new SQL.
 - B.1-fix-11A does not require new SQL.
+- B.1-fix-11B does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
