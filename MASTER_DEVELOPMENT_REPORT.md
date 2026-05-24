@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-11C
+- Current development version: B.1-fix-12
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -244,6 +244,27 @@
 - Secrets/env files: Not changed.
 - Enterprise Mobile Redesign 11A/11B/11C status: complete on develop pending user QA.
 
+## B.1-fix-12 Clock App UI Professionalization V1
+- Global app font stack standardized to `Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`.
+- Global design tokens added for navy, slate, blue, green, amber, purple, red, surfaces, borders, text, and elevation.
+- Global app background standardized to `#F4F7FB`.
+- Shared Card component now uses the standard white surface, `#E2E8F0` border, 20px radius, and subtle `0 8px 24px rgba(15, 23, 42, 0.06)` shadow.
+- Shared Button component now uses the standard navy primary style with 14px radius and lighter typography.
+- Date range button/modal styling tightened to match the same surface, radius, and shadow system.
+- CSS token layer added under `.opera-shell` to reduce old heavy shadows, oversized radii, and inconsistent slate backgrounds across touched screens.
+- Auth/onboarding/error surfaces updated to the same app background and calmer card elevation.
+- Bottom navigation now uses the standard Home / Schedule / Clock / More shell with 64px safe-area height, glass white surface, navy active state, and subdued inactive labels.
+- Activities remains out of the main bottom nav and is preserved as Home/More content.
+- No SQL, database, AI, or business-logic changes were made.
+
+## B.1-fix-12 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-mj9xffuwi-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -266,6 +287,7 @@
 - B.1-fix-11A does not require new SQL.
 - B.1-fix-11B does not require new SQL.
 - B.1-fix-11C does not require new SQL.
+- B.1-fix-12 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

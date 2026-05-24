@@ -7,7 +7,7 @@ const IS_OPERA_DEVELOPMENT_APP = OPERA_APP_CHANNEL !== "production";
 const OPERA_APP_ICON = IS_OPERA_DEVELOPMENT_APP ? "/icon-development-192.png" : "/icon-192.png";
 
 const Card = ({ children, className }) => (
-  <div className={`bg-white rounded-[28px] border border-slate-200/80 shadow-[0_18px_38px_rgba(15,23,42,0.08)] ${className || ""}`}>{children}</div>
+  <div className={`opera-card ${className || ""}`}>{children}</div>
 );
 
 const CardContent = ({ children, className }) => (
@@ -15,7 +15,7 @@ const CardContent = ({ children, className }) => (
 );
 
 const Button = ({ children, className, ...props }) => (
-  <button className={`inline-flex items-center justify-center bg-slate-950 text-white transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${className || ""}`} {...props}>
+  <button className={`opera-button inline-flex items-center justify-center transition active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 ${className || ""}`} {...props}>
     {children}
   </button>
 );
@@ -23,7 +23,7 @@ const Button = ({ children, className, ...props }) => (
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
     type="button"
-    className="w-full min-w-0 rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
+    className="w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
     onClick={onClick}
   >
     <span className="flex items-center justify-between gap-3">
@@ -63,7 +63,7 @@ const StandardDateRangeModal = ({
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-sm rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_28px_80px_rgba(15,23,42,0.34)]"
+        className="w-full max-w-sm rounded-[20px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
@@ -74,21 +74,21 @@ const StandardDateRangeModal = ({
           </div>
           <button
             type="button"
-            className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
+            className="h-10 w-10 rounded-[14px] border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
             onClick={onCancel}
             aria-label="Close date range"
           >
             x
           </button>
         </div>
-        <div className="mt-4 grid grid-cols-4 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1">
+        <div className="mt-4 grid grid-cols-4 gap-1 rounded-[14px] border border-slate-200 bg-slate-50 p-1">
           {options.map((option) => (
             <button
               key={`date-range-${option.id}`}
               type="button"
               className={`rounded-[14px] px-1.5 py-2 text-[12px] font-black leading-tight ${
                 mode === option.id
-                  ? "bg-blue-600 text-white shadow-[0_10px_20px_rgba(37,99,235,0.22)]"
+                  ? "bg-blue-600 text-white shadow-none"
                   : "text-slate-700 active:bg-white"
               }`}
               onClick={() => onModeChange(option.id)}
@@ -97,7 +97,7 @@ const StandardDateRangeModal = ({
             </button>
           ))}
         </div>
-        <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+        <div className="mt-4 rounded-[14px] border border-slate-200 bg-slate-50 p-3">
           <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected range</p>
           <p className="mt-1 text-[20px] font-black leading-tight text-slate-950">{rangeLabel}</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
@@ -105,7 +105,7 @@ const StandardDateRangeModal = ({
               From
               <input
                 type="date"
-                className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                className="h-12 w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
                 value={draftFrom}
                 disabled={mode !== "custom"}
                 onChange={(event) => onDraftFromChange(event.target.value)}
@@ -115,7 +115,7 @@ const StandardDateRangeModal = ({
               To
               <input
                 type="date"
-                className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                className="h-12 w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
                 value={draftTo}
                 disabled={mode !== "custom"}
                 onChange={(event) => onDraftToChange(event.target.value)}
@@ -131,14 +131,14 @@ const StandardDateRangeModal = ({
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button
             type="button"
-            className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-black text-slate-900"
+            className="rounded-[14px] border border-slate-300 bg-white px-4 py-3 text-[15px] font-semibold text-slate-700"
             onClick={onCancel}
           >
             Cancel
           </button>
           <Button
             type="button"
-            className="rounded-2xl px-4 py-3 text-[15px] font-black"
+            className="rounded-[14px] px-4 py-3 text-[15px] font-semibold"
             disabled={mode === "custom" && (!draftFrom || !draftTo || draftFrom > draftTo)}
             onClick={onApply}
           >
@@ -2490,9 +2490,9 @@ function PublicPhotoShareView({ share, index, setIndex }) {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-[#edf2f7] text-slate-900 flex justify-center">
-      <div className="w-full max-w-3xl bg-[#f7f9fc] min-h-[100dvh] shadow-[0_24px_70px_rgba(15,23,42,0.16)]">
-        <header className="m-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-[0_14px_30px_rgba(15,23,42,0.08)]">
+    <div className="min-h-[100dvh] bg-[#F4F7FB] text-slate-900 flex justify-center">
+      <div className="w-full max-w-3xl bg-[#F4F7FB] min-h-[100dvh] shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+        <header className="m-3 rounded-[20px] border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
           <h1 className="text-2xl font-black tracking-tight">{OPERA_APP_NAME}</h1>
           <p className="text-sm font-medium text-slate-600">
             Shared project photos{share?.folder ? ` - ${share.folder}` : ""}
@@ -13403,7 +13403,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   if (initialLoading) {
     return (
-      <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
+      <div className="min-h-screen bg-[#F4F7FB] flex items-center justify-center text-slate-900">
         <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
           <img src={OPERA_APP_ICON} alt="" className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-sm" />
           <p className="text-sm font-semibold text-slate-600">Loading {OPERA_APP_NAME}...</p>
@@ -13415,8 +13415,8 @@ const handlePhotoQuickUpload = async (event) => {
   if (!authUser) {
     if (authStep === "signup") {
       return (
-        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+        <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <div className="flex items-center gap-3">
                 <img src={OPERA_APP_ICON} alt="" className="h-12 w-12 rounded-2xl shadow-sm" />
@@ -13502,8 +13502,8 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     return (
-      <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-        <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+      <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
           <div className="bg-white border-b border-slate-100 p-5">
             <div className="flex items-center gap-3">
               <img src={OPERA_APP_ICON} alt="" className="h-12 w-12 rounded-2xl shadow-sm" />
@@ -13585,8 +13585,8 @@ const handlePhotoQuickUpload = async (event) => {
     // Inline (non-blocking) loader: do not take over the whole app once opened.
     if (hasOpenedAppRef.current) {
   return (
-        <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
-          <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
+        <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
+          <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
             <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
               <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
                 <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
@@ -13599,7 +13599,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     return (
-      <div className="min-h-screen bg-[#edf2f7] flex items-center justify-center text-slate-900">
+      <div className="min-h-screen bg-[#F4F7FB] flex items-center justify-center text-slate-900">
         <div className="rounded-[28px] border border-slate-200 bg-white px-8 py-7 text-center shadow-[0_20px_46px_rgba(15,23,42,0.12)]">
           <img src={OPERA_APP_ICON} alt="" className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-sm" />
           <p className="text-sm font-semibold text-slate-600">Loading your workspace...</p>
@@ -13611,8 +13611,8 @@ const handlePhotoQuickUpload = async (event) => {
   // Logged in, but not in a company yet → onboarding
   if (authStep === "company_created" && createdCompanyCode) {
     return (
-      <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-        <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+      <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
           <div className="bg-white border-b border-slate-100 p-5">
             <h1 className="text-2xl font-bold tracking-tight">Company Created</h1>
             <p className="text-sm text-slate-600 mt-1">Share this code with employees so they can join.</p>
@@ -13656,8 +13656,8 @@ const handlePhotoQuickUpload = async (event) => {
   if (!userCompany) {
     if (authStep === "create_company") {
       return (
-        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+        <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Create Company</h1>
               <p className="text-sm text-slate-600 mt-1">You’ll get a company code to share with employees.</p>
@@ -13705,8 +13705,8 @@ const handlePhotoQuickUpload = async (event) => {
 
     if (authStep === "join_company") {
       return (
-        <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-          <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+        <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+          <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Join Company</h1>
               <p className="text-sm text-slate-600 mt-1">Enter the company code your supervisor shared.</p>
@@ -13754,8 +13754,8 @@ const handlePhotoQuickUpload = async (event) => {
 
     // Default onboarding choice
     return (
-      <div className="min-h-screen bg-[#edf2f7] flex justify-center items-center text-slate-900 p-4">
-        <div className="w-full max-w-sm bg-[#f7f9fc] rounded-[30px] border border-slate-200 shadow-[0_24px_60px_rgba(15,23,42,0.14)] overflow-hidden">
+      <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
+        <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
           <div className="bg-white border-b border-slate-100 p-5">
             <h1 className="text-2xl font-bold tracking-tight">Welcome</h1>
             <p className="text-sm text-slate-600 mt-1">Choose what you want to do next.</p>
@@ -14984,8 +14984,8 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   return (
-    <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
-      <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
+    <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
+      <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
         <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
           <div className="rounded-[20px] bg-white border border-slate-200/90 px-2.5 py-1.5 shadow-[0_8px_22px_rgba(15,23,42,0.07)]">
             <div className="flex items-center justify-between gap-2">
@@ -17912,7 +17912,7 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {false && activeTab === "dashboard" && isAdmin && (
-            <Card className="rounded-[32px] border border-white/80 bg-[#f7f9fc] shadow-[0_28px_70px_rgba(15,23,42,0.14)] overflow-hidden">
+            <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
               <CardContent className="p-3 sm:p-5 space-y-3">
                 <div className="flex items-start justify-between gap-3 rounded-[26px] border border-white bg-gradient-to-br from-white via-white to-slate-50 px-4 py-4 shadow-[0_16px_34px_rgba(15,23,42,0.08),inset_0_1px_0_rgba(255,255,255,0.95)]">
                   <div className="min-w-0">
@@ -18464,7 +18464,7 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[32px] border border-white/80 bg-[#f2f5f9] shadow-[0_24px_58px_rgba(15,23,42,0.13)] overflow-hidden">
+            <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
               <CardContent className="p-2.5 sm:p-4 space-y-2.5">
                 <div className="relative overflow-hidden rounded-[30px] border border-white bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_58%,#fff8ed_100%)] px-3.5 py-3.5 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
                   <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-slate-300/80 to-transparent" />
@@ -23638,7 +23638,7 @@ const handlePhotoQuickUpload = async (event) => {
             }}
           >
             <div
-              className="h-full w-80 max-w-[88vw] bg-[#f7f9fc] shadow-[0_18px_50px_rgba(15,23,42,0.18)] p-3 flex flex-col gap-3"
+              className="h-full w-80 max-w-[88vw] bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)] p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm flex items-center justify-between gap-3">
@@ -23821,7 +23821,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         <div
-          className="fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-white/75 bg-white/80 px-1.5 py-1.5 shadow-[0_14px_36px_rgba(15,23,42,0.16)] backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
+          className="opera-bottom-nav fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/90 px-1.5 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
         >
           <div className="hidden">
             {isAdmin && (

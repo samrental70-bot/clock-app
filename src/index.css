@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+:root {
+  --opera-navy: #070b1f;
+  --opera-navy-soft: #111827;
+  --opera-bg: #f4f7fb;
+  --opera-surface: #ffffff;
+  --opera-surface-soft: #f8fafc;
+  --opera-border: #e2e8f0;
+  --opera-text: #070b1f;
+  --opera-text-secondary: #64748b;
+  --opera-text-muted: #94a3b8;
+  --opera-blue: #2563eb;
+  --opera-green: #059669;
+  --opera-amber: #f59e0b;
+  --opera-purple: #7c3aed;
+  --opera-red: #dc2626;
+  --opera-card-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
 /* PWA / mobile: keep the app inside the viewport; scroll only inside #root children */
 html,
 body {
@@ -19,8 +37,9 @@ body {
 }
 
 body {
-  background: #edf2f7;
-  color: #0f172a;
+  background: var(--opera-bg);
+  color: var(--opera-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -34,6 +53,9 @@ textarea {
 
 .opera-shell {
   -webkit-tap-highlight-color: transparent;
+  background: var(--opera-bg);
+  color: var(--opera-text);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 .opera-shell * {
@@ -65,7 +87,7 @@ textarea {
 .opera-shell input:not([type="checkbox"]):not([type="radio"]),
 .opera-shell select,
 .opera-shell textarea {
-  border-color: #e2e8f0;
+  border-color: var(--opera-border);
 }
 
 .opera-shell input:not([type="checkbox"]):not([type="radio"]):focus,
@@ -79,15 +101,105 @@ textarea {
 .opera-shell form select,
 .opera-shell form textarea {
   min-height: 2.75rem;
-  border-radius: 0.95rem;
+  border-radius: 14px;
   font-size: 0.95rem;
   font-weight: 650;
-  color: #0f172a;
+  color: var(--opera-text);
 }
 
 .opera-shell form label {
   font-weight: 750;
   color: #334155;
+}
+
+.opera-card {
+  background: var(--opera-surface);
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  box-shadow: var(--opera-card-shadow);
+}
+
+.opera-button {
+  border-radius: 14px;
+  background: var(--opera-navy);
+  color: white;
+  font-size: 15px;
+  font-weight: 650;
+  box-shadow: none;
+}
+
+.opera-shell .bg-\[\#edf2f7\],
+.opera-shell .bg-\[\#f7f9fc\],
+.opera-shell .bg-\[\#f2f5f9\] {
+  background-color: var(--opera-bg) !important;
+}
+
+.opera-shell .bg-slate-950 {
+  background-color: var(--opera-navy) !important;
+}
+
+.opera-shell .text-slate-950 {
+  color: var(--opera-text) !important;
+}
+
+.opera-shell .text-slate-500,
+.opera-shell .text-slate-600 {
+  color: var(--opera-text-secondary) !important;
+}
+
+.opera-shell .bg-slate-50 {
+  background-color: var(--opera-surface-soft) !important;
+}
+
+.opera-shell .border-slate-200,
+.opera-shell .border-slate-200\/80,
+.opera-shell .border-slate-200\/90 {
+  border-color: var(--opera-border) !important;
+}
+
+.opera-shell [class*="shadow-["],
+.opera-shell .shadow-sm,
+.opera-shell .shadow,
+.opera-shell .shadow-lg,
+.opera-shell .shadow-xl,
+.opera-shell .shadow-2xl {
+  box-shadow: var(--opera-card-shadow) !important;
+}
+
+.opera-shell .rounded-3xl,
+.opera-shell [class*="rounded-[28px]"],
+.opera-shell [class*="rounded-[30px]"],
+.opera-shell [class*="rounded-[32px]"] {
+  border-radius: 20px !important;
+}
+
+.opera-shell [class*="rounded-[22px]"],
+.opera-shell [class*="rounded-[24px]"],
+.opera-shell [class*="rounded-[26px]"] {
+  border-radius: 20px !important;
+}
+
+.opera-shell [class*="rounded-[18px]"],
+.opera-shell .rounded-2xl {
+  border-radius: 14px !important;
+}
+
+.opera-bottom-nav {
+  min-height: calc(64px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: var(--opera-border) !important;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
+}
+
+.opera-bottom-nav button {
+  min-height: 44px;
+  border-radius: 16px !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+}
+
+.opera-bottom-nav .bg-slate-950 {
+  background-color: var(--opera-navy) !important;
 }
 
 .schedule-task-form {
