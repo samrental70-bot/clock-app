@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-4
+- Current development version: B.1-fix-5
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -51,11 +51,56 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-5 Stabilization
+- Pending company settings SQL reviewed for live database safety.
+- Company settings migration remains additive/idempotent with `add column if not exists`.
+- Midnight default migration was tightened to avoid rewriting an existing manager-selected `12:00` value.
+- No destructive SQL was found in the reviewed migrations.
+- App fallback logic verified for missing company settings columns.
+- Auto clock-out default verified as `00:00` in frontend and `/api/auto-clockout`.
+- Development app URL responded successfully as `OPERA.AI Development`.
+- Fix-3 and Fix-4 behaviour verified by code inspection and deployment availability check.
+- Bundle warning reviewed: the app still builds as one large Vite app chunk; defer code splitting to a future safe refactor.
+- Auracut warning reviewed: Auracut files are ignored by git and Vercel deployment rules; runtime OPERA code has no Auracut references.
+- Existing database/team data protected; no SQL was run.
+
+## B.1-fix-5 Build / Deployment
+- Local build status: Passed.
+- Development preview deployment: Pending.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
   - `supabase/migrations/20260523133000_correct_auto_clock_out_default_midnight.sql`
 - B.1-fix-4 does not require new SQL.
+- B.1-fix-5 reviewed SQL package for manual Supabase execution:
+
+```sql
+alter table public.companies
+  add column if not exists auto_clock_out_time text not null default '00:00',
+  add column if not exists assign_all_projects_to_all_employees boolean not null default true,
+  add column if not exists assign_all_tasks_to_all_projects boolean not null default true;
+
+comment on column public.companies.auto_clock_out_time is
+  'Company local wall-clock time in HH:MM for automatic clock-out. Default is 00:00 midnight.';
+comment on column public.companies.assign_all_projects_to_all_employees is
+  'When true, every active employee can see/select every active company project.';
+comment on column public.companies.assign_all_tasks_to_all_projects is
+  'When true, every active task/cost centre is available under every active project.';
+
+alter table public.companies
+  alter column auto_clock_out_time set default '00:00';
+
+update public.companies
+set auto_clock_out_time = '00:00'
+where auto_clock_out_time is null
+   or btrim(auto_clock_out_time) = '';
+
+comment on column public.companies.auto_clock_out_time is
+  'Company local wall-clock time in HH:MM for automatic clock-out. Default is 00:00 midnight.';
+```
 
 ## Remaining Issues
 - Vercel/build warning only: the existing bundle is larger than 500 kB after minification.
