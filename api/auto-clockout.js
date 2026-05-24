@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
 const DEFAULT_TIME_ZONE = "America/Toronto";
-const DEFAULT_AUTO_CLOCK_OUT_TIME = "12:00";
+const DEFAULT_AUTO_CLOCK_OUT_TIME = "00:00";
 const AUTO_TIMED_OUT_STATUS = "Auto timed out";
 
 function getSupabaseUrl() {

@@ -233,7 +233,7 @@ function flattenClockProjectListsForSupabase(state, { userId, companyId }) {
 }
 
 const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
-const DEFAULT_AUTO_CLOCK_OUT_TIME = "12:00";
+const DEFAULT_AUTO_CLOCK_OUT_TIME = "00:00";
 const AUTO_TIMED_OUT_STATUS = "Auto timed out";
 const COMPANY_SETTINGS_SELECT =
   "id, name, code, time_zone, auto_clock_out_time, assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects";
@@ -261,6 +261,17 @@ function normalizeAutoClockOutTime(value) {
   const s = String(value || "").trim();
   const match = s.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
   return match ? `${match[1]}:${match[2]}` : DEFAULT_AUTO_CLOCK_OUT_TIME;
+}
+
+function formatAutoClockOutTimeText(value) {
+  const normalized = normalizeAutoClockOutTime(value);
+  const [hourRaw, minuteRaw] = normalized.split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return "12:00 AM";
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
 function companySettingEnabled(value, fallback = true) {
@@ -2889,6 +2900,7 @@ export default function EmployeeClockApp() {
   const [timesheetDateKey, setTimesheetDateKey] = useState("");
   const [timesheetDateFrom, setTimesheetDateFrom] = useState("");
   const [timesheetDateTo, setTimesheetDateTo] = useState("");
+  const [timesheetCompletedOnly, setTimesheetCompletedOnly] = useState(false);
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -4142,7 +4154,9 @@ export default function EmployeeClockApp() {
             setWatchId(null);
           }
           const autoIso = autoClockOutIsoForShift(currentShift?.clockIn, companyTimeZone, companyAutoClockOutTime);
-          const autoTimeText = autoIso ? formatTime(autoIso, companyTimeZone) : companyAutoClockOutTime;
+          const autoTimeText = autoIso
+            ? formatTime(autoIso, companyTimeZone)
+            : formatAutoClockOutTimeText(companyAutoClockOutTime);
           setAutoClockOutNotice(
             `You were automatically clocked out at ${autoTimeText}. If you are still working, please clock in again.`
           );
@@ -4634,27 +4648,25 @@ export default function EmployeeClockApp() {
     if (!isAdmin) return [];
     const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
     if (!todayKey) return [];
-    const ctx = {
-      selectedDateKey: todayKey,
-      companyTimeZone,
-      now,
-      authUser,
-      visibleCurrentShift,
-    };
     const cards = [];
     for (const row of dashboardRowsForAttendance) {
       if (!row?.userId) continue;
       const uid = String(row.userId);
-      const userDayRows = dashboardTodaySheets.filter((t) => String(t.userId) === uid);
+      const userDayRows = dashboardTodaySheets.filter((t) => {
+        if (String(t.userId) !== uid) return false;
+        if (!isCompletedReportTimesheet(t)) return false;
+        const clockInKey = calendarDateKeyInTimeZone(t.clockIn, companyTimeZone);
+        const clockOutKey = calendarDateKeyInTimeZone(t.clockOut, companyTimeZone);
+        return clockInKey === todayKey && clockOutKey === todayKey;
+      });
       if (!userDayRows.length) continue;
       const rep = pickRepresentativeTeamDayTimesheet(userDayRows);
-      const att = teamAttendanceStatusForRecord(rep, ctx);
       const metrics = computeDashboardEmployeeDayMetrics(
         userDayRows,
         rep,
         companyTimeZone,
-        getWorkedMinutes,
-        getLabourCost
+        getReportWorkedMinutes,
+        getReportLabourCost
       );
       const displayName =
         (row.displayName && String(row.displayName).trim()) || shortUserLabel(row.userId);
@@ -4662,7 +4674,7 @@ export default function EmployeeClockApp() {
         row,
         uid,
         rep,
-        att,
+        att: { label: "Clocked out", code: "clocked_out" },
         metrics,
         displayName,
         shiftCount: userDayRows.length,
@@ -4682,8 +4694,6 @@ export default function EmployeeClockApp() {
     dashboardTodaySheets,
     companyTimeZone,
     now,
-    authUser,
-    visibleCurrentShift,
   ]);
 
   const dashboardFinishedTodayCards = useMemo(
@@ -4709,6 +4719,23 @@ export default function EmployeeClockApp() {
     };
   }, [dashboardTodayWorkedCards]);
 
+  const dashboardActiveTeamSummary = useMemo(() => {
+    const cards = Array.isArray(dashboardLiveWorkingCards) ? dashboardLiveWorkingCards : [];
+    let totalMinutes = 0;
+    let totalCost = 0;
+    for (const card of cards) {
+      const rep = card?.rep;
+      if (!rep) continue;
+      totalMinutes += getWorkedMinutes(rep);
+      totalCost += getLabourCost(rep);
+    }
+    return {
+      employeeCount: cards.length,
+      totalMinutes,
+      totalCost,
+    };
+  }, [dashboardLiveWorkingCards, now, companyTimeZone, companyAutoClockOutTime]);
+
   const openDashboardTodayTimesheets = useCallback(() => {
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
     if (todayKey) {
@@ -4716,6 +4743,7 @@ export default function EmployeeClockApp() {
       setTimesheetDateKey(todayKey);
       setTimesheetDateFrom(todayKey);
       setTimesheetDateTo(todayKey);
+      setTimesheetCompletedOnly(true);
     }
     setActiveTab("timesheet");
     if (typeof fetchTimesheetsFromSupabase === "function") {
@@ -4851,6 +4879,82 @@ export default function EmployeeClockApp() {
     () => (dashboardRadarCards || []).filter((card) => card?.hasGps),
     [dashboardRadarCards]
   );
+
+  const dashboardActivityFeedItems = useMemo(() => {
+    const items = [];
+    const addItem = (item) => {
+      const whenMs = parseStoredInstant(item?.when).getTime();
+      if (!Number.isFinite(whenMs)) return;
+      items.push({ ...item, whenMs });
+    };
+    const employeeLabel = (row) =>
+      row?.employeeName ||
+      row?.employee ||
+      row?.profileDisplayName ||
+      teamProfileFullNameByUserId?.[String(row?.userId || row?.employeeId || row?.user_id || "")] ||
+      shortUserLabel(row?.userId || row?.employeeId || row?.user_id || "");
+
+    for (const row of normalizeArray(visibleRecords)) {
+      if (row?.clockIn) {
+        addItem({
+          id: `clock-in-${row.supabaseTimesheetId || row.id || row.clockIn}`,
+          kind: "Clock in",
+          title: `${employeeLabel(row)} clocked in`,
+          detail: [row?.project, row?.costCenter].filter(Boolean).join(" - ") || "No project selected",
+          when: row.clockIn,
+          tone: "bg-emerald-50 text-emerald-800 border-emerald-100",
+        });
+      }
+      if (row?.clockOut) {
+        const status = String(row?.status || "").toLowerCase();
+        addItem({
+          id: `clock-out-${row.supabaseTimesheetId || row.id || row.clockOut}`,
+          kind: status.includes("auto") ? "Auto clock-out" : "Clock out",
+          title: `${employeeLabel(row)} ${status.includes("auto") ? "was auto clocked out" : "clocked out"}`,
+          detail: [row?.project, row?.costCenter].filter(Boolean).join(" - ") || "Timesheet completed",
+          when: row.clockOut,
+          tone: status.includes("auto")
+            ? "bg-amber-50 text-amber-800 border-amber-100"
+            : "bg-slate-50 text-slate-700 border-slate-200",
+        });
+      }
+    }
+
+    for (const request of normalizeArray(timesheetRequests).slice(0, 20)) {
+      addItem({
+        id: `request-${request.id}`,
+        kind: "Correction",
+        title: `${request.employeeName || "Employee"} requested time approval`,
+        detail: request.requestType === "edit_time" ? "Timesheet edit" : "Manual time",
+        when: request.createdAt,
+        tone: "bg-blue-50 text-blue-800 border-blue-100",
+      });
+    }
+
+    const addMediaItems = (buckets, typeLabel) => {
+      for (const bucket of Object.values(normalizeMediaBuckets(buckets))) {
+        for (const item of normalizeArray(bucket).slice(0, 20)) {
+          const capturedAt = item?.capturedAt || item?.captured_at || item?.timestamp || item?.created_at;
+          addItem({
+            id: `${typeLabel}-${mediaItemId(item)}`,
+            kind: typeLabel,
+            title: `${mediaItemEmployeeName(item)} uploaded ${typeLabel.toLowerCase()}`,
+            detail: [mediaItemProjectName(item), item?.costCenter || item?.cost_centre].filter(Boolean).join(" - "),
+            when: capturedAt,
+            tone: typeLabel === "Receipt"
+              ? "bg-amber-50 text-amber-800 border-amber-100"
+              : "bg-violet-50 text-violet-800 border-violet-100",
+          });
+        }
+      }
+    };
+    addMediaItems(scopedProjectPhotos, "Photo");
+    addMediaItems(scopedProjectReceipts, "Receipt");
+
+    return items
+      .sort((a, b) => b.whenMs - a.whenMs)
+      .slice(0, 25);
+  }, [visibleRecords, timesheetRequests, scopedProjectPhotos, scopedProjectReceipts, teamProfileFullNameByUserId]);
 
   const openDashboardLiveLocationsMap = () => {
     const locs = dashboardLiveMapLocations;
@@ -5204,9 +5308,13 @@ export default function EmployeeClockApp() {
     if (!from || !to || from > to) return [];
     return rows.filter((record) => {
       const key = calendarDateKeyInTimeZone(record?.clockIn, companyTimeZone);
-      return key && key >= from && key <= to;
+      if (!key || key < from || key > to) return false;
+      if (!timesheetCompletedOnly) return true;
+      if (!isCompletedReportTimesheet(record)) return false;
+      const outKey = calendarDateKeyInTimeZone(record?.clockOut, companyTimeZone);
+      return outKey && outKey >= from && outKey <= to;
     });
-  }, [visibleRecords, timesheetRangeBounds.from, timesheetRangeBounds.to, companyTimeZone]);
+  }, [visibleRecords, timesheetRangeBounds.from, timesheetRangeBounds.to, companyTimeZone, timesheetCompletedOnly]);
 
   const pendingTimesheetRequests = useMemo(
     () => normalizeArray(timesheetRequests).filter((request) => request?.status === "pending"),
@@ -10665,7 +10773,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const openMenuTab = (tabName) => {
-    const employeeAllowedTabs = new Set(["clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
+    const employeeAllowedTabs = new Set(["activities", "clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
     if (companyAssignAllProjectsToAllEmployees) employeeAllowedTabs.add("projects");
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
@@ -10673,6 +10781,7 @@ const handlePhotoQuickUpload = async (event) => {
       setActiveTab("schedule");
       return;
     }
+    if (tabName === "timesheet") setTimesheetCompletedOnly(false);
     setActiveTab(tabName);
     if (tabName === "photos") setPhotoNotificationCount(0);
     setMenuPanel("main");
@@ -14211,6 +14320,30 @@ const handlePhotoQuickUpload = async (event) => {
     setReportsDatePickerOpen(false);
   };
 
+  const appHeaderDateLabel = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(now instanceof Date ? now : new Date(now));
+    } catch {
+      return formatDateParts(new Date(), companyTimeZone);
+    }
+  }, [companyTimeZone, now]);
+
+  const handleHeaderRefresh = useCallback(() => {
+    setDashboardRefreshKey((key) => key + 1);
+    setTeamRefreshKey((key) => key + 1);
+    setScheduleRefreshKey((key) => key + 1);
+    setCompanyProjectsRefreshKey((key) => key + 1);
+    if (typeof fetchTimesheetsFromSupabase === "function") void fetchTimesheetsFromSupabase();
+    if (typeof loadProjectMediaFromSupabase === "function") void loadProjectMediaFromSupabase({ silent: true });
+    if (typeof pollInAppNotifications === "function") void pollInAppNotifications();
+  }, [fetchTimesheetsFromSupabase, loadProjectMediaFromSupabase, pollInAppNotifications]);
+
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#edf2f7] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#f7f9fc] border-x border-slate-200/80 shadow-[0_24px_70px_rgba(15,23,42,0.14)] relative flex flex-col overflow-hidden">
@@ -14238,31 +14371,35 @@ const handlePhotoQuickUpload = async (event) => {
                 <img src={OPERA_APP_ICON} alt="" className="h-8 w-8 shrink-0 rounded-xl shadow-sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <h1 className="text-[18px] font-black leading-tight text-slate-950">OPERA.AI</h1>
+                    <h1 className="truncate text-[16px] font-black leading-tight text-slate-950">
+                      {userCompany?.name || "Company"}
+                    </h1>
                     {IS_OPERA_DEVELOPMENT_APP && (
                       <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700">
                         Development
                       </span>
                     )}
                   </div>
-                <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-600 leading-snug">{(profileFullName || "").trim() || "User"}</p>
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500 leading-snug">{appHeaderDateLabel}</p>
+                  <p className="mt-0.5 border-b border-slate-200 pb-1 text-[12px] font-bold text-slate-700 leading-snug truncate">
+                    Logged in: {(profileFullName || "").trim() || "User"}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   type="button"
-                  onClick={() => {
-                    setActiveTab(isAdmin ? "dashboard" : "clock");
-                    setIsMenuOpen(false);
-                  }}
+                  onClick={handleHeaderRefresh}
                   className="h-10 w-10 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent shadow-sm active:bg-white"
                   style={{ fontSize: 0, lineHeight: 0 }}
-                  aria-label="Home"
+                  aria-label="Refresh"
+                  disabled={dashboardLoading || timesheetsLoading}
                 >
                   <svg viewBox="0 0 24 24" className="h-5 w-5 text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 11.5 12 4l9 7.5" />
-                    <path d="M5.5 10.5V20h13v-9.5" />
-                    <path d="M9.5 20v-5h5v5" />
+                    <path d="M21 12a9 9 0 0 1-15.5 6.3" />
+                    <path d="M3 12a9 9 0 0 1 15.5-6.3" />
+                    <path d="M3 18v-5h5" />
+                    <path d="M21 6v5h-5" />
                   </svg>
                   âŒ‚
                 </button>
@@ -15432,6 +15569,18 @@ const handlePhotoQuickUpload = async (event) => {
                         : `${timesheetRangeBounds.from} to ${timesheetRangeBounds.to}`}
                     </p>
                   )}
+                  {timesheetCompletedOnly ? (
+                    <div className="flex items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2">
+                      <p className="text-[13px] font-black text-emerald-900">Completed shifts only</p>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-emerald-200 bg-white px-2.5 py-1 text-[12px] font-black text-emerald-900"
+                        onClick={() => setTimesheetCompletedOnly(false)}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="space-y-3">
                   {!timesheetsLoading && visibleTimesheetRecords.length === 0 && (
@@ -16373,6 +16522,43 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
+          {activeTab === "activities" && (
+            <Card className="rounded-[28px] overflow-hidden">
+              <CardContent className="p-3.5 space-y-3">
+                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
+                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Activities</h2>
+                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Clock events, uploads, and requests</p>
+                </div>
+                {dashboardActivityFeedItems.length === 0 ? (
+                  <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center">
+                    <p className="text-[15px] font-black text-slate-700">No recent activity yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {dashboardActivityFeedItems.map((item) => (
+                      <div
+                        key={`activity-tab-${item.id}`}
+                        className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[22px] border border-slate-200 bg-white px-3 py-3 shadow-sm"
+                      >
+                        <span className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border text-[11px] font-black ${item.tone}`}>
+                          {String(item.kind || "A").slice(0, 1).toUpperCase()}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-[14px] font-black leading-snug text-slate-950 break-words">{item.title}</p>
+                          <p className="mt-0.5 text-[12px] font-bold leading-snug text-slate-500 break-words">{item.detail}</p>
+                          <p className="mt-1 text-[11px] font-black uppercase tracking-wide text-slate-400">{item.kind}</p>
+                        </div>
+                        <p className="shrink-0 text-right text-[11px] font-black tabular-nums text-slate-500">
+                          {formatTime(item.when, companyTimeZone)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {activeTab === "dashboard" && !isAdmin && (
             <Card className="rounded-3xl shadow-sm">
               <CardContent className="p-5 space-y-3">
@@ -16410,17 +16596,16 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="relative mt-4 grid grid-cols-4 gap-2">
                   {[
                     {
-                      label: "Projects",
-                      action: () => setActiveTab("projects"),
+                      label: "Receipts",
+                      action: () => setActiveTab("receipts"),
                       tone: "from-amber-400 to-orange-500",
                       surface: "from-amber-50 to-orange-50 border-amber-100",
                       text: "text-amber-950",
                       shadow: "shadow-[0_14px_26px_rgba(245,158,11,0.24)]",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1">
-                          <path d="M8 7V6a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1" />
-                          <path d="M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8Z" />
-                          <path d="M4 13h16" />
+                          <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
+                          <path d="M9 8h6M9 12h6M9 16h3" />
                         </svg>
                       ),
                     },
@@ -16509,19 +16694,19 @@ const handlePhotoQuickUpload = async (event) => {
                   <section className="grid grid-cols-2 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
                     <div className="relative overflow-hidden border-r border-slate-200 bg-gradient-to-br from-blue-50 to-white p-4">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500 to-sky-500" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Team hours</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-blue-700">Active hours</p>
                       <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
-                        {formatHoursDecimal(dashboardSummary.totalMinutes)}
+                        {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
                       </p>
-                      <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
+                      <p className="mt-1 text-[12px] font-bold text-slate-400">Live now</p>
                     </div>
                     <div className="relative overflow-hidden bg-gradient-to-br from-emerald-50 to-white p-4">
                       <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-500" />
-                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">Est labor cost</p>
+                      <p className="text-[11px] font-black uppercase tracking-[0.18em] text-emerald-700">Active labour</p>
                       <p className="mt-2 text-[25px] font-black leading-none tabular-nums text-slate-950">
-                        {formatMoneyWhole(dashboardSummary.totalCost)}
+                        {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
                       </p>
-                      <p className="mt-1 text-[12px] font-bold text-slate-400">Today</p>
+                      <p className="mt-1 text-[12px] font-bold text-slate-400">Live now</p>
                     </div>
                   </section>
 
@@ -16587,26 +16772,118 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="mt-5 rounded-[24px] border border-slate-100 bg-gradient-to-b from-white to-slate-50 px-3 pt-3 pb-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged in by hour</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees Logged by Hour</p>
                         <p className="shrink-0 text-[11px] font-black text-slate-400">
                           {dashboardCoverageRangeLabel}
                           {(dashboardLiveWorkingCards || []).length ? ` - ${(dashboardLiveWorkingCards || []).length} now` : ""}
                         </p>
                       </div>
-                      <div className="flex h-32 items-end gap-1.5">
-                        {(dashboardCoverageBars || []).map((bar) => (
-                          <div key={bar.hour} className="flex min-w-0 flex-1 flex-col items-center justify-end gap-1">
-                            <span className="text-[10px] font-black tabular-nums text-slate-700">{bar.count}</span>
-                            <div
-                              className="w-full rounded-t-xl bg-gradient-to-t from-slate-950 to-slate-700 shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
-                              style={{ height: `${bar.height}%`, opacity: bar.count > 0 ? 0.95 : 0.18 }}
-                              title={bar.names?.length ? `${bar.names.join(", ")} working` : `${bar.count} working`}
-                            />
-                            <span className="h-4 text-[9px] font-bold text-slate-400">{bar.label}</span>
+                      {(() => {
+                        const bars = Array.isArray(dashboardCoverageBars) ? dashboardCoverageBars : [];
+                        const hasData = bars.some((bar) => Number(bar.count || 0) > 0);
+                        const maxCount = Math.max(1, ...bars.map((bar) => Number(bar.count || 0)));
+                        const width = 320;
+                        const height = 132;
+                        const left = 30;
+                        const right = 10;
+                        const top = 12;
+                        const bottom = 24;
+                        const graphW = width - left - right;
+                        const graphH = height - top - bottom;
+                        const points = bars.map((bar, index) => {
+                          const denom = Math.max(1, bars.length - 1);
+                          const x = left + (index / denom) * graphW;
+                          const y = top + graphH - (Number(bar.count || 0) / maxCount) * graphH;
+                          return { ...bar, x, y };
+                        });
+                        const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
+                        const areaPoints = points.length
+                          ? `${left},${top + graphH} ${linePoints} ${left + graphW},${top + graphH}`
+                          : "";
+                        return (
+                          <div className="mt-2 rounded-[22px] border border-slate-100 bg-white px-2 py-2">
+                            {hasData ? (
+                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
+                                {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
+                                  const y = top + graphH - (tick / maxCount) * graphH;
+                                  return (
+                                    <g key={`tick-${tick}`}>
+                                      <line x1={left} x2={left + graphW} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+                                      <text x="2" y={y + 4} fontSize="10" fontWeight="800" fill="#64748b">
+                                        {tick}
+                                      </text>
+                                    </g>
+                                  );
+                                })}
+                                <line x1={left} x2={left} y1={top} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
+                                <line x1={left} x2={left + graphW} y1={top + graphH} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
+                                <polygon points={areaPoints} fill="rgba(15,23,42,0.08)" />
+                                <polyline points={linePoints} fill="none" stroke="#020617" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+                                {points.map((point) => (
+                                  <g key={`point-${point.hour}`}>
+                                    <circle cx={point.x} cy={point.y} r="5.5" fill="#020617" stroke="#ffffff" strokeWidth="2.5" />
+                                    {Number(point.count || 0) > 0 ? (
+                                      <text x={point.x} y={point.y - 10} textAnchor="middle" fontSize="10" fontWeight="900" fill="#0f172a">
+                                        {point.count}
+                                      </text>
+                                    ) : null}
+                                    {point.label ? (
+                                      <text x={point.x} y={height - 4} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
+                                        {point.label}
+                                      </text>
+                                    ) : null}
+                                  </g>
+                                ))}
+                                <text x="0" y="10" fontSize="9" fontWeight="900" fill="#475569">
+                                  Employees
+                                </text>
+                              </svg>
+                            ) : (
+                              <div className="flex h-36 items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
+                                No employee login activity for this range yet.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </section>
+
+                  <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-950">Activities</p>
+                        <h3 className="mt-1 text-[19px] font-black text-slate-950">Team events</h3>
+                      </div>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                        {dashboardActivityFeedItems.length}
+                      </span>
+                    </div>
+                    {dashboardActivityFeedItems.length === 0 ? (
+                      <div className="mt-3 rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+                        <p className="text-[15px] font-black text-slate-700">No recent activity yet.</p>
+                      </div>
+                    ) : (
+                      <div className="mt-3 space-y-2.5">
+                        {dashboardActivityFeedItems.slice(0, 8).map((item) => (
+                          <div
+                            key={item.id}
+                            className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3"
+                          >
+                            <span className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border text-[11px] font-black ${item.tone}`}>
+                              {String(item.kind || "A").slice(0, 1).toUpperCase()}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[14px] font-black leading-snug text-slate-950 break-words">{item.title}</p>
+                              <p className="mt-0.5 text-[12px] font-bold leading-snug text-slate-500 break-words">{item.detail}</p>
+                            </div>
+                            <p className="shrink-0 text-right text-[11px] font-black tabular-nums text-slate-500">
+                              {formatTime(item.when, companyTimeZone)}
+                            </p>
                           </div>
                         ))}
                       </div>
-                    </div>
+                    )}
                   </section>
 
                   <section className="rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
@@ -16709,6 +16986,8 @@ const handlePhotoQuickUpload = async (event) => {
                               )
                             : 0;
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
+                          const liveMinutes = getWorkedMinutes(rep);
+                          const liveCost = getLabourCost(rep);
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                           const fallbackLoc = rep?.clockInLocation || null;
                           const latRaw = liveLoc?.latitude ?? liveLoc?.lat ?? fallbackLoc?.latitude;
@@ -16739,6 +17018,20 @@ const handlePhotoQuickUpload = async (event) => {
                               <p className="mt-3 rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm">
                                 {[rep?.project || "No project", rep?.costCenter || "No task"].join(" - ")}
                               </p>
+                              <div className="mt-3 grid grid-cols-2 gap-2">
+                                <div className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2">
+                                  <p className="text-[9px] font-black uppercase tracking-wide text-blue-700">Live hours</p>
+                                  <p className="mt-0.5 text-[14px] font-black tabular-nums text-slate-950">
+                                    {formatHoursDecimal(liveMinutes)}
+                                  </p>
+                                </div>
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-right">
+                                  <p className="text-[9px] font-black uppercase tracking-wide text-emerald-700">Live labour</p>
+                                  <p className="mt-0.5 text-[14px] font-black tabular-nums text-slate-950">
+                                    {formatMoneyWhole(liveCost)}
+                                  </p>
+                                </div>
+                              </div>
                               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                                 <button
                                   type="button"
@@ -21622,7 +21915,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Auto clock-out</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{companyAutoClockOutTime}</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{formatAutoClockOutTimeText(companyAutoClockOutTime)}</span>
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Projects</span>
@@ -22454,6 +22747,39 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
                       <span className="text-slate-400">›</span>
                     </button>
+                    {isAdmin && (
+                      <>
+                        <button
+                          type="button"
+                          className="w-full rounded-[22px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
+                          onClick={() => openMenuTab("projects")}
+                        >
+                          <span className="inline-flex items-center gap-3">
+                            <span className="h-3 w-3 rounded-full bg-amber-500 shadow-[0_0_0_4px_rgba(245,158,11,0.14)]" />
+                            Projects
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
+                          onClick={() => openMenuTab("reports")}
+                        >
+                          <span className="block text-[17px] font-black text-slate-950">Reports</span>
+                          <span className="text-slate-400">›</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="w-full rounded-[22px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-4 py-4 text-left font-black text-blue-950 shadow-sm active:bg-blue-50"
+                          onClick={() => {
+                            setTimesheetCompletedOnly(false);
+                            openMenuTab("timesheet");
+                          }}
+                        >
+                          <span className="block text-[17px] font-black">Request Center</span>
+                          <span className="block text-[13px] font-bold text-blue-700">Time approvals</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
                       className="relative w-full rounded-[22px] border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-4 py-4 text-left font-black text-violet-950 shadow-sm active:bg-violet-50"
@@ -22461,7 +22787,7 @@ const handlePhotoQuickUpload = async (event) => {
                     >
                       <span className="inline-flex items-center gap-3">
                         <span className="h-3 w-3 rounded-full bg-violet-600 shadow-[0_0_0_4px_rgba(124,58,237,0.12)]" />
-                        Pictures
+                        Project Documentation
                       </span>
                       {photoNotificationCount > 0 && (
                         <span className="ml-2 rounded-full bg-red-600 text-white text-[11px] px-2 py-0.5 align-middle">
@@ -22567,7 +22893,7 @@ const handlePhotoQuickUpload = async (event) => {
             )}
             <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
           </div>
-          <div className={`grid ${isAdmin ? "grid-cols-3" : "grid-cols-2"} gap-1.5`}>
+          <div className="grid grid-cols-3 gap-1.5">
             {isAdmin ? (
               <>
                 <button
@@ -22575,7 +22901,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => setActiveTab("dashboard")}
                   className={`rounded-[22px] py-3 px-1 text-[clamp(12px,3.4vw,15px)] font-black transition ${activeTab === "dashboard" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
                 >
-                  Dashboard
+                  Activities
                 </button>
                 <button
                   type="button"
@@ -22586,14 +22912,28 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab("reports")}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${activeTab === "reports" ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25" : "text-slate-500 active:bg-slate-100"}`}
+                  onClick={() => {
+                    setMenuPanel("main");
+                    setIsMenuOpen(true);
+                  }}
+                  className="rounded-[22px] py-3 px-2 text-[15px] font-black text-slate-500 transition active:bg-slate-100"
                 >
-                  Reports
+                  More
                 </button>
               </>
             ) : (
               <>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("activities")}
+                  className={`rounded-[22px] py-3 px-1 text-[clamp(12px,3.4vw,15px)] font-black transition ${
+                    activeTab === "activities"
+                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
+                      : "text-slate-500 active:bg-slate-100"
+                  }`}
+                >
+                  Activities
+                </button>
                 <button
                   type="button"
                   onClick={handleEmployeeBottomClockAction}
@@ -22609,14 +22949,13 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab("timesheet")}
-                  className={`rounded-[22px] py-3 px-2 text-[15px] font-black transition ${
-                    activeTab === "timesheet"
-                      ? "bg-[linear-gradient(135deg,#020617,#111827)] text-white shadow-[0_14px_28px_rgba(15,23,42,0.28)] ring-1 ring-white/25"
-                      : "text-slate-500 active:bg-slate-100"
-                  }`}
+                  onClick={() => {
+                    setMenuPanel("main");
+                    setIsMenuOpen(true);
+                  }}
+                  className="rounded-[22px] py-3 px-2 text-[15px] font-black text-slate-500 transition active:bg-slate-100"
                 >
-                  Timesheet
+                  More
                 </button>
               </>
             )}
