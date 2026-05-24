@@ -23,7 +23,7 @@ const Button = ({ children, className, ...props }) => (
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
     type="button"
-    className="w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
+    className="w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-left shadow-sm active:scale-[0.99]"
     onClick={onClick}
   >
     <span className="flex items-center justify-between gap-3">
@@ -32,7 +32,7 @@ const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Rang
         {presetLabel}
       </span>
     </span>
-    <span className="mt-1.5 block text-[15px] font-black leading-tight text-slate-950">
+    <span className="mt-1 block text-[14px] font-black leading-tight text-slate-950">
       {rangeLabel || "Choose dates"}
     </span>
   </button>
@@ -2736,6 +2736,7 @@ export default function EmployeeClockApp() {
   const [projectMediaLoading, setProjectMediaLoading] = useState(false);
   const [projectMediaSyncError, setProjectMediaSyncError] = useState("");
   const [selectedPhotoIdsByFolder, setSelectedPhotoIdsByFolder] = useState({});
+  const [photoSelectionMode, setPhotoSelectionMode] = useState(false);
   const [photoViewer, setPhotoViewer] = useState(null);
   const [photoShareMessage, setPhotoShareMessage] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -10921,6 +10922,7 @@ const handlePhotoQuickUpload = async (event) => {
     const folder = String(folderName || "");
     const id = String(itemId || "");
     if (!folder || !id) return;
+    setPhotoSelectionMode(true);
     setSelectedPhotoIdsByFolder((prev) => {
       const current = new Set(prev[folder] || []);
       if (current.has(id)) current.delete(id);
@@ -10933,6 +10935,7 @@ const handlePhotoQuickUpload = async (event) => {
     const folder = String(folderName || "");
     if (!folder) return;
     const ids = (filteredProjectPhotos[folder] || []).map((item, index) => mediaItemId(item, index));
+    setPhotoSelectionMode(Boolean(selected));
     setSelectedPhotoIdsByFolder((prev) => ({ ...prev, [folder]: selected ? ids : [] }));
   };
 
@@ -16456,9 +16459,9 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-3 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Pictures</h2>
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Photos</h2>
                     <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">
-                      {projectMediaLoading ? "Refreshing media..." : "Photos and videos"}
+                      {projectMediaLoading ? "Refreshing media..." : "Job site media by project"}
                     </p>
                   </div>
                 </div>
@@ -16467,12 +16470,12 @@ const handlePhotoQuickUpload = async (event) => {
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <div className="sticky top-2 z-20 rounded-[20px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
+                <div className="sticky top-2 z-20 rounded-[18px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     Project
                     <select
-                      className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={selectedPhotoFolder}
                       onChange={(event) => setSelectedPhotoFolder(event.target.value)}
                     >
@@ -16485,7 +16488,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                     Employee
                     <select
-                      className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
                       value={mediaFilterEmployeeId}
                       onChange={(event) => setMediaFilterEmployeeId(event.target.value)}
                     >
@@ -16743,35 +16746,52 @@ const handlePhotoQuickUpload = async (event) => {
                   {visiblePhotoFolders.map((folder) => {
                     const folderItems = normalizeArray(filteredProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
-                    const allSelected = folderItems.length > 0 && folderItems.every((item, index) => selectedIds.has(mediaItemId(item, index)));
+                    const selectedCount = selectedIds.size;
+                    const showSelectionControls = selectedCount > 0;
+                    const showPhotoCheckboxes = photoSelectionMode || selectedCount > 0;
+                    const projectLabel = pictureProjectOptions.find((project) => project.folder === folder)?.label || folder;
                     return (
-                      <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
-                        <div className="space-y-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="truncate text-[16px] font-black text-slate-950">{folder}</p>
-                              <p className="text-[12px] font-semibold text-slate-500">
-                                {folderItems.length} media{selectedIds.size > 0 ? ` - ${selectedIds.size} selected` : ""}
-                              </p>
+                      <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-[17px] font-black text-slate-950">{projectLabel}</p>
+                            <p className="mt-0.5 text-[12px] font-semibold text-slate-500">
+                              {folderItems.length} {folderItems.length === 1 ? "photo" : "photos"}
+                            </p>
+                          </div>
+                          {!showSelectionControls ? (
+                            <button
+                              type="button"
+                              className="shrink-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-900 shadow-sm active:bg-slate-50"
+                              onClick={() => setPhotoSelectionMode((current) => !current)}
+                            >
+                              Select
+                            </button>
+                          ) : (
+                            <div className="shrink-0 text-right">
+                              <p className="mb-1 text-[12px] font-black text-slate-700">{selectedCount} selected</p>
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  className="rounded-[12px] bg-slate-950 px-2.5 py-1.5 text-[11px] font-black text-white disabled:border disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                  onClick={() => void shareProjectFolder(folder)}
+                                  disabled={selectedCount === 0}
+                                >
+                                  Share
+                                </button>
+                                <button
+                                  type="button"
+                                  className="rounded-[12px] border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600"
+                                  onClick={() => {
+                                    setSelectedPhotoIdsByFolder((prev) => ({ ...prev, [folder]: [] }));
+                                    setPhotoSelectionMode(false);
+                                  }}
+                                >
+                                  Clear
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[13px] font-black text-slate-900"
-                              onClick={() => setAllProjectPhotosSelected(folder, !allSelected)}
-                            >
-                              {allSelected ? "Clear selected" : "Select all in project"}
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-2xl bg-slate-950 px-3 py-2 text-[13px] font-black text-white disabled:opacity-50"
-                              onClick={() => void shareProjectFolder(folder)}
-                              disabled={selectedIds.size === 0}
-                            >
-                              Share selected
-                            </button>
-                          </div>
+                          )}
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           {folderItems.map((photo, index) => {
@@ -16780,46 +16800,46 @@ const handlePhotoQuickUpload = async (event) => {
                             const isVideoMedia = isVideoMediaItem(photo);
                             const mediaUrl = mediaItemUrl(photo);
                             return (
-                              <div key={itemId} className={`overflow-hidden rounded-[16px] border bg-slate-50 ${selected ? "border-slate-900 ring-2 ring-slate-900/15" : "border-slate-200"}`}>
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    className="block w-full text-left"
-                                    onClick={() => openPhotoViewer(folder, index)}
-                                  >
-                                    {isVideoMedia ? (
-                                      <video
-                                        src={mediaUrl}
-                                        className="w-full h-32 bg-slate-950 object-cover"
-                                        muted
-                                        playsInline
-                                        preload="metadata"
-                                      />
-                                    ) : (
-                                      <img src={mediaUrl} alt="Project" className="w-full h-32 object-cover" />
-                                    )}
-                                  </button>
-                                  <label className="absolute left-2 top-2 flex h-8 w-8 items-center justify-center rounded-xl bg-white/95 shadow-sm">
+                              <div key={itemId} className={`relative aspect-square overflow-hidden rounded-[12px] border bg-slate-100 ${selected ? "border-slate-950 ring-2 ring-slate-950/15" : "border-slate-200"}`}>
+                                <button
+                                  type="button"
+                                  className="block h-full w-full text-left"
+                                  onClick={() => {
+                                    if (showPhotoCheckboxes) {
+                                      togglePhotoSelected(folder, itemId);
+                                      return;
+                                    }
+                                    openPhotoViewer(folder, index);
+                                  }}
+                                >
+                                  {isVideoMedia ? (
+                                    <video
+                                      src={mediaUrl}
+                                      className="h-full w-full bg-slate-950 object-cover"
+                                      muted
+                                      playsInline
+                                      preload="metadata"
+                                    />
+                                  ) : (
+                                    <img src={mediaUrl} alt="Job site" className="h-full w-full object-cover" />
+                                  )}
+                                </button>
+                                {isVideoMedia ? (
+                                  <span className="absolute bottom-2 right-2 rounded-full bg-slate-950/85 px-2 py-0.5 text-[10px] font-black text-white">
+                                    Video
+                                  </span>
+                                ) : null}
+                                {showPhotoCheckboxes ? (
+                                  <label className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[9px] bg-white/95 shadow-sm">
                                     <input
                                       type="checkbox"
-                                      className="h-4 w-4"
+                                      className="h-4 w-4 accent-slate-950"
                                       checked={selected}
                                       onChange={() => togglePhotoSelected(folder, itemId)}
                                       aria-label="Select photo"
                                     />
                                   </label>
-                                </div>
-                                <div className="p-2 text-[11px] font-semibold text-slate-500">
-                                  <p className="truncate text-[12px] font-black text-slate-950">{photo.employee || "Employee"}</p>
-                                  <p className="truncate">{photo.costCenter || "No task"}</p>
-                                  <p>{photo.capturedAt ? formatDate(new Date(photo.capturedAt), companyTimeZone) : ""}</p>
-                                  {isVideoMedia ? (
-                                    <p>Video{photo.durationSeconds || photo.duration_seconds ? ` - ${formatVideoDuration(photo.durationSeconds || photo.duration_seconds)}` : ""}</p>
-                                  ) : null}
-                                  {photo.location ? (
-                                    <button className="underline text-blue-700 font-semibold" onClick={() => openMap(photo.location)}>Map</button>
-                                  ) : null}
-                                </div>
+                                ) : null}
                               </div>
                             );
                           })}
@@ -16830,7 +16850,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 <StandardDateRangeModal
                   open={mediaDatePickerOpen}
-                  eyebrow="Pictures"
+                  eyebrow="Photos"
                   title="Choose dates"
                   mode={mediaDatePickerMode}
                   options={mediaDateRangeOptions}

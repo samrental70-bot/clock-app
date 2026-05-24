@@ -381,6 +381,29 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-18 Photos Screen Redesign V1
+- Pictures screen visible UI renamed to `Photos`.
+- Photos subtitle updated to `Job site media by project`.
+- Project Documentation wording remains absent from the visible Photos screen.
+- Visible Photos filters remain limited to Project, Employee, and Date Range.
+- Project and Employee filters were compacted, and the shared Date Range button was tightened.
+- Project media sections now show project name and current filtered photo count.
+- Project counts use the filtered photo bucket for the selected project/employee/date range.
+- Selection mode now starts with a compact Select action, then shows selected count, Share, and Clear when photos are selected.
+- Share is disabled only at zero selected and uses a light disabled state.
+- Photo grid now uses two columns with 8px gap, 12px thumbnail corners, and 28px top-left selection checkboxes.
+- Video display is preserved with a small tile indicator.
+- Existing media fetching, photo/video upload, project_media, AI/documentation backend, and RBAC logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-18 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-ppjratuk3-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -409,6 +432,7 @@
 - B.1-fix-15 does not require new SQL.
 - B.1-fix-16 does not require new SQL.
 - B.1-fix-17 does not require new SQL.
+- B.1-fix-18 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
