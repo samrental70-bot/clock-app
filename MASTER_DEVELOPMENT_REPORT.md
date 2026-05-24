@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-15
+- Current development version: B.1-fix-16
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -338,6 +338,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-16 Team Screen Redesign V1
+- Employees screen visible UI renamed to `Team` with subtitle `Manage employee accounts`.
+- Active / Archived / All tabs remain compact and preserve existing filtering.
+- Company invite card compacted to `Invite employees` with a copyable company code pill and Share action.
+- Manager employee clock-in/clock-out success feedback now appears as a temporary Team toast instead of a permanent page card.
+- Employee rows were redesigned into compact professional cards with name, status chip, role, pay rate, one-line email, default assignment, and compact Clock In / Clock Out plus Edit actions.
+- Email display now uses one-line truncation to prevent awkward wrapping on mobile.
+- Project and task selectors remain available under a grouped `Default assignment` section.
+- Effective date and joining date moved into a collapsed `More details` section.
+- More/Menu and Settings entry labels now point to `Team` for consistency with Home.
+- Existing employee loading, edit flow, manager clock-in/out, default assignment picks, Share invite, RBAC, and SQL-backed settings logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-16 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-ixmezsx4w-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -364,6 +385,7 @@
 - B.1-fix-13 does not require new SQL.
 - B.1-fix-14 does not require new SQL.
 - B.1-fix-15 does not require new SQL.
+- B.1-fix-16 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
