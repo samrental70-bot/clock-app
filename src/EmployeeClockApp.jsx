@@ -17864,35 +17864,6 @@ const handlePhotoQuickUpload = async (event) => {
               {userCompany?.id && companyChecked ? (
                 <div className="flex flex-col gap-3">
                   <section className="order-1 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-                    <div className="mb-2 flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-semibold leading-tight text-slate-950">Live operations</h3>
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
-                        Live
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-[16px] border border-[#061426] bg-[#061426] px-3 py-3 text-white">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-300">Active</p>
-                        <p className="mt-1 text-[28px] font-semibold leading-none tabular-nums">
-                          {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
-                        </p>
-                      </div>
-                      <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Hours</p>
-                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
-                        </p>
-                      </div>
-                      <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Labour</p>
-                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
-                        </p>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section className="order-4 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-[18px] font-semibold text-slate-950">Team coverage</h3>
                       <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
@@ -17945,81 +17916,80 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-3 rounded-[18px] border border-slate-100 bg-white px-3 pt-3 pb-3">
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged by hour</p>
-                        <p className="shrink-0 text-[11px] font-black text-slate-400">
-                          {dashboardCoverageRangeLabel}
-                          {(dashboardLiveWorkingCards || []).length ? ` - ${(dashboardLiveWorkingCards || []).length} now` : ""}
-                        </p>
-                      </div>
-                      {(() => {
-                        const bars = Array.isArray(dashboardCoverageBars) ? dashboardCoverageBars : [];
-                        const hasData = bars.some((bar) => Number(bar.count || 0) > 0);
-                        const maxCount = Math.max(1, ...bars.map((bar) => Number(bar.count || 0)));
-                        const width = 320;
-                        const height = 152;
-                        const left = 34;
-                        const right = 14;
-                        const top = 22;
-                        const bottom = 32;
-                        const graphW = width - left - right;
-                        const graphH = height - top - bottom;
-                        const points = bars.map((bar, index) => {
-                          const denom = Math.max(1, bars.length - 1);
-                          const x = left + (index / denom) * graphW;
-                          const y = top + graphH - (Number(bar.count || 0) / maxCount) * graphH;
-                          return { ...bar, x, y };
-                        });
-                        const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
-                        const areaPoints = points.length
-                          ? `${left},${top + graphH} ${linePoints} ${left + graphW},${top + graphH}`
-                          : "";
+                    {(() => {
+                      const bars = Array.isArray(dashboardCoverageBars) ? dashboardCoverageBars : [];
+                      const hasData = bars.some((bar) => Number(bar.count || 0) > 0);
+                      if (!hasData) {
                         return (
-                          <div className="mt-2 rounded-[18px] border border-slate-100 bg-white px-2 py-2">
-                            {hasData ? (
-                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 max-h-[160px] w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
-                                {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
-                                  const y = top + graphH - (tick / maxCount) * graphH;
-                                  return (
-                                    <g key={`tick-${tick}`}>
-                                      <line x1={left} x2={left + graphW} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
-                                      <text x="4" y={y + 4} fontSize="10" fontWeight="800" fill="#64748b">
-                                        {tick}
-                                      </text>
-                                    </g>
-                                  );
-                                })}
-                                <line x1={left} x2={left} y1={top} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
-                                <line x1={left} x2={left + graphW} y1={top + graphH} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
-                                <polygon points={areaPoints} fill="rgba(37,99,235,0.08)" />
-                                <polyline points={linePoints} fill="none" stroke="#020617" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                                {points.map((point) => (
-                                  <g key={`point-${point.hour}`}>
-                                    <circle cx={point.x} cy={point.y} r="4.5" fill="#020617" stroke="#ffffff" strokeWidth="2" />
-                                    {point.label ? (
-                                      <text x={point.x} y={height - 7} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
-                                        {point.label}
-                                      </text>
-                                    ) : null}
-                                  </g>
-                                ))}
-                                <text x={left} y="10" fontSize="9" fontWeight="900" fill="#475569">
-                                  Employee count
-                                </text>
-                              </svg>
-                            ) : (
-                              <div className="flex h-16 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-medium text-slate-500">
-                                No login activity yet.
-                              </div>
-                            )}
+                          <div className="mt-3 flex h-16 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-medium text-slate-500">
+                            No login activity yet.
                           </div>
                         );
-                      })()}
-                    </div>
+                      }
+                      const maxCount = Math.max(1, ...bars.map((bar) => Number(bar.count || 0)));
+                      const width = 320;
+                      const height = 152;
+                      const left = 34;
+                      const right = 14;
+                      const top = 22;
+                      const bottom = 32;
+                      const graphW = width - left - right;
+                      const graphH = height - top - bottom;
+                      const points = bars.map((bar, index) => {
+                        const denom = Math.max(1, bars.length - 1);
+                        const x = left + (index / denom) * graphW;
+                        const y = top + graphH - (Number(bar.count || 0) / maxCount) * graphH;
+                        return { ...bar, x, y };
+                      });
+                      const linePoints = points.map((point) => `${point.x},${point.y}`).join(" ");
+                      const areaPoints = points.length
+                        ? `${left},${top + graphH} ${linePoints} ${left + graphW},${top + graphH}`
+                        : "";
+                      return (
+                        <div className="mt-3 rounded-[18px] border border-slate-100 bg-white px-3 pt-3 pb-2">
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged by hour</p>
+                            <p className="shrink-0 text-[11px] font-black text-slate-400">
+                              {dashboardCoverageRangeLabel}
+                              {(dashboardLiveWorkingCards || []).length ? ` - ${(dashboardLiveWorkingCards || []).length} now` : ""}
+                            </p>
+                          </div>
+                          <svg viewBox={`0 0 ${width} ${height}`} className="h-36 max-h-[160px] w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
+                            {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
+                              const y = top + graphH - (tick / maxCount) * graphH;
+                              return (
+                                <g key={`tick-${tick}`}>
+                                  <line x1={left} x2={left + graphW} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1" />
+                                  <text x="4" y={y + 4} fontSize="10" fontWeight="800" fill="#64748b">
+                                    {tick}
+                                  </text>
+                                </g>
+                              );
+                            })}
+                            <line x1={left} x2={left} y1={top} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
+                            <line x1={left} x2={left + graphW} y1={top + graphH} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
+                            <polygon points={areaPoints} fill="rgba(37,99,235,0.08)" />
+                            <polyline points={linePoints} fill="none" stroke="#020617" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            {points.map((point) => (
+                              <g key={`point-${point.hour}`}>
+                                <circle cx={point.x} cy={point.y} r="4.5" fill="#020617" stroke="#ffffff" strokeWidth="2" />
+                                {point.label ? (
+                                  <text x={point.x} y={height - 7} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
+                                    {point.label}
+                                  </text>
+                                ) : null}
+                              </g>
+                            ))}
+                            <text x={left} y="10" fontSize="9" fontWeight="900" fill="#475569">
+                              Employee count
+                            </text>
+                          </svg>
+                        </div>
+                      );
+                    })()}
                   </section>
 
-                  <section className="order-6 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <section className="order-5 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-[18px] font-semibold text-slate-950">Recent activity</h3>
                       <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
@@ -18060,7 +18030,7 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </section>
 
-                  <section className="order-5 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <section className="order-4 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-[18px] font-semibold text-slate-950">Live job sites</h3>
                       <button
@@ -18125,10 +18095,30 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-2 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-semibold text-slate-950">Active team</h3>
+                      <h3 className="text-[18px] font-semibold text-slate-950">Live team</h3>
                       <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                        {(dashboardLiveWorkingCards || []).length}
+                        {(dashboardLiveWorkingCards || []).length} working
                       </p>
+                    </div>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <div className="rounded-[16px] border border-[#061426] bg-[#061426] px-3 py-3 text-white">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-300">Active</p>
+                        <p className="mt-1 text-[28px] font-semibold leading-none tabular-nums">
+                          {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
+                        </p>
+                      </div>
+                      <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Hours</p>
+                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
+                          {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
+                        </p>
+                      </div>
+                      <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Labour</p>
+                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
+                          {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
+                        </p>
+                      </div>
                     </div>
                     {dashboardLoading ? (
                       <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Loading active employees...</p>
@@ -18174,9 +18164,14 @@ const handlePhotoQuickUpload = async (event) => {
                                     </span>
                                   </p>
                                 </div>
-                                <p className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1.5 text-right text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
-                                  {formatDuration(liveMinutes)} / {formatMoney(liveCost)}
-                                </p>
+                                <div className="shrink-0 text-right">
+                                  <p className="rounded-full bg-[#061426] px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
+                                    {formatDuration(liveMinutes)}
+                                  </p>
+                                  <p className="mt-1 text-[11px] font-semibold leading-none tabular-nums text-slate-500">
+                                    {formatMoney(liveCost)}
+                                  </p>
+                                </div>
                               </div>
                               <p
                                 className="mt-2 truncate text-[13px] font-medium leading-snug text-slate-600"

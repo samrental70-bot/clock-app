@@ -504,6 +504,29 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-23 Home Section Order + Combined Live Team Card
+- Home information flow was updated to Header, Hero / Quick Actions, Team Coverage, Live Team, Worked Today, Live Job Sites, and Recent Activity.
+- Team Coverage now appears before the live working crew summary.
+- The separate `Live operations` card was removed.
+- The separate `Active team` card was replaced by a combined `Live team` card.
+- Live Team now contains the Active, Hours, and Labour KPI row above the active employee list.
+- The Issues KPI remains removed from Home.
+- Active employee rows remain inside Live Team with clock-in time, Working chip, project/task, live duration, compact earned amount, Location, and Clock out action.
+- Live Team keeps a compact empty state for zero working employees while still showing Active 0, Hours 0h, and Labour $0.
+- Worked Today remains after Live Team and still uses completed same-day shifts only.
+- Team Coverage only renders the employees-by-hour chart shell when there is useful chart data; otherwise it shows a compact `No login activity yet.` state.
+- Existing Home queries, live hours/labour calculations, Worked Today calculations, dashboard clock-out actions, map actions, RBAC, and company restrictions were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-23 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-61ntqwtf2-samrental70-7859s-projects.vercel.app
+- Screenshots: Attempted with headless Chrome; authenticated Home screenshots are blocked by the deployed Login screen in this environment and require a signed-in browser session or QA credentials.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -537,6 +560,7 @@
 - B.1-fix-20 does not require new SQL.
 - B.1-fix-21 does not require new SQL.
 - B.1-fix-22 does not require new SQL.
+- B.1-fix-23 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
