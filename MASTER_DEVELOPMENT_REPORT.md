@@ -458,6 +458,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-21 Home Screen Final UI Polish V2
+- Mobile AppHeader was simplified to logo, company name, tiny development chip, optional user subline, and notification bell only.
+- Visible hamburger and refresh controls were removed from the mobile header/Home chrome.
+- Bottom navigation was updated to five compact items: Home, Schedule, Clock, Timesheets, and More.
+- Home hero now uses a time-aware greeting with the user's first name and a single Today/date subtitle.
+- Home quick actions remain Schedule, Photos, Receipts, and Team with muted professional action cards.
+- Live operations was reduced to three KPIs: Active, Hours, and Labour; the Issues KPI was removed.
+- Active Team, Worked Today, Team Coverage, Live Job Sites, and Recent Activity sections were tightened with dark luxury navy styling, softer surfaces, better alignment, and smaller chips/buttons.
+- Recent Activity remains limited to the first six Home rows with View all activity preserved.
+- Existing Home data queries, live time/labour calculations, clock-out actions, map actions, RBAC, and company restrictions were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-21 Home Polish V2 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-pcsefai92-samrental70-7859s-projects.vercel.app
+- Screenshots: Attempted with headless Chrome; authenticated Home screenshots are blocked by the deployed Login screen in this environment and require a signed-in browser session or QA credentials.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:

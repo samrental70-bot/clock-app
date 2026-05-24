@@ -86,78 +86,115 @@ const AppHeader = ({
   iconSrc,
   isDevelopment,
   unreadCount = 0,
-  refreshDisabled = false,
-  onMenu,
-  onRefresh,
   onNotifications,
 }) => (
   <div className="opera-app-header">
-    <div className="flex items-center justify-between gap-2">
-      <button type="button" onClick={onMenu} className="opera-header-icon-button" aria-label="Open menu">
-        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-          <path d="M5 7h14" />
-          <path d="M5 12h14" />
-          <path d="M5 17h14" />
-        </svg>
-      </button>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className="flex min-h-[48px] items-center justify-between gap-3">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
         <img src={iconSrc} alt="" className="h-9 w-9 shrink-0 rounded-[12px]" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-1.5">
-            <h1 className="truncate text-[15px] font-black leading-tight text-slate-950">{companyName || "Company"}</h1>
+            <h1 className="truncate text-[16px] font-semibold leading-tight text-slate-950">{companyName || "Company"}</h1>
             {isDevelopment ? (
               <span className="opera-dev-chip">Dev</span>
             ) : null}
           </div>
-          <p className="mt-0.5 truncate text-[11px] font-bold leading-snug text-slate-500">{metaLabel}</p>
+          {metaLabel ? (
+            <p className="mt-0.5 truncate text-[13px] font-medium leading-snug text-slate-500">{metaLabel}</p>
+          ) : null}
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="opera-header-icon-button"
-          aria-label="Refresh"
-          disabled={refreshDisabled}
-        >
-          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 12a9 9 0 0 1-15.5 6.3" />
-            <path d="M3 12a9 9 0 0 1 15.5-6.3" />
-            <path d="M3 18v-5h5" />
-            <path d="M21 6v5h-5" />
-          </svg>
-        </button>
-        <button type="button" onClick={onNotifications} className="opera-header-icon-button relative" aria-label="Notifications">
-          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-            <path d="M10 21h4" />
-          </svg>
-          {unreadCount > 0 ? (
-            <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
-          ) : null}
-        </button>
-      </div>
+      <button type="button" onClick={onNotifications} className="opera-header-icon-button relative shrink-0" aria-label="Notifications">
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+          <path d="M10 21h4" />
+        </svg>
+        {unreadCount > 0 ? (
+          <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+        ) : null}
+      </button>
     </div>
   </div>
 );
 
-const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onMore }) => {
+const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onTimesheets, onMore }) => {
+  const NavIcon = ({ type }) => {
+    if (type === "home") {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V21h14V9.5" />
+          <path d="M9 21v-6h6v6" />
+        </svg>
+      );
+    }
+    if (type === "schedule") {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 3v4M17 3v4" />
+          <path d="M4 8h16" />
+          <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
+        </svg>
+      );
+    }
+    if (type === "clock") {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 8v5l3 2" />
+        </svg>
+      );
+    }
+    if (type === "timesheet") {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 4h10a2 2 0 0 1 2 2v14H5V6a2 2 0 0 1 2-2Z" />
+          <path d="M8 9h8M8 13h8M8 17h4" />
+        </svg>
+      );
+    }
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 7h14M5 12h14M5 17h14" />
+      </svg>
+    );
+  };
   const itemClass = (active, emphasized = false) =>
-    `rounded-[16px] py-2.5 px-1 text-[13px] font-black transition ${
+    `relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 py-1.5 text-[12px] font-semibold transition ${
       active
-        ? "bg-slate-950 text-white"
+        ? "bg-slate-100 text-[#061426]"
         : emphasized
-          ? "bg-emerald-50 text-emerald-800 active:bg-emerald-100"
+          ? "text-emerald-700 active:bg-emerald-50"
           : "text-slate-500 active:bg-slate-100"
     }`;
   const homeActive = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
   return (
-    <div className="opera-bottom-nav fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/90 px-1.5 py-1.5 backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]">
-      <div className="grid grid-cols-4 gap-1">
-        <button type="button" onClick={onHome} className={itemClass(homeActive)}>Home</button>
-        <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>Schedule</button>
-        <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>Clock</button>
-        <button type="button" onClick={onMore} className={itemClass(false)}>More</button>
+    <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
+      <div className="grid grid-cols-5 gap-0.5">
+        <button type="button" onClick={onHome} className={itemClass(homeActive)}>
+          {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          <NavIcon type="home" />
+          <span className="truncate">Home</span>
+        </button>
+        <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
+          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          <NavIcon type="schedule" />
+          <span className="truncate">Schedule</span>
+        </button>
+        <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>
+          {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          <NavIcon type="clock" />
+          <span className="truncate">Clock</span>
+        </button>
+        <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
+          {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          <NavIcon type="timesheet" />
+          <span className="truncate">Timesheets</span>
+        </button>
+        <button type="button" onClick={onMore} className={itemClass(false)}>
+          <NavIcon type="more" />
+          <span className="truncate">More</span>
+        </button>
       </div>
     </div>
   );
@@ -15201,8 +15238,29 @@ const handlePhotoQuickUpload = async (event) => {
   })();
   const appHeaderUserName = (profileFullName || "").trim() || "User";
   const appHeaderMetaSeparator = "\u2022";
-  const appHeaderMetaLabel = `${appHeaderDateLabel} ${appHeaderMetaSeparator} ${appHeaderUserName}`;
+  const appHeaderMetaLabel = appHeaderUserName;
   const homeTodayLabel = `Today ${appHeaderMetaSeparator} ${appHeaderDateLabel}`;
+  const homeFirstName = appHeaderUserName.split(/\s+/).filter(Boolean)[0] || appHeaderUserName;
+  const homeGreetingLabel = (() => {
+    try {
+      const hourText = new Intl.DateTimeFormat("en-CA", {
+        timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+        hour: "numeric",
+        hour12: false,
+      }).format(now instanceof Date ? now : new Date(now));
+      const hour = Number(String(hourText).replace(/\D/g, ""));
+      const normalizedHour = Number.isFinite(hour) ? hour % 24 : NaN;
+      if (Number.isFinite(normalizedHour) && normalizedHour < 12) return "Good morning";
+      if (Number.isFinite(normalizedHour) && normalizedHour < 17) return "Good afternoon";
+      return "Good evening";
+    } catch {
+      const hour = (now instanceof Date ? now : new Date(now)).getHours();
+      if (hour < 12) return "Good morning";
+      if (hour < 17) return "Good afternoon";
+      return "Good evening";
+    }
+  })();
+  const homeHeroTitle = `${homeGreetingLabel}, ${homeFirstName}`;
 
   const handleHeaderRefresh = () => {
     setDashboardRefreshKey((key) => key + 1);
@@ -15334,12 +15392,6 @@ const handlePhotoQuickUpload = async (event) => {
             iconSrc={OPERA_APP_ICON}
             isDevelopment={IS_OPERA_DEVELOPMENT_APP}
             unreadCount={inAppNotifUnread}
-            refreshDisabled={dashboardLoading || timesheetsLoading}
-            onMenu={() => {
-              setMenuPanel("main");
-              setIsMenuOpen(true);
-            }}
-            onRefresh={handleHeaderRefresh}
             onNotifications={() => setActiveTab("notifications")}
           />
 
@@ -17703,11 +17755,11 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "dashboard" && isAdmin && (
             <div className="space-y-3">
-              <section className="relative overflow-hidden rounded-[24px] border border-slate-200 bg-white px-3 py-3 shadow-[0_10px_26px_rgba(15,23,42,0.07)]">
+              <section className="relative overflow-hidden rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-[21px] font-black leading-[1.05] text-slate-950">Home</h2>
-                    <p className="mt-1 truncate text-[12px] font-bold text-slate-500">
+                    <h2 className="truncate text-[24px] font-semibold leading-tight text-slate-950">{homeHeroTitle}</h2>
+                    <p className="mt-1 truncate text-[13px] font-medium text-slate-500">
                       {homeTodayLabel}
                     </p>
                   </div>
@@ -17775,13 +17827,13 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       key={item.label}
                       type="button"
-                      className={`h-20 min-w-0 rounded-[16px] border ${item.surface} px-1 py-2 text-center shadow-sm active:scale-[0.98]`}
+                      className={`h-[78px] min-w-0 rounded-[16px] border ${item.surface} px-1 py-2 text-center shadow-sm active:scale-[0.98]`}
                       onClick={item.action}
                     >
-                      <span className={`mx-auto flex h-10 w-10 items-center justify-center rounded-[13px] ${item.tone}`}>
+                      <span className={`mx-auto flex h-9 w-9 items-center justify-center rounded-[12px] ${item.tone}`}>
                         {item.icon}
                       </span>
-                      <span className={`mt-1.5 block text-center text-[12px] font-black leading-tight ${item.text}`}>{item.label}</span>
+                      <span className={`mt-1.5 block text-center text-[12px] font-semibold leading-tight ${item.text}`}>{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -17807,57 +17859,51 @@ const handlePhotoQuickUpload = async (event) => {
 
               {userCompany?.id && companyChecked ? (
                 <div className="flex flex-col gap-3">
-                  <section className="order-1 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
+                  <section className="order-1 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="mb-2 flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black leading-tight text-slate-950">Live operations</h3>
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-black text-emerald-700">
+                      <h3 className="text-[18px] font-semibold leading-tight text-slate-950">Live operations</h3>
+                      <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
                         Live
                       </span>
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      <div className="rounded-[18px] border border-slate-200 bg-slate-950 px-2 py-2.5 text-white">
-                        <p className="text-[8px] font-black uppercase tracking-wide text-slate-300">Active</p>
-                        <p className="mt-1 text-[18px] font-black leading-none tabular-nums">
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-[16px] border border-[#061426] bg-[#061426] px-3 py-3 text-white">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-300">Active</p>
+                        <p className="mt-1 text-[28px] font-semibold leading-none tabular-nums">
                           {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-2.5">
-                        <p className="text-[8px] font-black uppercase tracking-wide text-blue-700">Hours</p>
-                        <p className="mt-1 text-[clamp(13px,3.7vw,18px)] font-black leading-none tabular-nums text-slate-950">
+                      <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Hours</p>
+                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
                           {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-slate-200 bg-white px-2 py-2.5">
-                        <p className="text-[8px] font-black uppercase tracking-wide text-emerald-700">Labour</p>
-                        <p className="mt-1 text-[clamp(13px,3.6vw,18px)] font-black leading-none tabular-nums text-slate-950">
+                      <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Labour</p>
+                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
                           {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
-                        </p>
-                      </div>
-                      <div className="rounded-[18px] border border-slate-200 bg-white px-2 py-2.5">
-                        <p className="text-[8px] font-black uppercase tracking-wide text-amber-700">Issues</p>
-                        <p className="mt-1 text-[18px] font-black leading-none tabular-nums text-slate-950">
-                          {pendingTimesheetRequests.length}
                         </p>
                       </div>
                     </div>
                   </section>
 
-                  <section className="order-4 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
+                  <section className="order-4 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Team coverage</h3>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                      <h3 className="text-[18px] font-semibold text-slate-950">Team coverage</h3>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
                         Today
                       </span>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <div className="rounded-[18px] bg-slate-50 p-3">
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <div className="rounded-[16px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">In</p>
-                          <p className="text-[22px] font-black tabular-nums text-slate-950">
+                          <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">In</p>
+                          <p className="text-[24px] font-semibold tabular-nums text-slate-950">
                             {dashboardLoading ? "-" : (dashboardLiveWorkingCards || []).length}
                           </p>
                         </div>
-                        <div className="mt-2 flex -space-x-1.5">
+                        <div className="mt-1.5 flex -space-x-1.5">
                           {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
                             <span
                               key={`pulse-in-${card.uid}`}
@@ -17872,14 +17918,14 @@ const handlePhotoQuickUpload = async (event) => {
                           )}
                         </div>
                       </div>
-                      <div className="rounded-[18px] bg-slate-50 p-3">
+                      <div className="rounded-[16px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">Out</p>
-                          <p className="text-[22px] font-black tabular-nums text-slate-950">
+                          <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Out</p>
+                          <p className="text-[24px] font-semibold tabular-nums text-slate-950">
                             {dashboardLoading ? "-" : dashboardFinishedTodayCards.length}
                           </p>
                         </div>
-                        <div className="mt-2 flex -space-x-1.5">
+                        <div className="mt-1.5 flex -space-x-1.5">
                           {(dashboardFinishedTodayCards || []).slice(0, 5).map((card, index) => (
                             <span
                               key={`pulse-out-${card.uid}`}
@@ -17895,7 +17941,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                       </div>
                     </div>
-                    <div className="mt-4 rounded-[20px] border border-slate-100 bg-white px-3 pt-3 pb-3">
+                    <div className="mt-3 rounded-[18px] border border-slate-100 bg-white px-3 pt-3 pb-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged by hour</p>
                         <p className="shrink-0 text-[11px] font-black text-slate-400">
@@ -17928,7 +17974,7 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div className="mt-2 rounded-[18px] border border-slate-100 bg-white px-2 py-2">
                             {hasData ? (
-                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
+                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 max-h-[160px] w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
                                 {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
                                   const y = top + graphH - (tick / maxCount) * graphH;
                                   return (
@@ -17959,7 +18005,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </text>
                               </svg>
                             ) : (
-                              <div className="flex h-24 items-center justify-center rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
+                              <div className="flex h-16 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-medium text-slate-500">
                                 No login activity yet.
                               </div>
                             )}
@@ -17969,10 +18015,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-6 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <section className="order-6 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[17px] font-black text-slate-950">Recent activity</h3>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
+                      <h3 className="text-[18px] font-semibold text-slate-950">Recent activity</h3>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
                         {dashboardActivityFeedItems.length}
                       </span>
                     </div>
@@ -17985,23 +18031,23 @@ const handlePhotoQuickUpload = async (event) => {
                         {dashboardActivityFeedItems.slice(0, 6).map((item) => (
                           <div
                             key={item.id}
-                            className="grid min-h-14 grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5"
+                            className="grid min-h-14 max-h-16 grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[14px] border border-slate-200 bg-slate-50 px-3 py-2.5"
                           >
-                            <span className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-[11px] border text-[10px] font-black ${item.tone}`}>
+                            <span className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-[12px] border text-[10px] font-semibold ${item.tone}`}>
                               {String(item.kind || "A").slice(0, 1).toUpperCase()}
                             </span>
                             <div className="min-w-0">
-                              <p className="text-[14px] font-black leading-snug text-slate-950 break-words">{item.title}</p>
-                              <p className="mt-0.5 text-[12px] font-bold leading-snug text-slate-500 break-words">{item.detail}</p>
+                              <p className="truncate text-[14px] font-semibold leading-snug text-slate-950">{item.title}</p>
+                              <p className="mt-0.5 truncate text-[12px] font-medium leading-snug text-slate-500">{item.detail}</p>
                             </div>
-                            <p className="shrink-0 text-right text-[11px] font-black tabular-nums text-slate-500">
+                            <p className="shrink-0 text-right text-[11px] font-semibold tabular-nums text-slate-500">
                               {formatTime(item.when, companyTimeZone)}
                             </p>
                           </div>
                         ))}
                         <button
                           type="button"
-                          className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700 active:bg-slate-50"
+                          className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-semibold text-slate-700 active:bg-slate-50"
                           onClick={() => setActiveTab("activities")}
                         >
                           View all activity
@@ -18010,12 +18056,12 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </section>
 
-                  <section className="order-5 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <section className="order-5 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Live job sites</h3>
+                      <h3 className="text-[18px] font-semibold text-slate-950">Live job sites</h3>
                       <button
                         type="button"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700 disabled:opacity-50"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-50"
                         disabled={!dashboardLiveMapLocations.length}
                         onClick={openDashboardLiveLocationsMap}
                       >
@@ -18031,7 +18077,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div
                       role="button"
                       tabIndex={dashboardLiveMapLocations.length ? 0 : -1}
-                      className={`relative mt-3 block ${dashboardLiveMapLocations.length ? "h-40" : "h-[150px]"} w-full overflow-hidden rounded-[18px] border border-slate-200 bg-[#e9eef5] text-left shadow-inner ${
+                      className={`relative mt-3 block ${dashboardLiveMapLocations.length ? "h-[180px]" : "h-[138px]"} w-full overflow-hidden rounded-[16px] border border-slate-200 bg-[#e9eef5] text-left ${
                         dashboardLiveMapLocations.length ? "cursor-pointer" : "cursor-default"
                       }`}
                       onClick={() => {
@@ -18049,7 +18095,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="absolute inset-0 bg-[linear-gradient(35deg,transparent_0_18%,rgba(255,255,255,0.78)_18%_22%,transparent_22%_45%,rgba(255,255,255,0.76)_45%_50%,transparent_50%),linear-gradient(120deg,rgba(15,23,42,0.10)_0_12%,transparent_12%_100%)]" />
                       <div className="absolute left-[-8%] top-[30%] h-5 w-[120%] -rotate-12 bg-white/80 shadow-sm" />
                       <div className="absolute left-[10%] top-[-8%] h-[130%] w-4 rotate-[35deg] bg-white/80 shadow-sm" />
-                      <div className="absolute bottom-3 left-4 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                      <div className="absolute bottom-3 left-3 rounded-full bg-white/90 px-2.5 py-1 text-[10px] font-semibold text-slate-700 shadow-sm">
                         {dashboardLiveMapLocations.length ? "Tap map to open live locations" : "No active locations"}
                       </div>
                       {(dashboardRadarCards || []).map((card) => (
@@ -18073,10 +18119,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-2 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
+                  <section className="order-2 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Active team</h3>
-                      <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
+                      <h3 className="text-[18px] font-semibold text-slate-950">Active team</h3>
+                      <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
                         {(dashboardLiveWorkingCards || []).length}
                       </p>
                     </div>
@@ -18110,35 +18156,34 @@ const handlePhotoQuickUpload = async (event) => {
                           return (
                             <div
                               key={`premium-live-${String(uid)}`}
-                              className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm"
+                              className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-sm"
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[16px] font-black leading-tight text-slate-950" title={displayName || "Employee"}>
+                                  <p className="truncate text-[16px] font-semibold leading-tight text-slate-950" title={displayName || "Employee"}>
                                     {displayName || "Employee"}
                                   </p>
-                                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] font-bold text-slate-500 tabular-nums">
+                                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12px] font-medium text-slate-500 tabular-nums">
                                     <span>Clocked in {clockInDisp}</span>
-                                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-emerald-700">
+                                    <span className="rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700">
                                       Working
                                     </span>
                                   </p>
                                 </div>
-                                <div className="shrink-0 rounded-[12px] bg-slate-950 px-2 py-1.5 text-right text-white shadow-sm">
-                                  <p className="text-[12px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
-                                  <p className="mt-1 text-[11px] font-black leading-none tabular-nums text-slate-200">{formatMoney(liveCost)}</p>
-                                </div>
+                                <p className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1.5 text-right text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
+                                  {formatDuration(liveMinutes)} / {formatMoney(liveCost)}
+                                </p>
                               </div>
                               <p
-                                className="mt-2 truncate text-[13px] font-bold leading-snug text-slate-600"
+                                className="mt-2 truncate text-[13px] font-medium leading-snug text-slate-600"
                                 title={projectTaskLine}
                               >
                                 {projectTaskLine}
                               </p>
-                              <div className="mt-2 grid grid-cols-[1fr_auto] gap-2">
+                              <div className="mt-3 grid grid-cols-2 gap-2">
                                 <button
                                   type="button"
-                                  className="rounded-[14px] border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-800 disabled:opacity-50"
+                                  className="flex h-10 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-semibold text-slate-800 disabled:opacity-50"
                                   disabled={!hasLiveGps}
                                   onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
                                 >
@@ -18146,7 +18191,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </button>
                                 <Button
                                   type="button"
-                                  className="rounded-[14px] px-3 py-2 text-[12px] font-black !bg-slate-950 !text-white"
+                                  className="flex h-10 items-center justify-center rounded-[14px] px-3 text-[12px] font-semibold !bg-[#061426] !text-white"
                                   disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                                 >
@@ -18159,12 +18204,12 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-3 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
+                  <section className="order-3 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Worked today</h3>
+                      <h3 className="text-[18px] font-semibold text-slate-950">Worked today</h3>
                       <button
                         type="button"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-black text-slate-700 active:scale-[0.98]"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:scale-[0.98]"
                         onClick={openDashboardTodayTimesheets}
                       >
                         View timesheets
@@ -18176,40 +18221,40 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's timesheet details"
                     >
-                      <span className="rounded-[18px] bg-slate-950 px-3 py-2.5 text-white shadow-sm">
-                        <span className="block text-[9px] font-black uppercase tracking-wide text-slate-300">Employees</span>
-                        <span className="mt-1 block text-[22px] font-black tabular-nums leading-none">
+                      <span className="rounded-[16px] bg-[#061426] px-3 py-2.5 text-white shadow-sm">
+                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-300">Employees</span>
+                        <span className="mt-1 block text-[24px] font-semibold tabular-nums leading-none">
                           {dashboardWorkedTodaySummary.employeeCount}
                         </span>
                       </span>
-                      <span className="rounded-[18px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <span className="block text-[9px] font-black uppercase tracking-wide text-slate-500">Entries</span>
-                        <span className="mt-1 block text-[22px] font-black tabular-nums leading-none text-slate-950">
+                      <span className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
+                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-500">Entries</span>
+                        <span className="mt-1 block text-[24px] font-semibold tabular-nums leading-none text-slate-950">
                           {dashboardWorkedTodaySummary.shiftCount}
                         </span>
                       </span>
-                      <span className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
-                        <span className="block text-[9px] font-black uppercase tracking-wide text-emerald-700">Labour</span>
-                        <span className="mt-1 block text-[clamp(14px,3.8vw,18px)] font-black tabular-nums leading-none text-slate-950">
+                      <span className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
+                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-emerald-700">Labour</span>
+                        <span className="mt-1 block text-[clamp(15px,4vw,20px)] font-semibold tabular-nums leading-none text-slate-950">
                           {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
                         </span>
                       </span>
                     </button>
                     <button
                       type="button"
-                      className="mb-3 w-full rounded-[20px] border border-slate-200 bg-white px-4 py-3 text-left shadow-sm active:scale-[0.99]"
+                      className="mb-3 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-left active:scale-[0.99]"
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's completed time and cost"
                     >
-                      <span className="flex items-end justify-between gap-3 border-b border-slate-100 pb-2">
-                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total hours</span>
-                        <span className="text-[24px] font-black leading-none tabular-nums text-slate-950">
+                      <span className="flex items-center justify-between gap-3 pb-2">
+                        <span className="text-[13px] font-medium text-slate-500">Total hours</span>
+                        <span className="text-[18px] font-semibold leading-none tabular-nums text-slate-950">
                           {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
                         </span>
                       </span>
-                      <span className="mt-2 flex items-end justify-between gap-3">
-                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Labour cost</span>
-                        <span className="text-[22px] font-black leading-none tabular-nums text-slate-950">
+                      <span className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
+                        <span className="text-[13px] font-medium text-slate-500">Labour cost</span>
+                        <span className="text-[18px] font-semibold leading-none tabular-nums text-slate-950">
                           {formatMoney(dashboardWorkedTodaySummary.totalCost)}
                         </span>
                       </span>
@@ -18233,37 +18278,28 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[15px] font-black text-slate-950" title={card.displayName}>
+                                  <p className="truncate text-[15px] font-semibold text-slate-950" title={card.displayName}>
                                     {card.displayName}
                                   </p>
-                                  <p className="mt-0.5 truncate text-[12px] font-bold text-slate-500" title={projectTaskLine}>
+                                  <p className="mt-0.5 truncate text-[12px] font-medium text-slate-500" title={projectTaskLine}>
                                     {projectTaskLine}
                                   </p>
                                 </div>
-                                <p className="shrink-0 text-right text-[13px] font-black tabular-nums text-slate-950">
+                                <p className="shrink-0 text-right text-[13px] font-semibold tabular-nums text-slate-950">
                                   {card.metrics.totalDisp}
                                 </p>
                               </div>
-                              <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700">
+                              <div className="mt-2 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-600">
                                 <span className="min-w-0 truncate tabular-nums">
                                   {card.metrics.inDisp} - {card.metrics.outDisp}
                                 </span>
-                                <span className="shrink-0 text-right tabular-nums text-slate-950">
+                                <span className="shrink-0 text-right font-semibold tabular-nums text-slate-950">
                                   {card.metrics.labourDisp}
                                 </span>
                               </div>
                             </button>
                           );
                         })}
-                        {dashboardTodayWorkedCards.length > 3 ? (
-                          <button
-                            type="button"
-                            className="w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700 active:bg-white"
-                            onClick={openDashboardTodayTimesheets}
-                          >
-                            View all timesheets
-                          </button>
-                        ) : null}
                       </div>
                     )}
                   </section>
@@ -24240,6 +24276,7 @@ const handlePhotoQuickUpload = async (event) => {
           onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
           onSchedule={() => setActiveTab("schedule")}
           onClock={() => setActiveTab("clock")}
+          onTimesheets={() => setActiveTab("timesheet")}
           onMore={() => {
             setMenuPanel("main");
             setIsMenuOpen(true);

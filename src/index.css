@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --opera-navy: #070b1f;
-  --opera-navy-soft: #111827;
+  --opera-navy: #061426;
+  --opera-navy-soft: #0b1f33;
   --opera-bg: #f4f7fb;
   --opera-surface: #ffffff;
   --opera-surface-soft: #f8fafc;
   --opera-border: #e2e8f0;
-  --opera-text: #070b1f;
+  --opera-text: #061426;
   --opera-text-secondary: #64748b;
   --opera-text-muted: #94a3b8;
   --opera-blue: #2563eb;
-  --opera-green: #059669;
+  --opera-green: #15803d;
   --opera-amber: #f59e0b;
   --opera-purple: #7c3aed;
   --opera-red: #dc2626;
@@ -318,9 +318,9 @@ textarea {
 }
 
 .opera-app-header {
-  min-height: 72px;
+  min-height: 66px;
   border: 1px solid var(--opera-border);
-  border-radius: 20px;
+  border-radius: 18px;
   background: white;
   padding: 8px 10px;
   box-shadow: var(--opera-card-shadow);
@@ -433,16 +433,16 @@ textarea {
 }
 
 .opera-bottom-nav {
-  min-height: calc(64px + env(safe-area-inset-bottom, 0px));
-  background: rgba(255, 255, 255, 0.92) !important;
+  min-height: calc(72px + env(safe-area-inset-bottom, 0px));
+  background: rgba(255, 255, 255, 0.95) !important;
   border-color: var(--opera-border) !important;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
+  box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.06) !important;
 }
 
 .opera-bottom-nav button {
-  min-height: 44px;
-  border-radius: 16px !important;
-  font-size: 13px !important;
+  min-height: 54px;
+  border-radius: 14px !important;
+  font-size: 12px !important;
   font-weight: 650 !important;
 }
 
