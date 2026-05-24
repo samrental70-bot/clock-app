@@ -444,6 +444,20 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-21 Duration Display Cleanup
+- Visible duration labels now use hours-and-minutes formatting instead of decimal hour formatting.
+- Home live operations, Worked Today totals, Timesheets cards/share text, Reports summaries, and legacy dashboard summary displays now render values like `2h 38m` instead of `2.63h`.
+- Underlying labour, rate, and payroll calculations remain numeric and unchanged.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-21 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-m23m62rhx-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -475,6 +489,7 @@
 - B.1-fix-18 does not require new SQL.
 - B.1-fix-19 does not require new SQL.
 - B.1-fix-20 does not require new SQL.
+- B.1-fix-21 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

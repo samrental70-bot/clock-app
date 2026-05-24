@@ -1795,7 +1795,7 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
   return {
     inDisp,
     outDisp,
-    totalDisp: formatHoursDecimal(sumMin),
+    totalDisp: formatHoursMinutes(sumMin),
     labourDisp: formatMoney(sumLab),
     totalMinutes: sumMin,
     labourCost: sumLab,
@@ -1861,18 +1861,16 @@ function minutesBetween(start, end) {
   return Math.max(0, Math.round((t1 - t0) / 60000));
 }
 
-function formatDuration(minutes) {
+function formatHoursMinutes(minutes) {
   const raw = Number(minutes);
-  const safeMin = Number.isFinite(raw) ? Math.max(0, raw) : 0;
+  const safeMin = Number.isFinite(raw) ? Math.max(0, Math.round(raw)) : 0;
   const h = Math.floor(safeMin / 60);
   const m = safeMin % 60;
   return `${h}h ${m}m`;
 }
 
-function formatHoursDecimal(minutes) {
-  const raw = Number(minutes);
-  const safeMin = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-  return `${(safeMin / 60).toFixed(2)}h`;
+function formatDuration(minutes) {
+  return formatHoursMinutes(minutes);
 }
 
 function formatTimer(seconds) {
@@ -5801,7 +5799,7 @@ export default function EmployeeClockApp() {
           record?.project || "No project",
           task,
           `${clockIn} - ${clockOut}`,
-          formatHoursDecimal(getWorkedMinutes(record)),
+          formatHoursMinutes(getWorkedMinutes(record)),
           formatMoney(getLabourCost(record)),
         ].join(" | ")
       );
@@ -13308,7 +13306,7 @@ const handlePhotoQuickUpload = async (event) => {
       <div className="mt-3 grid grid-cols-3 gap-2 rounded-[16px] border border-slate-200 bg-slate-50 p-2 text-[12px] text-slate-600">
         <div>
           <p className="font-black uppercase text-[9px] tracking-wide text-slate-500">Hours</p>
-          <p className="mt-1 font-black text-slate-950 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p>
+          <p className="mt-1 font-black text-slate-950 leading-tight">{formatHoursMinutes(getWorkedMinutes(record))}</p>
         </div>
         <div>
           <p className="font-black uppercase text-[9px] tracking-wide text-slate-500">Rate</p>
@@ -17826,7 +17824,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-2.5">
                         <p className="text-[8px] font-black uppercase tracking-wide text-blue-700">Hours</p>
                         <p className="mt-1 text-[clamp(13px,3.7vw,18px)] font-black leading-none tabular-nums text-slate-950">
-                          {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
+                          {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="rounded-[18px] border border-slate-200 bg-white px-2 py-2.5">
@@ -18206,7 +18204,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className="flex items-end justify-between gap-3 border-b border-slate-100 pb-2">
                         <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total hours</span>
                         <span className="text-[24px] font-black leading-none tabular-nums text-slate-950">
-                          {formatHoursDecimal(dashboardWorkedTodaySummary.totalMinutes)}
+                          {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
                         </span>
                       </span>
                       <span className="mt-2 flex items-end justify-between gap-3">
@@ -18331,7 +18329,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
                         <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide">Today hours</p>
                         <p className="text-[clamp(15px,4vw,19px)] font-black text-slate-950 tabular-nums leading-none whitespace-nowrap">
-                          {formatHoursDecimal(dashboardSummary.totalMinutes)}
+                          {formatHoursMinutes(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] border border-slate-200 bg-white p-3 shadow-[0_10px_22px_rgba(15,23,42,0.07)]">
@@ -18561,7 +18559,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                         <p className="text-[12px] font-bold text-slate-500 uppercase tracking-wide">Total Hours</p>
                         <p className="text-[20px] font-bold text-slate-900 tabular-nums leading-tight">
-                          {formatHoursDecimal(dashboardSummary.totalMinutes)}
+                          {formatHoursMinutes(dashboardSummary.totalMinutes)}
                         </p>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5">
