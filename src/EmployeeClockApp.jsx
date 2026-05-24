@@ -17418,16 +17418,9 @@ const handlePhotoQuickUpload = async (event) => {
                         (dashboardLiveWorkingCards || []).map((card) => {
                           const { row, rep, uid, displayName } = card || {};
                           if (!rep || !uid) return null;
-                          const timerSeconds = rep?.clockIn
-                            ? Math.max(
-                                0,
-                                Math.floor(
-                                  ((now instanceof Date ? now.getTime() : new Date(now).getTime()) -
-                                    parseStoredInstant(rep.clockIn).getTime()) /
-                                    1000
-                                )
-                              )
-                            : 0;
+                          const liveMinutes = getWorkedMinutes(rep);
+                          const liveCost = getLabourCost(rep);
+                          const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" • ");
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                           const fallbackLoc = rep?.clockInLocation || null;
@@ -17444,8 +17437,8 @@ const handlePhotoQuickUpload = async (event) => {
                               className="rounded-[24px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3.5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]"
                             >
                               <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="text-[17px] font-black leading-tight text-slate-950 break-words">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[17px] font-black leading-tight text-slate-950" title={displayName || "Employee"}>
                                     {displayName || "Employee"}
                                   </p>
                                   <p className="mt-1 flex flex-wrap items-center gap-2 text-[13px] font-bold text-slate-500 tabular-nums">
@@ -17455,12 +17448,18 @@ const handlePhotoQuickUpload = async (event) => {
                                     </span>
                                   </p>
                                 </div>
-                                <span className="shrink-0 rounded-full bg-slate-950 px-3 py-1.5 text-[13px] font-black tabular-nums text-white">
-                                  {formatTimer(timerSeconds)}
-                                </span>
+                                <div className="shrink-0 rounded-[18px] bg-slate-950 px-3 py-2 text-right text-white shadow-[0_10px_20px_rgba(15,23,42,0.18)]">
+                                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Time</p>
+                                  <p className="mt-0.5 text-[14px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
+                                  <p className="mt-1.5 text-[10px] font-black uppercase tracking-wide text-slate-300">Cost</p>
+                                  <p className="mt-0.5 text-[14px] font-black leading-none tabular-nums">{formatMoney(liveCost)}</p>
+                                </div>
                               </div>
-                              <p className="mt-3 rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm">
-                                {[rep?.project || "No project", rep?.costCenter || "No task"].join(" - ")}
+                              <p
+                                className="mt-3 truncate rounded-2xl border border-slate-100 bg-white px-3 py-2 text-[14px] font-bold leading-snug text-slate-700 shadow-sm"
+                                title={projectTaskLine}
+                              >
+                                {projectTaskLine}
                               </p>
                               <div className="mt-3 grid grid-cols-[1fr_auto] gap-2">
                                 <button
@@ -17525,6 +17524,25 @@ const handlePhotoQuickUpload = async (event) => {
                         </span>
                       </span>
                     </button>
+                    <button
+                      type="button"
+                      className="mb-3 w-full rounded-[24px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.06)] active:scale-[0.99]"
+                      onClick={openDashboardTodayTimesheets}
+                      aria-label="Open today's completed time and cost"
+                    >
+                      <span className="flex items-end justify-between gap-3 border-b border-slate-100 pb-2">
+                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total Time</span>
+                        <span className="text-[24px] font-black leading-none tabular-nums text-slate-950">
+                          {formatHoursDecimal(dashboardWorkedTodaySummary.totalMinutes)}
+                        </span>
+                      </span>
+                      <span className="mt-2 flex items-end justify-between gap-3">
+                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total Cost</span>
+                        <span className="text-[22px] font-black leading-none tabular-nums text-slate-950">
+                          {formatMoney(dashboardWorkedTodaySummary.totalCost)}
+                        </span>
+                      </span>
+                    </button>
                     {dashboardTodayWorkedCards.length === 0 ? (
                       <p className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-[15px] font-bold text-slate-600">
                         No timesheets for today yet.
@@ -17532,36 +17550,35 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : (
                       <div className="space-y-2.5">
                         {dashboardTodayWorkedCards.slice(0, 8).map((card) => {
-                          const statusText =
-                            card.att?.code === "clocked_in"
-                              ? "Working"
-                              : card.att?.code === "missing_out"
-                                ? "Missing out"
-                                : "Clocked out";
+                          const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
+                            .filter(Boolean)
+                            .join(" • ");
                           return (
                             <button
                               key={`premium-worked-${card.uid}`}
                               type="button"
-                              className="w-full rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3 text-left active:scale-[0.99]"
+                              className="w-full rounded-[22px] border border-slate-200 bg-white px-3 py-3 text-left shadow-[0_10px_20px_rgba(15,23,42,0.05)] active:scale-[0.99]"
                               onClick={openDashboardTodayTimesheets}
                             >
                               <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="text-[15px] font-black text-slate-950 break-words">{card.displayName}</p>
-                                  <p className="mt-0.5 text-[12px] font-bold text-slate-500 break-words">
-                                    {[card.metrics.projectDisp, card.metrics.costDisp].filter(Boolean).join(" - ")}
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[15px] font-black text-slate-950" title={card.displayName}>
+                                    {card.displayName}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-[12px] font-bold text-slate-500" title={projectTaskLine}>
+                                    {projectTaskLine}
                                   </p>
                                 </div>
                                 <p className="shrink-0 text-right text-[13px] font-black tabular-nums text-slate-950">
                                   {card.metrics.totalDisp}
                                 </p>
                               </div>
-                              <div className="mt-2 grid grid-cols-2 gap-2 text-[12px] font-black text-slate-700">
-                                <span className="rounded-2xl bg-white px-3 py-2 shadow-sm">
-                                  {card.metrics.inDisp} - {card.metrics.outDisp}
+                              <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700">
+                                <span className="min-w-0 truncate tabular-nums">
+                                  {card.metrics.inDisp} – {card.metrics.outDisp}
                                 </span>
-                                <span className="rounded-2xl bg-white px-3 py-2 text-right shadow-sm">
-                                  {statusText} - {card.metrics.labourDisp}
+                                <span className="shrink-0 text-right tabular-nums text-slate-950">
+                                  {card.metrics.labourDisp}
                                 </span>
                               </div>
                             </button>

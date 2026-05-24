@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-8
+- Current development version: B.1-fix-9
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -124,6 +124,22 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-9 Active Team + Worked Today Polish
+- Active Team employee cards now show live time and live labour amount per active employee.
+- Active Team per-employee cost remains display-only and is not saved until normal clock-out.
+- Active Team project/task text changed to compact `Project • Task` display with truncation for long names.
+- Worked Today entry layout simplified to employee, compact project/task, time range, total hours, and labour cost.
+- Removed visible `Clocked out` wording from Worked Today cards.
+- Worked Today summary now includes a clear Total Time / Total Cost card below the existing Employees / Entries / Labour metrics.
+- Worked Today continues to use only completed same-day shifts and excludes active shifts.
+
+## B.1-fix-9 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -141,6 +157,7 @@
       'When true, employees may add projects and tasks from the Clock screen. Default false.';
     ```
 - B.1-fix-8 does not require new SQL.
+- B.1-fix-9 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
