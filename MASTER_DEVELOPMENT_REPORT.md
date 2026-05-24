@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-11B
+- Current development version: B.1-fix-11C
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -221,6 +221,29 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-11C Enterprise Mobile Redesign Phase 3
+- Employees screen converted toward compact rows/slim cards with name, role, status, pay rate, and quick manager action visible.
+- Employee Active / Archived / All segmented control preserved and paired with compact employee search.
+- Manager Clock In / Clock Out action remains on each employee row and continues to use existing timesheet logic.
+- Employee project/task clock-in selectors were moved behind a compact row detail so the main list stays scannable.
+- Company code/invite/share utility compacted into a smaller utility card.
+- Settings screen flattened into grouped compact sections for Company, Time Tracking, Projects & Tasks, Account, and Team Management.
+- More/Menu drawer reduced from large navigation cards into a tighter grouped-list style while preserving access to operations, media, reports, requests, settings, and account/logout.
+- Request Center remains accessible outside dashboard/Home through the menu/timesheets path.
+- Activity Feed / Team Events rows were made denser with smaller icon chips and one consistent title style.
+- Notification badge visual weight reduced.
+- Final B.1 mobile QA checklist updated for Employees, More/Menu, Settings, Activity Feed, Request Center, notifications, destructive action checks, and cross-screen visual QA.
+- No SQL, database, AI, or business-logic changes were made.
+
+## B.1-fix-11C Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-re4j6x1zi-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+- Enterprise Mobile Redesign 11A/11B/11C status: complete on develop pending user QA.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -242,6 +265,7 @@
 - B.1-fix-10 does not require new SQL.
 - B.1-fix-11A does not require new SQL.
 - B.1-fix-11B does not require new SQL.
+- B.1-fix-11C does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

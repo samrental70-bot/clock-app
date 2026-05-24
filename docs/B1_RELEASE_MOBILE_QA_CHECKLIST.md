@@ -26,8 +26,9 @@ Production app must remain untouched during this QA pass.
 - [ ] Pictures shortcut opens Pictures.
 - [ ] Receipts shortcut opens Receipts.
 - [ ] Employees shortcut opens Employees.
-- [ ] Bottom nav shows Activities, Clock, More.
-- [ ] Activities opens dashboard/activity view.
+- [ ] Bottom nav shows Home, Schedule, Clock, More.
+- [ ] Home opens dashboard/activity view.
+- [ ] Schedule opens from bottom nav.
 - [ ] Clock opens clock screen.
 - [ ] More opens left menu.
 - [ ] Left menu navigation works.
@@ -47,6 +48,17 @@ Production app must remain untouched during this QA pass.
 - [ ] Pictures date range filter works.
 - [ ] Pictures gallery opens media.
 - [ ] Reports remain accessible from left menu.
+- [ ] Employees screen uses compact rows/slim cards.
+- [ ] Employee rows show name, role, status, pay rate, and quick action.
+- [ ] Active / Archived / All segmented control works.
+- [ ] Employee search filters by name, role, email, or status.
+- [ ] Company invite/share utility is compact and does not dominate the employee list.
+- [ ] Employee Manage flow opens and remains usable.
+- [ ] Archive/status changes require intentional save from Manage flow.
+- [ ] More menu uses grouped navigation sections.
+- [ ] Request Center remains accessible from More/Menu, not dashboard.
+- [ ] Settings uses grouped compact sections.
+- [ ] Activity feed rows are compact and readable.
 
 ## B. Supervisor
 - [ ] Supervisor can log in.
@@ -65,6 +77,9 @@ Production app must remain untouched during this QA pass.
 - [ ] Timesheet project filter works.
 - [ ] Timesheet Share Report respects filters.
 - [ ] Supervisor cannot access owner-only controls if restricted.
+- [ ] Supervisor sees compact Employees rows if role allows Employees access.
+- [ ] Supervisor can use allowed manager Clock In / Clock Out actions only where permitted.
+- [ ] Supervisor menu groups Operations, Team, Media, Reports, Settings where applicable.
 
 ## C. Employee
 - [ ] Employee can log in.
@@ -88,6 +103,8 @@ Production app must remain untouched during this QA pass.
 - [ ] Employee sees own uploaded pictures.
 - [ ] Employee cannot access admin controls.
 - [ ] Employee cannot clock in/out other employees.
+- [ ] Employee More menu does not expose owner/supervisor-only controls.
+- [ ] Employee Activity view shows only allowed/personal activity.
 
 ## D. Core Regression
 - [ ] React error #310 does not return.
@@ -100,6 +117,14 @@ Production app must remain untouched during this QA pass.
 - [ ] Auto clock-out default is 12:00 AM.
 - [ ] Activities feed loads clock events.
 - [ ] Activities feed loads upload events where available.
+- [ ] Activity / Team Events naming is consistent and not duplicated.
+- [ ] Request Center access remains outside dashboard/Home.
+- [ ] Notification badge is visible but not visually overpowering.
+- [ ] Notification list opens and can mark notifications read.
+- [ ] Destructive actions are not shown as large primary actions.
+- [ ] Destructive/archive actions require confirmation or intentional save.
+- [ ] Settings toggles persist for auto clock-out, assign all projects, assign all tasks, and employee project/task creation.
+- [ ] Final mobile visual QA: standard headers, compact cards, consistent chips, no cut-off labels, no excessive glow/shadows.
 - [ ] Schedule still opens.
 - [ ] Pictures still opens.
 - [ ] Receipts still opens.

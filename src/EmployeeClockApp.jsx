@@ -3054,6 +3054,7 @@ export default function EmployeeClockApp() {
   const [companyInviteShareMessage, setCompanyInviteShareMessage] = useState("");
   const [pendingEmployeePayPrompt, setPendingEmployeePayPrompt] = useState(null);
   const [teamListFilter, setTeamListFilter] = useState("active"); // active | archived | all
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
   const [timesheetViewMode, setTimesheetViewMode] = useState("day");
   const [timesheetDateKey, setTimesheetDateKey] = useState("");
   const [timesheetDateFrom, setTimesheetDateFrom] = useState("");
@@ -4729,11 +4730,28 @@ export default function EmployeeClockApp() {
   const displayedTeamRows = useMemo(() => {
     const selfRows = teamRows.filter((r) => String(r.userId) === String(authUser?.id));
     const base = isAdmin ? teamRows : selfRows;
-    if (!isAdmin) return base;
-    if (teamListFilter === "all") return base;
-    if (teamListFilter === "archived") return base.filter((r) => r.employmentStatus === "archived");
-    return base.filter((r) => r.employmentStatus !== "archived");
-  }, [isAdmin, teamRows, authUser?.id, teamListFilter]);
+    const statusFiltered = !isAdmin
+      ? base
+      : teamListFilter === "all"
+        ? base
+        : teamListFilter === "archived"
+          ? base.filter((r) => r.employmentStatus === "archived")
+          : base.filter((r) => r.employmentStatus !== "archived");
+    const query = String(teamSearchQuery || "").trim().toLowerCase();
+    if (!query) return statusFiltered;
+    return statusFiltered.filter((row) => {
+      const haystack = [
+        row.displayName,
+        row.profileEmailRaw,
+        row.role,
+        row.employmentStatus,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [isAdmin, teamRows, authUser?.id, teamListFilter, teamSearchQuery]);
 
   useEffect(() => {
     if ((activeTab !== "dashboard" && activeTab !== "team") || !isAdmin) return;
@@ -15035,7 +15053,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <path d="M10 21h4" />
                   </svg>
                   {inAppNotifUnread > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[1rem] h-4 px-0.5 rounded-full bg-red-600 text-white text-[8px] font-black flex items-center justify-center leading-none">
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[0.85rem] h-3.5 px-0.5 rounded-full bg-red-600 text-white text-[7px] font-black flex items-center justify-center leading-none">
                       {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
                     </span>
                   )}
@@ -17289,7 +17307,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 )}
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="text-[16px] font-black text-slate-950">{isAdmin ? "Activity feed" : "Personal activity"}</h3>
+                  <h3 className="text-[16px] font-black text-slate-950">{isAdmin ? "Activity" : "Personal activity"}</h3>
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-600">
                     {dashboardActivityFeedItems.length}
                   </span>
@@ -17303,15 +17321,14 @@ const handlePhotoQuickUpload = async (event) => {
                     {dashboardActivityFeedItems.map((item) => (
                       <div
                         key={`activity-tab-${item.id}`}
-                        className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[18px] border border-slate-200 bg-white px-3 py-3 shadow-sm"
+                        className="grid grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 shadow-sm"
                       >
-                        <span className={`mt-0.5 flex h-8 w-8 items-center justify-center rounded-[14px] border text-[11px] font-black ${item.tone}`}>
+                        <span className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-[11px] border text-[10px] font-black ${item.tone}`}>
                           {String(item.kind || "A").slice(0, 1).toUpperCase()}
                         </span>
                         <div className="min-w-0">
                           <p className="text-[14px] font-black leading-snug text-slate-950 break-words">{item.title}</p>
                           <p className="mt-0.5 text-[12px] font-bold leading-snug text-slate-500 break-words">{item.detail}</p>
-                          <p className="mt-1 text-[11px] font-black uppercase tracking-wide text-slate-400">{item.kind}</p>
                         </div>
                         <p className="shrink-0 text-right text-[11px] font-black tabular-nums text-slate-500">
                           {formatTime(item.when, companyTimeZone)}
@@ -17608,10 +17625,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </section>
 
-                  <section className="order-6 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-6 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Team events</h3>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[12px] font-black text-slate-700">
+                      <h3 className="text-[17px] font-black text-slate-950">Activity</h3>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
                         {dashboardActivityFeedItems.length}
                       </span>
                     </div>
@@ -17620,13 +17637,13 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[15px] font-black text-slate-700">No recent activity yet.</p>
                       </div>
                     ) : (
-                      <div className="mt-3 space-y-2.5">
+                      <div className="mt-3 space-y-2">
                         {dashboardActivityFeedItems.slice(0, 8).map((item) => (
                           <div
                             key={item.id}
-                            className="grid grid-cols-[auto_1fr_auto] items-start gap-3 rounded-[22px] border border-slate-200 bg-slate-50 px-3 py-3"
+                            className="grid grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5"
                           >
-                            <span className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-2xl border text-[11px] font-black ${item.tone}`}>
+                            <span className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-[11px] border text-[10px] font-black ${item.tone}`}>
                               {String(item.kind || "A").slice(0, 1).toUpperCase()}
                             </span>
                             <div className="min-w-0">
@@ -21957,16 +21974,41 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "team" && isAdmin && (
-            <Card className="rounded-[28px] overflow-hidden">
+            <Card className="rounded-[24px] overflow-hidden border border-slate-200 shadow-sm">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Employees</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Employee accounts</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Employees</h2>
+                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500">
+                      Team access, pay, status, and manager clock actions
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                    {displayedTeamRows.length}
+                  </span>
                 </div>
                 {isAdmin && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
-                    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <label className="min-w-0">
+                        <span className="sr-only">Search employees</span>
+                        <input
+                          type="search"
+                          className="h-10 w-full rounded-[14px] border border-slate-200 bg-white px-3 text-[13px] font-semibold text-slate-900 outline-none placeholder:text-slate-400 focus:border-slate-400"
+                          placeholder="Search employees"
+                          value={teamSearchQuery}
+                          onChange={(event) => setTeamSearchQuery(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="rounded-[14px] border border-slate-200 bg-white px-3 text-[12px] font-black text-slate-700 active:bg-slate-50"
+                        onClick={() => setTeamRefreshKey((key) => key + 1)}
+                      >
+                        Refresh
+                      </button>
+                    </div>
+                    <div className="inline-flex rounded-[14px] border border-slate-200 bg-slate-100 p-0.5">
                       {[
                         { id: "active", label: "Active" },
                         { id: "archived", label: "Archived" },
@@ -21988,10 +22030,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </div>
                 )}
-                <div className="rounded-[22px] border border-slate-200 bg-white p-3 space-y-2 shadow-sm">
+                <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] font-black text-slate-500 uppercase">Company code</p>
-                    <p className="text-[11px] font-bold text-slate-400">Add employees</p>
+                    <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Company invite</p>
+                    <p className="text-[11px] font-bold text-slate-400">Share access</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 min-w-0 rounded-lg bg-white border px-2 py-1.5 text-sm font-mono tracking-wide truncate">
@@ -22260,9 +22302,6 @@ const handlePhotoQuickUpload = async (event) => {
                       row.hourlyRate != null && Number.isFinite(Number(row.hourlyRate))
                         ? `${formatMoney(Number(row.hourlyRate))}/hr`
                         : "Not set";
-                    const effDisp = row.payRateEffectiveDate
-                      ? String(row.payRateEffectiveDate).slice(0, 10)
-                      : "Not set";
                     const joinDisp = row.joiningDate ? String(row.joiningDate).slice(0, 10) : "Not set";
                     const empArchived = row.employmentStatus === "archived";
                     const ownerLoginLocked =
@@ -22294,41 +22333,61 @@ const handlePhotoQuickUpload = async (event) => {
                       clockProjectsForRow.length === 0 ||
                       !clockPickProjectId ||
                       clockPickCentres.length === 0;
+                    const teamStatusLabel = empArchived ? "Archived" : activeRep ? "Working" : "Clocked out";
+                    const teamStatusClass = empArchived
+                      ? "bg-slate-100 text-slate-700 ring-slate-200"
+                      : activeRep
+                        ? "bg-emerald-50 text-emerald-800 ring-emerald-100"
+                        : "bg-slate-50 text-slate-600 ring-slate-200";
+                    const teamAssignmentLine = activeRep
+                      ? `${activeRep.project || "No project"} - ${activeRep.costCenter || "No task"}`
+                      : "Ready for assignment";
+                    const teamInitial = String(row.displayName || row.profileEmailRaw || "?").slice(0, 1).toUpperCase();
                     return (
                       <div
                         key={row.memberRowId}
-                        className={`rounded-xl border p-3 space-y-2.5 ${
+                        className={`rounded-[18px] border p-3 space-y-2.5 ${
                           empArchived
                             ? "border-slate-300 bg-slate-50"
-                            : "border-slate-200 bg-white"
+                            : "border-slate-200 bg-white shadow-sm"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2 min-w-0">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p
-                                className={`font-semibold text-sm leading-snug break-words ${
-                                  empArchived ? "text-slate-600" : "text-slate-900"
-                                }`}
-                              >
-                                {row.displayName}
+                          <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                            <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[14px] bg-slate-950 text-[13px] font-black text-white">
+                              {teamInitial}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <p
+                                  className={`min-w-0 truncate text-[14px] font-black leading-snug ${
+                                    empArchived ? "text-slate-600" : "text-slate-950"
+                                  }`}
+                                  title={row.displayName}
+                                >
+                                  {row.displayName}
+                                </p>
+                                {!isEditing && (
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ring-inset ${teamStatusClass}`}>
+                                    {teamStatusLabel}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500" title={emailLine}>
+                                {emailLine}
                               </p>
-                              {empArchived && !isEditing && (
-                                <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-300/80 text-slate-800 ring-1 ring-slate-400/80">
-                                  Archived
-                                </span>
-                              )}
+                              {!isEditing ? (
+                                <p className="mt-1 truncate text-[12px] font-bold text-slate-700" title={teamAssignmentLine}>
+                                  {teamAssignmentLine}
+                                </p>
+                              ) : null}
                             </div>
-                            <p className="mt-1 text-xs text-slate-600">
-                              <span className="font-medium text-slate-500">Email: </span>
-                              <span className="break-all">{emailLine}</span>
-                            </p>
                           </div>
                           {isAdmin && !isEditing && (
-                            <div className="shrink-0 flex items-center gap-2">
+                            <div className="shrink-0 flex items-center gap-1.5">
                               <Button
                                 type="button"
-                                className={`rounded-lg h-8 px-3 text-xs font-semibold ${
+                                className={`rounded-[12px] h-8 px-2.5 text-[11px] font-black ${
                                   activeRep ? "!bg-slate-950 !text-white" : ""
                                 }`}
                                 onClick={() =>
@@ -22342,11 +22401,11 @@ const handlePhotoQuickUpload = async (event) => {
                               </Button>
                               <Button
                                 type="button"
-                                className="rounded-lg h-8 px-3 text-xs font-semibold"
+                                className="rounded-[12px] h-8 px-2.5 text-[11px] font-black !bg-white !text-slate-900 border border-slate-200"
                                 onClick={() => beginTeamMemberEdit(row)}
                                 disabled={Boolean(teamSavingMemberRowId)}
                               >
-                                Edit
+                                Manage
                               </Button>
                             </div>
                           )}
@@ -22546,47 +22605,38 @@ const handlePhotoQuickUpload = async (event) => {
                             </div>
                           </div>
                         ) : (
-                          <div className="space-y-1.5 text-xs leading-snug">
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-500 shrink-0">Role</span>
-                              <span className="font-medium text-slate-900 text-right capitalize">{rowRoleNorm}</span>
-                            </div>
-                            <div className="flex justify-between gap-3 items-center">
-                              <span className="text-slate-500 shrink-0">Status</span>
-                              <span
-                                className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${
-                                  empArchived
-                                    ? "bg-slate-200 text-slate-800 ring-slate-400"
-                                    : "bg-green-50 text-green-800 ring-green-100"
-                                }`}
-                              >
-                                {empArchived ? "Archived" : "Active"}
-                              </span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-500 shrink-0">Pay rate</span>
-                              <span className="font-medium text-slate-700 text-right">{payDisp}</span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-500 shrink-0">Effective date</span>
-                              <span className="font-medium text-slate-700 text-right">{effDisp}</span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-slate-500 shrink-0">Joining date</span>
-                              <span className="font-medium text-slate-700 text-right">{joinDisp}</span>
+                          <div className="space-y-2 text-xs leading-snug">
+                            <div className="grid grid-cols-3 gap-2 rounded-[14px] border border-slate-100 bg-slate-50 px-2.5 py-2">
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Role</p>
+                                <p className="truncate text-[12px] font-black capitalize text-slate-900">{rowRoleNorm}</p>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Pay</p>
+                                <p className="truncate text-[12px] font-black text-slate-900">{payDisp}</p>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Joined</p>
+                                <p className="truncate text-[12px] font-black text-slate-900">{joinDisp}</p>
+                              </div>
                             </div>
                             {isAdmin && activeRep ? (
-                              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2">
-                                <p className="font-black text-emerald-900">
+                              <div className="rounded-[14px] border border-emerald-100 bg-emerald-50 px-3 py-2">
+                                <p className="text-[12px] font-black text-emerald-900">
                                   Working since {activeRep.clockIn ? formatTime(activeRep.clockIn, companyTimeZone) : "now"}
                                 </p>
-                                <p className="mt-0.5 text-[11px] font-bold text-emerald-800">
+                                <p className="mt-0.5 truncate text-[11px] font-bold text-emerald-800" title={teamAssignmentLine}>
                                   {activeRep.project || "No project"} - {activeRep.costCenter || "No task"}
                                 </p>
                               </div>
                             ) : null}
                             {isAdmin && !activeRep && !empArchived ? (
-                              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-2">
+                              <details className="group rounded-[14px] border border-slate-200 bg-white p-2">
+                                <summary className="cursor-pointer list-none text-[11px] font-black text-slate-700">
+                                  Clock-in project/task
+                                  <span className="float-right text-slate-400 group-open:rotate-180">v</span>
+                                </summary>
+                                <div className="mt-2 space-y-2 rounded-[12px] bg-slate-50 p-2">
                                 <div className="grid grid-cols-2 gap-2">
                                   <label className="block min-w-0 text-[10px] font-black uppercase tracking-wide text-slate-500">
                                     Project
@@ -22648,7 +22698,8 @@ const handlePhotoQuickUpload = async (event) => {
                                     Select an available project and task before clocking in.
                                   </p>
                                 ) : null}
-                              </div>
+                                </div>
+                              </details>
                             ) : null}
                           </div>
                         )}
@@ -22678,17 +22729,19 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "settings" && (
-            <Card className="rounded-[28px] overflow-hidden">
+            <Card className="rounded-[24px] overflow-hidden border border-slate-200 shadow-sm">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
-                <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
-                  <h2 className="font-black text-[23px] leading-tight text-slate-950">Profile</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">Manage company and employee profile details.</p>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Settings</h2>
+                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500">Company, time tracking, projects, and account controls.</p>
+                  </div>
                 </div>
-                <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[18px] font-black text-slate-900">Company Profile</p>
-                      <p className="text-[14px] text-slate-600">Company name and time zone.</p>
+                      <p className="text-[16px] font-black text-slate-900">Company</p>
+                      <p className="text-[12px] font-semibold text-slate-500">Profile, invite, and time tracking settings.</p>
                     </div>
                     {isAdmin ? (
                       <button
@@ -22731,6 +22784,7 @@ const handlePhotoQuickUpload = async (event) => {
                           onChange={(e) => setSettingsAutoClockOutDraft(normalizeAutoClockOutTime(e.target.value))}
                         />
                       </label>
+                      <p className="pt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Projects & Tasks</p>
                       <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[14px] font-bold text-slate-900">
                         <input
                           type="checkbox"
@@ -22789,7 +22843,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </Button>
                     </form>
                   ) : (
-                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-2">
+                    <div className="rounded-[16px] bg-slate-50 border border-slate-100 p-3 space-y-2">
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Company</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "—"}</span>
@@ -22847,11 +22901,11 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                 </div>
 
-                <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[18px] font-black text-slate-900">Employee Profile</p>
-                      <p className="text-[14px] text-slate-600">Your name and login email.</p>
+                      <p className="text-[16px] font-black text-slate-900">Account</p>
+                      <p className="text-[12px] font-semibold text-slate-500">Your name and login email.</p>
                     </div>
                     <button
                       type="button"
@@ -22891,7 +22945,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </Button>
                     </form>
                   ) : (
-                    <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3 space-y-2">
+                    <div className="rounded-[16px] bg-slate-50 border border-slate-100 p-3 space-y-2">
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Name</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">{(profileFullName || "").trim() || "User"}</span>
@@ -22905,10 +22959,10 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 {isAdmin ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+                  <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                     <div>
-                      <p className="text-[18px] font-black text-slate-900">Employees</p>
-                      <p className="text-[14px] text-slate-600">Manage employee profiles, roles, pay rates, and status.</p>
+                      <p className="text-[16px] font-black text-slate-900">Team Management</p>
+                      <p className="text-[12px] font-semibold text-slate-500">Manage employee profiles, roles, pay rates, status, and project access.</p>
                     </div>
                     <Button
                       type="button"
@@ -23584,10 +23638,10 @@ const handlePhotoQuickUpload = async (event) => {
             }}
           >
             <div
-              className="h-full w-80 max-w-[88vw] bg-[#f7f9fc] shadow-[0_24px_70px_rgba(15,23,42,0.22)] p-3 flex flex-col gap-3"
+              className="h-full w-80 max-w-[88vw] bg-[#f7f9fc] shadow-[0_18px_50px_rgba(15,23,42,0.18)] p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-[0_14px_30px_rgba(15,23,42,0.08)] flex items-center justify-between gap-3">
+              <div className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <h2 className="font-black text-[22px] leading-tight text-slate-950">
                     {menuPanel === "settings" ? "Settings" : "Menu"}
@@ -23596,7 +23650,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 <button
                   type="button"
-                  className="h-10 w-10 rounded-2xl bg-slate-100 text-xl font-black text-slate-700"
+                  className="h-9 w-9 rounded-[14px] bg-slate-100 text-lg font-black text-slate-700"
                   onClick={() => {
                     setIsMenuOpen(false);
                     setMenuPanel("main");
@@ -23610,19 +23664,20 @@ const handlePhotoQuickUpload = async (event) => {
               {menuPanel !== "main" && (
                 <button
                   type="button"
-                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-[16px] font-black text-slate-800 shadow-sm"
+                  className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-black text-slate-800 shadow-sm"
                   onClick={() => setMenuPanel("main")}
                 >
                   ← Back
                 </button>
               )}
 
-              <div className="opera-scroll flex-1 min-h-0 overflow-y-auto space-y-2 text-[17px]">
+              <div className="opera-scroll flex-1 min-h-0 overflow-y-auto space-y-3 text-[14px]">
                 {menuPanel === "main" && (
                   <>
+                    <p className="px-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Operations</p>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-blue-50"
+                      className="w-full rounded-[16px] border border-blue-100 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-blue-50"
                       onClick={() => openMenuTab("schedule")}
                     >
                       <span className="flex items-center gap-3 text-[17px] font-black text-blue-950">
@@ -23632,7 +23687,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
+                      className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
                       onClick={() => openMenuTab("timesheet")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
@@ -23642,7 +23697,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
+                          className="w-full rounded-[16px] border border-amber-100 bg-white px-3 py-2.5 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
                           onClick={() => openMenuTab("projects")}
                         >
                           <span className="inline-flex items-center gap-3">
@@ -23652,7 +23707,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
+                          className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
                           onClick={() => openMenuTab("reports")}
                         >
                           <span className="block text-[17px] font-black text-slate-950">Reports</span>
@@ -23660,7 +23715,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-4 py-4 text-left font-black text-blue-950 shadow-sm active:bg-blue-50"
+                          className="w-full rounded-[16px] border border-blue-100 bg-white px-3 py-2.5 text-left font-black text-blue-950 shadow-sm active:bg-blue-50"
                           onClick={() => {
                             setTimesheetCompletedOnly(false);
                             openMenuTab("timesheet");
@@ -23671,9 +23726,10 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                       </>
                     )}
+                    <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Media</p>
                     <button
                       type="button"
-                      className="relative w-full rounded-[22px] border border-violet-100 bg-gradient-to-br from-violet-50 to-white px-4 py-4 text-left font-black text-violet-950 shadow-sm active:bg-violet-50"
+                      className="relative w-full rounded-[16px] border border-violet-100 bg-white px-3 py-2.5 text-left font-black text-violet-950 shadow-sm active:bg-violet-50"
                       onClick={openPhotosTab}
                     >
                       <span className="inline-flex items-center gap-3">
@@ -23688,22 +23744,23 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("receipts")}
                     >
                       Receipts
                     </button>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("lists")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">List</span>
-                      <span className="block text-[13px] font-bold text-slate-500">Tasks and materials</span>
+                        <span className="block text-[13px] font-bold text-slate-500">Tasks and materials</span>
                     </button>
+                    <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Settings</p>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
+                      className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50 flex items-center justify-between"
                       onClick={() => setMenuPanel("settings")}
                     >
                       <span>Settings</span>
@@ -23714,18 +23771,20 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {menuPanel === "settings" && (
                   <>
+                    <p className="px-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Company</p>
                     <button
                       type="button"
-                      className="w-full rounded-[22px] border border-slate-200 bg-white px-4 py-4 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left font-black text-slate-900 shadow-sm active:bg-slate-50"
                       onClick={() => openMenuTab("settings")}
                     >
                       Profile
                     </button>
                     {isAdmin && (
                       <>
+                        <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Team</p>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-4 py-4 text-left font-black text-emerald-950 shadow-sm active:bg-emerald-50"
+                          className="w-full rounded-[16px] border border-emerald-100 bg-white px-3 py-2.5 text-left font-black text-emerald-950 shadow-sm active:bg-emerald-50"
                           onClick={() => openMenuTab("team")}
                         >
                           <span className="inline-flex items-center gap-3">
@@ -23733,9 +23792,10 @@ const handlePhotoQuickUpload = async (event) => {
                             Employees
                           </span>
                         </button>
+                        <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Projects & Tasks</p>
                         <button
                           type="button"
-                          className="w-full rounded-[22px] border border-amber-100 bg-gradient-to-br from-amber-50 to-white px-4 py-4 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
+                          className="w-full rounded-[16px] border border-amber-100 bg-white px-3 py-2.5 text-left font-black text-amber-950 shadow-sm active:bg-amber-50"
                           onClick={() => openMenuTab("projects")}
                         >
                           <span className="inline-flex items-center gap-3">
@@ -23751,7 +23811,7 @@ const handlePhotoQuickUpload = async (event) => {
 
               <button
                 type="button"
-                className="w-full rounded-[22px] border border-red-100 bg-red-50 px-4 py-4 text-left text-[17px] font-black text-red-700 shadow-sm"
+                className="w-full rounded-[16px] border border-red-100 bg-red-50 px-3 py-2.5 text-left text-[14px] font-black text-red-700 shadow-sm"
                 onClick={handleLogout}
               >
                 Logout
