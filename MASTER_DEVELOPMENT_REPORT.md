@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-16
+- Current development version: B.1-fix-17
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -359,6 +359,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-17 More/Menu Screen Redesign V1
+- More drawer redesigned as a compact professional `Menu` screen.
+- Menu subtitle now uses the logged-in user's display name or email dynamically.
+- Menu rows are grouped into Work, Operations, and Admin sections.
+- Work includes Schedule, Timesheets, Projects where allowed, and Tasks & materials.
+- Operations includes Team for admin users, Photos, Receipts, and Reports for admin users.
+- Admin includes Request Center and Settings while preserving role-safe navigation.
+- Rows now render with compact white surfaces, subtle borders, small colored icon chips, label, subtitle, chevron, and optional badge.
+- Large colored menu row backgrounds were removed from the rendered menu.
+- Photos and Request Center badges remain small and non-dominant.
+- Logout remains at the bottom as a compact 52px soft-red row.
+- Existing bottom navigation Home / Schedule / Clock / More and existing `openMenuTab` navigation guard were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-17 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-8qej8hjvb-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -386,6 +408,7 @@
 - B.1-fix-14 does not require new SQL.
 - B.1-fix-15 does not require new SQL.
 - B.1-fix-16 does not require new SQL.
+- B.1-fix-17 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

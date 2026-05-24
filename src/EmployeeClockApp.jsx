@@ -15061,6 +15061,116 @@ const handlePhotoQuickUpload = async (event) => {
     if (typeof pollInAppNotifications === "function") void pollInAppNotifications();
   };
 
+  const menuUserName = (profileFullName || authUser?.email || "").trim() || "User";
+  const canOpenProjectsFromMenu = isAdmin || companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation;
+  const menuSections = [
+    {
+      title: "Work",
+      items: [
+        {
+          label: "Schedule",
+          subtitle: "Work calendar",
+          icon: "Sc",
+          color: "blue",
+          onClick: () => openMenuTab("schedule"),
+        },
+        {
+          label: "Timesheets",
+          subtitle: "Hours and labour cost",
+          icon: "Ts",
+          color: "slate",
+          onClick: () => openMenuTab("timesheet"),
+        },
+        canOpenProjectsFromMenu
+          ? {
+              label: "Projects",
+              subtitle: "Job sites",
+              icon: "Pr",
+              color: "amber",
+              onClick: () => openMenuTab("projects"),
+            }
+          : null,
+        {
+          label: "Tasks & materials",
+          subtitle: "Lists for field work",
+          icon: "Tm",
+          color: "slate",
+          onClick: () => openMenuTab("lists"),
+        },
+      ].filter(Boolean),
+    },
+    {
+      title: "Operations",
+      items: [
+        isAdmin
+          ? {
+              label: "Team",
+              subtitle: "Employee accounts",
+              icon: "Te",
+              color: "green",
+              onClick: () => openMenuTab("team"),
+            }
+          : null,
+        {
+          label: "Photos",
+          subtitle: "Field media",
+          icon: "Ph",
+          color: "purple",
+          badge: photoNotificationCount > 0 ? (photoNotificationCount > 99 ? "99+" : String(photoNotificationCount)) : "",
+          onClick: openPhotosTab,
+        },
+        {
+          label: "Receipts",
+          subtitle: "Costs and uploads",
+          icon: "Rc",
+          color: "amber",
+          onClick: () => openMenuTab("receipts"),
+        },
+        isAdmin
+          ? {
+              label: "Reports",
+              subtitle: "Labour and project views",
+              icon: "Rp",
+              color: "slate",
+              onClick: () => openMenuTab("reports"),
+            }
+          : null,
+      ].filter(Boolean),
+    },
+    {
+      title: "Admin",
+      items: [
+        {
+          label: "Request Center",
+          subtitle: "Time approvals",
+          icon: "Rq",
+          color: "blue",
+          badge: isAdmin && pendingTimesheetRequests.length > 0 ? (pendingTimesheetRequests.length > 99 ? "99+" : String(pendingTimesheetRequests.length)) : "",
+          onClick: () => {
+            setTimesheetCompletedOnly(false);
+            openMenuTab("timesheet");
+          },
+        },
+        {
+          label: "Settings",
+          subtitle: "Company controls",
+          icon: "St",
+          color: "navy",
+          onClick: () => openMenuTab("settings"),
+        },
+      ],
+    },
+  ].filter((section) => section.items.length > 0);
+
+  const menuIconClassByColor = {
+    amber: "bg-amber-50 text-amber-600",
+    blue: "bg-blue-50 text-blue-600",
+    green: "bg-emerald-50 text-emerald-600",
+    navy: "bg-slate-950 text-white",
+    purple: "bg-violet-50 text-violet-600",
+    slate: "bg-slate-100 text-slate-600",
+  };
+
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
@@ -23743,16 +23853,16 @@ const handlePhotoQuickUpload = async (event) => {
               className="h-full w-80 max-w-[88vw] bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)] p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
-              <div className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm flex items-center justify-between gap-3">
+              <div className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-sm flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-black text-[22px] leading-tight text-slate-950">
-                    {menuPanel === "settings" ? "Settings" : "Menu"}
-                  </h2>
-                  <p className="text-[13px] font-bold text-slate-500 truncate">{(profileFullName || "").trim() || "User"}</p>
+                  <h2 className="font-black text-[22px] leading-tight text-slate-950">Menu</h2>
+                  <p className="text-[13px] font-bold text-slate-500 truncate">
+                    {menuUserName}
+                  </p>
                 </div>
                 <button
                   type="button"
-                  className="h-9 w-9 rounded-[14px] bg-slate-100 text-lg font-black text-slate-700"
+                  className="h-9 w-9 rounded-[14px] bg-slate-100 text-[13px] font-black text-slate-700"
                   onClick={() => {
                     setIsMenuOpen(false);
                     setMenuPanel("main");
@@ -23763,7 +23873,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
               </div>
 
-              {menuPanel !== "main" && (
+              {false && menuPanel !== "main" && (
                 <button
                   type="button"
                   className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-black text-slate-800 shadow-sm"
@@ -23773,8 +23883,37 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
               )}
 
-              <div className="opera-scroll flex-1 min-h-0 overflow-y-auto space-y-3 text-[14px]">
-                {menuPanel === "main" && (
+              <div className="opera-scroll flex-1 min-h-0 overflow-y-auto space-y-4 text-[14px]">
+                {menuSections.map((section) => (
+                  <section key={section.title} className="space-y-2">
+                    <p className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">{section.title}</p>
+                    {section.items.map((item) => (
+                      <button
+                        key={item.label}
+                        type="button"
+                        className="flex min-h-[56px] w-full items-center gap-3 rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:bg-slate-50"
+                        onClick={item.onClick}
+                      >
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] text-[12px] font-black ${menuIconClassByColor[item.color] || menuIconClassByColor.slate}`}>
+                          {item.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[15px] font-black text-slate-950">{item.label}</span>
+                          {item.subtitle ? (
+                            <span className="block truncate text-[12px] font-semibold text-slate-500">{item.subtitle}</span>
+                          ) : null}
+                        </span>
+                        {item.badge ? (
+                          <span className="shrink-0 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black text-white">
+                            {item.badge}
+                          </span>
+                        ) : null}
+                        <span className="shrink-0 text-[18px] font-black text-slate-300">&gt;</span>
+                      </button>
+                    ))}
+                  </section>
+                ))}
+                {false && menuPanel === "main" && (
                   <>
                     <p className="px-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Operations</p>
                     <button
@@ -23871,7 +24010,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </>
                 )}
 
-                {menuPanel === "settings" && (
+                {false && menuPanel === "settings" && (
                   <>
                     <p className="px-1 text-[10px] font-black uppercase tracking-wide text-slate-400">Company</p>
                     <button
@@ -23913,10 +24052,11 @@ const handlePhotoQuickUpload = async (event) => {
 
               <button
                 type="button"
-                className="w-full rounded-[16px] border border-red-100 bg-red-50 px-3 py-2.5 text-left text-[14px] font-black text-red-700 shadow-sm"
+                className="flex h-[52px] w-full items-center justify-between rounded-[16px] border border-red-200 bg-red-50 px-3 text-left text-[14px] font-black text-red-600 shadow-sm active:bg-red-100"
                 onClick={handleLogout}
               >
-                Logout
+                <span>Logout</span>
+                <span className="text-[18px]">&gt;</span>
               </button>
             </div>
           </div>
