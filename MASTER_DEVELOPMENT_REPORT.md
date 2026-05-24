@@ -479,6 +479,31 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-22 Clock Screen Professional Redesign V2
+- Clock normal working state no longer shows a permanent `Synced` badge.
+- Clock sync/status messaging now only appears when attention is needed, such as an unsaved shift.
+- Separate Add Project and Add Task buttons were removed from the main Clock screen.
+- Project dropdowns now keep existing projects first and include `+ Add new project` at the bottom when the existing permission setting allows it.
+- Task dropdowns now keep existing tasks first and include `+ Add new task` at the bottom when the existing permission setting allows it.
+- Before clock-in flow was redesigned as a compact `Start shift` card with Project / Job Site, Task, primary Clock In, Quick capture, and Tools sections.
+- Clock In / Clock Out remain the only dark filled primary Clock actions.
+- Photo and Receipt were kept as secondary quick capture actions, with Receipt using subtle green styling.
+- Task List and Material List were moved into lower-priority soft tool buttons.
+- Clocked-in flow was redesigned as a `Current shift` card with Working chip, project/task, Elapsed timer, Earned amount, primary Clock Out, Quick capture, Shift tools, and Lists/tools.
+- Break action label was changed to `Start Break` before a break begins.
+- Change Task label and active task-change dropdowns were cleaned while preserving existing project/task assignment and notification paths.
+- Existing clock-in, clock-out, photo, receipt, change-task, break, task-list, material-list, location prompt, RBAC, and employee project/task creation permission logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-22 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-dm1480z8o-samrental70-7859s-projects.vercel.app
+- Screenshots: Attempted with headless Chrome; authenticated Clock screenshots are blocked by the deployed Login screen in this environment and require a signed-in browser session or QA credentials.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -511,6 +536,7 @@
 - B.1-fix-19 does not require new SQL.
 - B.1-fix-20 does not require new SQL.
 - B.1-fix-21 does not require new SQL.
+- B.1-fix-22 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

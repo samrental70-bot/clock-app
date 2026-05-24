@@ -14624,22 +14624,23 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const renderClockListActionRow = () => (
-    <div className="rounded-[18px] border border-slate-200 bg-white p-2 shadow-sm">
+  const renderClockListActionRow = ({ title = "Tools" } = {}) => (
+    <div className="space-y-2">
+      <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          className="rounded-[14px] border border-slate-300 bg-white px-3 py-2.5 text-center transition active:bg-slate-50"
+          className="h-11 rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-center transition active:bg-white"
           onClick={() => openClockProjectList("task")}
         >
-          <span className="block text-[13px] font-black leading-tight text-slate-800">Task List</span>
+          <span className="block text-[15px] font-semibold leading-tight text-[#061426]">Task List</span>
         </button>
         <button
           type="button"
-          className="rounded-[14px] border border-slate-300 bg-white px-3 py-2.5 text-center transition active:bg-slate-50"
+          className="h-11 rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-center transition active:bg-white"
           onClick={() => openClockProjectList("material")}
         >
-          <span className="block text-[13px] font-black leading-tight text-slate-800">Material List</span>
+          <span className="block text-[15px] font-semibold leading-tight text-[#061426]">Material List</span>
         </button>
       </div>
     </div>
@@ -15492,10 +15493,9 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
             <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
-              <CardContent className="p-4 space-y-3">
+              <CardContent className="p-4 space-y-4">
                 <div>
-                  <h2 className="text-[22px] font-black leading-tight text-slate-950">Select work</h2>
-                  <p className="mt-1 text-[13px] font-semibold text-slate-500">Choose the job site and task for this shift.</p>
+                  <h2 className="text-[20px] font-semibold leading-tight text-slate-950">Start shift</h2>
                 </div>
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
                   <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-3 space-y-1.5">
@@ -15523,12 +15523,12 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   )}
 
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-[13px] font-black text-slate-700">Project / Job site</label>
+                    <label className="text-[13px] font-semibold text-slate-700">Project / Job Site</label>
                   </div>
                   <select
-                    className="w-full rounded-[16px] border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
+                    className="h-12 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-semibold leading-tight text-[#061426]"
                     value={projectId}
                     disabled={projectsLoading}
                     onChange={(event) => {
@@ -15546,15 +15546,16 @@ const handlePhotoQuickUpload = async (event) => {
                         {project.name}
                       </option>
                     ))}
+                    {canCreateProjectTaskFromClock ? <option value="__add_project__">+ Add new project</option> : null}
                   </select>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <label className="text-[13px] font-black text-slate-700">Task</label>
+                    <label className="text-[13px] font-semibold text-slate-700">Task</label>
                   </div>
                   <select
-                    className="w-full rounded-[16px] border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
+                    className="h-12 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-semibold leading-tight text-[#061426]"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -15577,9 +15578,10 @@ const handlePhotoQuickUpload = async (event) => {
                         {center}
                       </option>
                     ))}
+                    {canCreateProjectTaskFromClock ? <option value="__add_cost_centre__">+ Add new task</option> : null}
                   </select>
                   {!clockSelectedProject && clockSelectableProjects.length > 0 ? (
-                    <p className="text-[12px] font-semibold text-slate-500">Choose a project to load tasks.</p>
+                    <p className="text-[13px] font-medium text-slate-500">Choose a project to load tasks.</p>
                   ) : null}
                 </div>
 
@@ -15597,25 +15599,26 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <Button
-                  className="w-full rounded-[14px] h-12 text-[15px] font-semibold !bg-[#070B1F] !text-white"
+                  className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
                   onClick={handleClockIn}
                 >
                   Clock In
                 </Button>
 
-                <div ref={photoToolsRef} className="rounded-[20px] border border-slate-200 bg-white p-2.5 space-y-2.5 shadow-sm">
+                <div ref={photoToolsRef} className="space-y-2.5">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
                     </p>
                   ) : null}
+                  <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Quick capture</p>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      className={`w-full rounded-[16px] h-11 border text-center text-[14px] font-black transition disabled:opacity-50 ${
+                      className={`h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
-                          ? "border-slate-950 bg-slate-950 text-white"
-                          : "border-slate-300 bg-white text-slate-700"
+                          ? "border-[#061426] bg-[#061426] text-white"
+                          : "border-slate-300 bg-white text-[#061426]"
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
@@ -15640,10 +15643,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className={`block w-full rounded-[16px] h-11 border text-center text-[14px] font-black transition disabled:opacity-50 ${
+                      className={`block h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
-                          ? "border-slate-950 bg-slate-950 text-white"
-                          : "border-slate-300 bg-white text-slate-700"
+                          ? "border-[#061426] bg-[#061426] text-white"
+                          : "border-emerald-200 bg-emerald-50 text-emerald-700"
                       }`}
                       onClick={() => {
                         if (!clockSetupReady) {
@@ -15862,29 +15865,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                {renderClockListActionRow()}
-                {canCreateProjectTaskFromClock ? (
-                  <div className="flex items-center justify-between gap-2 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2">
-                    <span className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Admin actions</span>
-                    <div className="flex shrink-0 gap-1.5">
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-slate-50"
-                        onClick={() => openProjectManagementFromClock("project")}
-                      >
-                        + Project
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-slate-50 disabled:opacity-50"
-                        onClick={() => openProjectManagementFromClock("costCentre")}
-                        disabled={!clockSelectedProject && !companyAssignAllTasksToAllProjects}
-                      >
-                        + Task
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
+                {renderClockListActionRow({ title: "Tools" })}
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
                 )}
@@ -15893,84 +15874,99 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-[22px] border border-slate-200 bg-white shadow-sm overflow-hidden">
-              <CardContent className="p-3.5 flex flex-col gap-3">
+            <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
+              <CardContent className="flex flex-col gap-4 p-4">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
                     Your account is archived. Please contact your supervisor. You can still clock out this shift.
                   </div>
                 )}
-                <div className="rounded-[20px] border border-slate-200 bg-white px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
+                <div className="rounded-[18px] border border-slate-200 bg-white px-4 py-4">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-700">
-                        Working
-                      </span>
-                      <h2 className="mt-2 truncate text-[19px] font-black leading-tight text-slate-950" title={visibleCurrentShift.project || "Project"}>
-                        {visibleCurrentShift.project || "Project"}
-                      </h2>
-                      <p className="mt-0.5 truncate text-[13px] font-bold text-slate-500" title={visibleCurrentShift.costCenter || "Task"}>
-                        {visibleCurrentShift.costCenter || "Task"}
-                      </p>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="truncate text-[20px] font-semibold leading-tight text-slate-950">Current shift</h2>
+                      {!visibleCurrentShift.supabaseTimesheetId ? (
+                        <p className="mt-1 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                          Unsaved changes
+                        </p>
+                      ) : null}
                     </div>
-                    <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-black ${
-                      visibleCurrentShift.supabaseTimesheetId ? "border-emerald-100 bg-white text-emerald-700" : "border-amber-100 bg-white text-amber-700"
-                    }`}>
-                      {visibleCurrentShift.supabaseTimesheetId ? "Synced" : "Sync pending"}
+                    <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+                      Working
                     </span>
                   </div>
-                  <div className="mt-4 text-center">
-                    <p className="text-[42px] font-black leading-none tracking-tight text-slate-950 tabular-nums">{formatTimer(liveSeconds)}</p>
-                    <p className="mt-2 text-[13px] font-black uppercase tracking-[0.14em] text-slate-500">Earned</p>
-                    <p className="mt-1 text-[24px] font-black leading-none text-slate-950 tabular-nums">{formatMoney(liveEarnings)}</p>
+                  <div className="mt-4 min-w-0">
+                    <p className="truncate text-[18px] font-semibold leading-tight text-slate-950" title={visibleCurrentShift.project || "Project"}>
+                      {visibleCurrentShift.project || "Project"}
+                    </p>
+                    <p className="mt-1 truncate text-[16px] font-medium text-slate-600" title={visibleCurrentShift.costCenter || "Task"}>
+                      {visibleCurrentShift.costCenter || "Task"}
+                    </p>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-3">
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Elapsed</p>
+                      <p className="mt-1 text-[38px] font-semibold leading-none tracking-tight text-slate-950 tabular-nums">{formatTimer(liveSeconds)}</p>
+                    </div>
+                    <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-3">
+                      <p className="text-[12px] font-semibold uppercase tracking-wide text-emerald-700">Earned</p>
+                      <p className="mt-2 text-[26px] font-semibold leading-none text-slate-950 tabular-nums">{formatMoney(liveEarnings)}</p>
+                    </div>
                   </div>
                 </div>
 
                 {isChangingTask ? (
-                  <div className="space-y-1.5">
-                    <select
-                      className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11"
-                      value={projectId}
-                      onChange={(e) => {
-                        if (e.target.value === "__add_project__") {
-                          openProjectManagementFromClock("project");
-                          return;
-                        }
-                        handleProjectChange(e.target.value);
-                      }}
-                    >
-                      {canCreateProjectTaskFromClock ? <option value="__add_project__">+ Add project</option> : null}
-                      {clockSelectableProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="w-full rounded-2xl border py-2 px-2 text-[15px] h-11"
-                      value={costCenter}
-                      disabled={!clockSelectedProject}
-                      onChange={(e) => {
-                        if (e.target.value === "__add_cost_centre__") {
-                          openProjectManagementFromClock("costCentre");
-                          return;
-                        }
-                        setCostCenter(e.target.value);
-                      }}
-                    >
-                      {canCreateProjectTaskFromClock ? <option value="__add_cost_centre__">+ Add task</option> : null}
-                      {clockCostCentresActive.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-3 rounded-[18px] border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[18px] font-semibold text-slate-950">Change Task</p>
+                    <label className="block space-y-2">
+                      <span className="text-[13px] font-semibold text-slate-700">Project / Job Site</span>
+                      <select
+                        className="h-12 w-full rounded-[14px] border border-slate-200 bg-white px-3 text-[16px] font-semibold text-[#061426]"
+                        value={projectId}
+                        onChange={(e) => {
+                          if (e.target.value === "__add_project__") {
+                            openProjectManagementFromClock("project");
+                            return;
+                          }
+                          handleProjectChange(e.target.value);
+                        }}
+                      >
+                        {clockSelectableProjects.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                        {canCreateProjectTaskFromClock ? <option value="__add_project__">+ Add new project</option> : null}
+                      </select>
+                    </label>
+                    <label className="block space-y-2">
+                      <span className="text-[13px] font-semibold text-slate-700">Task</span>
+                      <select
+                        className="h-12 w-full rounded-[14px] border border-slate-200 bg-white px-3 text-[16px] font-semibold text-[#061426]"
+                        value={costCenter}
+                        disabled={!clockSelectedProject}
+                        onChange={(e) => {
+                          if (e.target.value === "__add_cost_centre__") {
+                            openProjectManagementFromClock("costCentre");
+                            return;
+                          }
+                          setCostCenter(e.target.value);
+                        }}
+                      >
+                        {clockCostCentresActive.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                        {canCreateProjectTaskFromClock ? <option value="__add_cost_centre__">+ Add new task</option> : null}
+                      </select>
+                    </label>
                     {clockCostCentresActive.length === 0 && (
                       <p className="text-[14px] font-medium text-amber-800 leading-snug">
                         {!isAdmin &&
                         (
-                          effectiveCostCentresByProjectId[String(clockSelectedProject.id)] ||
-                          effectiveCostCentresByProjectId[Number(clockSelectedProject.id)] ||
+                          effectiveCostCentresByProjectId[String(clockSelectedProject?.id)] ||
+                          effectiveCostCentresByProjectId[Number(clockSelectedProject?.id)] ||
                           []
                         ).length > 0
                           ? "No tasks assigned for this project. Please contact your supervisor."
@@ -15979,31 +15975,33 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                     <div className="grid grid-cols-2 gap-2">
                       <Button
-                        className="h-11 rounded-[14px] text-[15px] font-semibold !bg-[#070B1F] !text-white"
+                        className="h-[46px] rounded-[14px] text-[15px] font-semibold !bg-[#061426] !text-white"
                         disabled={clockCostCentresActive.length === 0 || !costCenter}
                         onClick={applyTaskChange}
                       >
                         Save
                       </Button>
-                      <Button className="h-11 rounded-[14px] border border-slate-300 !bg-white text-[15px] font-semibold !text-slate-700" onClick={() => setIsChangingTask(false)}>Cancel</Button>
+                      <Button className="h-[46px] rounded-[14px] border border-slate-300 !bg-white text-[15px] font-semibold !text-slate-700" onClick={() => setIsChangingTask(false)}>Cancel</Button>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="space-y-4">
                     <Button
-                      className="w-full rounded-[14px] h-12 text-[15px] font-semibold !bg-[#070B1F] !text-white"
+                      className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
                       onClick={handleClockOut}
                     >
                       Clock Out
                     </Button>
-                    <div ref={photoToolsRef} className="rounded-[20px] border border-slate-200 bg-white p-2.5 space-y-2.5 shadow-sm">
+                    <div ref={photoToolsRef} className="space-y-4">
+                      <div className="space-y-2">
+                        <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Quick capture</p>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          className={`w-full rounded-[14px] h-11 border text-center text-[13px] font-black transition disabled:opacity-50 ${
+                            className={`h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "photo"
-                              ? "border-slate-950 bg-slate-950 text-white"
-                              : "border-slate-300 bg-white text-slate-700"
+                                ? "border-[#061426] bg-[#061426] text-white"
+                                : "border-slate-300 bg-white text-[#061426]"
                           }`}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "photo") {
@@ -16024,10 +16022,10 @@ const handlePhotoQuickUpload = async (event) => {
                         </button>
                         <button
                           type="button"
-                          className={`block w-full rounded-[14px] h-11 border text-center text-[13px] font-black transition disabled:opacity-50 ${
+                            className={`block h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "receipt"
-                              ? "border-slate-950 bg-slate-950 text-white"
-                              : "border-slate-300 bg-white text-slate-700"
+                                ? "border-[#061426] bg-[#061426] text-white"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-700"
                           }`}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "receipt") {
@@ -16050,20 +16048,26 @@ const handlePhotoQuickUpload = async (event) => {
                         >
                           Receipt
                         </button>
+                      </div>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Shift tools</p>
+                        <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          className="rounded-[14px] h-11 border border-slate-300 bg-white px-2 text-[13px] font-black text-slate-700 active:bg-slate-50"
+                            className="h-[46px] rounded-[14px] border border-slate-300 bg-white px-2 text-[15px] font-semibold text-[#061426] active:bg-slate-50"
                           onClick={handleChangeTask}
                         >
                           Change Task
                         </button>
                         <button
                           type="button"
-                          className="rounded-[14px] h-11 border border-amber-200 bg-white px-2 text-[13px] font-black text-amber-800 active:bg-amber-50"
+                            className="h-[46px] rounded-[14px] border border-slate-300 bg-white px-2 text-[15px] font-semibold text-[#061426] active:bg-slate-50"
                           onClick={handleBreak}
                         >
-                          {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Done"}
+                          {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Complete"}
                         </button>
+                      </div>
                       </div>
 
                       <input
@@ -16265,7 +16269,7 @@ const handlePhotoQuickUpload = async (event) => {
                         ) : null}
                       </div>
                     </div>
-                    {renderClockListActionRow()}
+                    {renderClockListActionRow({ title: "Lists/tools" })}
                     {locationStatus && (
                       <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
                     )}
