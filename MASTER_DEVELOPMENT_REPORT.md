@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-12
+- Current development version: B.1-fix-13
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -265,6 +265,31 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-13 Home Screen Redesign V1
+- Home screen reordered into a manager operations dashboard flow: quick actions, live operations, active team, worked today, team coverage, live job sites, and recent activity.
+- Global app header tightened around a 72px compact layout with menu, logo, company name, date/user metadata, refresh, and notification bell.
+- Header "Logged in:" wording removed; the secondary header line now shows date and user name only.
+- Development chip reduced to a tiny dev-only label and notification badge size capped with `99+` handling.
+- Duplicate Home refresh action remains removed because the global header refresh is the single refresh control.
+- Install app banner slimmed to `Install Clock App` with short subtitle, compact Install action, and dismiss control.
+- Home quick actions renamed to Schedule, Photos, Receipts, and Team while preserving their existing routes/modules.
+- Quick action cards resized to one professional row with white surfaces and muted icon color.
+- Live operations KPI tiles polished while preserving live active hours/labour calculations.
+- Active Team empty state and active employee rows compacted while preserving live time/cost, location, and clock-out actions.
+- Worked Today cleaned with Employees / Entries / Labour KPIs, Total hours / Labour cost summary, and a maximum of 3 recent rows on Home.
+- Team coverage renamed and empty chart state compacted.
+- Live job sites map compacted when there are no active locations.
+- Recent activity renamed, limited to 6 Home rows, and linked to the full activity view.
+- No SQL, database, AI, or business-logic changes were made.
+
+## B.1-fix-13 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-hmqaexwq8-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -288,6 +313,7 @@
 - B.1-fix-11B does not require new SQL.
 - B.1-fix-11C does not require new SQL.
 - B.1-fix-12 does not require new SQL.
+- B.1-fix-13 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

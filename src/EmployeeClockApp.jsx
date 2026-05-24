@@ -14963,15 +14963,17 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       return new Intl.DateTimeFormat("en-CA", {
         timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
-        weekday: "short",
         month: "short",
         day: "numeric",
-        year: "numeric",
       }).format(now instanceof Date ? now : new Date(now));
     } catch {
       return formatDateParts(new Date(), companyTimeZone).fullDate;
     }
   })();
+  const appHeaderUserName = (profileFullName || "").trim() || "User";
+  const appHeaderMetaSeparator = "\u2022";
+  const appHeaderMetaLabel = `${appHeaderDateLabel} ${appHeaderMetaSeparator} ${appHeaderUserName}`;
+  const homeTodayLabel = `Today ${appHeaderMetaSeparator} ${appHeaderDateLabel}`;
 
   const handleHeaderRefresh = () => {
     setDashboardRefreshKey((key) => key + 1);
@@ -14987,7 +14989,7 @@ const handlePhotoQuickUpload = async (event) => {
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
         <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
-          <div className="rounded-[20px] bg-white border border-slate-200/90 px-2.5 py-1.5 shadow-[0_8px_22px_rgba(15,23,42,0.07)]">
+          <div className="min-h-[72px] rounded-[20px] bg-white border border-slate-200/90 px-2.5 py-2 shadow-[0_8px_22px_rgba(15,23,42,0.07)]">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -14995,7 +14997,7 @@ const handlePhotoQuickUpload = async (event) => {
                   setMenuPanel("main");
                   setIsMenuOpen(true);
                 }}
-                className="h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
+                className="h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
                 style={{ fontSize: 0, lineHeight: 0 }}
                 aria-label="Open menu"
               >
@@ -15006,21 +15008,20 @@ const handlePhotoQuickUpload = async (event) => {
                 </svg>
               </button>
               <div className="flex flex-1 min-w-0 items-center gap-2">
-                <img src={OPERA_APP_ICON} alt="" className="h-7 w-7 shrink-0 rounded-[10px]" />
+                <img src={OPERA_APP_ICON} alt="" className="h-9 w-9 shrink-0 rounded-[12px]" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <h1 className="truncate text-[15px] font-black leading-tight text-slate-950">
                       {userCompany?.name || "Company"}
                     </h1>
                     {IS_OPERA_DEVELOPMENT_APP && (
-                      <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-blue-700">
-                        Development
+                      <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-blue-700">
+                        Dev
                       </span>
                     )}
                   </div>
-                  <p className="mt-0.5 truncate text-[10px] font-bold text-slate-500 leading-snug">{appHeaderDateLabel}</p>
-                  <p className="mt-0.5 border-b border-slate-100 pb-0.5 text-[11px] font-bold text-slate-600 leading-snug truncate">
-                    Logged in: {(profileFullName || "").trim() || "User"}
+                  <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500 leading-snug">
+                    {appHeaderMetaLabel}
                   </p>
                 </div>
               </div>
@@ -15028,7 +15029,7 @@ const handlePhotoQuickUpload = async (event) => {
                 <button
                   type="button"
                   onClick={handleHeaderRefresh}
-                  className="h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white disabled:opacity-60"
+                  className="h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white disabled:opacity-60"
                   style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Refresh"
                   disabled={dashboardLoading || timesheetsLoading}
@@ -15039,12 +15040,11 @@ const handlePhotoQuickUpload = async (event) => {
                     <path d="M3 18v-5h5" />
                     <path d="M21 6v5h-5" />
                   </svg>
-                  âŒ‚
                 </button>
                 <button
                   type="button"
                   onClick={() => setActiveTab("notifications")}
-                  className="relative h-9 w-9 overflow-hidden rounded-[15px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
+                  className="relative h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
                   style={{ fontSize: 0, lineHeight: 0 }}
                   aria-label="Notifications"
                 >
@@ -15053,7 +15053,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <path d="M10 21h4" />
                   </svg>
                   {inAppNotifUnread > 0 && (
-                    <span className="absolute -top-0.5 -right-0.5 min-w-[0.85rem] h-3.5 px-0.5 rounded-full bg-red-600 text-white text-[7px] font-black flex items-center justify-center leading-none">
+                    <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[8px] font-black leading-none text-white">
                       {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
                     </span>
                   )}
@@ -15132,28 +15132,27 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {!isInstalled && !installHelpDismissed && (
-            <Card className="rounded-3xl border-blue-100 bg-gradient-to-br from-white to-blue-50 shadow-sm">
-              <CardContent className="p-3 space-y-2">
-                <div className="flex items-start gap-2.5">
-                  <img src={OPERA_APP_ICON} alt="" className="h-11 w-11 shrink-0 rounded-2xl shadow-sm" />
+            <Card className="rounded-[20px] border border-blue-100 bg-white shadow-sm">
+              <CardContent className="p-3">
+                <div className="flex items-center gap-2.5">
                   <div className="min-w-0 flex-1">
-                    <h2 className="font-black text-[17px] leading-tight">Install {OPERA_APP_NAME}</h2>
-                    <p className="mt-0.5 text-[14px] font-semibold text-slate-600 leading-snug">
-                      {deferredPrompt ? "Tap install to add it to this phone." : getInstallInstructions()}
+                    <h2 className="font-black text-[15px] leading-tight text-slate-950">Install Clock App</h2>
+                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500 leading-snug">
+                      Add it to this phone for faster access.
                     </p>
                   </div>
+                  <Button onClick={handleInstallApp} className="h-9 shrink-0 rounded-[12px] px-3 text-[12px] font-black">
+                    Install
+                  </Button>
                   <button
                     type="button"
                     onClick={dismissInstallHelp}
-                    className="h-8 w-8 shrink-0 rounded-full border border-slate-200 bg-white text-[16px] font-black text-slate-500"
+                    className="h-8 w-8 shrink-0 rounded-[12px] border border-slate-200 bg-slate-50 text-[14px] font-black text-slate-500"
                     aria-label="Hide install help"
                   >
-                    ×
+                    x
                   </button>
                 </div>
-                <Button onClick={handleInstallApp} className="w-full rounded-2xl h-12 text-[15px] font-bold">
-                  Install App
-                </Button>
               </CardContent>
             </Card>
           )}
@@ -17360,7 +17359,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="min-w-0">
                     <h2 className="truncate text-[21px] font-black leading-[1.05] text-slate-950">Home</h2>
                     <p className="mt-1 truncate text-[12px] font-bold text-slate-500">
-                      {dashboardSelectedDateLabel || "Today"} / {(profileFullName || "").trim() || "User"}
+                      {homeTodayLabel}
                     </p>
                   </div>
                 </div>
@@ -17370,9 +17369,9 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Schedule",
                       action: () => setActiveTab("schedule"),
-                      tone: "bg-blue-600",
-                      surface: "bg-blue-50 border-blue-100",
-                      text: "text-blue-950",
+                      tone: "bg-blue-50 text-blue-600",
+                      surface: "bg-white border-slate-200",
+                      text: "text-slate-800",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M7 3v4M17 3v4" />
@@ -17383,11 +17382,11 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     },
                     {
-                      label: "Pictures",
+                      label: "Photos",
                       action: openPhotosTab,
-                      tone: "bg-violet-600",
-                      surface: "bg-violet-50 border-violet-100",
-                      text: "text-violet-950",
+                      tone: "bg-violet-50 text-violet-600",
+                      surface: "bg-white border-slate-200",
+                      text: "text-slate-800",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
@@ -17399,9 +17398,9 @@ const handlePhotoQuickUpload = async (event) => {
                     {
                       label: "Receipts",
                       action: () => setActiveTab("receipts"),
-                      tone: "bg-orange-500",
-                      surface: "bg-orange-50 border-orange-100",
-                      text: "text-amber-950",
+                      tone: "bg-amber-50 text-amber-600",
+                      surface: "bg-white border-slate-200",
+                      text: "text-slate-800",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
@@ -17410,11 +17409,11 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     },
                     {
-                      label: "Employees",
+                      label: "Team",
                       action: () => setActiveTab("team"),
-                      tone: "bg-teal-600",
-                      surface: "bg-teal-50 border-teal-100",
-                      text: "text-emerald-950",
+                      tone: "bg-emerald-50 text-emerald-600",
+                      surface: "bg-white border-slate-200",
+                      text: "text-slate-800",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
                           <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" />
@@ -17427,13 +17426,13 @@ const handlePhotoQuickUpload = async (event) => {
                     <button
                       key={item.label}
                       type="button"
-                      className={`min-w-0 rounded-[18px] border ${item.surface} px-1 py-2.5 text-center shadow-sm active:scale-[0.98]`}
+                      className={`h-20 min-w-0 rounded-[16px] border ${item.surface} px-1 py-2 text-center shadow-sm active:scale-[0.98]`}
                       onClick={item.action}
                     >
-                      <span className={`mx-auto flex h-9 w-9 items-center justify-center rounded-[14px] ${item.tone} text-white shadow-sm`}>
+                      <span className={`mx-auto flex h-10 w-10 items-center justify-center rounded-[13px] ${item.tone}`}>
                         {item.icon}
                       </span>
-                      <span className={`mt-1.5 block text-center text-[10px] font-black leading-tight ${item.text}`}>{item.label}</span>
+                      <span className={`mt-1.5 block text-center text-[12px] font-black leading-tight ${item.text}`}>{item.label}</span>
                     </button>
                   ))}
                 </div>
@@ -17473,19 +17472,19 @@ const handlePhotoQuickUpload = async (event) => {
                           {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-blue-100 bg-blue-50 px-3 py-2.5">
+                      <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-2.5">
                         <p className="text-[8px] font-black uppercase tracking-wide text-blue-700">Hours</p>
                         <p className="mt-1 text-[clamp(13px,3.7vw,18px)] font-black leading-none tabular-nums text-slate-950">
                           {formatHoursDecimal(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-emerald-100 bg-emerald-50 px-2 py-2.5">
+                      <div className="rounded-[18px] border border-slate-200 bg-white px-2 py-2.5">
                         <p className="text-[8px] font-black uppercase tracking-wide text-emerald-700">Labour</p>
                         <p className="mt-1 text-[clamp(13px,3.6vw,18px)] font-black leading-none tabular-nums text-slate-950">
                           {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
                         </p>
                       </div>
-                      <div className="rounded-[18px] border border-amber-100 bg-amber-50 px-2 py-2.5">
+                      <div className="rounded-[18px] border border-slate-200 bg-white px-2 py-2.5">
                         <p className="text-[8px] font-black uppercase tracking-wide text-amber-700">Issues</p>
                         <p className="mt-1 text-[18px] font-black leading-none tabular-nums text-slate-950">
                           {pendingTimesheetRequests.length}
@@ -17496,14 +17495,10 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-4 rounded-[24px] border border-slate-200 bg-white p-3 shadow-[0_10px_26px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-black text-slate-950">Shift coverage</h3>
-                      <button
-                        type="button"
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700"
-                        onClick={() => setActiveTab("timesheet")}
-                      >
-                        Timesheet
-                      </button>
+                      <h3 className="text-[18px] font-black text-slate-950">Team coverage</h3>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-600">
+                        Today
+                      </span>
                     </div>
                     <div className="mt-4 grid grid-cols-2 gap-3">
                       <div className="rounded-[18px] bg-slate-50 p-3">
@@ -17553,7 +17548,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="mt-4 rounded-[20px] border border-slate-100 bg-white px-3 pt-3 pb-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees Logged by Hour</p>
+                        <p className="text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">Employees logged by hour</p>
                         <p className="shrink-0 text-[11px] font-black text-slate-400">
                           {dashboardCoverageRangeLabel}
                           {(dashboardLiveWorkingCards || []).length ? ` - ${(dashboardLiveWorkingCards || []).length} now` : ""}
@@ -17584,7 +17579,7 @@ const handlePhotoQuickUpload = async (event) => {
                         return (
                           <div className="mt-2 rounded-[18px] border border-slate-100 bg-white px-2 py-2">
                             {hasData ? (
-                              <svg viewBox={`0 0 ${width} ${height}`} className="h-40 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
+                              <svg viewBox={`0 0 ${width} ${height}`} className="h-36 w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
                                 {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
                                   const y = top + graphH - (tick / maxCount) * graphH;
                                   return (
@@ -17615,8 +17610,8 @@ const handlePhotoQuickUpload = async (event) => {
                                 </text>
                               </svg>
                             ) : (
-                              <div className="flex h-40 items-center justify-center rounded-[20px] border border-dashed border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
-                                No employee login activity for this range yet.
+                              <div className="flex h-24 items-center justify-center rounded-[16px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-bold text-slate-500">
+                                No login activity yet.
                               </div>
                             )}
                           </div>
@@ -17627,21 +17622,21 @@ const handlePhotoQuickUpload = async (event) => {
 
                   <section className="order-6 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[17px] font-black text-slate-950">Activity</h3>
+                      <h3 className="text-[17px] font-black text-slate-950">Recent activity</h3>
                       <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700">
                         {dashboardActivityFeedItems.length}
                       </span>
                     </div>
                     {dashboardActivityFeedItems.length === 0 ? (
-                      <div className="mt-3 rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
+                      <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
                         <p className="text-[15px] font-black text-slate-700">No recent activity yet.</p>
                       </div>
                     ) : (
                       <div className="mt-3 space-y-2">
-                        {dashboardActivityFeedItems.slice(0, 8).map((item) => (
+                        {dashboardActivityFeedItems.slice(0, 6).map((item) => (
                           <div
                             key={item.id}
-                            className="grid grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5"
+                            className="grid min-h-14 grid-cols-[auto_1fr_auto] items-start gap-2.5 rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5"
                           >
                             <span className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded-[11px] border text-[10px] font-black ${item.tone}`}>
                               {String(item.kind || "A").slice(0, 1).toUpperCase()}
@@ -17655,11 +17650,18 @@ const handlePhotoQuickUpload = async (event) => {
                             </p>
                           </div>
                         ))}
+                        <button
+                          type="button"
+                          className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700 active:bg-slate-50"
+                          onClick={() => setActiveTab("activities")}
+                        >
+                          View all activity
+                        </button>
                       </div>
                     )}
                   </section>
 
-                  <section className="order-5 rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.09)]">
+                  <section className="order-5 rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-[18px] font-black text-slate-950">Live job sites</h3>
                       <button
@@ -17680,7 +17682,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div
                       role="button"
                       tabIndex={dashboardLiveMapLocations.length ? 0 : -1}
-                      className={`relative mt-4 block h-44 w-full overflow-hidden rounded-[26px] border border-slate-200 bg-[#e9eef5] text-left shadow-inner ${
+                      className={`relative mt-3 block ${dashboardLiveMapLocations.length ? "h-40" : "h-[150px]"} w-full overflow-hidden rounded-[18px] border border-slate-200 bg-[#e9eef5] text-left shadow-inner ${
                         dashboardLiveMapLocations.length ? "cursor-pointer" : "cursor-default"
                       }`}
                       onClick={() => {
@@ -17733,8 +17735,9 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Loading active employees...</p>
                     ) : null}
                     {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
-                      <div className="mt-3 rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center">
-                        <p className="text-[15px] font-black text-slate-700">No employees are clocked in.</p>
+                      <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+                        <p className="text-[15px] font-black text-slate-700">No crew clocked in</p>
+                        <p className="mt-0.5 text-[12px] font-bold text-slate-500">Clock in from the Clock tab.</p>
                       </div>
                     ) : null}
                     <div className="mt-3 space-y-2">
@@ -17772,9 +17775,9 @@ const handlePhotoQuickUpload = async (event) => {
                                     </span>
                                   </p>
                                 </div>
-                                <div className="shrink-0 rounded-[14px] bg-slate-950 px-2.5 py-1.5 text-right text-white shadow-sm">
-                                  <p className="text-[13px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
-                                  <p className="mt-1 text-[12px] font-black leading-none tabular-nums text-slate-200">{formatMoney(liveCost)}</p>
+                                <div className="shrink-0 rounded-[12px] bg-slate-950 px-2 py-1.5 text-right text-white shadow-sm">
+                                  <p className="text-[12px] font-black leading-none tabular-nums">{formatDuration(liveMinutes)}</p>
+                                  <p className="mt-1 text-[11px] font-black leading-none tabular-nums text-slate-200">{formatMoney(liveCost)}</p>
                                 </div>
                               </div>
                               <p
@@ -17790,7 +17793,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={!hasLiveGps}
                                   onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
                                 >
-                                  Live location
+                                  Location
                                 </button>
                                 <Button
                                   type="button"
@@ -17850,25 +17853,25 @@ const handlePhotoQuickUpload = async (event) => {
                       aria-label="Open today's completed time and cost"
                     >
                       <span className="flex items-end justify-between gap-3 border-b border-slate-100 pb-2">
-                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total Time</span>
+                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total hours</span>
                         <span className="text-[24px] font-black leading-none tabular-nums text-slate-950">
                           {formatHoursDecimal(dashboardWorkedTodaySummary.totalMinutes)}
                         </span>
                       </span>
                       <span className="mt-2 flex items-end justify-between gap-3">
-                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Total Cost</span>
+                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">Labour cost</span>
                         <span className="text-[22px] font-black leading-none tabular-nums text-slate-950">
                           {formatMoney(dashboardWorkedTodaySummary.totalCost)}
                         </span>
                       </span>
                     </button>
                     {dashboardTodayWorkedCards.length === 0 ? (
-                      <p className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-[15px] font-bold text-slate-600">
+                      <p className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[15px] font-bold text-slate-600">
                         No timesheets for today yet.
                       </p>
                     ) : (
                       <div className="space-y-2.5">
-                        {dashboardTodayWorkedCards.slice(0, 8).map((card) => {
+                        {dashboardTodayWorkedCards.slice(0, 3).map((card) => {
                           const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
                             .filter(Boolean)
                             .join(" / ");
@@ -17876,7 +17879,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <button
                               key={`premium-worked-${card.uid}`}
                               type="button"
-                              className="w-full rounded-[22px] border border-slate-200 bg-white px-3 py-3 text-left shadow-[0_10px_20px_rgba(15,23,42,0.05)] active:scale-[0.99]"
+                              className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
                               onClick={openDashboardTodayTimesheets}
                             >
                               <div className="flex items-start justify-between gap-3">
@@ -17894,7 +17897,7 @@ const handlePhotoQuickUpload = async (event) => {
                               </div>
                               <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700">
                                 <span className="min-w-0 truncate tabular-nums">
-                                  {card.metrics.inDisp} – {card.metrics.outDisp}
+                                  {card.metrics.inDisp} - {card.metrics.outDisp}
                                 </span>
                                 <span className="shrink-0 text-right tabular-nums text-slate-950">
                                   {card.metrics.labourDisp}
@@ -17903,6 +17906,15 @@ const handlePhotoQuickUpload = async (event) => {
                             </button>
                           );
                         })}
+                        {dashboardTodayWorkedCards.length > 3 ? (
+                          <button
+                            type="button"
+                            className="w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-700 active:bg-white"
+                            onClick={openDashboardTodayTimesheets}
+                          >
+                            View all timesheets
+                          </button>
+                        ) : null}
                       </div>
                     )}
                   </section>
