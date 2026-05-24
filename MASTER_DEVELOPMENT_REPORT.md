@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-14
+- Current development version: B.1-fix-15
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -316,6 +316,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-15 Timesheet Screen Redesign V1
+- Timesheet page title standardized to `Timesheets`.
+- Timesheet subtitle updated to `Review labour hours and costs`.
+- Employee-only `My Timesheet` wording removed while preserving employee record visibility restrictions.
+- Filters compacted into one card with date range summary, employee/project summary, completed-only status, and Share report action.
+- Quick range chips added for Today, Week, Month, and Custom while preserving the existing standard date picker for custom ranges.
+- Employee and Project filters remain in the compact filter sheet.
+- Timesheet cards redesigned with employee, email, status chip, project/task, Hours/Rate/Cost metrics, In/Out times, and location actions.
+- Clock-in and clock-out map links changed from blue underlined links to small secondary map buttons.
+- Large Delete button removed from the main timesheet card action area.
+- Delete moved into More/overflow for normal card view and remains confirmation-protected through the existing delete handler.
+- Existing timesheet fetching, filters, Share Report, labour calculations, RBAC, and employee visibility logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-15 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-jplc4tgi9-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -341,6 +363,7 @@
 - B.1-fix-12 does not require new SQL.
 - B.1-fix-13 does not require new SQL.
 - B.1-fix-14 does not require new SQL.
+- B.1-fix-15 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

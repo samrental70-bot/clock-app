@@ -13120,26 +13120,32 @@ const handlePhotoQuickUpload = async (event) => {
     return (
     <div key={record.id} className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-[16px] font-black text-slate-950 leading-snug">{timesheetTitle}</p>
           {timesheetEmailSecondary && (
-            <p className="text-[13px] text-slate-500 mt-0.5 break-all">{timesheetEmailSecondary}</p>
+            <p className="mt-0.5 truncate text-[12px] font-semibold text-slate-500">{timesheetEmailSecondary}</p>
           )}
-          <p className="mt-1 truncate text-[13px] font-bold text-slate-600">
-            {record.project || "No project"} - {record.costCenter || "No task"}
+          <p className="mt-1 truncate text-[13px] font-bold text-slate-700">
+            {record.project || "No project"} / {record.costCenter || "No task"}
           </p>
         </div>
-        <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-black h-fit ${statusBadgeClass}`}>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-black h-fit uppercase tracking-wide ${statusBadgeClass}`}>
           {statusBadgeLabel}
         </span>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mt-3 text-[12px] text-slate-600">
-        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[9px] tracking-wide">Hours</p><p className="font-black text-slate-900 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p></div>
-        <div className="rounded-2xl bg-slate-50 p-2"><p className="font-black uppercase text-[9px] tracking-wide">Rate</p><p className="font-black text-slate-900 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p></div>
-        <div className="rounded-2xl bg-slate-50 p-2">
-          <p className="font-black uppercase text-[9px] tracking-wide">Cost</p>
-          <p className="font-black text-slate-900 leading-tight">
+      <div className="mt-3 grid grid-cols-3 gap-2 rounded-[16px] border border-slate-200 bg-slate-50 p-2 text-[12px] text-slate-600">
+        <div>
+          <p className="font-black uppercase text-[9px] tracking-wide text-slate-500">Hours</p>
+          <p className="mt-1 font-black text-slate-950 leading-tight">{formatHoursDecimal(getWorkedMinutes(record))}</p>
+        </div>
+        <div>
+          <p className="font-black uppercase text-[9px] tracking-wide text-slate-500">Rate</p>
+          <p className="mt-1 font-black text-slate-950 leading-tight">{formatMoney(rateFromTimesheet)}/hr</p>
+        </div>
+        <div>
+          <p className="font-black uppercase text-[9px] tracking-wide text-slate-500">Cost</p>
+          <p className="mt-1 font-black text-slate-950 leading-tight">
             {formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record))}
           </p>
         </div>
@@ -13230,55 +13236,61 @@ const handlePhotoQuickUpload = async (event) => {
             >
               {editTimesheetSaving ? (isAdmin ? "Saving..." : "Sending...") : (isAdmin ? "Save" : "Send request")}
             </Button>
-            <Button type="button" className="rounded-lg h-10 text-[14px]" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
+            <Button type="button" className="rounded-lg h-10 border border-slate-300 !bg-white text-[14px] !text-slate-800" disabled={editTimesheetSaving} onClick={cancelEditRecord}>
               Cancel
             </Button>
           </div>
           {isAdmin && !editTimesheetSaving && (
-            <Button
+            <button
               type="button"
-              className="w-full rounded-xl h-10 text-[14px] font-semibold border border-red-200 bg-red-50 text-red-700 shadow-none active:bg-red-100 disabled:opacity-60"
+              className="rounded-xl px-3 py-2 text-[12px] font-black text-red-600 active:bg-red-50 disabled:opacity-60"
               disabled={busyDelete}
               onClick={() => void handleDeleteTimesheetRecord(record)}
             >
               {busyDelete ? "Deleting..." : "Delete"}
-            </Button>
+            </button>
           )}
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2 mt-3 text-[14px] text-slate-600 border-t pt-3">
-            <div><p>In</p><p className="font-semibold text-slate-900">{formatTime(record.clockIn, companyTimeZone)}</p></div>
-            <div><p>Out</p><p className={outClass}>{outText}</p></div>
+          <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-[13px] text-slate-500">
+            <div className="rounded-[14px] bg-slate-50 px-3 py-2">
+              <p className="font-black uppercase tracking-wide text-[9px]">In</p>
+              <p className="mt-1 font-black text-slate-950">{formatTime(record.clockIn, companyTimeZone)}</p>
+            </div>
+            <div className="rounded-[14px] bg-slate-50 px-3 py-2">
+              <p className="font-black uppercase tracking-wide text-[9px]">Out</p>
+              <p className={`mt-1 ${outClass}`}>{outText}</p>
+            </div>
           </div>
-          {(record.clockInLocation || record.clockOutLocation) && (
-            <div className="mt-2 space-y-1 text-[13px] text-slate-600 border-t border-slate-100 pt-2">
+          <div className="mt-2 rounded-[14px] border border-slate-200 bg-white px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Locations</p>
+              <div className="flex flex-wrap gap-1.5">
               {record.clockInLocation && (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span>Clock In Location:</span>
                   <button
                     type="button"
-                    className="text-blue-700 font-semibold underline"
+                    className="rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-white"
                     onClick={() => openMap(record.clockInLocation)}
                   >
-                    View Map
+                    Clock-in map
                   </button>
-                </div>
               )}
               {record.clockOutLocation && (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span>Clock Out Location:</span>
                   <button
                     type="button"
-                    className="text-blue-700 font-semibold underline"
+                    className="rounded-full border border-slate-300 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-700 active:bg-white"
                     onClick={() => openMap(record.clockOutLocation)}
                   >
-                    View Map
+                    Clock-out map
                   </button>
-                </div>
               )}
+              {!record.clockInLocation && !record.clockOutLocation ? (
+                <span className="text-[12px] font-bold text-slate-400">No location</span>
+              ) : null}
+              </div>
             </div>
-          )}
+          </div>
           {staleActiveMissingOut && (
             <p className="mt-1 text-[13px] text-amber-700">This shift was never clocked out.</p>
           )}
@@ -13307,11 +13319,11 @@ const handlePhotoQuickUpload = async (event) => {
             </p>
           ) : null}
           {((allowEdit && canEditTimesheetRecord(record)) || isAdmin) && (
-            <div className="mt-2 grid grid-cols-2 gap-1.5">
+            <div className="mt-3 flex items-center gap-2">
               {allowEdit && canEditTimesheetRecord(record) && (
                 <Button
                   type="button"
-                  className="rounded-xl h-10 text-[14px] col-span-2 border border-slate-200 bg-white text-slate-800 shadow-none sm:col-span-1"
+                  className="h-10 flex-1 rounded-[14px] border border-slate-300 !bg-white text-[13px] font-black !text-slate-800 shadow-none"
                   disabled={busyDelete || Boolean(pendingEditRequest)}
                   onClick={() => startEditRecord(record)}
                 >
@@ -13319,14 +13331,39 @@ const handlePhotoQuickUpload = async (event) => {
                 </Button>
               )}
               {isAdmin && (
-                <Button
-                  type="button"
-                  className="rounded-xl h-10 text-[14px] font-semibold border border-red-200 bg-red-50 text-red-700 shadow-none active:bg-red-100 col-span-2 sm:col-span-1 disabled:opacity-60"
-                  disabled={busyDelete || busyClose}
-                  onClick={() => void handleDeleteTimesheetRecord(record)}
-                >
-                  {busyDelete ? "Deleting..." : "Delete"}
-                </Button>
+                <details className="relative">
+                  <summary className="flex h-10 cursor-pointer list-none items-center rounded-[14px] border border-slate-300 bg-white px-3 text-[13px] font-black text-slate-800 shadow-none active:bg-slate-50">
+                    More
+                  </summary>
+                  <div className="absolute right-0 z-30 mt-1 w-44 rounded-[16px] border border-slate-200 bg-white p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+                    {record.clockInLocation ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
+                        onClick={() => openMap(record.clockInLocation)}
+                      >
+                        Clock-in map
+                      </button>
+                    ) : null}
+                    {record.clockOutLocation ? (
+                      <button
+                        type="button"
+                        className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
+                        onClick={() => openMap(record.clockOutLocation)}
+                      >
+                        Clock-out map
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
+                      disabled={busyDelete || busyClose}
+                      onClick={() => void handleDeleteTimesheetRecord(record)}
+                    >
+                      {busyDelete ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
+                </details>
               )}
             </div>
           )}
@@ -14958,6 +14995,29 @@ const handlePhotoQuickUpload = async (event) => {
     setTimesheetRangePreset(timesheetDatePickerMode);
     setTimesheetDatePickerOpen(false);
   };
+  const applyTimesheetQuickRange = (preset) => {
+    if (preset === "custom") {
+      setTimesheetDraftDateFrom(timesheetRangeBounds.from || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+      setTimesheetDraftDateTo(timesheetRangeBounds.to || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+      setTimesheetDatePickerMode("custom");
+      setTimesheetDatePickerOpen(true);
+      return;
+    }
+    const { from, to } = computeStandardDateRange(preset, new Date(), companyTimeZone);
+    if (!from || !to) return;
+    if (preset === "today") {
+      setTimesheetViewMode("day");
+      setTimesheetDateKey(from);
+    } else if (preset === "weekly") {
+      setTimesheetViewMode("week");
+      setTimesheetDateKey(from);
+    } else {
+      setTimesheetViewMode("range");
+      setTimesheetDateFrom(from);
+      setTimesheetDateTo(to);
+    }
+    setTimesheetRangePreset(preset);
+  };
 
   const appHeaderDateLabel = (() => {
     try {
@@ -15947,38 +16007,58 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-3 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="text-[22px] font-black leading-tight text-slate-950">
-                      {isAdmin ? "Timesheets" : "My Timesheet"}
-                    </h2>
+                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Timesheets</h2>
                     <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">
-                      {isAdmin ? "Company time records" : "Submitted and requested time"}
+                      Review labour hours and costs
                     </p>
+                  </div>
+                </div>
+                <div className="rounded-[20px] border border-slate-200 bg-white p-2.5 shadow-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Filters</p>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-[14px] bg-slate-950 px-3 py-2 text-[12px] font-black text-white shadow-sm"
+                      onClick={() => void handleShareTimesheetReport()}
+                    >
+                      Share report
+                    </button>
+                  </div>
+                  <div className="mt-2 grid grid-cols-4 gap-1.5">
+                    {[
+                      { id: "today", label: "Today" },
+                      { id: "weekly", label: "Week" },
+                      { id: "monthly", label: "Month" },
+                      { id: "custom", label: "Custom" },
+                    ].map((option) => (
+                      <button
+                        key={`ts-range-${option.id}`}
+                        type="button"
+                        className={`rounded-full border px-2 py-1.5 text-[11px] font-black ${
+                          timesheetRangePreset === option.id
+                            ? "border-slate-950 bg-slate-950 text-white"
+                            : "border-slate-200 bg-slate-50 text-slate-700"
+                        }`}
+                        onClick={() => applyTimesheetQuickRange(option.id)}
+                      >
+                        {option.label}
+                      </button>
+                    ))}
                   </div>
                   <button
                     type="button"
-                    className="shrink-0 rounded-2xl bg-slate-950 px-3.5 py-2 text-[13px] font-black text-white shadow-sm"
-                    onClick={() => void handleShareTimesheetReport()}
+                    className="mt-2 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2 text-left active:bg-white"
+                    onClick={() => setTimesheetFilterSheetOpen(true)}
                   >
-                    Share
+                    <span className="block truncate text-[13px] font-black text-slate-950">
+                      {timesheetDateRangeLabel}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[12px] font-bold text-slate-500">
+                      {timesheetEmployeeFilterLabel} - {timesheetProjectFilterLabel}
+                      {timesheetCompletedOnly ? " - Completed only" : ""}
+                    </span>
                   </button>
                 </div>
-                <button
-                  type="button"
-                  className="w-full rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:bg-slate-50"
-                  onClick={() => setTimesheetFilterSheetOpen(true)}
-                >
-                  <span className="block text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
-                    Filters
-                  </span>
-                  <span className="mt-1 block truncate text-[14px] font-black text-slate-950">
-                    {timesheetDateRangeLabel} - {timesheetEmployeeFilterLabel} - {timesheetProjectFilterLabel}
-                  </span>
-                  {timesheetCompletedOnly ? (
-                    <span className="mt-2 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-800">
-                      Completed only
-                    </span>
-                  ) : null}
-                </button>
                 {!isAdmin ? (
                   <button
                     type="button"
