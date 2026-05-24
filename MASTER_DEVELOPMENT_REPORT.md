@@ -404,6 +404,26 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-19 Receipts Screen Redesign V1
+- Receipts header kept as `Receipts` and subtitle updated to `Expenses by project`.
+- Receipts filters are organized as Project, Date Range, Employee, and Task.
+- Receipt Project, Employee, and Task filters were compacted, and Date Range continues to use the shared calendar modal.
+- Receipt task filter now feeds the existing media bucket filtering path.
+- Receipt total was moved into a compact premium dark navy KPI card.
+- Receipt project sections now show project name, filtered total amount, and filtered receipt count.
+- Receipt cards were redesigned into compact expense rows with 12px thumbnail corners, supplier/category, amount, project/task, uploaded-by employee, date/time, status chip, map action, and admin OCR action where allowed.
+- Missing or broken receipt images now reveal a clean receipt-image placeholder.
+- Existing receipt upload/storage, project_media, OCR/AI hooks, reports integration, RBAC, and employee visibility logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-19 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-7l6hul85n-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -433,6 +453,7 @@
 - B.1-fix-16 does not require new SQL.
 - B.1-fix-17 does not require new SQL.
 - B.1-fix-18 does not require new SQL.
+- B.1-fix-19 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

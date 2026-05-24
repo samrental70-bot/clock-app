@@ -2986,11 +2986,12 @@ export default function EmployeeClockApp() {
         dateFrom: mediaFilterDateFrom,
         dateTo: mediaFilterDateTo,
         employeeId: mediaFilterEmployeeId,
-        costCentre: "all",
+        costCentre: mediaFilterCostCentre,
         mediaType: "receipt",
         documentationType: "receipt",
       }),
     [
+      mediaFilterCostCentre,
       mediaFilterDateFrom,
       mediaFilterDateTo,
       mediaFilterEmployeeId,
@@ -6393,6 +6394,14 @@ export default function EmployeeClockApp() {
       .map(([folder, label]) => ({ folder, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [scopedProjectPhotos, scopedProjectReceipts]);
+  const receiptProjectOptions = useMemo(() => {
+    return Object.entries(normalizeMediaBuckets(scopedProjectReceipts))
+      .map(([folder, items]) => {
+        const first = normalizeArray(items)[0];
+        return { folder, label: mediaItemProjectName(first) || folder };
+      })
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [scopedProjectReceipts]);
   const visibleDocumentationPhotoBuckets = useMemo(() => {
     if (selectedPhotoFolder === "all") return filteredProjectPhotos;
     return filteredProjectPhotos[selectedPhotoFolder] ? { [selectedPhotoFolder]: filteredProjectPhotos[selectedPhotoFolder] } : {};
@@ -16875,16 +16884,12 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "receipts" && (
-            <Card className="rounded-[24px] overflow-hidden shadow-sm">
+            <Card className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
               <CardContent className="p-3 space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-[22px] font-black leading-tight text-slate-950">Receipts</h2>
-                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Material spend and proof</p>
-                  </div>
-                  <div className="shrink-0 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-right">
-                    <p className="text-[9px] font-black uppercase tracking-wide text-amber-700">Total</p>
-                    <p className="text-[15px] font-black text-slate-950">{formatMoney(receiptTotal)}</p>
+                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Expenses by project</p>
                   </div>
                 </div>
                 {projectMediaSyncError ? (
@@ -16892,29 +16897,52 @@ const handlePhotoQuickUpload = async (event) => {
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <div className="sticky top-2 z-20 rounded-[20px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
+                <div className="rounded-[18px] bg-slate-950 px-4 py-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Receipt total</p>
+                  <p className="mt-1 text-[24px] font-black leading-none">{formatMoney(receiptTotal)}</p>
+                </div>
+                <div className="sticky top-2 z-20 rounded-[18px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
                   <div className="grid grid-cols-2 gap-2">
                     <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                       Project
-                      <select className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950" value={selectedReceiptFolder} onChange={(event) => setSelectedReceiptFolder(event.target.value)}>
+                      <select
+                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        value={selectedReceiptFolder}
+                        onChange={(event) => setSelectedReceiptFolder(event.target.value)}
+                      >
                         <option value="all">All Projects</option>
-                        {receiptFolders.map((folder) => <option key={folder} value={folder}>{folder}</option>)}
+                        {receiptProjectOptions.map((project) => <option key={project.folder} value={project.folder}>{project.label}</option>)}
                       </select>
                     </label>
+                    <DateRangeButton
+                      label="Date range"
+                      rangeLabel={mediaDateRangeLabel}
+                      presetLabel={mediaSelectedRangeLabel}
+                      onClick={openMediaDatePicker}
+                    />
                     <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
                       Employee
-                      <select className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[13px] font-black text-slate-950" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
+                      <select
+                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        value={mediaFilterEmployeeId}
+                        onChange={(e) => setMediaFilterEmployeeId(e.target.value)}
+                      >
                         <option value="all">All Employees</option>
                         {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
                       </select>
                     </label>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Task
+                      <select
+                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                        value={mediaFilterCostCentre}
+                        onChange={(event) => setMediaFilterCostCentre(event.target.value)}
+                      >
+                        <option value="all">All Tasks</option>
+                        {mediaFilterOptions.costCentres.map((costCentre) => <option key={costCentre} value={costCentre}>{costCentre}</option>)}
+                      </select>
+                    </label>
                   </div>
-                  <DateRangeButton
-                    label="Date range"
-                    rangeLabel={mediaDateRangeLabel}
-                    presetLabel={mediaSelectedRangeLabel}
-                    onClick={openMediaDatePicker}
-                  />
                 </div>
                 {visibleReceiptFolders.length === 0 && (
                   <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
@@ -16933,47 +16961,87 @@ const handlePhotoQuickUpload = async (event) => {
                   {visibleReceiptFolders.map((folder) => {
                     const folderReceipts = normalizeArray(filteredProjectReceipts[folder]);
                     const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+                    const projectLabel = receiptProjectOptions.find((project) => project.folder === folder)?.label || folder;
                     return (
                       <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                         <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0"><p className="truncate text-[16px] font-black text-slate-950">{folder}</p><p className="text-xs font-semibold text-slate-500">{folderReceipts.length} receipts</p></div>
-                          <p className="shrink-0 text-[14px] font-black text-slate-950">{formatMoney(folderTotal)}</p>
+                          <div className="min-w-0">
+                            <p className="truncate text-[17px] font-black text-slate-950">{projectLabel}</p>
+                            <p className="mt-0.5 text-[12px] font-semibold text-slate-500">
+                              {folderReceipts.length} {folderReceipts.length === 1 ? "receipt" : "receipts"}
+                            </p>
+                          </div>
+                          <p className="shrink-0 text-[16px] font-black text-slate-950">{formatMoney(folderTotal)}</p>
                         </div>
                         <div className="space-y-2">
-                          {folderReceipts.map((receipt) => (
-                            <div key={receipt.id} className="overflow-hidden rounded-[16px] border border-slate-200 bg-slate-50">
-                              {receipt.dataUrl || receipt.imageUrl ? (
-                                <img src={receipt.dataUrl || receipt.imageUrl} alt="Receipt" className="w-full h-32 object-cover" />
-                              ) : (
-                                <div className="flex h-32 items-center justify-center bg-slate-100 px-4 text-center text-[14px] font-bold text-slate-500">
-                                  Receipt pending
+                          {folderReceipts.map((receipt, index) => {
+                            const receiptUrl = mediaItemUrl(receipt);
+                            const receiptTask = String(receipt.costCenter || receipt.cost_centre || receipt.task || receipt.task_name || "").trim();
+                            const receiptEmployee = mediaItemEmployeeName(receipt);
+                            const receiptDateTime = receipt.capturedAt || receipt.captured_at || receipt.receiptUploadedAt || receipt.receipt_uploaded_at || receipt.timestamp;
+                            const receiptStatus = receipt.status || receipt.receiptStatus || receipt.receipt_status || "";
+                            const receiptProject = mediaItemProjectName(receipt) || projectLabel;
+                            return (
+                              <div key={mediaItemId(receipt, index)} className="rounded-[16px] border border-slate-200 bg-slate-50 p-2.5">
+                                <div className="flex gap-3">
+                                  <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[12px] border border-slate-200 bg-white">
+                                    <div className="absolute inset-0 flex items-center justify-center px-2 text-center text-[11px] font-black text-slate-400">
+                                      Receipt image
+                                    </div>
+                                    {receiptUrl ? (
+                                      <img
+                                        src={receiptUrl}
+                                        alt="Receipt"
+                                        className="relative h-full w-full rounded-[12px] object-cover"
+                                        onError={(event) => {
+                                          event.currentTarget.style.display = "none";
+                                        }}
+                                      />
+                                    ) : null}
+                                  </div>
+                                  <div className="min-w-0 flex-1 text-[12px] font-semibold text-slate-500">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0">
+                                        <p className="truncate text-[14px] font-black text-slate-950">{receipt.supplier || receipt.category || "Receipt"}</p>
+                                        <p className="mt-0.5 truncate">{receiptProject}{receiptTask ? ` / ${receiptTask}` : ""}</p>
+                                      </div>
+                                      <p className="shrink-0 text-[14px] font-black text-slate-950">{formatMoney(receipt.amount)}</p>
+                                    </div>
+                                    <p className="mt-1 truncate">Uploaded by {receiptEmployee}</p>
+                                    {receiptDateTime ? (
+                                      <p className="mt-0.5 truncate">{formatDate(receiptDateTime, companyTimeZone)} - {formatTime(receiptDateTime, companyTimeZone)}</p>
+                                    ) : null}
+                                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                      {receiptStatus ? (
+                                        <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-700 ring-1 ring-slate-200">
+                                          {receiptStatus}
+                                        </span>
+                                      ) : null}
+                                      {receipt.location ? (
+                                        <button
+                                          type="button"
+                                          className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-black text-slate-700"
+                                          onClick={() => openMap(receipt.location)}
+                                        >
+                                          Map
+                                        </button>
+                                      ) : null}
+                                      {isAdmin ? (
+                                        <button
+                                          type="button"
+                                          className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[10px] font-black text-amber-700 disabled:opacity-50"
+                                          onClick={() => void runFieldAiForMedia(receipt, "receipt")}
+                                          disabled={Boolean(fieldAiWorkingKey)}
+                                        >
+                                          AI read
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
                                 </div>
-                              )}
-                              <div className="p-3 text-xs font-semibold text-slate-600 space-y-1">
-                                <div className="flex justify-between gap-3"><p className="truncate font-black text-slate-950">{receipt.supplier || receipt.category || "Receipt"}</p><p className="shrink-0 font-black text-slate-950">{formatMoney(receipt.amount)}</p></div>
-                                <p>{receipt.employee} • {receipt.costCenter}</p>
-                                {receipt.status || receipt.receiptStatus ? (
-                                  <p className="inline-flex rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-800">
-                                    {receipt.status || receipt.receiptStatus}
-                                  </p>
-                                ) : null}
-                                <p>{formatDate(new Date(receipt.capturedAt), companyTimeZone)}</p>
-                                {receipt.location ? (
-                                  <button className="underline text-blue-700 font-semibold" onClick={() => openMap(receipt.location)}>Map</button>
-                                ) : null}
-                                {isAdmin ? (
-                                  <button
-                                    type="button"
-                                    className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-800 disabled:opacity-50"
-                                    onClick={() => void runFieldAiForMedia(receipt, "receipt")}
-                                    disabled={Boolean(fieldAiWorkingKey)}
-                                  >
-                                    AI Read Receipt
-                                  </button>
-                                ) : null}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
