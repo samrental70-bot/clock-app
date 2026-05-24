@@ -119,6 +119,64 @@ textarea {
   box-shadow: var(--opera-card-shadow);
 }
 
+.opera-page-card {
+  background: var(--opera-surface);
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  box-shadow: var(--opera-card-shadow);
+}
+
+.opera-section-card {
+  background: var(--opera-surface);
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: var(--opera-card-shadow);
+}
+
+.opera-filter-card {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: var(--opera-card-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.opera-kpi-box {
+  min-width: 0;
+  border: 1px solid var(--opera-border);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--opera-surface-soft);
+}
+
+.opera-kpi-box p {
+  margin: 0;
+  color: var(--opera-text-secondary);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.opera-kpi-box strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--opera-text);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.opera-kpi-primary {
+  background: var(--opera-navy);
+  color: white;
+}
+
+.opera-kpi-primary p,
+.opera-kpi-primary strong {
+  color: white;
+}
+
 .opera-button {
   border-radius: 14px;
   background: var(--opera-navy);
@@ -126,6 +184,196 @@ textarea {
   font-size: 15px;
   font-weight: 650;
   box-shadow: none;
+}
+
+.opera-primary-button {
+  min-height: 48px;
+  border-radius: 14px !important;
+  background: var(--opera-navy) !important;
+  color: white !important;
+}
+
+.opera-secondary-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: white;
+  color: #334155;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.opera-danger-action {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #fecaca;
+  border-radius: 14px;
+  background: #fef2f2;
+  color: var(--opera-red);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.opera-empty-state {
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  background: var(--opera-surface-soft);
+  padding: 16px;
+  text-align: center;
+}
+
+.opera-empty-title {
+  margin: 0;
+  color: var(--opera-text);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.opera-empty-body {
+  margin: 4px 0 0;
+  color: var(--opera-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.opera-status-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.opera-status-neutral {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.opera-status-success {
+  background: #ecfdf5;
+  color: var(--opera-green);
+}
+
+.opera-status-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.opera-status-danger {
+  background: #fef2f2;
+  color: var(--opera-red);
+}
+
+.opera-activity-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--opera-border);
+  border-radius: 14px;
+  background: var(--opera-surface-soft);
+  padding: 10px 12px;
+}
+
+.opera-activity-icon {
+  display: flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--opera-border);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.opera-activity-title {
+  margin: 0;
+  color: var(--opera-text);
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.opera-activity-detail {
+  margin: 2px 0 0;
+  color: var(--opera-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.opera-activity-time {
+  margin: 0;
+  color: var(--opera-text-secondary);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.opera-app-header {
+  min-height: 72px;
+  border: 1px solid var(--opera-border);
+  border-radius: 20px;
+  background: white;
+  padding: 8px 10px;
+  box-shadow: var(--opera-card-shadow);
+}
+
+.opera-header-icon-button {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--opera-border);
+  border-radius: 14px;
+  background: var(--opera-surface-soft);
+  color: var(--opera-text);
+}
+
+.opera-header-icon-button:active {
+  background: white;
+}
+
+.opera-header-icon-button:disabled {
+  opacity: 0.55;
+}
+
+.opera-dev-chip {
+  flex-shrink: 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 2px 6px;
+  color: #1d4ed8;
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.opera-notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: flex;
+  height: 18px;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--opera-red);
+  padding: 0 4px;
+  color: white;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
 }
 
 .opera-shell .bg-\[\#edf2f7\],

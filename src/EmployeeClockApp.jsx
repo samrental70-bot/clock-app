@@ -20,6 +20,149 @@ const Button = ({ children, className, ...props }) => (
   </button>
 );
 
+const PageCard = ({ children, className = "" }) => (
+  <div className={`opera-page-card ${className}`}>{children}</div>
+);
+
+const SectionCard = ({ children, className = "" }) => (
+  <section className={`opera-section-card ${className}`}>{children}</section>
+);
+
+const KPIBox = ({ label, value, tone = "neutral", className = "" }) => (
+  <div className={`opera-kpi-box opera-kpi-${tone} ${className}`}>
+    <p>{label}</p>
+    <strong>{value}</strong>
+  </div>
+);
+
+const PrimaryButton = ({ children, className = "", ...props }) => (
+  <Button className={`opera-primary-button ${className}`} {...props}>
+    {children}
+  </Button>
+);
+
+const SecondaryButton = ({ children, className = "", ...props }) => (
+  <button type="button" className={`opera-secondary-button ${className}`} {...props}>
+    {children}
+  </button>
+);
+
+const DangerAction = ({ children, className = "", ...props }) => (
+  <button type="button" className={`opera-danger-action ${className}`} {...props}>
+    {children}
+  </button>
+);
+
+const EmptyState = ({ title, body, action, className = "" }) => (
+  <div className={`opera-empty-state ${className}`}>
+    <p className="opera-empty-title">{title}</p>
+    {body ? <p className="opera-empty-body">{body}</p> : null}
+    {action ? <div className="mt-3">{action}</div> : null}
+  </div>
+);
+
+const StatusChip = ({ children, tone = "neutral", className = "" }) => (
+  <span className={`opera-status-chip opera-status-${tone} ${className}`}>{children}</span>
+);
+
+const FilterCard = ({ children, className = "" }) => (
+  <div className={`opera-filter-card ${className}`}>{children}</div>
+);
+
+const ActivityRow = ({ initial = "A", title, detail, time, tone = "", className = "" }) => (
+  <div className={`opera-activity-row ${className}`}>
+    <span className={`opera-activity-icon ${tone}`}>{String(initial || "A").slice(0, 1).toUpperCase()}</span>
+    <div className="min-w-0">
+      <p className="opera-activity-title">{title}</p>
+      {detail ? <p className="opera-activity-detail">{detail}</p> : null}
+    </div>
+    {time ? <p className="opera-activity-time">{time}</p> : null}
+  </div>
+);
+
+const AppHeader = ({
+  companyName,
+  metaLabel,
+  iconSrc,
+  isDevelopment,
+  unreadCount = 0,
+  refreshDisabled = false,
+  onMenu,
+  onRefresh,
+  onNotifications,
+}) => (
+  <div className="opera-app-header">
+    <div className="flex items-center justify-between gap-2">
+      <button type="button" onClick={onMenu} className="opera-header-icon-button" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <path d="M5 7h14" />
+          <path d="M5 12h14" />
+          <path d="M5 17h14" />
+        </svg>
+      </button>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <img src={iconSrc} alt="" className="h-9 w-9 shrink-0 rounded-[12px]" />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h1 className="truncate text-[15px] font-black leading-tight text-slate-950">{companyName || "Company"}</h1>
+            {isDevelopment ? (
+              <span className="opera-dev-chip">Dev</span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 truncate text-[11px] font-bold leading-snug text-slate-500">{metaLabel}</p>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="opera-header-icon-button"
+          aria-label="Refresh"
+          disabled={refreshDisabled}
+        >
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12a9 9 0 0 1-15.5 6.3" />
+            <path d="M3 12a9 9 0 0 1 15.5-6.3" />
+            <path d="M3 18v-5h5" />
+            <path d="M21 6v5h-5" />
+          </svg>
+        </button>
+        <button type="button" onClick={onNotifications} className="opera-header-icon-button relative" aria-label="Notifications">
+          <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+            <path d="M10 21h4" />
+          </svg>
+          {unreadCount > 0 ? (
+            <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+          ) : null}
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onMore }) => {
+  const itemClass = (active, emphasized = false) =>
+    `rounded-[16px] py-2.5 px-1 text-[13px] font-black transition ${
+      active
+        ? "bg-slate-950 text-white"
+        : emphasized
+          ? "bg-emerald-50 text-emerald-800 active:bg-emerald-100"
+          : "text-slate-500 active:bg-slate-100"
+    }`;
+  const homeActive = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
+  return (
+    <div className="opera-bottom-nav fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/90 px-1.5 py-1.5 backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]">
+      <div className="grid grid-cols-4 gap-1">
+        <button type="button" onClick={onHome} className={itemClass(homeActive)}>Home</button>
+        <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>Schedule</button>
+        <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>Clock</button>
+        <button type="button" onClick={onMore} className={itemClass(false)}>More</button>
+      </div>
+    </div>
+  );
+};
+
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
     type="button"
@@ -2316,7 +2459,7 @@ function scheduleShortEmployeeSummary(assignRows, fallbackNames) {
     }
   }
   const unique = [...new Set(names)];
-  return unique.length > 0 ? unique.join(", ") : "No emp";
+  return unique.length > 0 ? unique.join(", ") : "Unassigned";
 }
 
 async function createCompanyNotifications(supabase, params) {
@@ -14063,7 +14206,7 @@ const handlePhotoQuickUpload = async (event) => {
       task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
     const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
     const employeeSummary =
-      fromTaskNames !== "No emp"
+      fromTaskNames !== "Unassigned"
         ? fromTaskNames
         : scheduleShortEmployeeSummary(linkRow ? [linkRow] : [], "");
     const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
@@ -15187,78 +15330,20 @@ const handlePhotoQuickUpload = async (event) => {
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
         <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
-          <div className="min-h-[72px] rounded-[20px] bg-white border border-slate-200/90 px-2.5 py-2 shadow-[0_8px_22px_rgba(15,23,42,0.07)]">
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setMenuPanel("main");
-                  setIsMenuOpen(true);
-                }}
-                className="h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
-                style={{ fontSize: 0, lineHeight: 0 }}
-                aria-label="Open menu"
-              >
-                <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M5 7h14" />
-                  <path d="M5 12h14" />
-                  <path d="M5 17h14" />
-                </svg>
-              </button>
-              <div className="flex flex-1 min-w-0 items-center gap-2">
-                <img src={OPERA_APP_ICON} alt="" className="h-9 w-9 shrink-0 rounded-[12px]" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5">
-                    <h1 className="truncate text-[15px] font-black leading-tight text-slate-950">
-                      {userCompany?.name || "Company"}
-                    </h1>
-                    {IS_OPERA_DEVELOPMENT_APP && (
-                      <span className="shrink-0 rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wide text-blue-700">
-                        Dev
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 truncate text-[11px] font-bold text-slate-500 leading-snug">
-                    {appHeaderMetaLabel}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={handleHeaderRefresh}
-                  className="h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white disabled:opacity-60"
-                  style={{ fontSize: 0, lineHeight: 0 }}
-                  aria-label="Refresh"
-                  disabled={dashboardLoading || timesheetsLoading}
-                >
-                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 12a9 9 0 0 1-15.5 6.3" />
-                    <path d="M3 12a9 9 0 0 1 15.5-6.3" />
-                    <path d="M3 18v-5h5" />
-                    <path d="M21 6v5h-5" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("notifications")}
-                  className="relative h-9 w-9 overflow-hidden rounded-[14px] border border-slate-200 bg-slate-50 flex items-center justify-center text-[0px] text-transparent active:bg-white"
-                  style={{ fontSize: 0, lineHeight: 0 }}
-                  aria-label="Notifications"
-                >
-                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-slate-900" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-                    <path d="M10 21h4" />
-                  </svg>
-                  {inAppNotifUnread > 0 && (
-                    <span className="absolute -top-1 -right-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-600 px-1 text-[8px] font-black leading-none text-white">
-                      {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
-                    </span>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
+          <AppHeader
+            companyName={userCompany?.name || "Company"}
+            metaLabel={appHeaderMetaLabel}
+            iconSrc={OPERA_APP_ICON}
+            isDevelopment={IS_OPERA_DEVELOPMENT_APP}
+            unreadCount={inAppNotifUnread}
+            refreshDisabled={dashboardLoading || timesheetsLoading}
+            onMenu={() => {
+              setMenuPanel("main");
+              setIsMenuOpen(true);
+            }}
+            onRefresh={handleHeaderRefresh}
+            onNotifications={() => setActiveTab("notifications")}
+          />
 
           {!isAdmin && activeAssignNotif ? (
             <div className="fixed inset-0 z-[72] bg-black/40 px-3 py-6" role="dialog" aria-modal="true">
@@ -24063,7 +24148,7 @@ const handlePhotoQuickUpload = async (event) => {
                     >
                       <span className="inline-flex items-center gap-3">
                         <span className="h-3 w-3 rounded-full bg-violet-600 shadow-[0_0_0_4px_rgba(124,58,237,0.12)]" />
-                        Pictures
+                        Photos
                       </span>
                       {photoNotificationCount > 0 && (
                         <span className="ml-2 rounded-full bg-red-600 text-white text-[11px] px-2 py-0.5 align-middle">
@@ -24150,116 +24235,18 @@ const handlePhotoQuickUpload = async (event) => {
           </div>
         )}
 
-        <div
-          className="opera-bottom-nav fixed bottom-2 left-1/2 z-50 w-[calc(100%-1rem)] max-w-[22.5rem] -translate-x-1/2 rounded-[24px] border border-slate-200 bg-white/90 px-1.5 py-1.5 shadow-[0_8px_24px_rgba(15,23,42,0.08)] backdrop-blur-2xl pb-[max(0.375rem,env(safe-area-inset-bottom,0px))]"
-        >
-          <div className="hidden">
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setActiveTab("dashboard")}
-                className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "dashboard" ? "bg-slate-900 text-white" : "text-slate-500"}`}
-              >
-                Dashboard
-              </button>
-            )}
-            {!isAdmin && (
-              <button
-                type="button"
-                onClick={() => setActiveTab("schedule")}
-                className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "schedule" ? "bg-slate-900 text-white" : "text-slate-500"}`}
-              >
-                📅 Schedule
-              </button>
-            )}
-            <button onClick={() => setActiveTab("clock")} className={`rounded-2xl py-2.5 px-2 text-[15px] font-bold ${activeTab === "clock" ? "bg-slate-900 text-white" : "text-slate-500"}`}>⏱ Clock</button>
-          </div>
-          <div className="grid grid-cols-4 gap-1">
-            {isAdmin ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("dashboard")}
-                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${activeTab === "dashboard" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
-                >
-                  Home
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("schedule")}
-                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${activeTab === "schedule" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
-                >
-                  Schedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("clock")}
-                  className={`rounded-[18px] py-2.5 px-2 text-[14px] font-black transition ${activeTab === "clock" ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]" : "text-slate-500 active:bg-slate-100"}`}
-                >
-                  Clock
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuPanel("main");
-                    setIsMenuOpen(true);
-                  }}
-                  className="rounded-[18px] py-2.5 px-2 text-[14px] font-black text-slate-500 transition active:bg-slate-100"
-                >
-                  More
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("activities")}
-                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${
-                    activeTab === "activities"
-                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
-                      : "text-slate-500 active:bg-slate-100"
-                  }`}
-                >
-                  Home
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("schedule")}
-                  className={`rounded-[18px] py-2.5 px-1 text-[clamp(12px,3.4vw,14px)] font-black transition ${
-                    activeTab === "schedule"
-                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
-                      : "text-slate-500 active:bg-slate-100"
-                  }`}
-                >
-                  Schedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab("clock")}
-                  className={`rounded-[18px] py-2.5 px-2 text-[14px] font-black transition ${
-                    activeTab === "clock"
-                      ? "bg-slate-950 text-white shadow-[0_8px_18px_rgba(15,23,42,0.20)]"
-                      : visibleCurrentShift
-                        ? "bg-emerald-50 text-emerald-800 active:bg-emerald-100"
-                        : "text-slate-500 active:bg-slate-100"
-                  }`}
-                >
-                  Clock
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuPanel("main");
-                    setIsMenuOpen(true);
-                  }}
-                  className="rounded-[18px] py-2.5 px-2 text-[14px] font-black text-slate-500 transition active:bg-slate-100"
-                >
-                  More
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+        <BottomNav
+          isAdmin={isAdmin}
+          activeTab={activeTab}
+          visibleCurrentShift={visibleCurrentShift}
+          onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
+          onSchedule={() => setActiveTab("schedule")}
+          onClock={() => setActiveTab("clock")}
+          onMore={() => {
+            setMenuPanel("main");
+            setIsMenuOpen(true);
+          }}
+        />
       </div>
     </div>
   );

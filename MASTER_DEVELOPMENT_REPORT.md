@@ -424,6 +424,26 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-20 Final UI Professionalization Pass V1
+- Shared design primitives were standardized in the app layer: AppHeader, BottomNav, PageCard, SectionCard, KPIBox, PrimaryButton, SecondaryButton, DangerAction, EmptyState, ActivityRow, FilterCard, and StatusChip.
+- Global CSS tokens now expose the final field-operations UI system for navy, slate, blue, green, amber, purple, red, surfaces, borders, spacing-friendly radii, and light shadows.
+- AppHeader now renders through one shared compact component with menu, logo, company name, date/user metadata, refresh, and notification bell.
+- Bottom navigation now renders through one shared component with visible Home / Schedule / Clock / More only.
+- Hidden legacy emoji navigation markup was removed.
+- Global `No emp` fallback was replaced with `Unassigned`.
+- Visible `Pictures` menu fallback wording was changed to `Photos`.
+- Existing Home, Clock, Schedule, Timesheets, Team, Photos, Receipts, and More/Menu logic remains unchanged.
+- Development screenshot smoke capture reached the deployed Login screen only; authenticated screen-by-screen screenshots still require a signed-in browser session or QA credentials.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-20 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-f689vm45c-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -454,6 +474,7 @@
 - B.1-fix-17 does not require new SQL.
 - B.1-fix-18 does not require new SQL.
 - B.1-fix-19 does not require new SQL.
+- B.1-fix-20 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
