@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-13
+- Current development version: B.1-fix-14
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -290,6 +290,32 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-14 Clock Screen Redesign V1
+- Before clock-in screen redesigned around a compact `Select work` card.
+- Project / Job site and Task fields cleaned while preserving existing project/task data, assignment rules, and employee visibility.
+- Task helper text now appears only when a project must be selected to load tasks.
+- Add Project / Add Task moved out of primary field labels into a smaller secondary admin actions row.
+- Clock In remains the primary full-width navy action.
+- Photo and Receipt actions are secondary buttons below Clock In.
+- Task List and Material List remain secondary links/buttons and no longer use colored competing surfaces.
+- Active shift timer card flattened to the standard white surface with border, 20px radius, and subtle shadow.
+- Active shift card now shows a small Working status chip, project/task, timer, earned amount, and sync status.
+- Timer scale reduced to a professional mobile size while preserving live timer and live earned amount updates.
+- Clock Out moved to a full-width primary navy action after clock-in.
+- Photo, Receipt, Change Task, and Start Break are secondary action buttons.
+- Break label changed to Start Break for the initial break action.
+- Visible emoji-style action icons were removed from the Clock screen.
+- Existing clock, location, photo, receipt, change-task, break, and project/task permission logic was preserved.
+- No SQL, database, AI, or business-logic changes were made.
+
+## B.1-fix-14 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-fmrt1c4de-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -314,6 +340,7 @@
 - B.1-fix-11C does not require new SQL.
 - B.1-fix-12 does not require new SQL.
 - B.1-fix-13 does not require new SQL.
+- B.1-fix-14 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
