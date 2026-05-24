@@ -83,7 +83,7 @@
 
 ## B.1-fix-6 Build / Deployment
 - Local build status: Passed.
-- Development preview deployment: Pending.
+- Development preview deployment: Completed.
 - Development URL: https://project-rui1d-development.vercel.app
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
