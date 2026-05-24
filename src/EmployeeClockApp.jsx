@@ -20,6 +20,136 @@ const Button = ({ children, className, ...props }) => (
   </button>
 );
 
+const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
+  <button
+    type="button"
+    className="w-full min-w-0 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
+    onClick={onClick}
+  >
+    <span className="flex items-center justify-between gap-3">
+      <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
+      <span className="shrink-0 rounded-full bg-slate-950 px-2.5 py-1 text-[10px] font-black text-white">
+        {presetLabel}
+      </span>
+    </span>
+    <span className="mt-2 block text-[18px] font-black leading-tight text-slate-950">
+      {rangeLabel || "Choose dates"}
+    </span>
+  </button>
+);
+
+const StandardDateRangeModal = ({
+  open,
+  eyebrow = "Date range",
+  title = "Date range",
+  mode,
+  options = [],
+  draftFrom,
+  draftTo,
+  rangeLabel,
+  onModeChange,
+  onDraftFromChange,
+  onDraftToChange,
+  onCancel,
+  onApply,
+}) => {
+  if (!open) return null;
+  const invalidCustom = mode === "custom" && draftFrom && draftTo && draftFrom > draftTo;
+  return (
+    <div
+      className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-3 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      onClick={onCancel}
+    >
+      <div
+        className="w-full max-w-sm rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_28px_80px_rgba(15,23,42,0.34)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">{eyebrow}</p>
+            <h3 className="mt-1 text-[22px] font-black leading-tight text-slate-950">{title}</h3>
+          </div>
+          <button
+            type="button"
+            className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
+            onClick={onCancel}
+            aria-label="Close date range"
+          >
+            x
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-4 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1">
+          {options.map((option) => (
+            <button
+              key={`date-range-${option.id}`}
+              type="button"
+              className={`rounded-[14px] px-1.5 py-2 text-[12px] font-black leading-tight ${
+                mode === option.id
+                  ? "bg-blue-600 text-white shadow-[0_10px_20px_rgba(37,99,235,0.22)]"
+                  : "text-slate-700 active:bg-white"
+              }`}
+              onClick={() => onModeChange(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
+          <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected range</p>
+          <p className="mt-1 text-[20px] font-black leading-tight text-slate-950">{rangeLabel}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+              From
+              <input
+                type="date"
+                className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                value={draftFrom}
+                disabled={mode !== "custom"}
+                onChange={(event) => onDraftFromChange(event.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+              To
+              <input
+                type="date"
+                className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                value={draftTo}
+                disabled={mode !== "custom"}
+                onChange={(event) => onDraftToChange(event.target.value)}
+              />
+            </label>
+          </div>
+        </div>
+        {invalidCustom ? (
+          <p className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+            Start date must be before end date.
+          </p>
+        ) : null}
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-black text-slate-900"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <Button
+            type="button"
+            className="rounded-2xl px-4 py-3 text-[15px] font-black"
+            disabled={mode === "custom" && (!draftFrom || !draftTo || draftFrom > draftTo)}
+            onClick={onApply}
+          >
+            Apply
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const employees = [
   { id: 1, name: "Sam", role: "Admin", hourlyRate: 65 },
   { id: 2, name: "Anmol", role: "Admin", hourlyRate: 40 },
@@ -958,6 +1088,25 @@ function computeReportsQuickRange(preset, now, timeZone) {
     return { from: fromKey, to: toKey };
   }
   return { from: "", to: "" };
+}
+
+function computeStandardDateRange(preset, now, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const todayKey = calendarDateKeyInTimeZone(now, tz);
+  if (!todayKey) return { from: "", to: "" };
+  if (preset === "last_365") {
+    return { from: addWallDaysInTimeZone(todayKey, -365, tz) || todayKey, to: todayKey };
+  }
+  return computeReportsQuickRange(preset, now, tz);
+}
+
+function standardDateRangePresetLabel(preset) {
+  if (preset === "today") return "Today";
+  if (preset === "weekly") return "Week";
+  if (preset === "monthly") return "Month";
+  if (preset === "yearly") return "Year";
+  if (preset === "last_365") return "Year";
+  return "Custom";
 }
 
 function reportsCostCentreKeyFromRow(row) {
@@ -2570,6 +2719,11 @@ export default function EmployeeClockApp() {
   const [mediaFilterCostCentre, setMediaFilterCostCentre] = useState("all");
   const [mediaFilterMediaType, setMediaFilterMediaType] = useState("all");
   const [mediaFilterDocumentationType, setMediaFilterDocumentationType] = useState("all");
+  const [mediaRangePreset, setMediaRangePreset] = useState("last_365");
+  const [mediaDatePickerOpen, setMediaDatePickerOpen] = useState(false);
+  const [mediaDatePickerMode, setMediaDatePickerMode] = useState("last_365");
+  const [mediaDraftDateFrom, setMediaDraftDateFrom] = useState("");
+  const [mediaDraftDateTo, setMediaDraftDateTo] = useState("");
   const [projectDocsView, setProjectDocsView] = useState("projects");
   const [fieldAiStatus, setFieldAiStatus] = useState({
     checked: false,
@@ -2813,17 +2967,14 @@ export default function EmployeeClockApp() {
         dateFrom: mediaFilterDateFrom,
         dateTo: mediaFilterDateTo,
         employeeId: mediaFilterEmployeeId,
-        costCentre: mediaFilterCostCentre,
-        mediaType: mediaFilterMediaType,
-        documentationType: mediaFilterDocumentationType,
+        costCentre: "all",
+        mediaType: "all",
+        documentationType: "all",
       }),
     [
-      mediaFilterCostCentre,
       mediaFilterDateFrom,
       mediaFilterDateTo,
-      mediaFilterDocumentationType,
       mediaFilterEmployeeId,
-      mediaFilterMediaType,
       scopedProjectPhotos,
     ]
   );
@@ -2912,6 +3063,11 @@ export default function EmployeeClockApp() {
   const [timesheetEmployeeFilter, setTimesheetEmployeeFilter] = useState("all");
   const [timesheetProjectFilter, setTimesheetProjectFilter] = useState("all");
   const [timesheetShareMessage, setTimesheetShareMessage] = useState("");
+  const [timesheetRangePreset, setTimesheetRangePreset] = useState("today");
+  const [timesheetDatePickerOpen, setTimesheetDatePickerOpen] = useState(false);
+  const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
+  const [timesheetDraftDateFrom, setTimesheetDraftDateFrom] = useState("");
+  const [timesheetDraftDateTo, setTimesheetDraftDateTo] = useState("");
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
@@ -14479,8 +14635,24 @@ const handlePhotoQuickUpload = async (event) => {
     { id: "weekly", label: "Week" },
     { id: "monthly", label: "Month" },
   ];
+  const standardDateRangeOptions = [
+    { id: "today", label: "Today" },
+    { id: "weekly", label: "Week" },
+    { id: "monthly", label: "Month" },
+    { id: "custom", label: "Custom" },
+  ];
+  const mediaDateRangeOptions = [
+    { id: "last_365", label: "Year" },
+    { id: "monthly", label: "Month" },
+    { id: "weekly", label: "Week" },
+    { id: "custom", label: "Custom" },
+  ];
 
   const reportsDateRangeLabel = formatReportDateRangeLabel(reportsDateFrom, reportsDateTo);
+  const mediaDateRangeLabel = formatReportDateRangeLabel(mediaFilterDateFrom, mediaFilterDateTo);
+  const mediaSelectedRangeLabel = standardDateRangePresetLabel(mediaRangePreset);
+  const timesheetDateRangeLabel = formatReportDateRangeLabel(timesheetRangeBounds.from, timesheetRangeBounds.to);
+  const timesheetSelectedRangeLabel = standardDateRangePresetLabel(timesheetRangePreset);
 
   const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
     ? reportsRowsFilteredForUi.length
@@ -14652,6 +14824,63 @@ const handlePhotoQuickUpload = async (event) => {
     }
     applyReportsPreset(reportsDatePickerMode);
     setReportsDatePickerOpen(false);
+  };
+  const updateDraftRangeForMode = ({ mode, setFrom, setTo }) => {
+    if (mode === "custom") return;
+    const { from, to } = computeStandardDateRange(mode, new Date(), companyTimeZone);
+    if (from) setFrom(from);
+    if (to) setTo(to);
+  };
+  const openMediaDatePicker = () => {
+    setMediaDraftDateFrom(mediaFilterDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setMediaDraftDateTo(mediaFilterDateTo || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setMediaDatePickerMode(mediaRangePreset || "last_365");
+    setMediaDatePickerOpen(true);
+  };
+  const applyMediaDatePicker = () => {
+    if (mediaDatePickerMode === "custom") {
+      setMediaFilterDateFrom(mediaDraftDateFrom);
+      setMediaFilterDateTo(mediaDraftDateTo);
+      setMediaRangePreset("custom");
+      setMediaDatePickerOpen(false);
+      return;
+    }
+    const { from, to } = computeStandardDateRange(mediaDatePickerMode, new Date(), companyTimeZone);
+    if (from) setMediaFilterDateFrom(from);
+    if (to) setMediaFilterDateTo(to);
+    setMediaRangePreset(mediaDatePickerMode);
+    setMediaDatePickerOpen(false);
+  };
+  const openTimesheetDatePicker = () => {
+    setTimesheetDraftDateFrom(timesheetRangeBounds.from || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setTimesheetDraftDateTo(timesheetRangeBounds.to || calendarDateKeyInTimeZone(new Date(), companyTimeZone));
+    setTimesheetDatePickerMode(timesheetRangePreset || "today");
+    setTimesheetDatePickerOpen(true);
+  };
+  const applyTimesheetDatePicker = () => {
+    if (timesheetDatePickerMode === "custom") {
+      setTimesheetViewMode("range");
+      setTimesheetDateFrom(timesheetDraftDateFrom);
+      setTimesheetDateTo(timesheetDraftDateTo);
+      setTimesheetRangePreset("custom");
+      setTimesheetDatePickerOpen(false);
+      return;
+    }
+    const { from, to } = computeStandardDateRange(timesheetDatePickerMode, new Date(), companyTimeZone);
+    if (!from || !to) return;
+    if (timesheetDatePickerMode === "today") {
+      setTimesheetViewMode("day");
+      setTimesheetDateKey(from);
+    } else if (timesheetDatePickerMode === "weekly") {
+      setTimesheetViewMode("week");
+      setTimesheetDateKey(from);
+    } else {
+      setTimesheetViewMode("range");
+      setTimesheetDateFrom(from);
+      setTimesheetDateTo(to);
+    }
+    setTimesheetRangePreset(timesheetDatePickerMode);
+    setTimesheetDatePickerOpen(false);
   };
 
   const appHeaderDateLabel = (() => {
@@ -15765,65 +15994,12 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 )}
                 <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-2.5 shadow-sm">
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {[
-                      { id: "day", label: "Day" },
-                      { id: "week", label: "Week" },
-                      { id: "range", label: "Range" },
-                    ].map((mode) => (
-                      <button
-                        key={mode.id}
-                        type="button"
-                        className={`rounded-xl py-2.5 text-[14px] font-bold ${
-                          timesheetViewMode === mode.id
-                            ? "bg-slate-900 text-white"
-                            : "bg-white text-slate-800 border border-slate-200"
-                        }`}
-                        onClick={() => setTimesheetViewMode(mode.id)}
-                      >
-                        {mode.label}
-                      </button>
-                    ))}
-                  </div>
-                  {timesheetViewMode === "range" ? (
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-[13px] font-semibold text-slate-700">
-                        From
-                        <input
-                          type="date"
-                          className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
-                          value={timesheetDateFrom}
-                          onChange={(e) => setTimesheetDateFrom(e.target.value)}
-                        />
-                      </label>
-                      <label className="space-y-1 text-[13px] font-semibold text-slate-700">
-                        To
-                        <input
-                          type="date"
-                          className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
-                          value={timesheetDateTo}
-                          onChange={(e) => setTimesheetDateTo(e.target.value)}
-                        />
-                      </label>
-                    </div>
-                  ) : (
-                    <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
-                      {timesheetViewMode === "week" ? "Week containing" : "Date"}
-                      <input
-                        type="date"
-                        className="w-full rounded-xl border bg-white px-2 py-2 text-[15px]"
-                        value={timesheetDateKey}
-                        onChange={(e) => setTimesheetDateKey(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  {timesheetRangeBounds.from && timesheetRangeBounds.to && (
-                    <p className="text-[13px] font-medium text-slate-600">
-                      Showing {timesheetRangeBounds.from === timesheetRangeBounds.to
-                        ? timesheetRangeBounds.from
-                        : `${timesheetRangeBounds.from} to ${timesheetRangeBounds.to}`}
-                    </p>
-                  )}
+                  <DateRangeButton
+                    label="Date range"
+                    rangeLabel={timesheetDateRangeLabel}
+                    presetLabel={timesheetSelectedRangeLabel}
+                    onClick={openTimesheetDatePicker}
+                  />
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1 text-[13px] font-semibold text-slate-700">
                       Employee
@@ -15887,6 +16063,28 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                   {visibleTimesheetRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
+                <StandardDateRangeModal
+                  open={timesheetDatePickerOpen}
+                  eyebrow="Timesheet"
+                  title="Choose dates"
+                  mode={timesheetDatePickerMode}
+                  options={standardDateRangeOptions}
+                  draftFrom={timesheetDraftDateFrom}
+                  draftTo={timesheetDraftDateTo}
+                  rangeLabel={formatReportDateRangeLabel(timesheetDraftDateFrom, timesheetDraftDateTo)}
+                  onModeChange={(mode) => {
+                    setTimesheetDatePickerMode(mode);
+                    updateDraftRangeForMode({
+                      mode,
+                      setFrom: setTimesheetDraftDateFrom,
+                      setTo: setTimesheetDraftDateTo,
+                    });
+                  }}
+                  onDraftFromChange={setTimesheetDraftDateFrom}
+                  onDraftToChange={setTimesheetDraftDateTo}
+                  onCancel={() => setTimesheetDatePickerOpen(false)}
+                  onApply={applyTimesheetDatePicker}
+                />
               </CardContent>
             </Card>
           )}
@@ -15896,132 +16094,49 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-3.5 space-y-3">
                 <div className="rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <h2 className="font-black text-[23px] leading-tight text-slate-950">Pictures</h2>
-                  <p className="mt-1 text-[14px] font-semibold text-slate-500">
-                    {projectMediaLoading ? "Refreshing media..." : "Photos and videos by project."}
-                  </p>
+                  {projectMediaLoading ? (
+                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Refreshing media...</p>
+                  ) : null}
                 </div>
                 {projectMediaSyncError ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                  Project
-                  <select className="w-full rounded-[20px] border border-slate-200 bg-white p-3 text-[16px] font-black text-slate-950 shadow-sm" value={selectedPhotoFolder} onChange={(event) => setSelectedPhotoFolder(event.target.value)}>
-                    <option value="all">All Projects</option>
-                    {pictureProjectOptions.map((project) => (
-                      <option key={project.folder} value={project.folder}>{project.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                      From
-                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateFrom} onChange={(e) => setMediaFilterDateFrom(e.target.value)} />
-                    </label>
-                    <label className="space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                      To
-                      <input type="date" className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDateTo} onChange={(e) => setMediaFilterDateTo(e.target.value)} />
-                    </label>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterEmployeeId} onChange={(e) => setMediaFilterEmployeeId(e.target.value)}>
-                      <option value="all">All employees</option>
-                      {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-                    </select>
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterCostCentre} onChange={(e) => setMediaFilterCostCentre(e.target.value)}>
-                      <option value="all">All tasks</option>
-                      {mediaFilterOptions.costCentres.map((task) => <option key={task} value={task}>{task}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterMediaType} onChange={(e) => setMediaFilterMediaType(e.target.value)}>
-                      <option value="all">All media</option>
-                      <option value="photo">Photos only</option>
-                      <option value="video">Videos only</option>
-                      <option value="receipt">Receipts only</option>
-                    </select>
-                    <select className="h-11 rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-bold" value={mediaFilterDocumentationType} onChange={(e) => setMediaFilterDocumentationType(e.target.value)}>
-                      <option value="all">All types</option>
-                      {DOCUMENTATION_TYPE_OPTIONS.map((option) => (
-                        <option key={option.id} value={option.id}>{option.label}</option>
+                <div className="rounded-[26px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                    Project
+                    <select
+                      className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      value={selectedPhotoFolder}
+                      onChange={(event) => setSelectedPhotoFolder(event.target.value)}
+                    >
+                      <option value="all">All Projects</option>
+                      {pictureProjectOptions.map((project) => (
+                        <option key={project.folder} value={project.folder}>{project.label}</option>
                       ))}
                     </select>
-                  </div>
+                  </label>
+                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                    Employee
+                    <select
+                      className="h-12 w-full rounded-[18px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
+                      value={mediaFilterEmployeeId}
+                      onChange={(event) => setMediaFilterEmployeeId(event.target.value)}
+                    >
+                      <option value="all">All Employees</option>
+                      {mediaFilterOptions.employees.map((employee) => (
+                        <option key={employee.id} value={employee.id}>{employee.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <DateRangeButton
+                    label="Date range"
+                    rangeLabel={mediaDateRangeLabel}
+                    presetLabel={mediaSelectedRangeLabel}
+                    onClick={openMediaDatePicker}
+                  />
                 </div>
-                <div className="grid grid-cols-4 gap-2">
-                  {[
-                    { label: "Projects", value: projectDocumentationTotals.projects },
-                    { label: "Photos", value: projectDocumentationTotals.photos },
-                    { label: "Videos", value: projectDocumentationTotals.videos },
-                    { label: "Receipts", value: projectDocumentationTotals.receipts },
-                  ].map((metric) => (
-                    <div key={metric.label} className="rounded-2xl border border-slate-200 bg-white px-2 py-3 text-center shadow-sm">
-                      <p className="text-[18px] font-black text-slate-950 tabular-nums">{metric.value}</p>
-                      <p className="mt-0.5 text-[9px] font-black uppercase tracking-wide text-slate-500">{metric.label}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="grid grid-cols-2 gap-2 rounded-[22px] border border-slate-200 bg-white p-1 shadow-sm">
-                  <button
-                    type="button"
-                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-black ${projectDocsView === "projects" ? "bg-slate-950 text-white" : "text-slate-700"}`}
-                    onClick={() => setProjectDocsView("projects")}
-                  >
-                    Projects
-                  </button>
-                  <button
-                    type="button"
-                    className={`rounded-2xl px-3 py-2.5 text-[14px] font-black ${projectDocsView === "timeline" ? "bg-slate-950 text-white" : "text-slate-700"}`}
-                    onClick={() => setProjectDocsView("timeline")}
-                  >
-                    Timeline
-                  </button>
-                </div>
-                {isAdmin ? (
-                  <div className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[12px] font-black uppercase tracking-wide text-slate-500">AI Assistant</p>
-                        <p className="text-[13px] font-bold text-slate-600">{fieldAiStatus.message}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-800"
-                        onClick={() => void checkFieldAiStatus()}
-                      >
-                        Check
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[12px] font-black text-slate-900 disabled:opacity-50"
-                        onClick={() => void runFieldAiSummary("daily_summary")}
-                        disabled={Boolean(fieldAiWorkingKey)}
-                      >
-                        Summary
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2.5 text-[12px] font-black text-slate-900 disabled:opacity-50"
-                        onClick={() => void runFieldAiSummary("customer_update")}
-                        disabled={Boolean(fieldAiWorkingKey)}
-                      >
-                        Customer Draft
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-2xl bg-slate-950 px-2 py-2.5 text-[12px] font-black text-white disabled:opacity-50"
-                        onClick={() => void runFieldAiSummary("alerts")}
-                        disabled={Boolean(fieldAiWorkingKey)}
-                      >
-                        Alerts
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
                 {photoShareMessage ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] font-semibold text-slate-700">
                     {photoShareMessage}
@@ -16116,7 +16231,7 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                   </div>
                 ) : null}
-                {projectDocsView === "projects" ? (
+                {false && projectDocsView === "projects" ? (
                   <div className="space-y-3">
                     {projectDocumentationRows.map((row) => (
                       <div key={row.folder} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
@@ -16153,7 +16268,7 @@ const handlePhotoQuickUpload = async (event) => {
                     ))}
                   </div>
                 ) : null}
-                {projectDocsView === "timeline" ? (
+                {false && projectDocsView === "timeline" ? (
                   <div className="space-y-3">
                     {projectDocumentationTimeline.map((item, index) => {
                       const type = mediaItemMediaType(item);
@@ -16245,8 +16360,8 @@ const handlePhotoQuickUpload = async (event) => {
                     })}
                   </div>
                 ) : null}
-                {projectDocumentationTotals.total === 0 && <p className="text-sm text-slate-500 text-center py-8">No pictures or videos yet.</p>}
-                <div className={projectDocsView === "timeline" ? "hidden" : "space-y-4"}>
+                {visiblePhotoFolders.length === 0 && <p className="text-sm text-slate-500 text-center py-8">No pictures or videos yet.</p>}
+                <div className="space-y-4">
                   {visiblePhotoFolders.map((folder) => {
                     const folderItems = normalizeArray(filteredProjectPhotos[folder]);
                     const selectedIds = new Set((selectedPhotoIdsByFolder[folder] || []).map(String));
@@ -16335,6 +16450,28 @@ const handlePhotoQuickUpload = async (event) => {
                     );
                   })}
                 </div>
+                <StandardDateRangeModal
+                  open={mediaDatePickerOpen}
+                  eyebrow="Pictures"
+                  title="Choose dates"
+                  mode={mediaDatePickerMode}
+                  options={mediaDateRangeOptions}
+                  draftFrom={mediaDraftDateFrom}
+                  draftTo={mediaDraftDateTo}
+                  rangeLabel={formatReportDateRangeLabel(mediaDraftDateFrom, mediaDraftDateTo)}
+                  onModeChange={(mode) => {
+                    setMediaDatePickerMode(mode);
+                    updateDraftRangeForMode({
+                      mode,
+                      setFrom: setMediaDraftDateFrom,
+                      setTo: setMediaDraftDateTo,
+                    });
+                  }}
+                  onDraftFromChange={setMediaDraftDateFrom}
+                  onDraftToChange={setMediaDraftDateTo}
+                  onCancel={() => setMediaDatePickerOpen(false)}
+                  onApply={applyMediaDatePicker}
+                />
               </CardContent>
             </Card>
           )}
@@ -23229,7 +23366,7 @@ const handlePhotoQuickUpload = async (event) => {
                     >
                       <span className="inline-flex items-center gap-3">
                         <span className="h-3 w-3 rounded-full bg-violet-600 shadow-[0_0_0_4px_rgba(124,58,237,0.12)]" />
-                        Project Documentation
+                        Pictures
                       </span>
                       {photoNotificationCount > 0 && (
                         <span className="ml-2 rounded-full bg-red-600 text-white text-[11px] px-2 py-0.5 align-middle">

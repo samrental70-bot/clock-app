@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-7
+- Current development version: B.1-fix-8
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -106,6 +106,24 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-8 Date Range + Pictures Filter Cleanup
+- Shared Reports-style date range button/modal added for Pictures and Timesheet date filters.
+- Pictures tab visible filters simplified to Project, Employee, and Date Range only.
+- Pictures project filter default remains All Projects.
+- Pictures employee filter default remains All Employees.
+- Pictures date range defaults to the last 1 year from today.
+- Hidden task/media/type filters no longer affect the Pictures display.
+- Pictures tab top wording simplified and documentation/admin wording removed from the Pictures entry.
+- Pictures display now focuses on the media gallery/share flow while preserving project_media and AI/documentation backend logic.
+- Timesheet date filter now uses the same modal style while preserving existing timesheet filtering and Share Report behaviour.
+
+## B.1-fix-8 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -122,6 +140,7 @@
     comment on column public.companies.allow_employee_project_task_creation is
       'When true, employees may add projects and tasks from the Clock screen. Default false.';
     ```
+- B.1-fix-8 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
