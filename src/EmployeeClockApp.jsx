@@ -236,7 +236,7 @@ const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
 const DEFAULT_AUTO_CLOCK_OUT_TIME = "00:00";
 const AUTO_TIMED_OUT_STATUS = "Auto timed out";
 const COMPANY_SETTINGS_SELECT =
-  "id, name, code, time_zone, auto_clock_out_time, assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects";
+  "id, name, code, time_zone, auto_clock_out_time, assign_all_projects_to_all_employees, assign_all_tasks_to_all_projects, allow_employee_project_task_creation";
 const COMPANY_BASE_SELECT = "id, name, code, time_zone";
 
 const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
@@ -294,6 +294,7 @@ function withCompanySettingDefaults(company) {
       true
     ),
     assign_all_tasks_to_all_projects: companySettingEnabled(company.assign_all_tasks_to_all_projects, true),
+    allow_employee_project_task_creation: companySettingEnabled(company.allow_employee_project_task_creation, false),
   };
 }
 
@@ -303,7 +304,8 @@ function isMissingCompanySettingsColumnError(error) {
     msg.includes("column") &&
     (msg.includes("auto_clock_out_time") ||
       msg.includes("assign_all_projects_to_all_employees") ||
-      msg.includes("assign_all_tasks_to_all_projects"))
+      msg.includes("assign_all_tasks_to_all_projects") ||
+      msg.includes("allow_employee_project_task_creation"))
   );
 }
 
@@ -2683,6 +2685,11 @@ export default function EmployeeClockApp() {
     userCompany?.assign_all_tasks_to_all_projects,
     true
   );
+  const companyAllowEmployeeProjectTaskCreation = companySettingEnabled(
+    userCompany?.allow_employee_project_task_creation,
+    false
+  );
+  const canCreateProjectTaskFromClock = isAdmin || (isEmployeeRole && companyAllowEmployeeProjectTaskCreation);
   const publicPhotoShare = useMemo(() => {
     if (typeof window === "undefined") return null;
     const raw = new URLSearchParams(window.location.search).get("photoShare");
@@ -2873,6 +2880,7 @@ export default function EmployeeClockApp() {
   const [settingsAutoClockOutDraft, setSettingsAutoClockOutDraft] = useState(DEFAULT_AUTO_CLOCK_OUT_TIME);
   const [settingsAssignAllProjectsDraft, setSettingsAssignAllProjectsDraft] = useState(true);
   const [settingsAssignAllTasksDraft, setSettingsAssignAllTasksDraft] = useState(true);
+  const [settingsAllowEmployeeProjectTaskDraft, setSettingsAllowEmployeeProjectTaskDraft] = useState(false);
   const [autoClockOutNotice, setAutoClockOutNotice] = useState("");
 
   const [teamRows, setTeamRows] = useState([]);
@@ -3024,6 +3032,7 @@ export default function EmployeeClockApp() {
     setSettingsAutoClockOutDraft(normalizeAutoClockOutTime(userCompany?.auto_clock_out_time));
     setSettingsAssignAllProjectsDraft(companySettingEnabled(userCompany?.assign_all_projects_to_all_employees, true));
     setSettingsAssignAllTasksDraft(companySettingEnabled(userCompany?.assign_all_tasks_to_all_projects, true));
+    setSettingsAllowEmployeeProjectTaskDraft(companySettingEnabled(userCompany?.allow_employee_project_task_creation, false));
   }, [
     userCompany?.id,
     userCompany?.time_zone,
@@ -3031,6 +3040,7 @@ export default function EmployeeClockApp() {
     userCompany?.auto_clock_out_time,
     userCompany?.assign_all_projects_to_all_employees,
     userCompany?.assign_all_tasks_to_all_projects,
+    userCompany?.allow_employee_project_task_creation,
   ]);
 
   useEffect(() => {
@@ -6422,7 +6432,7 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (
       activeTab !== "projects" ||
-      (!isAdmin && !companyAssignAllProjectsToAllEmployees) ||
+      (!isAdmin && !companyAssignAllProjectsToAllEmployees && !companyAllowEmployeeProjectTaskCreation) ||
       !userCompany?.id
     ) {
       return;
@@ -6572,7 +6582,14 @@ export default function EmployeeClockApp() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, companyAssignAllProjectsToAllEmployees, userCompany?.id, projectsScreenRefreshKey]);
+  }, [
+    activeTab,
+    isAdmin,
+    companyAssignAllProjectsToAllEmployees,
+    companyAllowEmployeeProjectTaskCreation,
+    userCompany?.id,
+    projectsScreenRefreshKey,
+  ]);
 
   useEffect(() => {
     // Keep manual Clock selections valid without auto-selecting a job for the user.
@@ -7485,11 +7502,11 @@ export default function EmployeeClockApp() {
   const openProjectManagementFromClock = useCallback(
     (mode = "project") => {
       setClockSelectedScheduledTaskId("");
-      if (!isAdmin) {
+      if (!canCreateProjectTaskFromClock) {
         setLocationStatus(
           mode === "costCentre"
-            ? "Ask a supervisor to add the task."
-            : "Ask a supervisor to add the project."
+            ? "Ask a supervisor to add the task, or ask them to enable employee project/task creation."
+            : "Ask a supervisor to add the project, or ask them to enable employee project/task creation."
         );
         setTimeout(() => setLocationStatus(""), 5000);
         return;
@@ -7519,8 +7536,32 @@ export default function EmployeeClockApp() {
       }
       setActiveTab("projects");
     },
-    [clockSelectedProject?.id, isAdmin, projectId]
+    [canCreateProjectTaskFromClock, clockSelectedProject?.id, projectId]
   );
+
+  const notifyEmployeeProjectTaskCreated = async ({ itemType, itemName, projectName = "" }) => {
+    if (isAdmin || !authUser?.id || !userCompany?.id) return;
+    const cleanName = String(itemName || "").trim();
+    if (!cleanName) return;
+    const actorName = employeeDisplayName || authUser?.email || "Employee";
+    const isTask = itemType === "task";
+    try {
+      await createCompanyNotifications(supabase, {
+        companyId: userCompany.id,
+        actorUserId: authUser.id,
+        actorRole: userCompanyRole || "employee",
+        type: isTask ? "task_created" : "project_created",
+        title: isTask ? "New task created" : "New project created",
+        message: isTask
+          ? `New task created by ${actorName}: ${cleanName}${projectName ? `\nProject: ${projectName}` : ""}`
+          : `New project created by ${actorName}: ${cleanName}`,
+        projectName: projectName || (isTask ? "" : cleanName),
+        costCentre: isTask ? cleanName : "",
+      });
+    } catch (err) {
+      console.warn("[NOTIFY] employee project/task notification failed", err);
+    }
+  };
 
   const fetchCompanyDefaultCostCentreNames = async (companyId) => {
     const { data, error } = await supabase
@@ -7672,7 +7713,7 @@ export default function EmployeeClockApp() {
       setAddProjectError("Company/user missing. Please logout and login again.");
       return;
     }
-    if (!isAdmin) return;
+    if (!canCreateProjectTaskFromClock) return;
 
     setAddProjectLoading(true);
     setAddProjectError("");
@@ -7689,6 +7730,7 @@ export default function EmployeeClockApp() {
         projectName: name,
         costCentresCsv: newProjectCostCentres,
       });
+      await notifyEmployeeProjectTaskCreated({ itemType: "project", itemName: name });
 
       setNewProjectName("");
       setNewProjectCostCentres("");
@@ -7723,7 +7765,7 @@ export default function EmployeeClockApp() {
       setProjectsTaskError("Company/user missing. Please logout and login again.");
       return;
     }
-    if (!isAdmin) return;
+    if (!canCreateProjectTaskFromClock) return;
 
     const taskName = String(projectsTaskName || "").trim();
     if (!taskName) {
@@ -7776,9 +7818,40 @@ export default function EmployeeClockApp() {
           created_by: authUser.id,
         }));
 
+      let insertedRows = [];
       if (rows.length > 0) {
-        const { error: insertError } = await supabase.from("cost_centres").insert(rows);
+        const { data: inserted, error: insertError } = await supabase.from("cost_centres").insert(rows).select("id, name, project_id");
         if (insertError) throw insertError;
+        insertedRows = inserted || [];
+      }
+      if (
+        insertedRows.length > 0 &&
+        companyAssignAllProjectsToAllEmployees &&
+        companyAssignAllTasksToAllProjects
+      ) {
+        try {
+          const userIds = await fetchActiveCompanyMemberUserIds(userCompany.id);
+          const pccaRows = [];
+          for (const uid of userIds) {
+            for (const cc of insertedRows) {
+              if (!cc?.id || !cc?.project_id) continue;
+              pccaRows.push({
+                company_id: userCompany.id,
+                project_id: cc.project_id,
+                cost_centre_id: cc.id,
+                user_id: uid,
+                assigned_by: authUser.id,
+                status: "active",
+              });
+            }
+          }
+          if (pccaRows.length > 0) {
+            const { error: pccaErr } = await supabase.from("project_cost_centre_assignments").insert(pccaRows);
+            if (pccaErr) console.warn("[PROJECT_TASK] default task assignment failed", pccaErr);
+          }
+        } catch (assignErr) {
+          console.warn("[PROJECT_TASK] default task assignment failed", assignErr);
+        }
       }
 
       setProjectsTaskName("");
@@ -7791,6 +7864,13 @@ export default function EmployeeClockApp() {
           ? `Task added to ${rows.length} project${rows.length === 1 ? "" : "s"}.`
           : "Task already exists for the selected project."
       );
+      if (!isAdmin && rows.length > 0) {
+        const projectLabel =
+          companyAssignAllTasksToAllProjects
+            ? "All active projects"
+            : companyProjects.find((project) => String(project.id) === String(projectsTaskProjectId))?.name || "";
+        await notifyEmployeeProjectTaskCreated({ itemType: "task", itemName: taskName, projectName: projectLabel });
+      }
     } catch (err) {
       setProjectsTaskError(getErrorMessage(err));
     } finally {
@@ -7804,7 +7884,7 @@ export default function EmployeeClockApp() {
       setProjectsAddError("Company/user missing. Please logout and login again.");
       return;
     }
-    if (!isAdmin) return;
+    if (!canCreateProjectTaskFromClock) return;
 
     setProjectsAddSaving(true);
     setProjectsAddError("");
@@ -7823,6 +7903,7 @@ export default function EmployeeClockApp() {
         projectName: name,
         costCentresCsv: projectsAddCostCentres,
       });
+      await notifyEmployeeProjectTaskCreated({ itemType: "project", itemName: name });
 
       setCompanyProjectsRefreshKey((k) => k + 1);
       setProjectsScreenRefreshKey((k) => k + 1);
@@ -8350,7 +8431,28 @@ const handleClockIn = async () => {
     if (clockLocationEnabled || clockLocationPermissionState === "granted") {
       setLocationStatus("Getting location...");
     }
-    const locResult = await getClockActionLocation();
+    let locResult = await getClockActionLocation();
+    if (locResult.error === "not_enabled") {
+      setLocationStatus("Location is needed for clock-in. Please allow location.");
+      locResult = await getCurrentLocation();
+      const nextPermissionState = await readGeolocationPermissionState();
+      setClockLocationPermissionState(nextPermissionState);
+      if (locResult.coords && authUser?.id) {
+        setClockLocationEnabled(true);
+        safeWrite(clockLocationStorageKey(authUser.id), true);
+      }
+    }
+    if (!locResult.coords && locResult.error === "denied") {
+      setClockLocationEnabled(false);
+      safeWrite(clockLocationStorageKey(authUser.id), false);
+      setClockLocationPermissionState("denied");
+      setLocationStatus("Location is blocked in browser settings. Location is needed for clock-in.");
+      return;
+    }
+    if (!locResult.coords && locResult.error === "not_supported") {
+      setLocationStatus("Location is not available on this device.");
+      return;
+    }
     const gps = locResult.coords;
 
     let employeeHourlyRate = 0;
@@ -11006,6 +11108,7 @@ const handlePhotoQuickUpload = async (event) => {
   const openMenuTab = (tabName) => {
     const employeeAllowedTabs = new Set(["activities", "clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
     if (companyAssignAllProjectsToAllEmployees) employeeAllowedTabs.add("projects");
+    if (companyAllowEmployeeProjectTaskCreation) employeeAllowedTabs.add("projects");
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
       setIsMenuOpen(false);
@@ -12497,6 +12600,7 @@ const handlePhotoQuickUpload = async (event) => {
         auto_clock_out_time: normalizeAutoClockOutTime(settingsAutoClockOutDraft),
         assign_all_projects_to_all_employees: Boolean(settingsAssignAllProjectsDraft),
         assign_all_tasks_to_all_projects: Boolean(settingsAssignAllTasksDraft),
+        allow_employee_project_task_creation: Boolean(settingsAllowEmployeeProjectTaskDraft),
       };
       let { error } = await supabase
         .from("companies")
@@ -12522,6 +12626,7 @@ const handlePhotoQuickUpload = async (event) => {
                     auto_clock_out_time: payload.auto_clock_out_time,
                     assign_all_projects_to_all_employees: payload.assign_all_projects_to_all_employees,
                     assign_all_tasks_to_all_projects: payload.assign_all_tasks_to_all_projects,
+                    allow_employee_project_task_creation: payload.allow_employee_project_task_creation,
                   }
                 : {}),
             })
@@ -12531,7 +12636,7 @@ const handlePhotoQuickUpload = async (event) => {
       setSettingsTzMessage(
         savedSettings
           ? "Company profile saved."
-          : "Company profile saved. Run the B.1-fix-2 company settings SQL to save auto clock-out and assignment toggles."
+          : "Company profile saved. Run the company settings SQL to save auto clock-out, assignment, and employee add permissions."
       );
     } catch (err) {
       setSettingsTzMessage(getErrorMessage(err));
@@ -14059,19 +14164,17 @@ const handlePhotoQuickUpload = async (event) => {
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white active:shadow-inner"
+          className="rounded-[20px] border border-blue-100 bg-gradient-to-br from-blue-50 to-white px-3 py-4 text-center transition shadow-sm active:bg-white active:shadow-inner"
           onClick={() => openClockProjectList("task")}
         >
-          <span className="block text-[16px] font-black leading-tight text-slate-950">Task List</span>
-          <span className="mt-1 block text-[12px] font-bold leading-tight text-slate-500">Project tasks</span>
+          <span className="block text-[16px] font-black leading-tight text-blue-950">Task List</span>
         </button>
         <button
           type="button"
-          className="rounded-[20px] border border-slate-200 bg-slate-50 px-3 py-3 text-left transition active:bg-white active:shadow-inner"
+          className="rounded-[20px] border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white px-3 py-4 text-center transition shadow-sm active:bg-white active:shadow-inner"
           onClick={() => openClockProjectList("material")}
         >
-          <span className="block text-[16px] font-black leading-tight text-slate-950">Material List</span>
-          <span className="mt-1 block text-[12px] font-bold leading-tight text-slate-500">Project materials</span>
+          <span className="block text-[16px] font-black leading-tight text-emerald-950">Material List</span>
         </button>
       </div>
     </div>
@@ -14753,20 +14856,12 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
-            <Card className="rounded-[28px] overflow-hidden">
+            <Card className="rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] overflow-hidden">
               <CardContent className="p-3 sm:p-4 space-y-3">
-                <div className="flex items-center gap-2 rounded-[22px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-3 py-3">
-                  <div className="h-9 w-9 sm:h-11 sm:w-11 rounded-2xl bg-slate-100 flex items-center justify-center text-base sm:text-xl shrink-0">👷</div>
-                  <div className="min-w-0">
-                    <h2 className="font-black text-[21px] leading-tight text-slate-950">Start Shift</h2>
-                    <p className="text-[14px] font-semibold text-slate-500 leading-snug">Choose project and task</p>
-                  </div>
-                </div>
-
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
-                  <div className="rounded-2xl border bg-white p-3 space-y-1.5">
-                    <p className="text-[16px] font-semibold">No projects yet</p>
-                    <p className="text-[14px] text-slate-500">Ask your supervisor to add a project, or create one now if you're an owner/supervisor.</p>
+                  <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                    <p className="text-[16px] font-black text-slate-900">No projects yet</p>
+                    <p className="text-[14px] font-semibold text-slate-500">Ask your supervisor to add a project.</p>
                   </div>
                 )}
 
@@ -14789,52 +14884,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   )}
 
-                {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && isAdmin && (
-                  <form onSubmit={handleAddProject} className="rounded-3xl border bg-white p-2.5 space-y-2">
-                  <div>
-                      <p className="text-[16px] font-semibold">Add Project</p>
-                      <p className="text-[14px] text-slate-500">Add a project and tasks (comma-separated).</p>
-                  </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[14px] font-medium">Project name</label>
-                      <input
-                        type="text"
-                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11"
-                        value={newProjectName}
-                        onChange={(e) => setNewProjectName(e.target.value)}
-                        placeholder="Example: Basement Renovation"
-                        required
-                      />
-                </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[14px] font-medium">Tasks</label>
-                      <input
-                        type="text"
-                        className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11"
-                        value={newProjectCostCentres}
-                        onChange={(e) => setNewProjectCostCentres(e.target.value)}
-                        placeholder="Framing, Drywall, Painting"
-                      />
-                    </div>
-
-                    {addProjectError && (
-                      <div className="rounded-2xl bg-red-50 border border-red-100 p-3 text-[14px] text-red-700">
-                        {addProjectError}
-                      </div>
-                    )}
-
-                    <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={addProjectLoading}>
-                      {addProjectLoading ? "Adding..." : "Add Project"}
-                    </Button>
-                  </form>
-                )}
-
                 <div className="space-y-1">
-                  <label className="text-[14px] font-medium">Project / Job Site</label>
+                  <label className="text-[14px] font-black text-slate-700">Project / Job Site</label>
                   <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
                     value={projectId}
                     disabled={projectsLoading}
                     onChange={(event) => {
@@ -14847,7 +14900,7 @@ const handlePhotoQuickUpload = async (event) => {
                     }}
                   >
                     <option value="">Select project</option>
-                    {isAdmin ? <option value="__add_project__">+ Add project</option> : null}
+                    {canCreateProjectTaskFromClock ? <option value="__add_project__">+ Add project</option> : null}
                     {clockSelectableProjects.map((project) => (
                       <option key={project.id} value={project.id}>
                         {project.name}
@@ -14857,9 +14910,9 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[14px] font-medium">Task</label>
+                  <label className="text-[14px] font-black text-slate-700">Task</label>
                   <select
-                    className="w-full rounded-2xl border bg-white py-2 px-2.5 text-[15px] h-11 leading-tight"
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2 px-2.5 text-[16px] font-bold h-12 leading-tight"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -14877,7 +14930,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <option value="">
                       {clockSelectedProject ? "Select task" : "Select project first"}
                     </option>
-                    {isAdmin && clockSelectedProject ? <option value="__add_cost_centre__">+ Add task</option> : null}
+                    {canCreateProjectTaskFromClock && clockSelectedProject ? <option value="__add_cost_centre__">+ Add task</option> : null}
                     {clockCostCentresActive.map((center) => (
                       <option key={center} value={center}>
                         {center}
@@ -14899,27 +14952,32 @@ const handlePhotoQuickUpload = async (event) => {
                   </p>
                 )}
 
+                {canCreateProjectTaskFromClock ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-900 shadow-sm active:bg-slate-50"
+                      onClick={() => openProjectManagementFromClock("project")}
+                    >
+                      Add Project
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 text-[14px] font-black text-slate-900 shadow-sm active:bg-slate-50 disabled:opacity-50"
+                      onClick={() => openProjectManagementFromClock("costCentre")}
+                      disabled={!clockSelectedProject && !companyAssignAllTasksToAllProjects}
+                    >
+                      Add Task
+                    </button>
+                  </div>
+                ) : null}
+
                 <div ref={photoToolsRef} className="rounded-[24px] border border-slate-200 bg-white p-2.5 space-y-2.5 shadow-sm">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
                     </p>
                   ) : null}
-                  <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                    Photo type
-                    <select
-                      className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
-                      value={photoDocumentationType}
-                      onChange={(event) => setPhotoDocumentationType(event.target.value)}
-                      disabled={photoBatchUploading}
-                    >
-                      {DOCUMENTATION_TYPE_OPTIONS.filter((option) =>
-                        ["daily_progress", "before", "after", "other"].includes(option.id)
-                      ).map((option) => (
-                        <option key={option.id} value={option.id}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
@@ -15173,16 +15231,6 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                {!(clockLocationEnabled || clockLocationPermissionState === "granted") ? (
-                  <button
-                    type="button"
-                    className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-[15px] font-black text-slate-800"
-                    onClick={() => void handleEnableClockLocation()}
-                  >
-                    Enable Location
-                  </button>
-                ) : null}
-
                 {isAdmin ? (
                   <Button
                     className="w-full rounded-2xl h-12 sm:h-14 text-[16px] font-bold"
@@ -15227,7 +15275,7 @@ const handlePhotoQuickUpload = async (event) => {
                         handleProjectChange(e.target.value);
                       }}
                     >
-                      {isAdmin ? <option value="__add_project__">+ Add project</option> : null}
+                      {canCreateProjectTaskFromClock ? <option value="__add_project__">+ Add project</option> : null}
                       {clockSelectableProjects.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
@@ -15246,7 +15294,7 @@ const handlePhotoQuickUpload = async (event) => {
                         setCostCenter(e.target.value);
                       }}
                     >
-                      {isAdmin ? <option value="__add_cost_centre__">+ Add task</option> : null}
+                      {canCreateProjectTaskFromClock ? <option value="__add_cost_centre__">+ Add task</option> : null}
                       {clockCostCentresActive.map((c) => (
                         <option key={c} value={c}>
                           {c}
@@ -15279,21 +15327,6 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-1.5">
                     <div ref={photoToolsRef} className="rounded-2xl border border-green-200 bg-white/80 p-2 space-y-2">
-                      <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
-                        Photo type
-                        <select
-                          className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
-                          value={photoDocumentationType}
-                          onChange={(event) => setPhotoDocumentationType(event.target.value)}
-                          disabled={photoBatchUploading}
-                        >
-                          {DOCUMENTATION_TYPE_OPTIONS.filter((option) =>
-                            ["daily_progress", "before", "after", "other"].includes(option.id)
-                          ).map((option) => (
-                            <option key={option.id} value={option.id}>{option.label}</option>
-                          ))}
-                        </select>
-                      </label>
                       <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
@@ -15575,15 +15608,6 @@ const handlePhotoQuickUpload = async (event) => {
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleChangeTask}>🔄 Change Task</Button>
                       <Button className="w-full rounded-2xl h-12 text-[15px] font-bold" onClick={handleBreak}>☕ {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Done"}</Button>
                     </div>
-                    {!(clockLocationEnabled || clockLocationPermissionState === "granted") ? (
-                      <button
-                        type="button"
-                        className="w-full rounded-2xl h-11 border border-slate-300 bg-white text-[15px] font-black text-slate-800"
-                        onClick={() => void handleEnableClockLocation()}
-                      >
-                        Enable Location
-                      </button>
-                    ) : null}
                     {isAdmin ? (
                       <Button className="w-full rounded-2xl h-12 text-[16px] font-bold" onClick={handleClockOut}>
                         Clock Out
@@ -20756,7 +20780,7 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {activeTab === "projects" && (isAdmin || companyAssignAllProjectsToAllEmployees) && (
+          {activeTab === "projects" && (isAdmin || companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation) && (
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
@@ -20764,7 +20788,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <h2 className="font-black text-[23px] leading-tight text-slate-950">Projects</h2>
                     <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and tasks</p>
                   </div>
-                  {isAdmin && (
+                  {canCreateProjectTaskFromClock && (
                     <div className="flex shrink-0 flex-wrap gap-2">
                       {!projectsAddFormOpen && (
                         <Button
@@ -20887,7 +20911,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </form>
                 )}
-                {projectsTaskFormOpen && isAdmin && (
+                {projectsTaskFormOpen && canCreateProjectTaskFromClock && (
                   <form
                     onSubmit={(e) => void handleProjectsScreenSaveNewTask(e)}
                     className="rounded-2xl border border-slate-200 bg-white p-3 space-y-2.5 shadow-sm"
@@ -22286,6 +22310,20 @@ const handlePhotoQuickUpload = async (event) => {
                           </span>
                         </span>
                       </label>
+                      <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[14px] font-bold text-slate-900">
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                          checked={settingsAllowEmployeeProjectTaskDraft}
+                          onChange={(e) => setSettingsAllowEmployeeProjectTaskDraft(e.target.checked)}
+                        />
+                        <span>
+                          <span className="block">Allow employees to add projects and tasks</span>
+                          <span className="block pt-0.5 text-[12px] font-semibold text-slate-500">
+                            Default OFF. When ON, employees can add project/task names from Clock.
+                          </span>
+                        </span>
+                      </label>
                       {settingsTzMessage && (
                         <div
                           className={`rounded-2xl border p-3 text-xs ${
@@ -22325,6 +22363,12 @@ const handlePhotoQuickUpload = async (event) => {
                         <span className="text-[14px] font-semibold text-slate-500">Tasks</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">
                           {companyAssignAllTasksToAllProjects ? "All projects" : "Manual assignment"}
+                        </span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="text-[14px] font-semibold text-slate-500">Employee adds</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                          {companyAllowEmployeeProjectTaskCreation ? "Allowed" : "Off"}
                         </span>
                       </div>
                       {isAdmin ? (

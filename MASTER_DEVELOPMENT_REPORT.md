@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-6
+- Current development version: B.1-fix-7
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -88,12 +88,32 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-7 Clock-In Cleanup + Employee Project/Task Permission
+- Clock-In screen top "Start Shift" / "Choose project and task" wording removed.
+- Clock-In card simplified around project selector, task selector, camera, receipt, clock action, Task List, and Material List.
+- Photo Type selector removed from Clock screen; default upload metadata behaviour remains internal.
+- Visible Enable Location button removed from Clock cards; location prompt now happens during Clock In when needed.
+- Task List and Material List descriptions removed and buttons cleaned up.
+- Company setting added in UI for "Allow employees to add projects and tasks", default OFF.
+- Employees only see Add Project / Add Task when the company setting is ON.
+- Employee-created project/task notifications reuse the existing `createCompanyNotifications` flow.
+- New project/task creation continues to follow existing global assignment settings.
+
+## B.1-fix-7 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Pending.
+- Development URL: https://project-rui1d-development.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
   - `supabase/migrations/20260523133000_correct_auto_clock_out_default_midnight.sql`
 - B.1-fix-4 does not require new SQL.
 - B.1-fix-6 does not require new SQL.
+- B.1-fix-7 requires this safe additive SQL before the new employee project/task permission can persist:
+  - `supabase/migrations/20260523160000_add_employee_project_task_creation_setting.sql`
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
