@@ -7392,7 +7392,7 @@ export default function EmployeeClockApp() {
 };
     loadSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       console.log("AUTH EVENT", event);
       setStartupError("");
 
@@ -7432,16 +7432,22 @@ export default function EmployeeClockApp() {
         }
 
         console.log("AUTH EVENT first sign-in context load");
-        try {
-          setAuthUser(user);
-          await ensureProfile(user);
-          await loadUserContext(user, { background: false });
-          setAuthStep("login");
-        } catch (err) {
-          // Inline error only; don't full-screen load.
-          setStartupError(`Auth context load failed: ${getErrorMessage(err)}`);
-          setCompanyChecked(true);
-        }
+        window.setTimeout(() => {
+          void (async () => {
+            try {
+              setAuthUser(user);
+              await ensureProfile(user);
+              await loadUserContext(user, { background: false });
+              setAuthStep("login");
+            } catch (err) {
+              // Inline error only; don't full-screen load.
+              setStartupError(`Auth context load failed: ${getErrorMessage(err)}`);
+              setCompanyChecked(true);
+            } finally {
+              setInitialLoading(false);
+            }
+          })();
+        }, 0);
       }
     });
 

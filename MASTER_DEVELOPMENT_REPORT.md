@@ -549,6 +549,23 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-24 Startup Loading Hotfix
+- Fixed the development app hang on `Loading OPERA.AI Development...` for signed-in desktop/browser sessions.
+- Root cause: the Supabase auth state callback was awaiting profile/company context loading directly during `SIGNED_IN`, which could trap the initial session check before `initialLoading` was released.
+- Auth event handling now defers the async sign-in context load outside the Supabase callback path and clears `initialLoading` in the deferred completion path.
+- Verified in the in-app browser that the development app now renders the signed-in Home dashboard instead of staying on the loading screen.
+- Existing auth, profile, company membership, RBAC, Home, Clock, and data logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-24 Startup Loading Hotfix Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-ee5gy62ui-samrental70-7859s-projects.vercel.app
+- Browser verification: Passed; signed-in Home dashboard loads in the in-app browser.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
