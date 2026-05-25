@@ -14148,28 +14148,33 @@ const handlePhotoQuickUpload = async (event) => {
   if (!hasOpenedAppRef.current) hasOpenedAppRef.current = true;
 
   const renderScheduleViewSwitcher = (selectId) => (
-    <div className="space-y-2 rounded-[18px] border border-slate-200 bg-white p-2 shadow-sm">
-      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-slate-100 p-1">
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-1 rounded-[16px] border border-[#E2E8F0] bg-white p-1 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
         <button
           type="button"
-          className={`rounded-xl px-3 py-2 text-[13px] font-black ${
+          className={`flex h-10 items-center justify-center gap-2 rounded-[12px] px-3 text-[13px] font-black transition ${
             scheduleViewMode === "list"
-              ? "bg-[#0B1F33] text-white shadow-sm"
-              : "text-slate-600 active:bg-white"
+              ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
+              : "text-[#475569] active:bg-[#F8FAFC]"
           }`}
           onClick={() => setScheduleViewMode("list")}
         >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 6h13M8 12h13M8 18h13" />
+            <path d="M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
           List
         </button>
         <button
           type="button"
-          className={`rounded-xl px-3 py-2 text-[13px] font-black ${
+          className={`flex h-10 items-center justify-center gap-2 rounded-[12px] px-3 text-[13px] font-black transition ${
             scheduleViewMode !== "list"
-              ? "bg-[#0B1F33] text-white shadow-sm"
-              : "text-slate-600 active:bg-white"
+              ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
+              : "text-[#475569] active:bg-[#F8FAFC]"
           }`}
           onClick={() => setScheduleViewMode(scheduleViewMode === "list" ? "cal7" : scheduleViewMode)}
         >
+          {renderTimesheetUiIcon("calendar", "h-4 w-4")}
           Calendar
         </button>
       </div>
@@ -14180,7 +14185,7 @@ const handlePhotoQuickUpload = async (event) => {
           </label>
           <select
             id={selectId}
-            className="h-10 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
+            className="h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[13px] font-black text-[#061426]"
             value={scheduleViewMode}
             onChange={(e) => setScheduleViewMode(e.target.value)}
           >
@@ -14192,6 +14197,78 @@ const handlePhotoQuickUpload = async (event) => {
         </>
       ) : null}
     </div>
+  );
+
+  const formatScheduleDateHeading = (dateKey) => {
+    if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey))) return "DATE UNKNOWN";
+    const labelIso = wallDateTimeToUtcIso(dateKey, "12:00:00", companyTimeZone);
+    const weekday = wallWeekdayLongInTimeZone(dateKey, companyTimeZone);
+    const dateLabel = labelIso
+      ? new Intl.DateTimeFormat("en-US", {
+          month: "long",
+          day: "numeric",
+          year: "numeric",
+          timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+        }).format(new Date(labelIso))
+      : String(dateKey);
+    return `${weekday} • ${dateLabel}`.toUpperCase();
+  };
+
+  const formatScheduleListTime = (iso) => {
+    if (!iso) return "—";
+    try {
+      return new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+      }).format(new Date(iso));
+    } catch {
+      return formatTime(iso, companyTimeZone);
+    }
+  };
+
+  const formatScheduleListWindow = (task) => {
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
+    if (task?.end_time) return `${startDisp} - ${formatScheduleListTime(task.end_time)}`;
+    const durRaw = task?.duration_minutes;
+    if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw))) {
+      return `${startDisp} - ${Number(durRaw)} min`;
+    }
+    return `${startDisp} - —`;
+  };
+
+  const scheduleAssignmentChipClass = (label, tone = "assignment") => {
+    const clean = String(label || "").trim().toLowerCase();
+    if (tone === "success" || clean === "accepted" || (clean && clean !== "unassigned" && clean !== "pending" && clean !== "declined")) {
+      return "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]";
+    }
+    if (clean === "pending") return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
+    if (clean === "declined") return "border-red-200 bg-[#FEF2F2] text-[#DC2626]";
+    return "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]";
+  };
+
+  const renderScheduleSectionHeading = (dateKey) => (
+    <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+      <span className="flex h-4 w-4 items-center justify-center text-[#C9A227]">
+        {renderTimesheetUiIcon("calendar", "h-3.5 w-3.5")}
+      </span>
+      <span>{formatScheduleDateHeading(dateKey)}</span>
+    </div>
+  );
+
+  const renderScheduleRowIcon = () => (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
+      {renderTimesheetUiIcon("task", "h-4 w-4")}
+    </span>
+  );
+
+  const renderScheduleChevron = () => (
+    <span className="flex h-7 w-5 shrink-0 items-center justify-center text-[#C9A227]" aria-hidden="true">
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m9 18 6-6-6-6" />
+      </svg>
+    </span>
   );
 
   const renderEmployeeScheduleTaskCard = (task, dateKey) => {
@@ -14348,8 +14425,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderEmployeeScheduleListTaskCard = (task, dateKey) => {
     const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
-    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
-    const endDisp = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "—";
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
     const linkRow =
       task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
     const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
@@ -14362,23 +14438,30 @@ const handlePhotoQuickUpload = async (event) => {
     const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
     const tidStr = task?.id != null ? String(task.id) : "";
     const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
+    const responseLabel = scheduleAssigneeResponseLabel(respStatus);
 
     return (
       <div
         key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
-        className="rounded-[18px] border border-slate-200 bg-white px-3 py-3 shadow-sm min-w-0"
+        className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_8px_22px_rgba(6,20,38,0.06)] min-w-0"
       >
-        <div className="min-w-0">
-          <p className="text-[16px] font-black text-slate-950 leading-snug break-words">
-            {ttitle}
-          </p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-semibold text-slate-700 min-w-0">
-            <span className="shrink-0 tabular-nums">
-              {startDisp} - {endDisp}
-            </span>
-            <span className="text-slate-300">|</span>
-            <span className="shrink-0 max-w-full truncate text-slate-900">{employeeSummary}</span>
+        <div className="flex min-w-0 items-center gap-3">
+          {renderScheduleRowIcon()}
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-start justify-between gap-2">
+              <p className="min-w-0 truncate text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
+              <span
+                className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black leading-none ${scheduleAssignmentChipClass(responseLabel)}`}
+              >
+                {responseLabel}
+              </span>
+            </div>
+            <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
+              {formatScheduleListWindow(task)}
+              {employeeSummary && employeeSummary !== "Unassigned" ? ` - ${employeeSummary}` : ""}
+            </p>
           </div>
+          {renderScheduleChevron()}
         </div>
 
         {respStatus === "pending" && assigneeRowId ? (
@@ -14442,15 +14525,7 @@ const handlePhotoQuickUpload = async (event) => {
               </div>
             )}
           </div>
-        ) : (
-          <div className="mt-2">
-            <span
-              className={`inline-flex rounded-full px-2.5 py-1 text-[12px] font-bold uppercase tracking-wide ring-1 ${scheduleAssigneeResponseBadgeClass(respStatus)}`}
-            >
-              {scheduleAssigneeResponseLabel(respStatus)}
-            </span>
-          </div>
-        )}
+        ) : null}
       </div>
     );
   };
@@ -20228,13 +20303,13 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "schedule" && !isAdmin && (
-            <Card className="rounded-[24px] border border-slate-200/80 bg-white shadow-sm overflow-hidden">
-              <CardContent className="p-3 space-y-3">
-                <div className="space-y-2">
+            <Card className="rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)] overflow-hidden">
+              <CardContent className="p-4 space-y-3">
+                <div className="space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">Schedule</h2>
-                      <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Assigned work</p>
+                      <h2 className="text-[28px] font-black leading-tight tracking-normal text-[#061426]">Schedule</h2>
+                      <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Team work plan</p>
                     </div>
                   </div>
                   <button
@@ -20565,18 +20640,10 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-5">
                     {(employeeScheduleTasksGroupedByDate || []).map(({ dateKey, tasks }) => {
-                      const labelIso =
-                        dateKey && dateKey !== "—"
-                          ? wallDateTimeToUtcIso(dateKey, "12:00:00", companyTimeZone)
-                          : null;
-                      const dateHeading =
-                        labelIso && dateKey !== "—"
-                          ? `${wallWeekdayLongInTimeZone(dateKey, companyTimeZone)} · ${formatDate(labelIso, companyTimeZone)}`
-                          : "Date unknown";
                       const taskList = Array.isArray(tasks) ? tasks : [];
                       return (
                         <div key={dateKey} className="space-y-2">
-                          <p className="text-[14px] font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
+                          {renderScheduleSectionHeading(dateKey)}
                           <div className="space-y-2">
                             {taskList.map((task) => renderEmployeeScheduleListTaskCard(task, dateKey))}
                           </div>
@@ -20590,20 +20657,20 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "schedule" && isAdmin && (
-            <Card className="rounded-[24px] border border-slate-200/80 bg-white shadow-sm overflow-hidden">
-              <CardContent className="p-3 space-y-3">
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
+            <Card className="rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)] overflow-hidden">
+              <CardContent className="p-4 space-y-4">
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="text-[22px] font-black leading-tight tracking-normal text-slate-950">
+                      <h2 className="text-[28px] font-black leading-tight tracking-normal text-[#061426]">
                         Schedule
                       </h2>
-                      <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Team work plan</p>
+                      <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Team work plan</p>
                     </div>
                     {!scheduleFormOpen && (
                       <Button
                         type="button"
-                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-[#0B1F33] text-white shadow-sm"
+                        className="shrink-0 rounded-[14px] h-11 px-3.5 text-[13px] font-black bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)]"
                         onClick={() => {
                           setScheduleSaveError("");
                           setScheduleEditingTaskId(null);
@@ -20620,6 +20687,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleFormOpen(true);
                         }}
                       >
+                        <span className="mr-1 text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
                         New task
                       </Button>
                     )}
@@ -21355,18 +21423,10 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-5">
                     {(scheduleTasksGroupedByDate || []).map(({ dateKey, tasks }) => {
-                      const labelIso =
-                        dateKey && dateKey !== "—"
-                          ? wallDateTimeToUtcIso(dateKey, "12:00:00", companyTimeZone)
-                          : null;
-                      const dateHeading =
-                        labelIso && dateKey !== "—"
-                          ? `${wallWeekdayLongInTimeZone(dateKey, companyTimeZone)} · ${formatDate(labelIso, companyTimeZone)}`
-                          : "Date unknown";
                       const taskList = Array.isArray(tasks) ? tasks : [];
                       return (
                         <div key={dateKey} className="space-y-2">
-                          <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">{dateHeading}</p>
+                          {renderScheduleSectionHeading(dateKey)}
                           <div className="space-y-2">
                             {taskList.map((task) => {
                               const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
@@ -21374,11 +21434,11 @@ const handlePhotoQuickUpload = async (event) => {
                               const projLine = proj.length > 0 ? proj : "No project selected";
                               const cc = String(task?.cost_centre ?? "").trim();
                               const ccLine = cc.length > 0 ? cc : "No task";
-                              const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+                              const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
                               const endRaw = task?.end_time;
                               const durRaw = task?.duration_minutes;
                               let windowLabel = "—";
-                              if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
+                              if (endRaw) windowLabel = formatScheduleListTime(endRaw);
                               else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
                                 windowLabel = `${Number(durRaw)} min`;
                               const rawAssignList =
@@ -21389,8 +21449,6 @@ const handlePhotoQuickUpload = async (event) => {
                               );
                               const at = String(task?.assigned_team ?? "").trim();
                               const notesDisp = String(task?.notes ?? "").trim();
-                              const st = String(task?.status ?? "").trim() || "—";
-                              const endDisp = task?.end_time ? formatTime(task.end_time, companyTimeZone) : "—";
                               const employeeSummary = scheduleShortEmployeeSummary(
                                 assignRowsForTask,
                                 task?.assigned_employee_name
@@ -21435,23 +21493,30 @@ const handlePhotoQuickUpload = async (event) => {
                                       openThisScheduleTaskEdit();
                                     }
                                   }}
-                                  className={`rounded-[18px] border border-slate-200 bg-white px-3 py-3 space-y-2 shadow-sm min-w-0 ${
-                                    !isEditingThis ? "cursor-pointer active:bg-slate-50" : ""
+                                  className={`rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3 space-y-2 shadow-[0_8px_22px_rgba(6,20,38,0.06)] min-w-0 ${
+                                    !isEditingThis ? "cursor-pointer active:bg-[#F8FAFC]" : ""
                                   }`}
                                 >
-                                  <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    {renderScheduleRowIcon()}
                                     <div className="min-w-0 flex-1">
-                                      <p className="text-[16px] font-black text-slate-950 leading-snug break-words">{ttitle}</p>
-                                      {!isEditingThis ? (
-                                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-semibold text-slate-700 min-w-0">
-                                          <span className="shrink-0 tabular-nums">
-                                            {startDisp} - {endDisp}
+                                      <div className="flex min-w-0 items-start justify-between gap-2">
+                                        <p className="min-w-0 truncate text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
+                                        {!isEditingThis ? (
+                                          <span
+                                            className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black leading-none ${scheduleAssignmentChipClass(employeeSummary)}`}
+                                          >
+                                            {employeeSummary}
                                           </span>
-                                          <span className="text-slate-300">|</span>
-                                          <span className="shrink-0 max-w-full truncate text-slate-900">{employeeSummary}</span>
-                                        </div>
+                                        ) : null}
+                                      </div>
+                                      {!isEditingThis ? (
+                                        <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
+                                          {startDisp} - {windowLabel}
+                                        </p>
                                       ) : null}
                                     </div>
+                                    {!isEditingThis ? renderScheduleChevron() : null}
                                     <div className="hidden">
                                       <button
                                         type="button"

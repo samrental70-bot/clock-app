@@ -801,6 +801,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-34 Schedule Reference Layout Update
+- Updated the Schedule screen toward the provided reference layout using approved Royal Navy Luxury colors.
+- Refined the Schedule page header with a larger title, Team work plan subtitle, and compact Royal Navy New task action with gold accent.
+- Rebuilt the List / Calendar segmented control with compact icon labels and approved active-state styling.
+- Redesigned list-mode schedule day groups with compact uppercase date headings and gold calendar accents.
+- Redesigned schedule task rows as slim white cards with a Royal Navy task icon, task title, time range, assignment/status chip, and gold chevron.
+- Applied the same compact list-row styling to the employee assigned-schedule list while preserving accept/decline actions.
+- Preserved existing schedule loading, list/calendar switching, new task creation, task edit flow, assignment display, employee response flow, RBAC/company restrictions, and React hook order.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-34-schedule-reference-layout.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-34 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-kmhwx7bf1-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -845,6 +866,7 @@
 - B.1-fix-31 does not require new SQL.
 - B.1-fix-32 does not require new SQL.
 - B.1-fix-33 does not require new SQL.
+- B.1-fix-34 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
