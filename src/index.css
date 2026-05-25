@@ -695,13 +695,52 @@ textarea {
   color: var(--color-text);
 }
 
+.schedule-edit-card {
+  background: var(--color-surface);
+}
+
+.schedule-edit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.schedule-edit-icon {
+  display: flex;
+  width: 2.3rem;
+  height: 2.3rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--color-navy-950);
+  color: var(--color-surface);
+  box-shadow: 0 8px 18px rgba(6, 20, 38, 0.14);
+}
+
+.schedule-edit-close {
+  display: flex;
+  width: 2rem;
+  height: 2rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-navy-950);
+}
+
 .schedule-task-form label,
 .schedule-task-form .schedule-form-label {
   display: block;
   margin-bottom: 0.35rem;
-  font-size: 0.875rem;
+  font-size: 0.72rem;
   font-weight: 800;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
 }
 
 .schedule-task-form input:not([type="checkbox"]),
@@ -743,6 +782,22 @@ textarea {
   gap: 0.7rem;
 }
 
+.schedule-task-form .schedule-date-time-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.6rem;
+}
+
+.schedule-task-form .schedule-date-time-grid > div {
+  min-width: 0;
+}
+
+.schedule-task-form .schedule-date-time-grid input {
+  padding-left: 0.4rem !important;
+  padding-right: 0.35rem !important;
+  font-size: 0.78rem !important;
+}
+
 .schedule-task-form .schedule-time-row > div {
   min-width: 0;
 }
@@ -754,8 +809,15 @@ textarea {
 }
 
 .schedule-task-form .schedule-pick-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
   max-height: 11rem;
   border-radius: 1rem;
+  border: 0 !important;
+  background: transparent !important;
+  padding: 0 !important;
+  overflow-y: auto;
 }
 
 .schedule-task-form .schedule-pick-list label {
@@ -763,17 +825,22 @@ textarea {
   align-items: center;
   gap: 0.75rem;
   margin: 0;
-  min-height: 2.6rem;
-  padding: 0.6rem 0.7rem;
+  min-height: 2.5rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--color-divider);
   border-radius: 0.85rem;
-  font-size: 0.95rem;
+  background: var(--color-surface);
+  color: var(--color-navy-950);
+  font-size: 0.9rem;
   line-height: 1.2;
   cursor: pointer;
 }
 
 .schedule-task-form .schedule-pick-list label:has(input:checked) {
-  background: var(--color-surface-soft);
-  box-shadow: inset 0 0 0 1px var(--color-divider);
+  border-color: var(--color-navy-950);
+  background: var(--color-navy-950);
+  color: var(--color-surface);
+  box-shadow: 0 8px 18px rgba(6, 20, 38, 0.12);
 }
 
 .schedule-task-form .schedule-pick-list label span {

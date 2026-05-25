@@ -11999,7 +11999,7 @@ const handlePhotoQuickUpload = async (event) => {
       const taskTitle = String(scheduleDraft?.title ?? "").trim();
       const startDate = String(scheduleDraft?.startDate ?? "").trim();
       if (!taskTitle || !startDate) {
-        setScheduleSaveError("Task title and start date are required.");
+        setScheduleSaveError("Job and start date are required.");
         return;
       }
       const startIso = wallDateTimeToUtcIso(startDate, normalizeTimeInputForWallClock(scheduleDraft?.startTime), companyTimeZone);
@@ -12177,7 +12177,7 @@ const handlePhotoQuickUpload = async (event) => {
       const taskTitle = String(d?.title ?? "").trim();
       const startDate = String(d?.startDate ?? "").trim();
       if (!taskTitle || !startDate) {
-        setScheduleEditError("Task title and start date are required.");
+        setScheduleEditError("Job and start date are required.");
         return;
       }
       const startIso = wallDateTimeToUtcIso(startDate, normalizeTimeInputForWallClock(d?.startTime), companyTimeZone);
@@ -12326,7 +12326,7 @@ const handlePhotoQuickUpload = async (event) => {
       if (!tid || !isAdmin || !userCompany?.id || !authUser?.id) return;
       if (
         typeof window !== "undefined" &&
-        !window.confirm("Delete this scheduled task? This cannot be undone.")
+        !window.confirm("Delete this scheduled job? This cannot be undone.")
       ) {
         return;
       }
@@ -13318,6 +13318,25 @@ const handlePhotoQuickUpload = async (event) => {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+    }
+    if (type === "save") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5 3h12l2 2v16H5z" />
+          <path d="M8 3v6h8V3" />
+          <path d="M8 21v-7h8v7" />
+        </svg>
+      );
+    }
+    if (type === "trash") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 7h16" />
+          <path d="M10 11v6M14 11v6" />
+          <path d="M6 7l1 14h10l1-14" />
+          <path d="M9 7V4h6v3" />
         </svg>
       );
     }
@@ -20686,9 +20705,9 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleDraft({ ...SCHEDULE_FORM_EMPTY, assignedUserIds: [], startDate: todayKey });
                           setScheduleFormOpen(true);
                         }}
-                      >
+                        >
                         <span className="mr-1 text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
-                        New task
+                        New job
                       </Button>
                     )}
                   </div>
@@ -20767,7 +20786,7 @@ const handlePhotoQuickUpload = async (event) => {
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2">
                       <div>
-                        <p className="text-[19px] font-black leading-tight text-slate-950">New task</p>
+                        <p className="text-[19px] font-black leading-tight text-slate-950">New job</p>
                         <p className="text-[13px] font-semibold text-slate-500">Fill the essentials and save.</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -20793,7 +20812,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="relative">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-title">
-                        Task title
+                        Job
                       </label>
                       <input
                         id="sched-title"
@@ -21111,7 +21130,7 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                     <div className="flex gap-2 pt-0.5">
                       <Button type="submit" className="flex-1 rounded-2xl h-12 text-[16px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]" disabled={scheduleSaving}>
-                        {scheduleSaving ? "Saving…" : "Save task"}
+                        {scheduleSaving ? "Saving…" : "Save job"}
                       </Button>
                     </div>
                   </form>
@@ -21417,7 +21436,7 @@ const handlePhotoQuickUpload = async (event) => {
                         setScheduleFormOpen(true);
                       }}
                     >
-                      New Task
+                      New Job
                     </button>
                   </div>
                 ) : (
@@ -21493,10 +21512,13 @@ const handlePhotoQuickUpload = async (event) => {
                                       openThisScheduleTaskEdit();
                                     }
                                   }}
-                                  className={`rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3 space-y-2 shadow-[0_8px_22px_rgba(6,20,38,0.06)] min-w-0 ${
-                                    !isEditingThis ? "cursor-pointer active:bg-[#F8FAFC]" : ""
-                                  }`}
+                                  className={
+                                    isEditingThis
+                                      ? "rounded-[22px] border border-[#E2E8F0] bg-white p-0 shadow-[0_14px_30px_rgba(6,20,38,0.08)] min-w-0 overflow-hidden"
+                                      : "rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3 space-y-2 shadow-[0_8px_22px_rgba(6,20,38,0.06)] min-w-0 cursor-pointer active:bg-[#F8FAFC]"
+                                  }
                                 >
+                                  {!isEditingThis ? (
                                   <div className="flex min-w-0 items-center gap-3">
                                     {renderScheduleRowIcon()}
                                     <div className="min-w-0 flex-1">
@@ -21544,24 +21566,50 @@ const handlePhotoQuickUpload = async (event) => {
                                       </button>
                                     </div>
                                   </div>
+                                  ) : null}
                                   {isEditingThis ? (
                                     <form
                                       onSubmit={(e) => void handleScheduleUpdateTask(e)}
-                                      className="schedule-task-form space-y-3 rounded-[22px] border border-slate-200 bg-white p-3.5 shadow-[0_14px_30px_rgba(15,23,42,0.08)]"
+                                      className="schedule-task-form schedule-edit-card space-y-3 p-3.5"
                                     >
-                                      <div className="hidden">
-                                        <p className="text-[19px] font-black leading-tight text-slate-950">Edit task</p>
-                                        <p className="text-[13px] font-semibold text-slate-500">Update only what changed.</p>
+                                      <div className="schedule-edit-header">
+                                        <div className="flex min-w-0 items-center gap-3">
+                                          <span className="schedule-edit-icon">
+                                            {renderTimesheetUiIcon("calendar", "h-4 w-4")}
+                                          </span>
+                                          <div className="min-w-0">
+                                            <p className="text-[18px] font-black leading-tight text-[#061426]">Edit Job</p>
+                                            <p className="mt-0.5 truncate text-[12px] font-semibold text-[#64748B]">{ttitle}</p>
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="schedule-edit-close"
+                                          disabled={scheduleEditSaving}
+                                          aria-label="Close edit job"
+                                          onClick={() => {
+                                            const returnView = scheduleEditReturnViewMode;
+                                            setScheduleEditingTaskId(null);
+                                            setScheduleEditDraft(null);
+                                            setScheduleEditError("");
+                                            restoreScheduleEditReturnView(returnView);
+                                          }}
+                                        >
+                                          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M6 6l12 12M18 6 6 18" />
+                                          </svg>
+                                        </button>
                                       </div>
                                       <div className="relative">
                                         <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-title-${tidKey}`}>
-                                          Task title
+                                          Job
                                         </label>
                                         <input
                                           id={`sched-edit-title-${tidKey}`}
                                           type="text"
                                           className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
                                           value={scheduleEditDraft.title}
+                                          placeholder="e.g. Job name"
                                           onChange={(e) =>
                                             setScheduleEditDraft((prev) =>
                                               prev ? { ...prev, title: e.target.value } : prev
@@ -21594,7 +21642,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           </div>
                                         ) : null}
                                       </div>
-                                      <div className="grid grid-cols-1 gap-2">
+                                      <div className="grid grid-cols-2 gap-2">
                                         <div className="space-y-1">
                                           <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-proj-${tidKey}`}>
                                             Project
@@ -21644,7 +21692,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           </select>
                                         </div>
                                       </div>
-                                      <div className="grid grid-cols-1 gap-2">
+                                      <div className="schedule-date-time-grid">
                                         <div className="space-y-1">
                                           <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-sd-${tidKey}`}>
                                             Start date
@@ -21672,7 +21720,6 @@ const handlePhotoQuickUpload = async (event) => {
                                             required
                                           />
                                         </div>
-                                        <div className="schedule-time-row">
                                           <div>
                                             <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-st-${tidKey}`}>
                                               Start time
@@ -21713,7 +21760,6 @@ const handlePhotoQuickUpload = async (event) => {
                                               disabled={scheduleEditSaving}
                                             />
                                           </div>
-                                        </div>
                                       </div>
                                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                         <div className="hidden">
@@ -21821,6 +21867,17 @@ const handlePhotoQuickUpload = async (event) => {
                                             })}
                                           </div>
                                         )}
+                                        {(() => {
+                                          const selectedCount = Array.isArray(scheduleEditDraft?.assignedUserIds)
+                                            ? scheduleEditDraft.assignedUserIds.length
+                                            : 0;
+                                          const totalCount = Array.isArray(schedulePickMembers) ? schedulePickMembers.length : 0;
+                                          return (
+                                            <p className="text-[11px] font-semibold text-[#64748B]">
+                                              {selectedCount} of {totalCount} selected
+                                            </p>
+                                          );
+                                        })()}
                                       </div>
                                       <div className="hidden">
                                         <label className="block text-[11px] font-medium text-slate-600" htmlFor={`sched-edit-team-${tidKey}`}>
@@ -21882,28 +21939,15 @@ const handlePhotoQuickUpload = async (event) => {
                                           {scheduleEditError}
                                         </div>
                                       ) : null}
-                                      <div className="grid grid-cols-2 gap-2 pt-1">
+                                      <div className="space-y-2 pt-1">
                                         <Button
                                           type="submit"
-                                          className="rounded-2xl h-12 text-[17px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]"
+                                          className="flex w-full items-center justify-center gap-2 rounded-[14px] h-12 text-[15px] font-black bg-[#061426] text-white shadow-[0_12px_22px_rgba(6,20,38,0.14)]"
                                           disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
                                         >
+                                          <span className="text-[#C9A227]">{renderTimesheetUiIcon("save", "h-4 w-4")}</span>
                                           {scheduleEditSaving ? "Saving…" : "Save"}
                                         </Button>
-                                        <button
-                                          type="button"
-                                          disabled={
-                                            Boolean(scheduleEditSaving) ||
-                                            scheduleDeleteSavingId === tidKey ||
-                                            Boolean(scheduleRescheduleSavingId)
-                                          }
-                                          onClick={() => void handleScheduleDeleteTask(task?.id)}
-                                          className="rounded-2xl h-12 text-[17px] font-black border border-red-200 bg-red-50 text-red-800 shadow-sm disabled:opacity-50"
-                                        >
-                                          {scheduleDeleteSavingId === tidKey ? "Deleting…" : "Delete"}
-                                        </button>
-                                      </div>
-                                      <div className="pt-0.5">
                                         <button
                                           type="button"
                                           disabled={scheduleEditSaving}
@@ -21914,9 +21958,22 @@ const handlePhotoQuickUpload = async (event) => {
                                             setScheduleEditError("");
                                             restoreScheduleEditReturnView(returnView);
                                           }}
-                                          className="w-full rounded-2xl h-11 text-[15px] font-black border border-slate-200 bg-white text-slate-700"
+                                          className="w-full rounded-[14px] h-11 text-[14px] font-black border border-[#CBD5E1] bg-white text-[#061426] disabled:opacity-50"
                                         >
                                           Cancel
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={
+                                            Boolean(scheduleEditSaving) ||
+                                            scheduleDeleteSavingId === tidKey ||
+                                            Boolean(scheduleRescheduleSavingId)
+                                          }
+                                          onClick={() => void handleScheduleDeleteTask(task?.id)}
+                                          className="flex w-full items-center justify-center gap-2 rounded-[14px] h-11 text-[14px] font-black border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] disabled:opacity-50"
+                                        >
+                                          {renderTimesheetUiIcon("trash", "h-4 w-4")}
+                                          {scheduleDeleteSavingId === tidKey ? "Deleting…" : "Delete Job"}
                                         </button>
                                       </div>
                                     </form>

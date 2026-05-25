@@ -862,6 +862,26 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-37 Schedule Edit Job Form Polish
+- Updated the Schedule edit UI toward the provided reference layout using approved Royal Navy Luxury colors.
+- Renamed the visible scheduled work title concept from Task title to Job in Schedule create/edit UI so it is distinct from Project and Task.
+- Updated Schedule admin primary action from New task to New job.
+- Rebuilt the inline edit state into a compact Edit Job card with header icon, close action, Job field, Project/Task row, Start date/Start time/End time row, employee picker, notes, Save, Cancel, and Delete Job actions.
+- Added selected employee count to the edit form.
+- Kept Project and Task dropdown logic, assignment persistence, schedule save/delete confirmation, RBAC/company restrictions, and React hook order unchanged.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-37-schedule-edit-job-final.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-37 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-5t11s0ro5-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -909,6 +929,7 @@
 - B.1-fix-34 does not require new SQL.
 - B.1-fix-35 does not require new SQL.
 - B.1-fix-36 does not require new SQL.
+- B.1-fix-37 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
