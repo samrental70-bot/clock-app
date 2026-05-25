@@ -1122,6 +1122,23 @@ function compareScheduleTaskStart(a, b) {
   return va - vb;
 }
 
+function sortScheduleDateKeysTodayFirst(keys, todayKey) {
+  const today = String(todayKey || "").trim();
+  const isDateKey = (key) => /^\d{4}-\d{2}-\d{2}$/.test(String(key || ""));
+  const rank = (key) => {
+    const value = String(key || "");
+    if (!isDateKey(value)) return 2;
+    return today && value < today ? 1 : 0;
+  };
+  return [...keys].sort((a, b) => {
+    const ar = rank(a);
+    const br = rank(b);
+    if (ar !== br) return ar - br;
+    if (ar === 1) return String(b).localeCompare(String(a));
+    return String(a).localeCompare(String(b));
+  });
+}
+
 function filterScheduledTasksByWallDateRange(tasks, rangeStartKey, rangeEndKey, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   if (!rangeStartKey || !rangeEndKey) return [];
@@ -2989,6 +3006,7 @@ export default function EmployeeClockApp() {
   const shownAssignNotifIdsRef = useRef(new Set());
   const shownAssignMessageSignaturesRef = useRef(new Set());
   const [employeeNotifPermMessage, setEmployeeNotifPermMessage] = useState("");
+  const [employeeNotifPermissionUi, setEmployeeNotifPermissionUi] = useState("unknown");
 
   const photoNotifyBatchRef = useRef({
     timer: null,
@@ -4265,9 +4283,9 @@ export default function EmployeeClockApp() {
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
     }
-    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    const keys = sortScheduleDateKeysTodayFirst(Object.keys(groups), scheduleWallTodayKey);
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
-  }, [scheduledTasks, companyTimeZone]);
+  }, [scheduledTasks, companyTimeZone, scheduleWallTodayKey]);
 
   const adminScheduledTaskById = useMemo(() => {
     const m = {};
@@ -4290,9 +4308,9 @@ export default function EmployeeClockApp() {
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
     }
-    const keys = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+    const keys = sortScheduleDateKeysTodayFirst(Object.keys(groups), scheduleWallTodayKey);
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
-  }, [employeeScheduledTasks, companyTimeZone]);
+  }, [employeeScheduledTasks, companyTimeZone, scheduleWallTodayKey]);
 
   const scheduleCalendarDaySpan = useMemo(() => {
     if (scheduleViewMode === "cal1") return 1;
@@ -12509,6 +12527,42 @@ const handlePhotoQuickUpload = async (event) => {
     };
   }, [authUser?.id, userCompany?.id]);
 
+  useEffect(() => {
+    if (!isEmployeeRole) {
+      setEmployeeNotifPermissionUi("unknown");
+      return;
+    }
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setEmployeeNotifPermissionUi("not_supported");
+      return;
+    }
+    if (Notification.permission === "denied") {
+      setEmployeeNotifPermissionUi("blocked");
+      return;
+    }
+    if (Notification.permission !== "granted") {
+      setEmployeeNotifPermissionUi("default");
+      return;
+    }
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      setEmployeeNotifPermissionUi("not_supported");
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!cancelled) setEmployeeNotifPermissionUi(sub ? "enabled" : "default");
+      } catch {
+        if (!cancelled) setEmployeeNotifPermissionUi("default");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEmployeeRole, authUser?.id, userCompany?.id]);
+
   const handleEnableMobileNotifications = async () => {
     if (typeof window === "undefined" || !("Notification" in window)) {
       setMobileNotifPermissionUi("not_supported");
@@ -12630,12 +12684,20 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       const result = await ensurePushSubscription();
       const p = result.permission;
-      if (p === "granted") setEmployeeNotifPermMessage("Phone notifications enabled.");
-      else if (p === "denied") setEmployeeNotifPermMessage("Notifications blocked in browser settings.");
-      else setEmployeeNotifPermMessage("Notifications not enabled yet.");
+      if (p === "granted") {
+        setEmployeeNotifPermissionUi(result.subscribed ? "enabled" : "default");
+        setEmployeeNotifPermMessage("Phone notifications enabled.");
+      } else if (p === "denied") {
+        setEmployeeNotifPermissionUi("blocked");
+        setEmployeeNotifPermMessage("Notifications blocked in browser settings.");
+      } else {
+        setEmployeeNotifPermissionUi("default");
+        setEmployeeNotifPermMessage("Notifications not enabled yet.");
+      }
       setTimeout(() => setEmployeeNotifPermMessage(""), 7000);
     } catch (e) {
       console.warn("[NOTIFY] permission request failed", e);
+      setEmployeeNotifPermissionUi("default");
       setEmployeeNotifPermMessage(getErrorMessage(e) || "Could not enable phone notifications.");
       setTimeout(() => setEmployeeNotifPermMessage(""), 7000);
     }
@@ -20431,13 +20493,15 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Upcoming assigned work</p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-2 px-3 text-[13px] font-bold text-slate-900 shadow-sm relative z-[1] pointer-events-auto"
-                    onClick={() => void handleEmployeeRequestNotificationPermission()}
-                  >
-                    Enable phone notifications
-                  </button>
+                  {employeeNotifPermissionUi !== "enabled" ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-2 px-3 text-[13px] font-bold text-slate-900 shadow-sm relative z-[1] pointer-events-auto"
+                      onClick={() => void handleEmployeeRequestNotificationPermission()}
+                    >
+                      Enable phone notifications
+                    </button>
+                  ) : null}
                   {employeeNotifPermMessage ? (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-[12px] font-semibold text-slate-700">
                       {employeeNotifPermMessage}

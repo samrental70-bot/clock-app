@@ -1001,6 +1001,23 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-43 Schedule List Current-First + Notification Prompt Cleanup
+- Updated Schedule list view ordering so today and future schedule sections appear first on the current screen.
+- Older/past schedule sections remain available below the current/future work so users can scroll down to review previous schedule items.
+- Applied the same current-first list ordering to both employee assigned Schedule and admin/company Schedule list views.
+- Added employee schedule notification permission state so the `Enable phone notifications` button is hidden once phone/background push notifications are enabled.
+- Preserved schedule list/calendar views, accept/decline workflow, admin schedule editing, push subscription saving, RBAC/company restrictions, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-43 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-nk08k47o7-samrental70-7859s-projects.vercel.app
+- Browser screenshot status: Not captured in this environment; authenticated in-app browser bridge remains unavailable.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -1054,6 +1071,7 @@
 - B.1-fix-40 does not require new SQL.
 - B.1-fix-41 does not require new SQL.
 - B.1-fix-42 does not require new SQL.
+- B.1-fix-43 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
