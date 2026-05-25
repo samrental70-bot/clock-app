@@ -204,17 +204,17 @@ const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Rang
     onClick={onClick}
   >
     <span className="flex items-center justify-between gap-3">
-      <span className="min-w-0">
-        <span className="block text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">{label}</span>
-        <span className="mt-1 flex min-w-0 items-center gap-2">
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] bg-[#EFF6FF] text-[#2563EB]">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M7 3v4M17 3v4" />
-              <path d="M4 8h16" />
-              <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
-            </svg>
-          </span>
-          <span className="min-w-0 text-[13px] font-black leading-tight text-[#061426]">
+      <span className="flex min-w-0 items-center gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 3v4M17 3v4" />
+            <path d="M4 8h16" />
+            <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
+          </svg>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">{label}</span>
+          <span className="mt-0.5 block min-w-0 truncate text-[14px] font-black leading-tight text-[#061426]">
             {rangeLabel || "Choose dates"}
           </span>
         </span>
@@ -224,6 +224,28 @@ const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Rang
       </span>
     </span>
   </button>
+);
+
+const DateInputField = ({ label, value, disabled, onChange }) => (
+  <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
+    {label}
+    <span className="relative block">
+      <input
+        type="date"
+        className="h-12 w-full min-w-0 appearance-none rounded-[13px] border border-[#CBD5E1] bg-white px-3 pr-9 text-[13px] font-black text-[#061426] outline-none [color-scheme:light] focus:border-[#061426] disabled:border-[#E2E8F0] disabled:bg-white disabled:text-[#061426]"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      <span className="pointer-events-none absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#061426]">
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 3v4M17 3v4" />
+          <path d="M4 8h16" />
+          <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
+        </svg>
+      </span>
+    </span>
+  </label>
 );
 
 const StandardDateRangeModal = ({
@@ -245,36 +267,38 @@ const StandardDateRangeModal = ({
   const invalidCustom = mode === "custom" && draftFrom && draftTo && draftFrom > draftTo;
   return (
     <div
-      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#061426]/58 p-3 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+        className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">{eyebrow}</p>
             <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">{title}</h3>
           </div>
           <button
             type="button"
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
             onClick={onCancel}
             aria-label="Close date range"
           >
-            x
+            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
           </button>
         </div>
-        <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-[16px] border border-[#E2E8F0] bg-white p-1">
+        <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-full border border-[#E2E8F0] bg-white p-1 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
           {options.map((option) => (
             <button
               key={`date-range-${option.id}`}
               type="button"
-              className={`rounded-[13px] px-1.5 py-2 text-[12px] font-black leading-tight transition ${
+              className={`h-8 rounded-full px-1.5 text-[12px] font-black leading-tight transition ${
                 mode === option.id
                   ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
                   : "text-[#475569] active:bg-[#F8FAFC]"
@@ -285,30 +309,12 @@ const StandardDateRangeModal = ({
             </button>
           ))}
         </div>
-        <div className="mt-4 rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+        <div className="mt-4 rounded-[18px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
           <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Selected range</p>
           <p className="mt-1 text-[20px] font-black leading-tight text-[#061426]">{rangeLabel}</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
-              From
-              <input
-                type="date"
-                className="h-12 w-full min-w-0 rounded-[14px] border border-[#CBD5E1] bg-white px-2 text-[13px] font-black text-[#061426] [color-scheme:light] disabled:text-[#64748B]"
-                value={draftFrom}
-                disabled={mode !== "custom"}
-                onChange={(event) => onDraftFromChange(event.target.value)}
-              />
-            </label>
-            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
-              To
-              <input
-                type="date"
-                className="h-12 w-full min-w-0 rounded-[14px] border border-[#CBD5E1] bg-white px-2 text-[13px] font-black text-[#061426] [color-scheme:light] disabled:text-[#64748B]"
-                value={draftTo}
-                disabled={mode !== "custom"}
-                onChange={(event) => onDraftToChange(event.target.value)}
-              />
-            </label>
+            <DateInputField label="From" value={draftFrom} disabled={mode !== "custom"} onChange={onDraftFromChange} />
+            <DateInputField label="To" value={draftTo} disabled={mode !== "custom"} onChange={onDraftToChange} />
           </div>
         </div>
         {invalidCustom ? (
@@ -319,14 +325,14 @@ const StandardDateRangeModal = ({
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button
             type="button"
-            className="rounded-[14px] border border-[#CBD5E1] bg-white px-4 py-3 text-[15px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
+            className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[15px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
             onClick={onCancel}
           >
             Cancel
           </button>
           <Button
             type="button"
-            className="rounded-[14px] bg-[#061426] px-4 py-3 text-[15px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]"
+            className="h-12 rounded-[14px] bg-[#061426] px-4 text-[15px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
             disabled={mode === "custom" && (!draftFrom || !draftTo || draftFrom > draftTo)}
             onClick={onApply}
           >

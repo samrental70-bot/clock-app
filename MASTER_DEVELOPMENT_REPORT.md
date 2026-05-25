@@ -779,6 +779,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-33 Shared Date Picker Royal Navy Update
+- Updated the shared date picker used by Timesheets, Photos, Receipts, and Reports to match the approved bottom-sheet reference design.
+- Refined the date chooser overlay, drag handle, close button, segmented Today/Week/Month/Custom controls, selected range panel, From/To date inputs, and Cancel/Apply actions.
+- Updated shared date range trigger cards to use approved Royal Navy, white surface, slate border, and compact calendar-icon styling.
+- Preserved existing date range state, quick range calculations, custom date selection, filtering behavior, reports integration, RBAC/company restrictions, and React hook order.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshots:
+  - `screenshots/b1-fix-33-timesheets-date-picker.png`
+  - `screenshots/b1-fix-33-photos-date-picker.png`
+  - `screenshots/b1-fix-33-receipts-date-picker.png`
+  - `screenshots/b1-fix-33-reports-date-picker.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-33 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-1g15zv3uo-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -822,6 +844,7 @@
 - B.1-fix-30 does not require new SQL.
 - B.1-fix-31 does not require new SQL.
 - B.1-fix-32 does not require new SQL.
+- B.1-fix-33 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
