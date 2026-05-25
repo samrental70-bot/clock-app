@@ -14839,7 +14839,7 @@ const handlePhotoQuickUpload = async (event) => {
   const clockActionTileClass = ({ active = false, receipt = false, dark = false, compact = false } = {}) =>
     [
       compact
-        ? "flex h-10 w-full items-center justify-center gap-1.5 rounded-[10px] border px-2 text-center text-[12px] font-semibold transition disabled:opacity-50"
+        ? "flex h-9 w-full items-center justify-center gap-1.5 rounded-[8px] border px-2 text-center text-[11px] font-semibold transition disabled:opacity-50"
         : "flex h-[64px] w-full flex-col items-center justify-center gap-1 rounded-[14px] border px-1.5 text-center transition disabled:opacity-50",
       active
         ? "border-[#061426] bg-[#061426] text-white"
@@ -14853,7 +14853,7 @@ const handlePhotoQuickUpload = async (event) => {
   const clockActionGlyphClass = ({ active = false, receipt = false, dark = false, compact = false } = {}) =>
     [
       compact
-        ? "flex h-5 w-5 items-center justify-center rounded-[6px] text-[10px] font-semibold leading-none"
+        ? "flex h-4 w-4 items-center justify-center rounded-[5px] text-[9px] font-semibold leading-none"
         : "flex h-6 w-6 items-center justify-center rounded-[8px] border text-[10px] font-semibold leading-none",
       active
         ? "border-white/25 bg-white/10 text-white"
@@ -14915,23 +14915,33 @@ const handlePhotoQuickUpload = async (event) => {
     );
   };
 
-  const renderClockListActionRow = () => (
-    <div className="grid grid-cols-2 gap-2 px-1">
-      <button
-        type="button"
-        className="h-9 rounded-[12px] text-center text-[13px] font-semibold text-[#061426] transition active:bg-slate-50"
-        onClick={() => openClockProjectList("task")}
-      >
-        Task List
-      </button>
-      <button
-        type="button"
-        className="flex h-9 items-center justify-center gap-1 rounded-[12px] text-center text-[13px] font-semibold text-[#061426] transition active:bg-slate-50"
-        onClick={() => openClockProjectList("material")}
-      >
-        Material List <span aria-hidden="true">&gt;</span>
-      </button>
-    </div>
+  const renderClockListsDropdown = () => (
+    <details className="group w-[126px]" open>
+      <summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-2 rounded-[8px] border border-[#CBD5E1] bg-white px-3 text-[11px] font-semibold text-[#061426] [&::-webkit-details-marker]:hidden">
+        <span>Lists</span>
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </summary>
+      <div className="mt-2 w-[156px] overflow-hidden rounded-[12px] border border-slate-200 bg-white shadow-[0_10px_24px_rgba(6,20,38,0.12)]">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[11px] font-semibold text-[#061426] active:bg-slate-50"
+          onClick={() => openClockProjectList("task")}
+        >
+          {renderClockActionIcon("lists")}
+          Task List
+        </button>
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2.5 text-left text-[11px] font-semibold text-[#061426] active:bg-slate-50"
+          onClick={() => openClockProjectList("material")}
+        >
+          {renderTimesheetUiIcon("folder", "h-3.5 w-3.5")}
+          Material List
+        </button>
+      </div>
+    </details>
   );
 
   const listProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter(
@@ -15830,7 +15840,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <label className="text-[13px] font-semibold text-slate-700">Project / Job Site</label>
                   </div>
                   <select
-                    className="h-12 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-semibold leading-tight text-[#061426]"
+                    className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] font-semibold leading-tight text-[#061426]"
                     value={projectId}
                     disabled={projectsLoading}
                     onChange={(event) => {
@@ -15857,7 +15867,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <label className="text-[13px] font-semibold text-slate-700">Task</label>
                   </div>
                   <select
-                    className="h-12 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[16px] font-semibold leading-tight text-[#061426]"
+                    className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] font-semibold leading-tight text-[#061426]"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -15901,7 +15911,7 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <Button
-                  className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
+                  className="h-11 w-full rounded-[10px] text-[13px] font-semibold !bg-[#061426] !text-white"
                   onClick={handleClockIn}
                 >
                   <span
@@ -15921,10 +15931,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </p>
                   ) : null}
                   <p className="px-1 text-[12px] font-semibold text-slate-500">More actions</p>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
-                      className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true })}
+                      className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })}
                       onClick={() => {
                         if (!clockSetupReady) {
                           showClockSetupRequired();
@@ -15944,16 +15954,17 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
-                      <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true })} aria-hidden="true">
+                      <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })} aria-hidden="true">
                         {renderClockActionIcon("photo")}
                       </span>
-                      <span className="block text-[11px] font-semibold leading-tight">Camera</span>
+                      <span className="block leading-tight">Camera</span>
                     </button>
                     <button
                       type="button"
                       className={clockActionTileClass({
                         active: photoCameraOpen && photoCameraMode === "receipt",
                         receipt: true,
+                        compact: true,
                       })}
                       onClick={() => {
                         if (!clockSetupReady) {
@@ -15982,38 +15993,36 @@ const handlePhotoQuickUpload = async (event) => {
                         className={clockActionGlyphClass({
                           active: photoCameraOpen && photoCameraMode === "receipt",
                           receipt: true,
+                          compact: true,
                         })}
                         aria-hidden="true"
                       >
                         {renderClockActionIcon("receipt")}
                       </span>
-                      <span className="block text-[11px] font-semibold leading-tight">Receipt</span>
+                      <span className="block leading-tight">Receipt</span>
                     </button>
-                    <details className="group relative">
-                      <summary className={`${clockActionTileClass()} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
-                        <span className={clockActionGlyphClass()} aria-hidden="true">
-                          {renderClockActionIcon("lists")}
-                        </span>
-                        <span className="block text-[11px] font-semibold leading-tight">Lists</span>
-                      </summary>
-                      <div className="absolute right-0 z-20 mt-2 w-40 overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_10px_26px_rgba(6,20,38,0.10)]">
-                        <button
-                          type="button"
-                          className="block w-full px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
-                          onClick={() => openClockProjectList("task")}
-                        >
-                          Task List
-                        </button>
-                        <button
-                          type="button"
-                          className="block w-full border-t border-slate-100 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
-                          onClick={() => openClockProjectList("material")}
-                        >
-                          Material List
-                        </button>
-                      </div>
-                    </details>
+                    <button
+                      type="button"
+                      className={clockActionTileClass({ dark: true, compact: true })}
+                      onClick={showClockSetupRequired}
+                    >
+                      <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
+                        {renderClockActionIcon("change")}
+                      </span>
+                      <span className="block leading-tight">Change Task</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={clockActionTileClass({ dark: true, compact: true })}
+                      onClick={showClockSetupRequired}
+                    >
+                      <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
+                        {renderClockActionIcon("break")}
+                      </span>
+                      <span className="block leading-tight">Break</span>
+                    </button>
                   </div>
+                  {renderClockListsDropdown()}
 
                   {photoCameraError ? (
                     <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] font-semibold text-amber-900 leading-snug">
@@ -16325,7 +16334,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-4">
                     <Button
-                      className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
+                      className="h-11 w-full rounded-[10px] text-[13px] font-semibold !bg-[#061426] !text-white"
                       onClick={handleClockOut}
                     >
                       <span
@@ -16423,33 +16432,7 @@ const handlePhotoQuickUpload = async (event) => {
                           </span>
                         </button>
                       </div>
-                      <details className="group relative">
-                        <summary className="flex h-10 w-full cursor-pointer list-none items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[12px] font-semibold text-[#061426] [&::-webkit-details-marker]:hidden">
-                          {renderClockActionIcon("lists")}
-                          <span>Lists</span>
-                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m6 9 6 6 6-6" />
-                          </svg>
-                        </summary>
-                        <div className="absolute left-0 z-20 mt-2 w-40 overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_10px_26px_rgba(6,20,38,0.10)]">
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
-                            onClick={() => openClockProjectList("task")}
-                          >
-                            {renderClockActionIcon("lists")}
-                            Task List
-                          </button>
-                          <button
-                            type="button"
-                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
-                            onClick={() => openClockProjectList("material")}
-                          >
-                            {renderTimesheetUiIcon("folder", "h-3.5 w-3.5")}
-                            Material List
-                          </button>
-                        </div>
-                      </details>
+                      {renderClockListsDropdown()}
 
                       <input
                         ref={photoFallbackCameraInputRef}

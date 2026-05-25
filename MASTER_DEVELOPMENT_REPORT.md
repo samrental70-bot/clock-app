@@ -922,6 +922,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-40 Clock Reference Action Layout Polish
+- Updated the Clock screen action area to match the latest reference more closely.
+- Before clock-in now keeps Camera / Receipt, Change Task / Break, and Lists actions inside the Start shift card in compact two-column rows.
+- Lists now opens as a compact in-card dropdown with Task List and Material List rows using line icons.
+- Clock In and Clock Out buttons were reduced to the slimmer reference-style Royal Navy button height.
+- Project and Task dropdown heights were compacted while preserving existing project/task selection and add-new options.
+- Active-shift action rows reuse the same compact Camera / Receipt, Change Task / Break, and Lists dropdown style.
+- Preserved clock-in, clock-out, camera/photo, receipt, change-task, break, task-list, material-list logic, RBAC/company restrictions, and React hook order.
+- Screenshot verification completed for the signed-in before-shift Clock state.
+- Screenshot: `screenshots/b1-fix-40-clock-reference-actions.png`
+- Active Clock Out screenshot was not created because creating a real active shift would write demo timesheet data.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-40 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-fe4avhm31-samrental70-7859s-projects.vercel.app
+- Browser verification status: Before-shift screenshot passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -972,6 +994,7 @@
 - B.1-fix-37 does not require new SQL.
 - B.1-fix-38 does not require new SQL.
 - B.1-fix-39 does not require new SQL.
+- B.1-fix-40 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
