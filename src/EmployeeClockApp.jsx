@@ -19231,11 +19231,11 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "reports" && isAdmin && (
             <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-[#F4F7FB] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-              <CardContent className="space-y-3 p-3 sm:p-4">
+              <CardContent className="space-y-3.5 p-4 sm:p-5">
                 <div className="flex items-start justify-between gap-3 px-1 pt-1">
                   <div className="min-w-0">
-                    <h2 className="text-[28px] font-black leading-none tracking-tight text-[#061426]">Reports</h2>
-                    <p className="mt-1 truncate text-[16px] font-black leading-tight text-[#C9A227]">
+                    <h2 className="text-[34px] font-black leading-none tracking-tight text-[#061426]">Reports</h2>
+                    <p className="mt-1 truncate text-[18px] font-black leading-tight text-[#C9A227]">
                       {reportsScopeLabel}
                     </p>
                   </div>
@@ -19257,21 +19257,17 @@ const handlePhotoQuickUpload = async (event) => {
 
                 <button
                   type="button"
-                  className="flex w-full items-center justify-between gap-3 rounded-[14px] border border-[#E2E8F0] bg-white px-4 py-3 text-left shadow-[0_10px_26px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC]"
+                  className="flex w-full items-center justify-between gap-3 rounded-[18px] border border-[#E2E8F0] bg-white px-4 py-3.5 text-left shadow-[0_10px_26px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC]"
                   onClick={openReportsDatePicker}
                 >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#EFF6FF] text-[#061426]">
-                      {renderTimesheetUiIcon("calendar", "h-5 w-5")}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[11px] font-semibold leading-none text-[#64748B]">Date Range</span>
-                      <span className="mt-1 block text-[13px] font-black leading-snug text-[#061426]">
-                        {reportsDateRangeLabel}
-                      </span>
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-bold leading-none text-[#64748B]">Date Range</span>
+                    <span className="mt-1.5 block truncate whitespace-nowrap text-[13px] font-black leading-tight text-[#061426]">
+                      {reportsDateRangeLabel}
                     </span>
                   </span>
-                  <span className="shrink-0 rounded-full bg-[#061426] px-3.5 py-2 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#061426] px-3 py-2 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
+                    {renderTimesheetUiIcon("calendar", "h-3.5 w-3.5")}
                     {reportsSelectedRangeLabel}
                   </span>
                 </button>
@@ -19307,72 +19303,72 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="overflow-hidden rounded-[16px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-                      <div className="flex items-center gap-3 border-b border-[#E2E8F0] px-4 py-3">
-                        <span className="h-5 w-0.5 rounded-full bg-[#C9A227]" />
-                        <p className="text-[16px] font-black leading-tight text-[#061426]">Overview</p>
+                    <div className="overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                      <div className="flex items-center gap-3 border-b border-[#E2E8F0] px-4 py-3.5">
+                        <span className="h-6 w-0.5 rounded-full bg-[#C9A227]" />
+                        <p className="text-[18px] font-black leading-tight text-[#061426]">Overview</p>
                       </div>
                       <div className="grid grid-cols-3 divide-x divide-y divide-[#E2E8F0]">
                         <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#061426]">
                               {renderTimesheetUiIcon("clock", "h-4 w-4")}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Team Hours</span>
-                              <span className="mt-1 block text-[16px] font-black leading-none tabular-nums text-[#061426]">
+                              <span className="mt-1 block text-[20px] font-black leading-none tabular-nums text-[#061426]">
                                 {formatDuration(reportsVisibleSummary.minutes)}
                               </span>
                             </span>
                           </div>
                         </div>
                         <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFF7E6] text-[#F59E0B]">
                               {renderTimesheetUiIcon("task", "h-4 w-4")}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Entries</span>
-                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
                                 {reportsVisibleEntryCount}
                               </span>
                             </span>
                           </div>
                         </div>
                         <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
                               {renderTimesheetUiIcon("user", "h-4 w-4")}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Employees</span>
-                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
                                 {reportsVisibleEmployeeCount}
                               </span>
                             </span>
                           </div>
                         </div>
                         <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 flex-col gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
                             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
                               {renderTimesheetUiIcon("folder", "h-4 w-4")}
                             </span>
                             <span className="min-w-0">
                               <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Projects</span>
-                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
                                 {reportsVisibleProjectCount}
                               </span>
                             </span>
                           </div>
                         </div>
-                        <div className="col-span-2 min-w-0 px-3 py-4">
-                          <div className="flex items-start gap-2">
+                        <div className="col-span-2 min-w-0 bg-[#ECFDF5] px-3 py-4">
+                          <div className="flex items-center justify-center gap-3">
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ECFDF5] text-[#15803D]">
                               {renderTimesheetUiIcon("rate", "h-5 w-5")}
                             </span>
-                            <span className="min-w-0">
+                            <span className="min-w-0 text-center">
                               <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
-                              <span className="mt-1 block truncate text-[25px] font-black leading-none tabular-nums text-[#15803D]">
+                              <span className="mt-1 block truncate text-[34px] font-black leading-none tabular-nums text-[#15803D]">
                                 {formatMoneyWhole(reportsVisibleSummary.cost)}
                               </span>
                             </span>
@@ -19382,10 +19378,10 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
 
                     {reportsAvailableDims.length ? (
-                      <label className="grid grid-cols-[auto_1fr] items-center gap-2 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-slate-500 shadow-[0_12px_26px_rgba(15,23,42,0.08)]">
+                      <label className="grid grid-cols-[auto_1fr] items-center gap-2 rounded-[18px] border border-[#E2E8F0] bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#64748B] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
                         <span>View by</span>
                         <select
-                          className="h-10 min-w-0 rounded-[16px] border border-slate-100 bg-slate-50 px-3 text-[15px] font-black normal-case tracking-normal text-slate-950 outline-none focus:border-slate-300"
+                          className="h-10 min-w-0 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[15px] font-black normal-case tracking-normal text-[#061426] outline-none focus:border-[#CBD5E1]"
                           value={reportsCurrentViewBy}
                           onChange={(e) => {
                             const v = e.target.value;

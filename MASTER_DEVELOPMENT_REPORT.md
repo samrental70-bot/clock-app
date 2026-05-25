@@ -822,6 +822,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-35 Reports Reference Layout Polish
+- Updated the Reports screen toward the latest provided reference using approved Royal Navy Luxury colors.
+- Enlarged the Reports title and preserved the gold project/scope label under it.
+- Restyled the date range card with compact Date Range label, one-line date range, and Royal Navy Today chip with calendar icon.
+- Refined the Overview card header with gold accent and compact white surface.
+- Reworked Overview KPI cells to better match the reference layout, including larger Team Hours, Entries, Employees, Projects, and a soft-green Estimated Pay panel.
+- Kept View by and Breakdown controls visible below the Overview card with matching compact Royal Navy styling.
+- Preserved existing report date range logic, quick range presets, calculations, drill-down grouping, RBAC/company restrictions, and React hook order.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-35-reports-reference-layout.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-35 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-cl20fnvhp-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -867,6 +888,7 @@
 - B.1-fix-32 does not require new SQL.
 - B.1-fix-33 does not require new SQL.
 - B.1-fix-34 does not require new SQL.
+- B.1-fix-35 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
