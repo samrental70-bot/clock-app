@@ -3,7 +3,7 @@
 ## Release Line
 - Production/beta branch: main
 - Development branch: develop
-- Current development version: B.1-fix-17
+- Current development version: Beta Release B candidate from B.1-fix-45
 - Production promotion rule: confirm with user before pushing or deploying production.
 
 ## B.1-fix-2 Completed
@@ -1050,6 +1050,31 @@
 - Browser screenshot status: Not captured in this environment; authenticated in-app browser bridge remains unavailable.
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
+
+## Beta Release B Candidate
+- UI professionalization completed across the current B.1 development line.
+- Royal Navy Luxury design system applied as the official field-operations UI direction.
+- Home / Clock / Schedule / Timesheets / Team / Photos / Receipts / More polished for mobile-first production use.
+- Employee navigation and RBAC/company restrictions preserved, including employee Timesheets own-record scoping.
+- Receipt OCR work is paused and not included in this release promotion.
+- No new SQL is included in this release promotion.
+- Production Release A remains the previous stable version until this promotion completes.
+
+## Release B Notes
+- Professional Royal Navy UI.
+- Improved mobile navigation.
+- Improved dashboard/Home experience.
+- Improved Clock experience.
+- Improved Timesheets/Team/Photos/Receipts/Menu UI.
+- RBAC and company restrictions preserved.
+
+## Beta Release B Promotion Verification
+- Develop branch verified before promotion.
+- Develop build status: Passed.
+- Development URL verification: Passed, HTTP 200 at https://project-rui1d-development.vercel.app.
+- Unwanted file check: no env/secrets files changed; untracked temporary browser folder remains excluded from release commits.
+- OCR work: Not run.
+- SQL/database changes: Not run.
 
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
