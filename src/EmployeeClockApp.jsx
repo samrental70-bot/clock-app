@@ -879,8 +879,24 @@ function shortUserLabel(userId) {
   return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
+function timesheetRecordBelongsToUser(record, authUser) {
+  if (!record || !authUser?.id) return false;
+  const uid = record.userId ?? record.user_id ?? record.employeeId ?? record.employee_id;
+  if (uid != null && String(uid).trim() !== "") {
+    return String(uid) === String(authUser.id);
+  }
+  const rowEmail = String(record.employeeEmail || record.employee_email || record.profileEmailForRow || "").trim().toLowerCase();
+  const authEmail = String(authUser.email || "").trim().toLowerCase();
+  return Boolean(rowEmail && authEmail && rowEmail === authEmail);
+}
+
 function resolveTimesheetEmployeeTitle(record, { profileFullName, authUser, teamProfileFullNameByUserId = {} }) {
   const uid = record.userId || record.employeeId;
+  if (authUser?.id != null && String(uid) === String(authUser.id)) {
+    const pf = (profileFullName || "").trim();
+    if (pf && !looksLikeEmail(pf) && !looksLikeUuidOrIdLike(pf)) return pf;
+  }
+
   const good = pickGoodFreeformEmployeeName(record);
   if (good) return good;
 
@@ -889,11 +905,6 @@ function resolveTimesheetEmployeeTitle(record, { profileFullName, authUser, team
 
   const fromTeam = teamProfileFullNameByUserId[uid];
   if (fromTeam && String(fromTeam).trim()) return String(fromTeam).trim();
-
-  if (authUser?.id != null && String(uid) === String(authUser.id)) {
-    const pf = (profileFullName || "").trim();
-    if (pf && !looksLikeEmail(pf) && !looksLikeUuidOrIdLike(pf)) return pf;
-  }
 
   const mail =
     (record.employeeEmail || "").trim() ||
@@ -4496,7 +4507,9 @@ export default function EmployeeClockApp() {
       const { data, error } = await query;
       if (error) throw error;
 
-      const mapped = (data || []).map(mapTimesheetRowFromSupabase);
+      const mapped = (data || [])
+        .map(mapTimesheetRowFromSupabase)
+        .filter((record) => !isEmployeeRole || timesheetRecordBelongsToUser(record, authUser));
       const uids = mapped.map((r) => r.userId).filter(Boolean);
       const pmap = await fetchProfilesByTimesheetUserIds(supabase, uids);
       const enriched = mapped.map((rec) => {
@@ -4511,7 +4524,12 @@ export default function EmployeeClockApp() {
     } catch (err) {
       const msg = getErrorMessage(err);
       setTimesheetsError(msg);
-      setRecords((prev) => (prev.length > 0 ? prev : localTimesheetBackupRef.current));
+      setRecords((prev) => {
+        const fallback = prev.length > 0 ? prev : localTimesheetBackupRef.current;
+        return isEmployeeRole
+          ? normalizeArray(fallback).filter((record) => timesheetRecordBelongsToUser(record, authUser))
+          : fallback;
+      });
     } finally {
       setTimesheetsLoading(false);
     }
@@ -5126,7 +5144,7 @@ export default function EmployeeClockApp() {
 
   const visibleRecords = isAdmin
     ? records
-    : records.filter((record) => (record.userId || record.user_id || record.employeeId) === authUser?.id);
+    : records.filter((record) => timesheetRecordBelongsToUser(record, authUser));
   const teamActiveShiftByUserId = useMemo(() => {
     const grouped = {};
     for (const record of normalizeArray(visibleRecords)) {
@@ -6475,6 +6493,11 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
   }, [isEmployeeRole, activeTab]);
+
+  useEffect(() => {
+    if (!isEmployeeRole) return;
+    setTimesheetEmployeeFilter("all");
+  }, [isEmployeeRole, authUser?.id]);
 
   useEffect(() => {
     notifPollBootstrappedRef.current = false;
@@ -15392,7 +15415,9 @@ const handlePhotoQuickUpload = async (event) => {
   const timesheetDateRangeLabel = formatReportDateRangeLabel(timesheetRangeBounds.from, timesheetRangeBounds.to);
   const timesheetSelectedRangeLabel = standardDateRangePresetLabel(timesheetRangePreset);
   const timesheetEmployeeFilterLabel =
-    timesheetEmployeeFilter === "all"
+    isEmployeeRole
+      ? "My timesheets"
+      : timesheetEmployeeFilter === "all"
       ? "All Employees"
       : timesheetEmployeeOptions.find((employee) => String(employee.id) === String(timesheetEmployeeFilter))?.name ||
         "Selected Employee";
@@ -17045,31 +17070,43 @@ const handlePhotoQuickUpload = async (event) => {
                           presetLabel={timesheetSelectedRangeLabel}
                           onClick={openTimesheetDatePicker}
                         />
-                        <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
-                          Employee
-                          <span className="relative block">
-                            <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
-                              {renderTimesheetUiIcon("user", "h-4 w-4")}
+                        {isEmployeeRole ? (
+                          <div className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                            Employee
+                            <div className="flex h-12 items-center gap-3 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[14px] font-black normal-case tracking-normal text-[#061426]">
+                              <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[#061426]">
+                                {renderTimesheetUiIcon("user", "h-4 w-4")}
+                              </span>
+                              <span className="truncate">My timesheets</span>
+                            </div>
+                          </div>
+                        ) : (
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                            Employee
+                            <span className="relative block">
+                              <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+                                {renderTimesheetUiIcon("user", "h-4 w-4")}
+                              </span>
+                              <select
+                                className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                                value={timesheetEmployeeFilter}
+                                onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
+                              >
+                                <option value="all">All Employees</option>
+                                {timesheetEmployeeOptions.map((employee) => (
+                                  <option key={employee.id} value={employee.id}>
+                                    {employee.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="m6 9 6 6 6-6" />
+                                </svg>
+                              </span>
                             </span>
-                            <select
-                              className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
-                              value={timesheetEmployeeFilter}
-                              onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
-                            >
-                              <option value="all">All Employees</option>
-                              {timesheetEmployeeOptions.map((employee) => (
-                                <option key={employee.id} value={employee.id}>
-                                  {employee.name}
-                                </option>
-                              ))}
-                            </select>
-                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
-                              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="m6 9 6 6 6-6" />
-                              </svg>
-                            </span>
-                          </span>
-                        </label>
+                          </label>
+                        )}
                         <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
                           Project
                           <span className="relative block">

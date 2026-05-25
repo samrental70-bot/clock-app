@@ -1033,6 +1033,24 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-45 Employee Timesheets Own-Records Enforcement
+- Tightened employee-role Timesheets scoping so employee users only see timesheet records belonging to the signed-in auth user.
+- Added an explicit own-record helper that checks `user_id`/employee id first, with email fallback only for legacy rows missing a user id.
+- Applied employee ownership filtering to Supabase Timesheets fetch results, cached/offline fallback records, and final visible Timesheets records.
+- Reset stale employee filters when an employee user/session loads and replaced the employee filter control with a read-only `My timesheets` row for employee-role users.
+- Updated timesheet row title resolution so the signed-in employee profile name is preferred over stale stored `employee_name` values on that employee's own rows.
+- Preserved owner/supervisor all-company Timesheets visibility, filters, share report, manual time requests, record cards, RBAC/company restrictions, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-45 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-h1x99onrp-samrental70-7859s-projects.vercel.app
+- Browser screenshot status: Not captured in this environment; authenticated in-app browser bridge remains unavailable.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -1088,6 +1106,7 @@
 - B.1-fix-42 does not require new SQL.
 - B.1-fix-43 does not require new SQL.
 - B.1-fix-44 does not require new SQL.
+- B.1-fix-45 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
