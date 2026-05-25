@@ -2720,7 +2720,7 @@ function PublicPhotoShareView({ share, index, setIndex }) {
                     </button>
                     <button
                       type="button"
-                      className="rounded-2xl bg-slate-900 py-3 text-base font-bold text-white"
+                      className="rounded-2xl bg-[#061426] py-3 text-base font-bold text-white"
                       onClick={() => go(1)}
                     >
                       Next
@@ -14168,7 +14168,7 @@ const handlePhotoQuickUpload = async (event) => {
                   type="button"
                   disabled={Boolean(savingThis)}
                   onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
-                  className="rounded-lg bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
+                  className="rounded-lg bg-[#061426] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                 >
                   {savingThis ? "Saving…" : "Accept"}
                 </button>
@@ -14282,7 +14282,7 @@ const handlePhotoQuickUpload = async (event) => {
                   type="button"
                   disabled={Boolean(savingThis)}
                   onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
-                className="flex-1 rounded-xl bg-slate-900 px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
+                className="flex-1 rounded-xl bg-[#061426] px-3 py-2 text-[13px] font-bold text-white disabled:opacity-50"
                 >
                   {savingThis ? "Saving..." : "Accept"}
                 </button>
@@ -23964,7 +23964,7 @@ const handlePhotoQuickUpload = async (event) => {
                       placeholder="0.00"
                     />
                   </label>
-                  <button type="submit" className="w-full rounded-2xl bg-blue-700 py-3 text-[16px] font-black text-white">
+                  <button type="submit" className="w-full rounded-2xl bg-[#061426] py-3 text-[16px] font-black text-white">
                     Continue to payment
                   </button>
                 </form>
@@ -24017,7 +24017,7 @@ const handlePhotoQuickUpload = async (event) => {
                       placeholder="0.00"
                     />
                   </label>
-                  <button type="submit" className="w-full rounded-2xl bg-slate-900 py-3 text-[16px] font-black text-white">
+                  <button type="submit" className="w-full rounded-2xl bg-[#061426] py-3 text-[16px] font-black text-white">
                     OK
                   </button>
                 </form>
@@ -24161,7 +24161,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="rounded-2xl bg-slate-900 py-3 text-[15px] font-bold text-white"
+                      className="rounded-2xl bg-[#061426] py-3 text-[15px] font-bold text-white"
                       onClick={() => movePhotoViewer(1)}
                     >
                       Next

@@ -1,14 +1,18 @@
-# Royal Navy FieldOps UI Design System
+# Royal Navy Luxury FieldOps UI Design System
 
 This document is the UI source of truth for the Clock App.
 
-All future UI work must use the Royal Navy FieldOps UI tokens. No new hard-coded colors should be added unless approved by controller/design review.
+All future UI work must use the Royal Navy Luxury FieldOps UI tokens. No new hard-coded colors should be added unless approved by controller/design review.
 
 Before completing any future UI task, Codex must check whether new styles match this design document.
 
+If a new screen is added, first check this design system and reuse existing tokens.
+
 ## 1. Brand Direction
 
-Royal Navy FieldOps UI is a premium contractor SaaS interface for mobile field operations.
+Design Name: Royal Navy Luxury FieldOps UI
+
+Royal Navy Luxury FieldOps UI is a premium contractor SaaS interface for mobile field operations.
 
 The style should feel clean, serious, trustworthy, mobile-first, and business-ready. It can be inspired by the quality bar of Jobber, Buildertrend, and ServiceTitan, but it must keep its own Royal Navy identity.
 
@@ -23,9 +27,16 @@ Primary brand colors:
 - Royal Navy 800: `#102A43`
 - Royal Navy 700: `#163B5C`
 - Luxury Gold: `#C9A227`
-- Background: `#F4F7FB`
-- Surface: `#FFFFFF`
-- Surface Soft: `#F8FAFC`
+
+Background and surfaces:
+
+- App Background: `#F4F7FB`
+- Card Surface: `#FFFFFF`
+- Soft Surface: `#F8FAFC`
+- Ivory Luxury Surface: `#FBF8F1`
+
+Borders:
+
 - Border: `#E2E8F0`
 - Divider: `#CBD5E1`
 
@@ -50,19 +61,25 @@ Status colors:
 - Info Soft: `#EFF6FF`
 - Photos Purple: `#7C3AED`
 - Photos Soft: `#F3E8FF`
-- Receipts Amber: `#F59E0B`
-- Receipts Soft: `#FFF7E6`
+- Receipt Amber: `#F59E0B`
+- Receipt Soft: `#FFF7E6`
 
 Color rules:
 
 - Do not use pure black or near-black values such as `#000000`, `#010101`, `#020617`, or `#030712` as the main app color.
 - Use `#061426` or `#0B1F33` for primary dark surfaces and actions.
-- For visible filled UI that must clearly read as Royal Navy instead of black, use Royal Navy 800 `#102A43` or Royal Navy 900 `#0B1F33` from the approved palette. Reserve Royal Navy 950 `#061426` for text, deepest brand marks, and high-contrast accents.
+- Use Royal Navy 950 `#061426` for primary actions and active navigation.
+- Use Royal Navy 900 `#0B1F33` for pressed, hover, modal overlay, and deep supporting surfaces.
 - Use Luxury Gold only as a small premium accent, selected indicator, or accent line.
 - Use green for live, active, success, working, receipt confirmation, and clocked-in status.
 - Use red only for delete, danger, failed, or error states.
 - Use blue for schedule, information, and links.
 - Use purple for photos and media.
+- Use receipt amber only for receipts and cost attention.
+
+Acceptance rule:
+
+All future screens must use this same Royal Navy Luxury color system. Do not create new random colors unless approved by controller/design review.
 
 ## 3. Font System
 
@@ -226,7 +243,7 @@ Avoid giant dashed empty boxes and decorative illustrations.
 
 Do:
 
-- Use Royal Navy FieldOps UI tokens.
+- Use Royal Navy Luxury FieldOps UI tokens.
 - Use white cards on the `#F4F7FB` app background.
 - Keep buttons, chips, filters, modals, menus, submenus, and forms consistent.
 - Use semantic color only when it carries meaning.

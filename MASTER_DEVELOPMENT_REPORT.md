@@ -646,6 +646,26 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-26 Official Royal Navy Color System Enforcement
+- Updated `CLOCK_APP_DESIGN_SYSTEM.md` to the official Royal Navy Luxury FieldOps UI naming and color palette.
+- Added the official ivory surface and receipt amber naming to the design documentation and CSS token set.
+- Updated central CSS tokens so `--opera-navy` resolves to Royal Navy 950 `#061426` for primary actions and active navigation.
+- Added safe compatibility aliases for older receipt token names while introducing the official `--color-receipt` and `--color-receipt-soft` tokens.
+- Expanded global enforcement overrides so old slate/black utility classes inside the app resolve to the official Royal Navy/text/surface tokens.
+- Replaced remaining direct `bg-slate-900` filled UI classes and one primary `bg-blue-700` action with Royal Navy `#061426` where safe.
+- Preserved semantic blue, green, purple, amber, and red usage for schedule/info/link, live/success, photos/media, receipts/cost, and destructive/error states.
+- Clock screen color usage was audited: Clock In/Out, timer, earned accent, working chip, inputs, and bottom nav remain aligned with the official color rules.
+- Existing functionality, RBAC/company restrictions, team data, and React hook order were preserved.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-26 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-g34u8tjby-samrental70-7859s-projects.vercel.app
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -681,6 +701,8 @@
 - B.1-fix-22 does not require new SQL.
 - B.1-fix-23 does not require new SQL.
 - B.1-fix-24 does not require new SQL.
+- B.1-fix-25 does not require new SQL.
+- B.1-fix-26 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

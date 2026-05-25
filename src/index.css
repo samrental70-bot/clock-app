@@ -9,6 +9,7 @@
   --color-bg: #F4F7FB;
   --color-surface: #FFFFFF;
   --color-surface-soft: #F8FAFC;
+  --color-ivory: #FBF8F1;
   --color-border: #E2E8F0;
   --color-divider: #CBD5E1;
   --color-text: #061426;
@@ -26,8 +27,10 @@
   --color-info-soft: #EFF6FF;
   --color-purple: #7C3AED;
   --color-purple-soft: #F3E8FF;
-  --color-receipts: #F59E0B;
-  --color-receipts-soft: #FFF7E6;
+  --color-receipt: #F59E0B;
+  --color-receipt-soft: #FFF7E6;
+  --color-receipts: var(--color-receipt);
+  --color-receipts-soft: var(--color-receipt-soft);
   --shadow-card: 0 10px 26px rgba(6, 20, 38, 0.07);
   --shadow-soft: 0 6px 18px rgba(6, 20, 38, 0.05);
   --radius-page: 22px;
@@ -36,7 +39,7 @@
   --radius-button: 14px;
   --radius-pill: 999px;
 
-  --opera-navy: var(--color-navy-800);
+  --opera-navy: var(--color-navy-950);
   --opera-navy-strong: var(--color-navy-950);
   --opera-navy-soft: var(--color-navy-900);
   --opera-bg: var(--color-bg);
@@ -49,7 +52,7 @@
   --opera-text-muted: var(--color-text-muted);
   --opera-blue: var(--color-info);
   --opera-green: var(--color-success);
-  --opera-amber: var(--color-receipts);
+  --opera-amber: var(--color-receipt);
   --opera-purple: var(--color-purple);
   --opera-red: var(--color-danger);
   --opera-card-shadow: var(--shadow-card);
@@ -256,7 +259,7 @@ textarea {
   min-height: 44px;
   align-items: center;
   justify-content: center;
-  border: 1px solid #fecaca;
+  border: 1px solid var(--color-danger);
   border-radius: var(--radius-button);
   background: var(--color-danger-soft);
   color: var(--opera-red);
@@ -296,7 +299,7 @@ textarea {
 }
 
 .opera-status-neutral {
-  background: #f1f5f9;
+  background: var(--color-surface-soft);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
 }
@@ -310,13 +313,13 @@ textarea {
 .opera-status-warning {
   background: var(--color-warning-soft);
   color: var(--color-warning);
-  border: 1px solid #fed7aa;
+  border: 1px solid var(--color-warning);
 }
 
 .opera-status-danger {
   background: var(--color-danger-soft);
   color: var(--opera-red);
-  border: 1px solid #fecaca;
+  border: 1px solid var(--color-danger);
 }
 
 .opera-activity-row {
@@ -397,7 +400,7 @@ textarea {
 
 .opera-dev-chip {
   flex-shrink: 0;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--color-info);
   border-radius: var(--radius-pill);
   background: var(--color-info-soft);
   padding: 2px 6px;
@@ -437,7 +440,9 @@ textarea {
 .opera-shell .bg-\[\#030712\],
 .opera-shell .bg-\[\#061426\],
 .opera-shell .bg-\[\#0B1F33\],
+.opera-shell .bg-blue-700,
 .opera-shell .bg-black,
+.opera-shell .bg-slate-900,
 .opera-shell .bg-slate-950 {
   background-color: var(--opera-navy) !important;
 }
@@ -471,6 +476,7 @@ textarea {
 .opera-shell .text-\[\#020617\],
 .opera-shell .text-\[\#030712\],
 .opera-shell .text-black,
+.opera-shell .text-slate-900,
 .opera-shell .text-slate-950 {
   color: var(--opera-text) !important;
 }
@@ -485,7 +491,7 @@ textarea {
 }
 
 .opera-shell .bg-slate-100 {
-  background-color: #eef2f7 !important;
+  background-color: var(--color-surface-soft) !important;
 }
 
 .opera-shell .bg-blue-50 {
@@ -536,14 +542,14 @@ textarea {
 
 .opera-shell .bg-amber-400,
 .opera-shell .bg-orange-500 {
-  background-color: var(--color-receipts) !important;
+  background-color: var(--color-receipt) !important;
 }
 
 .opera-shell .text-amber-500,
 .opera-shell .text-amber-600,
 .opera-shell .text-orange-500,
 .opera-shell .text-orange-600 {
-  color: var(--color-receipts) !important;
+  color: var(--color-receipt) !important;
 }
 
 .opera-shell .border-amber-100,
@@ -551,7 +557,7 @@ textarea {
 .opera-shell .border-amber-400,
 .opera-shell .border-orange-100,
 .opera-shell .border-orange-200 {
-  border-color: #fed7aa !important;
+  border-color: var(--color-warning) !important;
 }
 
 .opera-shell .bg-red-50,
@@ -572,6 +578,7 @@ textarea {
 }
 
 .opera-shell .border-slate-300,
+.opera-shell .border-slate-900,
 .opera-shell .border-slate-950 {
   border-color: var(--color-divider) !important;
 }
@@ -618,6 +625,7 @@ textarea {
 }
 
 .opera-bottom-nav .bg-slate-950,
+.opera-bottom-nav .bg-slate-900,
 .opera-bottom-nav .bg-\[\#061426\],
 .opera-bottom-nav .bg-\[\#0B1F33\] {
   background-color: var(--opera-navy) !important;
@@ -704,7 +712,7 @@ textarea {
 }
 
 .schedule-task-form .schedule-pick-list label:has(input:checked) {
-  background: #f1f5f9;
+  background: var(--color-surface-soft);
   box-shadow: inset 0 0 0 1px var(--color-divider);
 }
 
