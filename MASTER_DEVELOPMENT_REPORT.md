@@ -586,6 +586,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-25 Clock Screen Luxury Simplification V3
+- Clock screen before-shift layout was simplified so the main `Start shift` card contains only Project / Job Site, Task, and Clock In.
+- Photo, Receipt, Task List, and Material List were moved below the main Start shift card as quiet secondary/lower-priority actions.
+- Clock screen labels `Quick capture`, `Tools`, `Shift tools`, and `Lists/tools` were removed.
+- Current shift card was simplified into one premium Royal Navy card surface with project/task, Working chip, large elapsed timer, smaller earned amount with subtle Luxury Gold accent, and one primary Clock Out button.
+- Photo, Receipt, Change Task, and Start Break are quiet secondary actions with white surfaces and subtle borders.
+- Receipt action uses subtle green text/border only and is not a strong green filled button.
+- Task List and Material List were reduced to smaller lower-priority soft outline actions.
+- Clock In and Clock Out use Royal Navy `#061426` as the only strong primary actions in their states.
+- Header cleanup and bottom nav Royal Navy active styling were preserved.
+- Existing clock-in, clock-out, photo, receipt, change-task, break, task-list, material-list, project/task dropdown, `+ Add new project`, `+ Add new task`, RBAC, company restrictions, live timer, and earned calculation logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-25 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-hwjpajkx1-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: Clock before-clock-in screenshot captured; project/task dropdown options verified in DOM and select screenshots captured. After-clock-in screenshot could not be captured without changing live database state because the available signed-in demo employee was not in an active personal Clock state.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
