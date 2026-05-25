@@ -117,7 +117,7 @@ const AppHeader = ({
   </div>
 );
 
-const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onTimesheets, onMore }) => {
+const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onClock, onTimesheets, onMore }) => {
   const NavIcon = ({ type }) => {
     if (type === "home") {
       return (
@@ -168,18 +168,14 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
           : "text-slate-500 active:bg-slate-100"
     }`;
   const homeActive = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
+  const moreActive = !homeActive && !["clock", "timesheet"].includes(activeTab);
   return (
     <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
-      <div className="grid grid-cols-5 gap-0.5">
+      <div className="grid grid-cols-4 gap-0.5">
         <button type="button" onClick={onHome} className={itemClass(homeActive)}>
           {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="home" />
           <span className="truncate">Home</span>
-        </button>
-        <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
-          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
-          <NavIcon type="schedule" />
-          <span className="truncate">Schedule</span>
         </button>
         <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>
           {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
@@ -191,7 +187,8 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
           <NavIcon type="timesheet" />
           <span className="truncate">Timesheets</span>
         </button>
-        <button type="button" onClick={onMore} className={itemClass(false)}>
+        <button type="button" onClick={onMore} className={itemClass(moreActive)}>
+          {moreActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="more" />
           <span className="truncate">More</span>
         </button>
@@ -18172,16 +18169,18 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     },
                     {
-                      label: "Team",
-                      action: () => setActiveTab("team"),
-                      tone: "bg-emerald-50 text-emerald-600",
+                      label: "Reports",
+                      action: () => openMenuTab("reports"),
+                      tone: "bg-[#F8FAFC] text-[#061426]",
                       surface: "bg-white border-slate-200",
                       text: "text-slate-800",
                       icon: (
                         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1">
-                          <path d="M16 19v-1a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v1" />
-                          <path d="M10 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
-                          <path d="M20 19v-1a4 4 0 0 0-3-3.8M17 4.3a3 3 0 0 1 0 5.4" />
+                          <path d="M7 4h10a2 2 0 0 1 2 2v14H5V6a2 2 0 0 1 2-2Z" />
+                          <path d="M8 17h8" />
+                          <path d="M9 14v-3" />
+                          <path d="M12 14V8" />
+                          <path d="M15 14v-5" />
                         </svg>
                       ),
                     },
@@ -24529,7 +24528,6 @@ const handlePhotoQuickUpload = async (event) => {
           activeTab={activeTab}
           visibleCurrentShift={visibleCurrentShift}
           onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
-          onSchedule={() => setActiveTab("schedule")}
           onClock={() => setActiveTab("clock")}
           onTimesheets={() => setActiveTab("timesheet")}
           onMore={() => {

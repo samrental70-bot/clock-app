@@ -720,6 +720,25 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-30 Home Quick Actions / Bottom Navigation Update
+- Updated the Home quick-action row for admin dashboard users to show Schedule, Photos, Receipts, and Reports.
+- Replaced the Team quick action with Reports while preserving Team access from Menu.
+- Removed Schedule from the fixed bottom navigation.
+- Bottom navigation now shows Home, Clock, Timesheets, and More.
+- Schedule remains accessible from the Home quick action and Menu.
+- More now shows the active navigation state for overflow screens such as Schedule, Photos, Receipts, Reports, Team, Settings, Projects, and Lists.
+- Preserved existing Home, Schedule, Reports, Menu, RBAC/company restriction, and React hook order logic.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-30 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-7jkj61bks-samrental70-7859s-projects.vercel.app
+- Browser verification status: Development app loads; signed-in Home visual QA is gated by login session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -760,6 +779,7 @@
 - B.1-fix-27 does not require new SQL.
 - B.1-fix-28 does not require new SQL.
 - B.1-fix-29 does not require new SQL.
+- B.1-fix-30 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
