@@ -566,6 +566,26 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-24 Royal Navy Visibility Correction
+- Rechecked the signed-in Home screen in the in-app browser after user feedback that the theme still appeared black.
+- Confirmed the old pure-black values were removed, but visible filled UI still read too dark because the filled layer used the deepest Royal Navy 950 tone.
+- Updated the visible filled brand layer to use approved Royal Navy 800 / 900 tokens so primary pills, KPI fills, active indicators, dark chips, modals, and button surfaces read as Royal Navy blue instead of black.
+- Preserved Royal Navy 950 for primary text, deepest brand accents, and high-contrast identity.
+- Added the visible-filled-surface guidance to `CLOCK_APP_DESIGN_SYSTEM.md`.
+- Added global CSS normalization for common Tailwind blue, purple, green, amber, orange, red, and emerald utility colors so UI elements resolve to the approved design tokens.
+- Verified in the in-app browser that visible filled surfaces now compute to Royal Navy 800 `rgb(16, 42, 67)` or Royal Navy 900 `rgb(11, 31, 51)`.
+- Existing app functionality, auth startup hotfix, RBAC, company restrictions, and data logic were preserved.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-24 Royal Navy Visibility Correction Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-9pjwj4u7l-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: Signed-in in-app browser screenshot reviewed; Home visible filled surfaces now render Royal Navy 800 / 900 rather than black.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:

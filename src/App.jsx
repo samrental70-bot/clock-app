@@ -57,7 +57,7 @@ class AppErrorBoundary extends Component {
             </div>
             <button
               type="button"
-              className="mt-4 h-12 w-full rounded-[14px] bg-[#061426] px-4 text-[15px] font-semibold text-white"
+              className="mt-4 h-12 w-full rounded-[14px] bg-[#0B1F33] px-4 text-[15px] font-semibold text-white"
               onClick={() => window.location.reload()}
             >
               Reload

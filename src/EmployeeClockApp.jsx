@@ -172,22 +172,22 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
     <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
       <div className="grid grid-cols-5 gap-0.5">
         <button type="button" onClick={onHome} className={itemClass(homeActive)}>
-          {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
           <NavIcon type="home" />
           <span className="truncate">Home</span>
         </button>
         <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
-          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
           <NavIcon type="schedule" />
           <span className="truncate">Schedule</span>
         </button>
         <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>
-          {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
           <NavIcon type="clock" />
           <span className="truncate">Clock</span>
         </button>
         <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
-          {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#061426]" /> : null}
+          {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
           <NavIcon type="timesheet" />
           <span className="truncate">Timesheets</span>
         </button>
@@ -208,7 +208,7 @@ const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Rang
   >
     <span className="flex items-center justify-between gap-3">
       <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
-      <span className="shrink-0 rounded-full bg-[#061426] px-2 py-0.5 text-[10px] font-black text-white">
+      <span className="shrink-0 rounded-full bg-[#0B1F33] px-2 py-0.5 text-[10px] font-black text-white">
         {presetLabel}
       </span>
     </span>
@@ -237,7 +237,7 @@ const StandardDateRangeModal = ({
   const invalidCustom = mode === "custom" && draftFrom && draftTo && draftFrom > draftTo;
   return (
     <div
-      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#061426]/55 p-3 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 p-3 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       onClick={onCancel}
@@ -2684,11 +2684,11 @@ function PublicPhotoShareView({ share, index, setIndex }) {
           ) : (
             <>
               <div className="rounded-2xl border bg-white overflow-hidden">
-                <div className="bg-[#061426]">
+                <div className="bg-[#0B1F33]">
                   {isVideo ? (
-                    <video src={url} className="w-full max-h-[72vh] bg-[#061426]" controls playsInline />
+                    <video src={url} className="w-full max-h-[72vh] bg-[#0B1F33]" controls playsInline />
                   ) : (
-                    <img src={url} alt="Shared project" className="w-full max-h-[72vh] object-contain bg-[#061426]" />
+                    <img src={url} alt="Shared project" className="w-full max-h-[72vh] object-contain bg-[#0B1F33]" />
                   )}
                 </div>
                 <div className="p-3 space-y-2">
@@ -2742,7 +2742,7 @@ function PublicPhotoShareView({ share, index, setIndex }) {
                       onClick={() => setIndex(itemIndex)}
                     >
                       {thumbVideo ? (
-                        <video src={thumbUrl} className="h-20 w-full object-cover bg-[#061426]" muted playsInline preload="metadata" />
+                        <video src={thumbUrl} className="h-20 w-full object-cover bg-[#0B1F33]" muted playsInline preload="metadata" />
                       ) : (
                         <img src={thumbUrl} alt="" className="h-20 w-full object-cover" />
                       )}
@@ -11091,7 +11091,7 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button
               type="button"
-              className="rounded-2xl bg-[#061426] px-3 py-3 text-[14px] font-black text-white disabled:opacity-50"
+              className="rounded-2xl bg-[#0B1F33] px-3 py-3 text-[14px] font-black text-white disabled:opacity-50"
               disabled={busy}
               onClick={() => void approveTimesheetRequest(request)}
             >
@@ -14047,7 +14047,7 @@ const handlePhotoQuickUpload = async (event) => {
           type="button"
           className={`rounded-xl px-3 py-2 text-[13px] font-black ${
             scheduleViewMode === "list"
-              ? "bg-[#061426] text-white shadow-sm"
+              ? "bg-[#0B1F33] text-white shadow-sm"
               : "text-slate-600 active:bg-white"
           }`}
           onClick={() => setScheduleViewMode("list")}
@@ -14058,7 +14058,7 @@ const handlePhotoQuickUpload = async (event) => {
           type="button"
           className={`rounded-xl px-3 py-2 text-[13px] font-black ${
             scheduleViewMode !== "list"
-              ? "bg-[#061426] text-white shadow-sm"
+              ? "bg-[#0B1F33] text-white shadow-sm"
               : "text-slate-600 active:bg-white"
           }`}
           onClick={() => setScheduleViewMode(scheduleViewMode === "list" ? "cal7" : scheduleViewMode)}
@@ -15384,7 +15384,7 @@ const handlePhotoQuickUpload = async (event) => {
     amber: "bg-amber-50 text-amber-600",
     blue: "bg-blue-50 text-blue-600",
     green: "bg-emerald-50 text-emerald-600",
-    navy: "bg-[#061426] text-white",
+    navy: "bg-[#0B1F33] text-white",
     purple: "bg-violet-50 text-violet-600",
     slate: "bg-slate-100 text-slate-600",
   };
@@ -15403,7 +15403,7 @@ const handlePhotoQuickUpload = async (event) => {
           />
 
           {!isAdmin && activeAssignNotif ? (
-            <div className="fixed inset-0 z-[72] bg-[#061426]/40 px-3 py-6" role="dialog" aria-modal="true">
+            <div className="fixed inset-0 z-[72] bg-[#0B1F33]/40 px-3 py-6" role="dialog" aria-modal="true">
               <div className="mx-auto w-full max-w-md">
                 <div className="rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
                   <div className="p-4 border-b border-slate-100 bg-slate-50/60">
@@ -15605,7 +15605,7 @@ const handlePhotoQuickUpload = async (event) => {
                 )}
 
                 <Button
-                  className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
+                  className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#0B1F33] !text-white"
                   onClick={handleClockIn}
                 >
                   Clock In
@@ -15623,7 +15623,7 @@ const handlePhotoQuickUpload = async (event) => {
                       type="button"
                       className={`h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "photo"
-                          ? "border-[#061426] bg-[#061426] text-white"
+                          ? "border-[#0B1F33] bg-[#0B1F33] text-white"
                           : "border-slate-300 bg-white text-[#061426]"
                       }`}
                       onClick={() => {
@@ -15651,7 +15651,7 @@ const handlePhotoQuickUpload = async (event) => {
                       type="button"
                       className={`block h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                         photoCameraOpen && photoCameraMode === "receipt"
-                          ? "border-[#061426] bg-[#061426] text-white"
+                          ? "border-[#0B1F33] bg-[#0B1F33] text-white"
                           : "border-emerald-200 bg-emerald-50 text-emerald-700"
                       }`}
                       onClick={() => {
@@ -15691,7 +15691,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div ref={photoUploadActionsRef} className="space-y-2">
                       <video
                         ref={photoVideoRef}
-                        className="w-full max-h-64 rounded-2xl bg-[#061426] object-cover"
+                        className="w-full max-h-64 rounded-2xl bg-[#0B1F33] object-cover"
                         playsInline
                         muted
                         autoPlay
@@ -15767,7 +15767,7 @@ const handlePhotoQuickUpload = async (event) => {
                         {photoDrafts.map((draft, index) => (
                           <div key={draft.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                             <img src={draft.previewUrl} alt={`Selected photo ${index + 1}`} className="h-20 w-full object-cover" />
-                            <span className="absolute left-1 top-1 rounded-full bg-[#061426]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                            <span className="absolute left-1 top-1 rounded-full bg-[#0B1F33]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
                               {index + 1}
                             </span>
                             <button
@@ -15820,7 +15820,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2">
                         <video
                           src={videoDraft.previewUrl}
-                          className="w-full max-h-56 rounded-xl bg-[#061426]"
+                          className="w-full max-h-56 rounded-xl bg-[#0B1F33]"
                           controls
                           playsInline
                           preload="metadata"
@@ -15981,7 +15981,7 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                     <div className="grid grid-cols-2 gap-2">
                       <Button
-                        className="h-[46px] rounded-[14px] text-[15px] font-semibold !bg-[#061426] !text-white"
+                        className="h-[46px] rounded-[14px] text-[15px] font-semibold !bg-[#0B1F33] !text-white"
                         disabled={clockCostCentresActive.length === 0 || !costCenter}
                         onClick={applyTaskChange}
                       >
@@ -15993,7 +15993,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : (
                   <div className="space-y-4">
                     <Button
-                      className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
+                      className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#0B1F33] !text-white"
                       onClick={handleClockOut}
                     >
                       Clock Out
@@ -16006,7 +16006,7 @@ const handlePhotoQuickUpload = async (event) => {
                           type="button"
                             className={`h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "photo"
-                                ? "border-[#061426] bg-[#061426] text-white"
+                                ? "border-[#0B1F33] bg-[#0B1F33] text-white"
                                 : "border-slate-300 bg-white text-[#061426]"
                           }`}
                           onClick={() => {
@@ -16030,7 +16030,7 @@ const handlePhotoQuickUpload = async (event) => {
                           type="button"
                             className={`block h-[46px] w-full rounded-[14px] border text-center text-[15px] font-semibold transition disabled:opacity-50 ${
                             photoCameraOpen && photoCameraMode === "receipt"
-                                ? "border-[#061426] bg-[#061426] text-white"
+                                ? "border-[#0B1F33] bg-[#0B1F33] text-white"
                                 : "border-emerald-200 bg-emerald-50 text-emerald-700"
                           }`}
                           onClick={() => {
@@ -16096,7 +16096,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <div ref={photoUploadActionsRef} className="space-y-2">
                           <video
                             ref={photoVideoRef}
-                            className="w-full max-h-64 rounded-2xl bg-[#061426] object-cover"
+                            className="w-full max-h-64 rounded-2xl bg-[#0B1F33] object-cover"
                             playsInline
                             muted
                             autoPlay
@@ -16172,7 +16172,7 @@ const handlePhotoQuickUpload = async (event) => {
                             {photoDrafts.map((draft, index) => (
                               <div key={draft.id} className="relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
                                 <img src={draft.previewUrl} alt={`Selected photo ${index + 1}`} className="h-20 w-full object-cover" />
-                                <span className="absolute left-1 top-1 rounded-full bg-[#061426]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                                <span className="absolute left-1 top-1 rounded-full bg-[#0B1F33]/80 px-1.5 py-0.5 text-[10px] font-bold text-white">
                                   {index + 1}
                                 </span>
                                 <button
@@ -16225,7 +16225,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2">
                             <video
                               src={videoDraft.previewUrl}
-                              className="w-full max-h-56 rounded-xl bg-[#061426]"
+                              className="w-full max-h-56 rounded-xl bg-[#0B1F33]"
                               controls
                               playsInline
                               preload="metadata"
@@ -16301,7 +16301,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Filters</p>
                     <button
                       type="button"
-                      className="shrink-0 rounded-[14px] bg-[#061426] px-3 py-2 text-[12px] font-black text-white shadow-sm"
+                      className="shrink-0 rounded-[14px] bg-[#0B1F33] px-3 py-2 text-[12px] font-black text-white shadow-sm"
                       onClick={() => void handleShareTimesheetReport()}
                     >
                       Share report
@@ -16319,7 +16319,7 @@ const handlePhotoQuickUpload = async (event) => {
                         type="button"
                         className={`rounded-full border px-2 py-1.5 text-[11px] font-black ${
                           timesheetRangePreset === option.id
-                            ? "border-[#061426] bg-[#061426] text-white"
+                            ? "border-[#0B1F33] bg-[#0B1F33] text-white"
                             : "border-slate-200 bg-slate-50 text-slate-700"
                         }`}
                         onClick={() => applyTimesheetQuickRange(option.id)}
@@ -16438,7 +16438,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </label>
                     <button
                       type="submit"
-                      className="w-full rounded-2xl bg-[#061426] px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                      className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
                       disabled={manualTimeSaving}
                     >
                       {manualTimeSaving ? "Sending..." : "Send for supervisor approval"}
@@ -16488,7 +16488,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {timesheetFilterSheetOpen ? (
                   <div
-                    className="fixed inset-0 z-[70] flex items-end justify-center bg-[#061426]/45 p-3 backdrop-blur-[2px]"
+                    className="fixed inset-0 z-[70] flex items-end justify-center bg-[#0B1F33]/45 p-3 backdrop-blur-[2px]"
                     role="dialog"
                     aria-modal="true"
                     onClick={() => setTimesheetFilterSheetOpen(false)}
@@ -16572,7 +16572,7 @@ const handlePhotoQuickUpload = async (event) => {
                           </button>
                           <button
                             type="button"
-                            className="rounded-2xl bg-[#061426] px-3 py-2.5 text-[13px] font-black text-white"
+                            className="rounded-2xl bg-[#0B1F33] px-3 py-2.5 text-[13px] font-black text-white"
                             onClick={() => setTimesheetFilterSheetOpen(false)}
                           >
                             Apply
@@ -16735,7 +16735,7 @@ const handlePhotoQuickUpload = async (event) => {
                     {fieldAiPanel.mode === "receipt" && fieldAiPanel.json ? (
                       <button
                         type="button"
-                        className="w-full rounded-2xl bg-[#061426] px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
+                        className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
                         onClick={() => void saveFieldAiReceiptExtraction()}
                         disabled={fieldAiSavingKey === String(fieldAiPanel.item?.dbId || fieldAiPanel.item?.id || "")}
                       >
@@ -16745,7 +16745,7 @@ const handlePhotoQuickUpload = async (event) => {
                     {fieldAiPanel.mode === "tag" && fieldAiPanel.json ? (
                       <button
                         type="button"
-                        className="w-full rounded-2xl bg-[#061426] px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
+                        className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[14px] font-black text-white disabled:opacity-50"
                         onClick={() => void saveFieldAiTags()}
                         disabled={fieldAiSavingKey === String(fieldAiPanel.item?.dbId || fieldAiPanel.item?.id || "")}
                       >
@@ -16811,7 +16811,7 @@ const handlePhotoQuickUpload = async (event) => {
                             >
                               {url ? (
                                 isVideoMedia ? (
-                                  <video src={url} className="h-full w-full object-cover bg-[#061426]" muted playsInline preload="metadata" />
+                                  <video src={url} className="h-full w-full object-cover bg-[#0B1F33]" muted playsInline preload="metadata" />
                                 ) : (
                                   <img src={url} alt="" className="h-full w-full object-cover" />
                                 )
@@ -16825,7 +16825,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   <p className="truncate text-[16px] font-black text-slate-950">{mediaItemProjectName(item)}</p>
                                   <p className="truncate text-[13px] font-bold text-slate-600">{item.costCenter || item.cost_centre || "No task"}</p>
                                 </div>
-                                <span className="shrink-0 rounded-full bg-[#061426] px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">
+                                <span className="shrink-0 rounded-full bg-[#0B1F33] px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">
                                   {documentationTypeLabel(mediaItemDocumentationType(item), type)}
                                 </span>
                               </div>
@@ -16861,7 +16861,7 @@ const handlePhotoQuickUpload = async (event) => {
                               {isReceiptMedia ? (
                                 <button
                                   type="button"
-                                  className="rounded-2xl bg-[#061426] px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
+                                  className="rounded-2xl bg-[#0B1F33] px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
                                   onClick={() => void runFieldAiForMedia(item, "receipt")}
                                   disabled={Boolean(fieldAiWorkingKey)}
                                 >
@@ -16889,7 +16889,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <p className="mt-1 text-[13px] font-semibold text-slate-500">Try a different project, employee, or date range.</p>
                     <button
                       type="button"
-                      className="mt-3 rounded-2xl bg-[#061426] px-4 py-2 text-[13px] font-black text-white"
+                      className="mt-3 rounded-2xl bg-[#0B1F33] px-4 py-2 text-[13px] font-black text-white"
                       onClick={() => setActiveTab("clock")}
                     >
                       Open Clock
@@ -16927,7 +16927,7 @@ const handlePhotoQuickUpload = async (event) => {
                               <div className="flex gap-1.5">
                                 <button
                                   type="button"
-                                  className="rounded-[12px] bg-[#061426] px-2.5 py-1.5 text-[11px] font-black text-white disabled:border disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                                  className="rounded-[12px] bg-[#0B1F33] px-2.5 py-1.5 text-[11px] font-black text-white disabled:border disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                                   onClick={() => void shareProjectFolder(folder)}
                                   disabled={selectedCount === 0}
                                 >
@@ -16954,7 +16954,7 @@ const handlePhotoQuickUpload = async (event) => {
                             const isVideoMedia = isVideoMediaItem(photo);
                             const mediaUrl = mediaItemUrl(photo);
                             return (
-                              <div key={itemId} className={`relative aspect-square overflow-hidden rounded-[12px] border bg-slate-100 ${selected ? "border-[#061426] ring-2 ring-slate-950/15" : "border-slate-200"}`}>
+                              <div key={itemId} className={`relative aspect-square overflow-hidden rounded-[12px] border bg-slate-100 ${selected ? "border-[#0B1F33] ring-2 ring-slate-950/15" : "border-slate-200"}`}>
                                 <button
                                   type="button"
                                   className="block h-full w-full text-left"
@@ -16969,7 +16969,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   {isVideoMedia ? (
                                     <video
                                       src={mediaUrl}
-                                      className="h-full w-full bg-[#061426] object-cover"
+                                      className="h-full w-full bg-[#0B1F33] object-cover"
                                       muted
                                       playsInline
                                       preload="metadata"
@@ -16979,7 +16979,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   )}
                                 </button>
                                 {isVideoMedia ? (
-                                  <span className="absolute bottom-2 right-2 rounded-full bg-[#061426]/85 px-2 py-0.5 text-[10px] font-black text-white">
+                                  <span className="absolute bottom-2 right-2 rounded-full bg-[#0B1F33]/85 px-2 py-0.5 text-[10px] font-black text-white">
                                     Video
                                   </span>
                                 ) : null}
@@ -17042,7 +17042,7 @@ const handlePhotoQuickUpload = async (event) => {
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <div className="rounded-[18px] bg-[#061426] px-4 py-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
+                <div className="rounded-[18px] bg-[#0B1F33] px-4 py-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
                   <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Receipt total</p>
                   <p className="mt-1 text-[24px] font-black leading-none">{formatMoney(receiptTotal)}</p>
                 </div>
@@ -17095,7 +17095,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <p className="mt-1 text-[13px] font-semibold text-slate-500">Upload a receipt from Clock to attach it to a project.</p>
                     <button
                       type="button"
-                      className="mt-3 rounded-2xl bg-[#061426] px-4 py-2 text-[13px] font-black text-white"
+                      className="mt-3 rounded-2xl bg-[#0B1F33] px-4 py-2 text-[13px] font-black text-white"
                       onClick={() => setActiveTab("clock")}
                     >
                       Open Clock
@@ -17292,7 +17292,7 @@ const handlePhotoQuickUpload = async (event) => {
                       type="button"
                       className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
                         !listShowCompleted
-                          ? "bg-[#061426] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                          ? "bg-[#0B1F33] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
                           : "text-slate-600 active:bg-white"
                       }`}
                       onClick={() => setListShowCompleted(false)}
@@ -17303,7 +17303,7 @@ const handlePhotoQuickUpload = async (event) => {
                       type="button"
                       className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
                         listShowCompleted
-                          ? "bg-[#061426] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                          ? "bg-[#0B1F33] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
                           : "text-slate-600 active:bg-white"
                       }`}
                       onClick={() => setListShowCompleted(true)}
@@ -17325,7 +17325,7 @@ const handlePhotoQuickUpload = async (event) => {
                       />
                       <button
                         type="submit"
-                        className="shrink-0 rounded-2xl bg-[#061426] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
+                        className="shrink-0 rounded-2xl bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
                         disabled={
                           !selectedListProject ||
                           (listType === "task"
@@ -17342,7 +17342,7 @@ const handlePhotoQuickUpload = async (event) => {
                           type="button"
                           className={`w-full rounded-2xl px-3 py-3 text-[15px] font-black transition ${
                             listCameraOpen && listCameraTarget === "page"
-                              ? "bg-[#061426] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                              ? "bg-[#0B1F33] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
                               : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
                           }`}
                           onClick={() => {
@@ -17361,7 +17361,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
                             <video
                               ref={listCameraVideoRef}
-                              className="aspect-[4/3] w-full rounded-[18px] bg-[#061426] object-cover"
+                              className="aspect-[4/3] w-full rounded-[18px] bg-[#0B1F33] object-cover"
                               playsInline
                               muted
                             />
@@ -17382,7 +17382,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ) : null}
                             <button
                               type="button"
-                              className="w-full rounded-2xl bg-[#061426] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
+                              className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
                               onClick={() => void captureListTaskPhoto()}
                             >
                               Capture Photo
@@ -17658,7 +17658,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="mt-3 grid grid-cols-3 gap-2">
                         <button
                           type="button"
-                          className="rounded-[16px] bg-[#061426] px-3 py-2.5 text-[13px] font-black text-white"
+                          className="rounded-[16px] bg-[#0B1F33] px-3 py-2.5 text-[13px] font-black text-white"
                           onClick={handleEmployeeBottomClockAction}
                         >
                           {employeeClockActionLabel}
@@ -17888,7 +17888,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
                             <span
                               key={`pulse-in-${card.uid}`}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#061426] text-[10px] font-black text-white"
+                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#0B1F33] text-[10px] font-black text-white"
                               style={{ zIndex: 10 - index }}
                             >
                               {String(card.displayName || "?").slice(0, 1).toUpperCase()}
@@ -17975,10 +17975,10 @@ const handlePhotoQuickUpload = async (event) => {
                             <line x1={left} x2={left} y1={top} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
                             <line x1={left} x2={left + graphW} y1={top + graphH} y2={top + graphH} stroke="#94a3b8" strokeWidth="1.25" />
                             <polygon points={areaPoints} fill="rgba(37,99,235,0.08)" />
-                            <polyline points={linePoints} fill="none" stroke="#061426" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+                            <polyline points={linePoints} fill="none" stroke="#102A43" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
                             {points.map((point) => (
                               <g key={`point-${point.hour}`}>
-                                <circle cx={point.x} cy={point.y} r="4.5" fill="#061426" stroke="#ffffff" strokeWidth="2" />
+                                <circle cx={point.x} cy={point.y} r="4.5" fill="#102A43" stroke="#ffffff" strokeWidth="2" />
                                 {point.label ? (
                                   <text x={point.x} y={height - 7} textAnchor="middle" fontSize="9" fontWeight="800" fill="#64748b">
                                     {point.label}
@@ -18083,7 +18083,7 @@ const handlePhotoQuickUpload = async (event) => {
                           key={`radar-${card.uid}`}
                           type="button"
                           className={`absolute flex h-9 w-9 items-center justify-center rounded-full border-2 border-white text-[12px] font-black shadow-[0_12px_24px_rgba(15,23,42,0.22)] ${
-                            card.hasGps ? "bg-[#061426] text-white" : "bg-slate-300 text-slate-600"
+                            card.hasGps ? "bg-[#0B1F33] text-white" : "bg-slate-300 text-slate-600"
                           }`}
                           style={{ left: `${card.x}%`, top: `${card.y}%` }}
                           disabled={!card.hasGps}
@@ -18107,7 +18107,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </p>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2">
-                      <div className="rounded-[16px] border border-[#061426] bg-[#061426] px-3 py-3 text-white">
+                      <div className="rounded-[16px] border border-[#0B1F33] bg-[#0B1F33] px-3 py-3 text-white">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-300">Active</p>
                         <p className="mt-1 text-[28px] font-semibold leading-none tabular-nums">
                           {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
@@ -18171,7 +18171,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   </p>
                                 </div>
                                 <div className="shrink-0 text-right">
-                                  <p className="rounded-full bg-[#061426] px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
+                                  <p className="rounded-full bg-[#0B1F33] px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
                                     {formatDuration(liveMinutes)}
                                   </p>
                                   <p className="mt-1 text-[11px] font-semibold leading-none tabular-nums text-slate-500">
@@ -18196,7 +18196,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 </button>
                                 <Button
                                   type="button"
-                                  className="flex h-10 items-center justify-center rounded-[14px] px-3 text-[12px] font-semibold !bg-[#061426] !text-white"
+                                  className="flex h-10 items-center justify-center rounded-[14px] px-3 text-[12px] font-semibold !bg-[#0B1F33] !text-white"
                                   disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                                 >
@@ -18226,7 +18226,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's timesheet details"
                     >
-                      <span className="rounded-[16px] bg-[#061426] px-3 py-2.5 text-white shadow-sm">
+                      <span className="rounded-[16px] bg-[#0B1F33] px-3 py-2.5 text-white shadow-sm">
                         <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-300">Employees</span>
                         <span className="mt-1 block text-[24px] font-semibold tabular-nums leading-none">
                           {dashboardWorkedTodaySummary.employeeCount}
@@ -18361,7 +18361,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
-                      <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] bg-[#061426] p-3 text-white shadow-[0_14px_28px_rgba(15,23,42,0.24)]">
+                      <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] bg-[#0B1F33] p-3 text-white shadow-[0_14px_28px_rgba(15,23,42,0.24)]">
                         <p className="text-[9px] font-black uppercase tracking-wide text-slate-300">Working now</p>
                         <p className="text-[25px] font-black tabular-nums leading-none">
                           {dashboardLoading ? "..." : (dashboardLiveWorkingCards || []).length}
@@ -18419,7 +18419,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <div className="min-w-0">
                               <p className="text-[17px] font-black text-slate-950 leading-snug break-words flex items-start justify-between gap-3">
                                 {displayName || "—"}
-                                <span className="shrink-0 rounded-full bg-[#061426] px-3 py-1.5 text-[13px] font-black tabular-nums text-white shadow-[0_8px_16px_rgba(15,23,42,0.20)]">{formatTimer(timerSeconds)}</span>
+                                <span className="shrink-0 rounded-full bg-[#0B1F33] px-3 py-1.5 text-[13px] font-black tabular-nums text-white shadow-[0_8px_16px_rgba(15,23,42,0.20)]">{formatTimer(timerSeconds)}</span>
                               </p>
                               <p className="mt-1 text-[14px] font-bold text-slate-500 leading-snug tabular-nums">
                                 Clocked in {clockInDisp}
@@ -18450,7 +18450,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ) : null}
                             <Button
                               type="button"
-                              className="w-full rounded-2xl h-11 text-[14px] font-black !bg-[#061426] !text-white shadow-[0_12px_26px_rgba(15,23,42,0.22)] disabled:opacity-60"
+                              className="w-full rounded-2xl h-11 text-[14px] font-black !bg-[#0B1F33] !text-white shadow-[0_12px_26px_rgba(15,23,42,0.22)] disabled:opacity-60"
                               disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
                               onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                             >
@@ -18880,7 +18880,7 @@ const handlePhotoQuickUpload = async (event) => {
                     {reportsSafeDrillStack.length ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded-2xl border border-slate-200 bg-[#061426] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_12px_22px_rgba(15,23,42,0.18)] active:bg-slate-800"
+                        className="shrink-0 rounded-2xl border border-slate-200 bg-[#0B1F33] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_12px_22px_rgba(15,23,42,0.18)] active:bg-slate-800"
                         onClick={() => {
                           const next = reportsSafeDrillStack.slice(0, -1);
                           setReportsDrillStack(next);
@@ -18907,7 +18907,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
                           Date range
                         </span>
-                        <span className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
+                        <span className="shrink-0 rounded-full bg-[#0B1F33] px-2.5 py-1 text-[10px] font-black text-white">
                           {reportsSelectedRangeLabel}
                         </span>
                       </span>
@@ -19093,7 +19093,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : null}
                 {reportsDatePickerOpen && (
                   <div
-                    className="fixed inset-0 z-[85] flex items-end justify-center bg-[#061426]/55 p-3 backdrop-blur-[2px]"
+                    className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 p-3 backdrop-blur-[2px]"
                     role="dialog"
                     aria-modal="true"
                     onClick={() => setReportsDatePickerOpen(false)}
@@ -19257,7 +19257,7 @@ const handlePhotoQuickUpload = async (event) => {
                           type="button"
                           className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
                             reportsRangePreset === p.id
-                              ? "bg-[#061426] text-white border-[#061426] shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                              ? "bg-[#0B1F33] text-white border-[#0B1F33] shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
                               : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
                           }`}
                           onClick={() => {
@@ -19330,7 +19330,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="col-span-2 rounded-[24px] bg-[#061426] px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
+                      <div className="col-span-2 rounded-[24px] bg-[#0B1F33] px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
                         <p className="text-[11px] font-black uppercase tracking-wide text-slate-300">Total hours</p>
                         <p className="mt-2 text-[34px] font-black tabular-nums leading-none">
                           {formatDuration(
@@ -19558,7 +19558,7 @@ const handlePhotoQuickUpload = async (event) => {
                       type="button"
                       className={`rounded-2xl py-2.5 text-[15px] font-black transition ${
                         reportsViewMode === mode.id
-                          ? "bg-[#061426] text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                          ? "bg-[#0B1F33] text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                           : "text-slate-700 active:bg-white"
                       }`}
                       onClick={() => setReportsViewMode(mode.id)}
@@ -19576,7 +19576,7 @@ const handlePhotoQuickUpload = async (event) => {
                         type="button"
                         className={`rounded-2xl px-2 py-2.5 text-[12px] font-black border transition-colors leading-tight ${
                           reportsRangePreset === p.id
-                            ? "bg-[#061426] text-white border-[#061426] shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
+                            ? "bg-[#0B1F33] text-white border-[#0B1F33] shadow-[0_8px_14px_rgba(15,23,42,0.18)]"
                             : "bg-slate-50 text-slate-800 border-slate-200 active:bg-white"
                         }`}
                         onClick={() => {
@@ -19643,7 +19643,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo && (
                   <>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="col-span-2 rounded-[24px] bg-[#061426] px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
+                      <div className="col-span-2 rounded-[24px] bg-[#0B1F33] px-4 py-4 text-white shadow-[0_16px_28px_rgba(15,23,42,0.24)]">
                         <p className="text-[11px] font-black uppercase tracking-wide text-slate-300">Total hours</p>
                         <p className="mt-2 text-[34px] font-black tabular-nums leading-none">
                           {formatDuration(reportsAggregates.totalMinutes)}
@@ -20050,7 +20050,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-xl bg-[#061426] px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                        className="rounded-xl bg-[#0B1F33] px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                         onClick={() =>
                           setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
                         }
@@ -20382,7 +20382,7 @@ const handlePhotoQuickUpload = async (event) => {
                     {!scheduleFormOpen && (
                       <Button
                         type="button"
-                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-[#061426] text-white shadow-sm"
+                        className="shrink-0 rounded-2xl h-10 px-3.5 text-[13px] font-black bg-[#0B1F33] text-white shadow-sm"
                         onClick={() => {
                           setScheduleSaveError("");
                           setScheduleEditingTaskId(null);
@@ -20425,7 +20425,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </button>
                       <button
                         type="button"
-                        className="rounded-xl bg-[#061426] px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                        className="rounded-xl bg-[#0B1F33] px-2 py-1.5 text-[12px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                         onClick={() =>
                           setScheduleCalendarAnchor(calendarDateKeyInTimeZone(new Date(), companyTimeZone))
                         }
@@ -21114,7 +21114,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <p className="mt-1 text-[13px] font-semibold text-slate-500">Create a task when the next job is ready.</p>
                     <button
                       type="button"
-                      className="mt-3 rounded-2xl bg-[#061426] px-4 py-2 text-[13px] font-black text-white"
+                      className="mt-3 rounded-2xl bg-[#0B1F33] px-4 py-2 text-[13px] font-black text-white"
                       onClick={() => {
                         setScheduleSaveError("");
                         setScheduleEditingTaskId(null);
@@ -22809,7 +22809,7 @@ const handlePhotoQuickUpload = async (event) => {
                               <Button
                                 type="button"
                                 className={`h-9 rounded-[12px] px-3 text-[12px] font-black ${
-                                  activeRep ? "!bg-[#061426] !text-white" : ""
+                                  activeRep ? "!bg-[#0B1F33] !text-white" : ""
                                 }`}
                                 onClick={() =>
                                   activeRep
@@ -23307,7 +23307,7 @@ const handlePhotoQuickUpload = async (event) => {
                             </code>
                             <button
                               type="button"
-                              className="shrink-0 rounded-xl bg-[#061426] px-3 py-2 text-[13px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
+                              className="shrink-0 rounded-xl bg-[#0B1F33] px-3 py-2 text-[13px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
                               onClick={() => void handleShareCompanyInvite()}
                               disabled={!userCompany?.code}
                             >
@@ -23408,7 +23408,7 @@ const handlePhotoQuickUpload = async (event) => {
         </div>
 
         {pendingEmployeePayPrompt && isAdmin && (
-          <div className="fixed inset-0 z-[81] flex items-center justify-center bg-[#061426]/55 p-4" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[81] flex items-center justify-center bg-[#0B1F33]/55 p-4" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4">
               <div className="space-y-1">
                 <p className="text-[22px] font-black text-slate-950 leading-tight">New employee joined</p>
@@ -23462,7 +23462,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {firstLoginPasswordPromptOpen && (
-          <div className="fixed inset-0 z-[82] flex items-center justify-center bg-[#061426]/55 p-4" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[82] flex items-center justify-center bg-[#0B1F33]/55 p-4" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4">
               <div className="space-y-1">
                 <p className="text-[22px] font-black text-slate-950 leading-tight">Change password?</p>
@@ -23498,7 +23498,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {changePasswordOpen && (
-          <div className="fixed inset-0 z-[83] flex items-center justify-center bg-[#061426]/55 p-4" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[83] flex items-center justify-center bg-[#0B1F33]/55 p-4" role="dialog" aria-modal="true">
             <form
               className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-4 shadow-2xl space-y-4"
               onSubmit={(event) => void handleSavePasswordChange(event)}
@@ -23566,7 +23566,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {clockListModal && (
-          <div className="fixed inset-0 z-[73] bg-[#061426]/50 p-4 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[73] bg-[#0B1F33]/50 p-4 flex items-end sm:items-center justify-center" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm max-h-[86dvh] overflow-hidden rounded-3xl bg-white shadow-2xl flex flex-col">
               <div className="border-b border-slate-200 p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -23610,7 +23610,7 @@ const handlePhotoQuickUpload = async (event) => {
                     type="button"
                     className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
                       !clockListShowCompleted
-                        ? "bg-[#061426] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                        ? "bg-[#0B1F33] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
                         : "text-slate-600 active:bg-white"
                     }`}
                     onClick={() => setClockListShowCompleted(false)}
@@ -23621,7 +23621,7 @@ const handlePhotoQuickUpload = async (event) => {
                     type="button"
                     className={`rounded-xl px-3 py-2.5 text-[14px] font-black transition ${
                       clockListShowCompleted
-                        ? "bg-[#061426] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
+                        ? "bg-[#0B1F33] text-white shadow-[0_8px_16px_rgba(15,23,42,0.16)]"
                         : "text-slate-600 active:bg-white"
                     }`}
                     onClick={() => setClockListShowCompleted(true)}
@@ -23643,7 +23643,7 @@ const handlePhotoQuickUpload = async (event) => {
                     />
                     <button
                       type="submit"
-                      className="shrink-0 rounded-2xl bg-[#061426] px-5 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
+                      className="shrink-0 rounded-2xl bg-[#0B1F33] px-5 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
                       disabled={
                         clockListModal === "task"
                           ? !String(clockListDraft || "").trim() && !clockListImageDraft?.dataUrl
@@ -23659,7 +23659,7 @@ const handlePhotoQuickUpload = async (event) => {
                         type="button"
                         className={`w-full rounded-2xl px-3 py-3 text-[15px] font-black transition ${
                           listCameraOpen && listCameraTarget === "modal"
-                            ? "bg-[#061426] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
+                            ? "bg-[#0B1F33] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
                             : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
                         }`}
                         onClick={() => {
@@ -23677,7 +23677,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
                           <video
                             ref={listCameraVideoRef}
-                            className="aspect-[4/3] w-full rounded-[18px] bg-[#061426] object-cover"
+                            className="aspect-[4/3] w-full rounded-[18px] bg-[#0B1F33] object-cover"
                             playsInline
                             muted
                           />
@@ -23698,7 +23698,7 @@ const handlePhotoQuickUpload = async (event) => {
                           ) : null}
                           <button
                             type="button"
-                            className="w-full rounded-2xl bg-[#061426] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
+                            className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
                             onClick={() => void captureListTaskPhoto()}
                           >
                             Capture Photo
@@ -23776,7 +23776,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {materialPaymentOpen && (
-          <div className="fixed inset-0 z-[74] bg-[#061426]/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[74] bg-[#0B1F33]/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -23854,7 +23854,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {receiptEntryStep && (
-          <div className="fixed inset-0 z-[75] bg-[#061426]/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[75] bg-[#0B1F33]/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -23962,7 +23962,7 @@ const handlePhotoQuickUpload = async (event) => {
         )}
 
         {listImageViewer?.imageUrl ? (
-          <div className="fixed inset-0 z-[90] bg-[#061426]/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 z-[90] bg-[#0B1F33]/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
             <div className="w-full max-w-sm rounded-3xl bg-white overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-3">
                 <div className="min-w-0">
@@ -23984,11 +23984,11 @@ const handlePhotoQuickUpload = async (event) => {
                   ×
                 </button>
               </div>
-              <div className="bg-[#061426]">
+              <div className="bg-[#0B1F33]">
                 <img
                   src={listImageViewer.imageUrl}
                   alt=""
-                  className="w-full max-h-[70dvh] object-contain bg-[#061426]"
+                  className="w-full max-h-[70dvh] object-contain bg-[#0B1F33]"
                 />
               </div>
             </div>
@@ -24003,7 +24003,7 @@ const handlePhotoQuickUpload = async (event) => {
           const isVideo = isVideoMediaItem(item);
           const url = mediaItemUrl(item);
           return (
-            <div className="fixed inset-0 z-[70] bg-[#061426]/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
+            <div className="fixed inset-0 z-[70] bg-[#0B1F33]/85 p-3 flex items-center justify-center" role="dialog" aria-modal="true">
               <div className="w-full max-w-sm rounded-3xl bg-white overflow-hidden shadow-2xl">
                 <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-3">
                   <div className="min-w-0">
@@ -24019,11 +24019,11 @@ const handlePhotoQuickUpload = async (event) => {
                     ×
                   </button>
                 </div>
-                <div className="bg-[#061426]">
+                <div className="bg-[#0B1F33]">
                   {isVideo ? (
-                    <video src={url} className="w-full max-h-[64dvh] bg-[#061426]" controls playsInline />
+                    <video src={url} className="w-full max-h-[64dvh] bg-[#0B1F33]" controls playsInline />
                   ) : (
-                    <img src={url} alt="Project" className="w-full max-h-[64dvh] object-contain bg-[#061426]" />
+                    <img src={url} alt="Project" className="w-full max-h-[64dvh] object-contain bg-[#0B1F33]" />
                   )}
                 </div>
                 <div className="p-3 space-y-3">
@@ -24055,7 +24055,7 @@ const handlePhotoQuickUpload = async (event) => {
 
         {isMenuOpen && (
           <div
-            className="fixed inset-0 z-[60] bg-[#061426]/45 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[60] bg-[#0B1F33]/45 backdrop-blur-[2px]"
             onClick={() => {
               setIsMenuOpen(false);
               setMenuPanel("main");

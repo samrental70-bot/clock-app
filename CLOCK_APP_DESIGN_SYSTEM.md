@@ -57,6 +57,7 @@ Color rules:
 
 - Do not use pure black or near-black values such as `#000000`, `#010101`, `#020617`, or `#030712` as the main app color.
 - Use `#061426` or `#0B1F33` for primary dark surfaces and actions.
+- For visible filled UI that must clearly read as Royal Navy instead of black, use Royal Navy 800 `#102A43` or Royal Navy 900 `#0B1F33` from the approved palette. Reserve Royal Navy 950 `#061426` for text, deepest brand marks, and high-contrast accents.
 - Use Luxury Gold only as a small premium accent, selected indicator, or accent line.
 - Use green for live, active, success, working, receipt confirmation, and clocked-in status.
 - Use red only for delete, danger, failed, or error states.

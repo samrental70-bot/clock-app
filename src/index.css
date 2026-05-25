@@ -36,7 +36,8 @@
   --radius-button: 14px;
   --radius-pill: 999px;
 
-  --opera-navy: var(--color-navy-950);
+  --opera-navy: var(--color-navy-800);
+  --opera-navy-strong: var(--color-navy-950);
   --opera-navy-soft: var(--color-navy-900);
   --opera-bg: var(--color-bg);
   --opera-surface: var(--color-surface);
@@ -207,6 +208,7 @@ textarea {
 .opera-kpi-primary {
   background: var(--opera-navy);
   color: var(--color-surface);
+  border-color: var(--color-navy-700);
 }
 
 .opera-kpi-primary p,
@@ -233,7 +235,7 @@ textarea {
 
 .opera-primary-button:hover,
 .opera-primary-button:active {
-  background: var(--color-navy-900) !important;
+  background: var(--color-navy-700) !important;
 }
 
 .opera-secondary-button {
@@ -433,27 +435,35 @@ textarea {
 .opera-shell .bg-\[\#111827\],
 .opera-shell .bg-\[\#020617\],
 .opera-shell .bg-\[\#030712\],
+.opera-shell .bg-\[\#061426\],
+.opera-shell .bg-\[\#0B1F33\],
 .opera-shell .bg-black,
 .opera-shell .bg-slate-950 {
   background-color: var(--opera-navy) !important;
 }
 
+.opera-shell .bg-\[\#102A43\] {
+  background-color: var(--color-navy-800) !important;
+}
+
 .opera-shell .bg-black\/40 {
-  background-color: rgba(6, 20, 38, 0.4) !important;
+  background-color: rgba(11, 31, 51, 0.4) !important;
 }
 
 .opera-shell .bg-black\/50 {
-  background-color: rgba(6, 20, 38, 0.5) !important;
+  background-color: rgba(11, 31, 51, 0.5) !important;
 }
 
 .opera-shell .bg-black\/85 {
-  background-color: rgba(6, 20, 38, 0.85) !important;
+  background-color: rgba(11, 31, 51, 0.85) !important;
 }
 
 .opera-shell [class*="bg-slate-950/"],
 .opera-shell [class*="bg-[#020617]/"],
-.opera-shell [class*="bg-[#030712]/"] {
-  background-color: rgba(6, 20, 38, 0.55) !important;
+.opera-shell [class*="bg-[#030712]/"],
+.opera-shell [class*="bg-[#061426]/"],
+.opera-shell [class*="bg-[#0B1F33]/"] {
+  background-color: rgba(11, 31, 51, 0.55) !important;
 }
 
 .opera-shell .text-\[\#070B1F\],
@@ -476,6 +486,83 @@ textarea {
 
 .opera-shell .bg-slate-100 {
   background-color: #eef2f7 !important;
+}
+
+.opera-shell .bg-blue-50 {
+  background-color: var(--color-info-soft) !important;
+}
+
+.opera-shell .text-blue-600,
+.opera-shell .text-blue-700 {
+  color: var(--color-info) !important;
+}
+
+.opera-shell .bg-violet-50,
+.opera-shell .bg-purple-50 {
+  background-color: var(--color-purple-soft) !important;
+}
+
+.opera-shell .text-violet-600,
+.opera-shell .text-purple-600,
+.opera-shell .text-purple-700 {
+  color: var(--color-purple) !important;
+}
+
+.opera-shell .bg-emerald-50,
+.opera-shell .bg-green-50,
+.opera-shell .bg-green-100 {
+  background-color: var(--color-success-soft) !important;
+}
+
+.opera-shell .text-emerald-600,
+.opera-shell .text-emerald-700,
+.opera-shell .text-emerald-900,
+.opera-shell .text-green-600,
+.opera-shell .text-green-700 {
+  color: var(--color-success) !important;
+}
+
+.opera-shell .border-emerald-100,
+.opera-shell .border-emerald-200,
+.opera-shell .border-green-100,
+.opera-shell .border-green-200 {
+  border-color: var(--color-success-border) !important;
+}
+
+.opera-shell .bg-amber-50,
+.opera-shell .bg-orange-50 {
+  background-color: var(--color-warning-soft) !important;
+}
+
+.opera-shell .bg-amber-400,
+.opera-shell .bg-orange-500 {
+  background-color: var(--color-receipts) !important;
+}
+
+.opera-shell .text-amber-500,
+.opera-shell .text-amber-600,
+.opera-shell .text-orange-500,
+.opera-shell .text-orange-600 {
+  color: var(--color-receipts) !important;
+}
+
+.opera-shell .border-amber-100,
+.opera-shell .border-amber-200,
+.opera-shell .border-amber-400,
+.opera-shell .border-orange-100,
+.opera-shell .border-orange-200 {
+  border-color: #fed7aa !important;
+}
+
+.opera-shell .bg-red-50,
+.opera-shell .bg-rose-50 {
+  background-color: var(--color-danger-soft) !important;
+}
+
+.opera-shell .text-red-600,
+.opera-shell .text-red-700,
+.opera-shell .text-rose-600 {
+  color: var(--color-danger) !important;
 }
 
 .opera-shell .border-slate-200,
@@ -531,7 +618,8 @@ textarea {
 }
 
 .opera-bottom-nav .bg-slate-950,
-.opera-bottom-nav .bg-\[\#061426\] {
+.opera-bottom-nav .bg-\[\#061426\],
+.opera-bottom-nav .bg-\[\#0B1F33\] {
   background-color: var(--opera-navy) !important;
 }
 
