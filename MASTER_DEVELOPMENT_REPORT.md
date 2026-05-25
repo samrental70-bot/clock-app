@@ -760,6 +760,25 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-32 Reports Reference Layout Update
+- Updated the Reports screen toward the provided reference design using approved Royal Navy Luxury colours.
+- Rebuilt the top Reports area with a clean page title, gold scope label, compact date range card, and Today/Week/Month/Custom preset chip.
+- Replaced the older report summary card with an Overview card showing Team Hours, Entries, Employees, Projects, and Estimated Pay.
+- Used Royal Navy for text/actions, Luxury Gold for the overview accent, Success Green for Estimated Pay, and approved soft surfaces/borders.
+- Preserved existing report date range logic, quick range presets, report calculations, project/employee/task breakdown drill-down, RBAC/company restriction, and React hook order logic.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-32-reports-final.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-32 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-ia5h4g1yp-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -802,6 +821,7 @@
 - B.1-fix-29 does not require new SQL.
 - B.1-fix-30 does not require new SQL.
 - B.1-fix-31 does not require new SQL.
+- B.1-fix-32 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

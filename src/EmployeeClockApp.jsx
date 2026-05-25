@@ -15276,6 +15276,9 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsCurrentTitle = reportsSafeDrillStack.length
     ? reportsSafeDrillStack.map((step) => step.label).join(" / ")
     : "All reports";
+  const reportsScopeLabel = reportsSafeDrillStack.length
+    ? reportsSafeDrillStack[reportsSafeDrillStack.length - 1]?.label || "Selected view"
+    : reportsTopProjects[0]?.project || "All projects";
   const reportsSelectedRangeLabel =
     reportsRangePreset === "today"
       ? "Today"
@@ -19146,46 +19149,64 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-              <CardContent className="p-2.5 sm:p-4 space-y-2.5">
-                <div className="relative overflow-hidden rounded-[22px] border border-[#E2E8F0] bg-white px-3.5 py-3.5 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
-                  <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#C9A227]/50 to-transparent" />
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Reports</p>
-                      <h2 className="mt-0.5 text-[22px] font-black leading-[1.03] text-[#061426] break-words">
-                        {reportsCurrentTitle}
-                      </h2>
-                    </div>
-                    {reportsSafeDrillStack.length ? (
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-[14px] border border-[#061426] bg-[#061426] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                        onClick={() => {
-                          const next = reportsSafeDrillStack.slice(0, -1);
-                          setReportsDrillStack(next);
-                          const remaining = REPORT_DIMS.filter((dim) => !new Set(next.map((step) => step.dim)).has(dim));
-                          setReportsDrillViewBy(remaining[0] || "project");
-                        }}
-                      >
-                        Back
-                      </button>
-                    ) : (
-                      <span className="shrink-0 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-[11px] font-black text-[#475569] shadow-sm">
-                        {reportsVisibleEntryCount} entries
-                      </span>
-                    )}
+            <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-[#F4F7FB] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+              <CardContent className="space-y-3 p-3 sm:p-4">
+                <div className="flex items-start justify-between gap-3 px-1 pt-1">
+                  <div className="min-w-0">
+                    <h2 className="text-[28px] font-black leading-none tracking-tight text-[#061426]">Reports</h2>
+                    <p className="mt-1 truncate text-[16px] font-black leading-tight text-[#C9A227]">
+                      {reportsScopeLabel}
+                    </p>
                   </div>
-
-                  <div className="mt-3">
-                    <DateRangeButton
-                      label="Date range"
-                      rangeLabel={reportsDateRangeLabel}
-                      presetLabel={reportsSelectedRangeLabel}
-                      onClick={openReportsDatePicker}
-                    />
-                  </div>
+                  {reportsSafeDrillStack.length ? (
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-[14px] border border-[#061426] bg-[#061426] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                      onClick={() => {
+                        const next = reportsSafeDrillStack.slice(0, -1);
+                        setReportsDrillStack(next);
+                        const remaining = REPORT_DIMS.filter((dim) => !new Set(next.map((step) => step.dim)).has(dim));
+                        setReportsDrillViewBy(remaining[0] || "project");
+                      }}
+                    >
+                      Back
+                    </button>
+                  ) : null}
                 </div>
+
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-3 rounded-[14px] border border-[#E2E8F0] bg-white px-4 py-3 text-left shadow-[0_10px_26px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC]"
+                  onClick={openReportsDatePicker}
+                >
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[#EFF6FF] text-[#061426]">
+                      {renderTimesheetUiIcon("calendar", "h-5 w-5")}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[11px] font-semibold leading-none text-[#64748B]">Date Range</span>
+                      <span className="mt-1 block text-[13px] font-black leading-snug text-[#061426]">
+                        {reportsDateRangeLabel}
+                      </span>
+                    </span>
+                  </span>
+                  <span className="shrink-0 rounded-full bg-[#061426] px-3.5 py-2 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
+                    {reportsSelectedRangeLabel}
+                  </span>
+                </button>
+
+                {reportsContextCards.length ? (
+                  <div className="flex flex-wrap gap-2 px-1">
+                    {reportsContextCards.map((card) => (
+                      <span
+                        key={`${card.dim}-${card.key}`}
+                        className="rounded-full border border-[#E2E8F0] bg-white px-3 py-1.5 text-[11px] font-black text-[#475569]"
+                      >
+                        {card.label} - {formatDuration(card.summary.minutes)}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
 
                 {reportsScreenLoading ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-[14px] font-bold text-slate-600">
@@ -19205,61 +19226,77 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {!reportsScreenLoading && !reportsScreenError && reportsDateFrom && reportsDateTo && reportsDateFrom <= reportsDateTo ? (
                   <>
-                    <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
-                      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
-                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M4 19V5M8 19V9M12 19V7M16 19v-5M20 19V4" />
-                            </svg>
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-700">Team hours</p>
-                            <p className="text-[11px] font-bold text-slate-400">
-                              {reportsSafeDrillStack.length ? "Filtered view" : "All entries"}
-                            </p>
+                    <div className="overflow-hidden rounded-[16px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                      <div className="flex items-center gap-3 border-b border-[#E2E8F0] px-4 py-3">
+                        <span className="h-5 w-0.5 rounded-full bg-[#C9A227]" />
+                        <p className="text-[16px] font-black leading-tight text-[#061426]">Overview</p>
+                      </div>
+                      <div className="grid grid-cols-3 divide-x divide-y divide-[#E2E8F0]">
+                        <div className="min-w-0 px-3 py-4">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#061426]">
+                              {renderTimesheetUiIcon("clock", "h-4 w-4")}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Team Hours</span>
+                              <span className="mt-1 block text-[16px] font-black leading-none tabular-nums text-[#061426]">
+                                {formatDuration(reportsVisibleSummary.minutes)}
+                              </span>
+                            </span>
                           </div>
                         </div>
-                        <p className="shrink-0 text-[24px] font-black leading-none tabular-nums text-slate-950">
-                          {formatDuration(reportsVisibleSummary.minutes)}
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-2 gap-px bg-slate-100">
-                        <div className="bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-blue-600">Regular</p>
-                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">
-                            {formatDuration(reportsVisibleSummary.minutes)}
-                          </p>
-                        </div>
-                        <div className="bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-amber-500">Entries</p>
-                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleEntryCount}</p>
-                        </div>
-                        <div className="bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-orange-500">Employees</p>
-                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleEmployeeCount}</p>
-                        </div>
-                        <div className="bg-white px-4 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">Projects</p>
-                          <p className="mt-1 text-[18px] font-black tabular-nums text-slate-950">{reportsVisibleProjectCount}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
-                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M4 7h16v10H4z" />
-                              <path d="M8 11h.01M16 13h.01M12 12a2 2 0 1 0 0 .01" />
-                            </svg>
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-700">Est pay</p>
-                            <p className="text-[11px] font-bold text-slate-400">{reportsVisibleEntryCount} entries</p>
+                        <div className="min-w-0 px-3 py-4">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFF7E6] text-[#F59E0B]">
+                              {renderTimesheetUiIcon("task", "h-4 w-4")}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Entries</span>
+                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                                {reportsVisibleEntryCount}
+                              </span>
+                            </span>
                           </div>
                         </div>
-                        <p className="shrink-0 text-[24px] font-black leading-none tabular-nums text-slate-950">
-                          {formatMoneyWhole(reportsVisibleSummary.cost)}
-                        </p>
+                        <div className="min-w-0 px-3 py-4">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
+                              {renderTimesheetUiIcon("user", "h-4 w-4")}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Employees</span>
+                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                                {reportsVisibleEmployeeCount}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                        <div className="min-w-0 px-3 py-4">
+                          <div className="flex min-w-0 flex-col gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
+                              {renderTimesheetUiIcon("folder", "h-4 w-4")}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Projects</span>
+                              <span className="mt-1 block text-[18px] font-black leading-none tabular-nums text-[#061426]">
+                                {reportsVisibleProjectCount}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                        <div className="col-span-2 min-w-0 px-3 py-4">
+                          <div className="flex items-start gap-2">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ECFDF5] text-[#15803D]">
+                              {renderTimesheetUiIcon("rate", "h-5 w-5")}
+                            </span>
+                            <span className="min-w-0">
+                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
+                              <span className="mt-1 block truncate text-[25px] font-black leading-none tabular-nums text-[#15803D]">
+                                {formatMoneyWhole(reportsVisibleSummary.cost)}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
