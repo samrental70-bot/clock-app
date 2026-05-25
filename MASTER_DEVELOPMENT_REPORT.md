@@ -702,6 +702,24 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-29 Photos / Receipts / Reports Date Filter Alignment
+- Extended the Royal Navy date/filter pattern to Photos, Receipts, and Reports.
+- Photos now uses a matching filter card with Filters header, Photos chip, shared Date Range row, and Royal Navy Project/Employee select rows.
+- Receipts now uses a matching filter card with Filters header, Receipts chip, shared Date Range row, and Royal Navy Project/Employee/Task select rows.
+- Reports date control now uses the same shared Date Range button and a cleaner Royal Navy report header instead of the older gradient/blue-heavy treatment.
+- Shared date picker modal remains the source for Timesheets, Photos, Receipts, and Reports, preserving quick ranges and custom date behavior.
+- Preserved existing photo/media filtering, receipt filtering, reports date filtering, RBAC/company restrictions, V3/V4 media backend, OCR/AI hooks, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-29 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-59ekdw3km-samrental70-7859s-projects.vercel.app
+- Screenshot/checklist status: Photos and Receipts verified with authenticated QA screenshots; Reports code/build verified, with full Reports screenshot requiring an admin signed-in QA session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -741,6 +759,7 @@
 - B.1-fix-26 does not require new SQL.
 - B.1-fix-27 does not require new SQL.
 - B.1-fix-28 does not require new SQL.
+- B.1-fix-29 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

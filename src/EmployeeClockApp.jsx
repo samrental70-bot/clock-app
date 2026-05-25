@@ -217,7 +217,7 @@ const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Rang
               <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
             </svg>
           </span>
-          <span className="truncate text-[14px] font-black leading-tight text-[#061426]">
+          <span className="min-w-0 text-[13px] font-black leading-tight text-[#061426]">
             {rangeLabel || "Choose dates"}
           </span>
         </span>
@@ -13338,6 +13338,14 @@ const handlePhotoQuickUpload = async (event) => {
         </svg>
       );
     }
+    if (type === "task") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 4h6l1 2h3v15H5V6h3l1-2Z" />
+          <path d="M9 12h6M9 16h4" />
+        </svg>
+      );
+    }
     if (type === "rate") {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -13368,6 +13376,29 @@ const handlePhotoQuickUpload = async (event) => {
       </svg>
     );
   };
+
+  const renderRoyalNavyFilterSelect = ({ label, icon = "folder", value, onChange, children }) => (
+    <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+      {label}
+      <span className="relative block">
+        <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+          {renderTimesheetUiIcon(icon, "h-4 w-4")}
+        </span>
+        <select
+          className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+          value={value}
+          onChange={onChange}
+        >
+          {children}
+        </select>
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </span>
+      </span>
+    </label>
+  );
 
   const renderTimesheetCard = (record, allowEdit = true) => {
     const st = normalizeStatus(record.status);
@@ -16926,34 +16957,13 @@ const handlePhotoQuickUpload = async (event) => {
                     {projectMediaSyncError}
                   </div>
                 ) : null}
-                <div className="sticky top-2 z-20 rounded-[18px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                    Project
-                    <select
-                      className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
-                      value={selectedPhotoFolder}
-                      onChange={(event) => setSelectedPhotoFolder(event.target.value)}
-                    >
-                      <option value="all">All Projects</option>
-                      {pictureProjectOptions.map((project) => (
-                        <option key={project.folder} value={project.folder}>{project.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                    Employee
-                    <select
-                      className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
-                      value={mediaFilterEmployeeId}
-                      onChange={(event) => setMediaFilterEmployeeId(event.target.value)}
-                    >
-                      <option value="all">All Employees</option>
-                      {mediaFilterOptions.employees.map((employee) => (
-                        <option key={employee.id} value={employee.id}>{employee.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="sticky top-2 z-20 rounded-[20px] border border-[#E2E8F0] bg-white/95 p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)] backdrop-blur space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-2 text-[13px] font-black text-[#475569]">
+                      <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
+                      Filters
+                    </p>
+                    <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[10px] font-black text-[#7C3AED]">Photos</span>
                   </div>
                   <DateRangeButton
                     label="Date range"
@@ -16961,6 +16971,36 @@ const handlePhotoQuickUpload = async (event) => {
                     presetLabel={mediaSelectedRangeLabel}
                     onClick={openMediaDatePicker}
                   />
+                  <div className="grid grid-cols-1 gap-3">
+                    {renderRoyalNavyFilterSelect({
+                      label: "Project",
+                      icon: "folder",
+                      value: selectedPhotoFolder,
+                      onChange: (event) => setSelectedPhotoFolder(event.target.value),
+                      children: (
+                        <>
+                          <option value="all">All Projects</option>
+                          {pictureProjectOptions.map((project) => (
+                            <option key={project.folder} value={project.folder}>{project.label}</option>
+                          ))}
+                        </>
+                      ),
+                    })}
+                    {renderRoyalNavyFilterSelect({
+                      label: "Employee",
+                      icon: "user",
+                      value: mediaFilterEmployeeId,
+                      onChange: (event) => setMediaFilterEmployeeId(event.target.value),
+                      children: (
+                        <>
+                          <option value="all">All Employees</option>
+                          {mediaFilterOptions.employees.map((employee) => (
+                            <option key={employee.id} value={employee.id}>{employee.name}</option>
+                          ))}
+                        </>
+                      ),
+                    })}
+                  </div>
                 </div>
                 {photoShareMessage ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] font-semibold text-slate-700">
@@ -17348,47 +17388,57 @@ const handlePhotoQuickUpload = async (event) => {
                   <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Receipt total</p>
                   <p className="mt-1 text-[24px] font-black leading-none">{formatMoney(receiptTotal)}</p>
                 </div>
-                <div className="sticky top-2 z-20 rounded-[18px] border border-slate-200 bg-white/95 p-2.5 shadow-sm backdrop-blur space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      Project
-                      <select
-                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
-                        value={selectedReceiptFolder}
-                        onChange={(event) => setSelectedReceiptFolder(event.target.value)}
-                      >
-                        <option value="all">All Projects</option>
-                        {receiptProjectOptions.map((project) => <option key={project.folder} value={project.folder}>{project.label}</option>)}
-                      </select>
-                    </label>
-                    <DateRangeButton
-                      label="Date range"
-                      rangeLabel={mediaDateRangeLabel}
-                      presetLabel={mediaSelectedRangeLabel}
-                      onClick={openMediaDatePicker}
-                    />
-                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      Employee
-                      <select
-                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
-                        value={mediaFilterEmployeeId}
-                        onChange={(e) => setMediaFilterEmployeeId(e.target.value)}
-                      >
-                        <option value="all">All Employees</option>
-                        {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
-                      </select>
-                    </label>
-                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
-                      Task
-                      <select
-                        className="h-9 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-2.5 text-[12px] font-black text-slate-950 outline-none focus:border-slate-400 focus:bg-white"
-                        value={mediaFilterCostCentre}
-                        onChange={(event) => setMediaFilterCostCentre(event.target.value)}
-                      >
-                        <option value="all">All Tasks</option>
-                        {mediaFilterOptions.costCentres.map((costCentre) => <option key={costCentre} value={costCentre}>{costCentre}</option>)}
-                      </select>
-                    </label>
+                <div className="sticky top-2 z-20 rounded-[20px] border border-[#E2E8F0] bg-white/95 p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)] backdrop-blur space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="flex items-center gap-2 text-[13px] font-black text-[#475569]">
+                      <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
+                      Filters
+                    </p>
+                    <span className="rounded-full bg-[#FFF7E6] px-2.5 py-1 text-[10px] font-black text-[#F59E0B]">Receipts</span>
+                  </div>
+                  <DateRangeButton
+                    label="Date range"
+                    rangeLabel={mediaDateRangeLabel}
+                    presetLabel={mediaSelectedRangeLabel}
+                    onClick={openMediaDatePicker}
+                  />
+                  <div className="grid grid-cols-1 gap-3">
+                    {renderRoyalNavyFilterSelect({
+                      label: "Project",
+                      icon: "folder",
+                      value: selectedReceiptFolder,
+                      onChange: (event) => setSelectedReceiptFolder(event.target.value),
+                      children: (
+                        <>
+                          <option value="all">All Projects</option>
+                          {receiptProjectOptions.map((project) => <option key={project.folder} value={project.folder}>{project.label}</option>)}
+                        </>
+                      ),
+                    })}
+                    {renderRoyalNavyFilterSelect({
+                      label: "Employee",
+                      icon: "user",
+                      value: mediaFilterEmployeeId,
+                      onChange: (event) => setMediaFilterEmployeeId(event.target.value),
+                      children: (
+                        <>
+                          <option value="all">All Employees</option>
+                          {mediaFilterOptions.employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}
+                        </>
+                      ),
+                    })}
+                    {renderRoyalNavyFilterSelect({
+                      label: "Task",
+                      icon: "task",
+                      value: mediaFilterCostCentre,
+                      onChange: (event) => setMediaFilterCostCentre(event.target.value),
+                      children: (
+                        <>
+                          <option value="all">All Tasks</option>
+                          {mediaFilterOptions.costCentres.map((costCentre) => <option key={costCentre} value={costCentre}>{costCentre}</option>)}
+                        </>
+                      ),
+                    })}
                   </div>
                 </div>
                 {visibleReceiptFolders.length === 0 && (
@@ -19168,21 +19218,21 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "reports" && isAdmin && (
-            <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
+            <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
               <CardContent className="p-2.5 sm:p-4 space-y-2.5">
-                <div className="relative overflow-hidden rounded-[30px] border border-white bg-[linear-gradient(135deg,#ffffff_0%,#f7fbff_58%,#fff8ed_100%)] px-3.5 py-3.5 shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
-                  <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-slate-300/80 to-transparent" />
+                <div className="relative overflow-hidden rounded-[22px] border border-[#E2E8F0] bg-white px-3.5 py-3.5 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
+                  <div className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-[#C9A227]/50 to-transparent" />
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Reports</p>
-                      <h2 className="mt-0.5 text-[22px] font-black leading-[1.03] text-slate-950 break-words">
+                      <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Reports</p>
+                      <h2 className="mt-0.5 text-[22px] font-black leading-[1.03] text-[#061426] break-words">
                         {reportsCurrentTitle}
                       </h2>
                     </div>
                     {reportsSafeDrillStack.length ? (
                       <button
                         type="button"
-                        className="shrink-0 rounded-2xl border border-slate-200 bg-[#0B1F33] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_12px_22px_rgba(15,23,42,0.18)] active:bg-slate-800"
+                        className="shrink-0 rounded-[14px] border border-[#061426] bg-[#061426] px-3.5 py-2.5 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
                         onClick={() => {
                           const next = reportsSafeDrillStack.slice(0, -1);
                           setReportsDrillStack(next);
@@ -19193,7 +19243,7 @@ const handlePhotoQuickUpload = async (event) => {
                         Back
                       </button>
                     ) : (
-                      <span className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700 shadow-sm">
+                      <span className="shrink-0 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-1.5 text-[11px] font-black text-[#475569] shadow-sm">
                         {reportsVisibleEntryCount} entries
                       </span>
                     )}
