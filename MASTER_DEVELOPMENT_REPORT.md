@@ -631,6 +631,21 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-25 Clock Action Icon Refinement
+- Replaced the temporary `Ph`, `Rc`, `Li`, `Ch`, and `Br` action glyph placeholders with small inline SVG line icons.
+- Added matching icons for Photo, Receipt, Lists, Change Task, and Start Break without adding a new icon dependency.
+- Existing Clock screen action handlers, project/task dropdowns, list menus, photo/receipt upload flow, change-task flow, break flow, RBAC, and company restrictions were preserved.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-25 Clock Action Icon Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-55mugzyx4-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: Before-clock-in Clock screenshot captured after development alias update.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:

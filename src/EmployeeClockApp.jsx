@@ -14650,6 +14650,51 @@ const handlePhotoQuickUpload = async (event) => {
           : "border-slate-200 bg-slate-50 text-[#061426]",
     ].join(" ");
 
+  const renderClockActionIcon = (type) => {
+    const iconClass = "h-3.5 w-3.5";
+    if (type === "photo") {
+      return (
+        <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 8h3l1.2-2h7.6L17 8h3v10H4V8Z" />
+          <circle cx="12" cy="13" r="3" />
+        </svg>
+      );
+    }
+    if (type === "receipt") {
+      return (
+        <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 3h10v18l-2-1-2 1-2-1-2 1-2-1V3Z" />
+          <path d="M9.5 8h5M9.5 12h5M9.5 16h3" />
+        </svg>
+      );
+    }
+    if (type === "lists") {
+      return (
+        <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M8 6h11M8 12h11M8 18h11" />
+          <path d="M5 6h.01M5 12h.01M5 18h.01" />
+        </svg>
+      );
+    }
+    if (type === "change") {
+      return (
+        <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 7h10l-2-2" />
+          <path d="M17 7l-2 2" />
+          <path d="M17 17H7l2-2" />
+          <path d="M7 17l2 2" />
+        </svg>
+      );
+    }
+    return (
+      <svg viewBox="0 0 24 24" className={iconClass} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M7 8h9v4a4 4 0 0 1-4 4h-1a4 4 0 0 1-4-4V8Z" />
+        <path d="M16 9h1a2 2 0 0 1 0 4h-1" />
+        <path d="M8 20h8" />
+      </svg>
+    );
+  };
+
   const renderClockListActionRow = () => (
     <div className="grid grid-cols-2 gap-2 px-1">
       <button
@@ -15676,7 +15721,7 @@ const handlePhotoQuickUpload = async (event) => {
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
                       <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
-                        Ph
+                        {renderClockActionIcon("photo")}
                       </span>
                       <span className="block text-[11px] font-semibold leading-tight">Photo</span>
                     </button>
@@ -15716,14 +15761,14 @@ const handlePhotoQuickUpload = async (event) => {
                         })}
                         aria-hidden="true"
                       >
-                        Rc
+                        {renderClockActionIcon("receipt")}
                       </span>
                       <span className="block text-[11px] font-semibold leading-tight">Receipt</span>
                     </button>
                     <details className="group relative">
                       <summary className={`${clockActionTileClass()} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
                         <span className={clockActionGlyphClass()} aria-hidden="true">
-                          Li
+                          {renderClockActionIcon("lists")}
                         </span>
                         <span className="block text-[11px] font-semibold leading-tight">Lists</span>
                       </summary>
@@ -16087,7 +16132,7 @@ const handlePhotoQuickUpload = async (event) => {
                           aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
                           <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
-                            Ph
+                            {renderClockActionIcon("photo")}
                           </span>
                           <span className="block text-[10px] font-semibold leading-tight">Photo</span>
                         </button>
@@ -16123,7 +16168,7 @@ const handlePhotoQuickUpload = async (event) => {
                             })}
                             aria-hidden="true"
                           >
-                            Rc
+                            {renderClockActionIcon("receipt")}
                           </span>
                           <span className="block text-[10px] font-semibold leading-tight">Receipt</span>
                         </button>
@@ -16133,7 +16178,7 @@ const handlePhotoQuickUpload = async (event) => {
                           onClick={handleChangeTask}
                         >
                           <span className={clockActionGlyphClass()} aria-hidden="true">
-                            Ch
+                            {renderClockActionIcon("change")}
                           </span>
                           <span className="block text-[10px] font-semibold leading-tight">Change<br />Task</span>
                         </button>
@@ -16143,7 +16188,7 @@ const handlePhotoQuickUpload = async (event) => {
                           onClick={handleBreak}
                         >
                           <span className={clockActionGlyphClass()} aria-hidden="true">
-                            Br
+                            {renderClockActionIcon("break")}
                           </span>
                           <span className="block text-[10px] font-semibold leading-tight">
                             {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Complete"}
