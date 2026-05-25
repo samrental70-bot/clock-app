@@ -28,6 +28,7 @@ dist-ssr
 
 # Non-OPERA files accidentally dropped into this workspace.
 # Keep these out of commits and Vercel deployments.
+screenshots/
 census-tenant-form-2026/
 charts/
 public/audio/

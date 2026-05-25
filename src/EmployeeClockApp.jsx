@@ -91,21 +91,22 @@ const AppHeader = ({
   const userLabel = String(metaLabel || "").trim().split(/\s+/).slice(0, 2).join(" ");
   return (
     <div className="opera-app-header">
-      <div className="flex min-h-[52px] items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      <div className="flex min-h-[48px] items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5">
           <span className="opera-header-logo-wrap">
             <img src={iconSrc} alt="" className="h-full w-full rounded-[10px]" />
           </span>
           <div className="min-w-0 flex-1">
-            <h1 className="opera-header-company">{companyName || "Company"}</h1>
-            <p className="opera-header-brand-line">Field operations</p>
+            <div className="opera-header-title-row">
+              <h1 className="opera-header-company">{companyName || "Company"}</h1>
+              {isDevelopment ? (
+                <span className="opera-dev-chip">Dev</span>
+              ) : null}
+            </div>
+            {userLabel ? <p className="opera-header-brand-line">{userLabel}</p> : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {userLabel ? <span className="opera-header-user">{userLabel}</span> : null}
-          {isDevelopment ? (
-            <span className="opera-dev-chip">Dev</span>
-          ) : null}
+        <div className="flex shrink-0 items-center gap-2">
           <button type="button" onClick={onNotifications} className="opera-header-icon-button relative shrink-0" aria-label="Notifications">
             <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
@@ -14835,24 +14836,38 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const clockActionTileClass = ({ active = false, receipt = false } = {}) =>
+  const clockActionTileClass = ({ active = false, receipt = false, dark = false, compact = false } = {}) =>
     [
-      "flex h-[64px] w-full flex-col items-center justify-center gap-1 rounded-[14px] border px-1.5 text-center transition disabled:opacity-50",
+      compact
+        ? "flex h-10 w-full items-center justify-center gap-1.5 rounded-[10px] border px-2 text-center text-[12px] font-semibold transition disabled:opacity-50"
+        : "flex h-[64px] w-full flex-col items-center justify-center gap-1 rounded-[14px] border px-1.5 text-center transition disabled:opacity-50",
       active
         ? "border-[#061426] bg-[#061426] text-white"
         : receipt
-          ? "border-emerald-200 bg-white text-emerald-700 active:bg-emerald-50"
-          : "border-slate-200 bg-white text-[#061426] active:bg-slate-50",
+          ? "border-[#15803D] bg-[#15803D] text-white active:bg-[#146C35]"
+          : dark
+            ? "border-[#061426] bg-[#061426] text-white active:bg-[#0B1F33]"
+            : "border-slate-200 bg-white text-[#061426] active:bg-slate-50",
     ].join(" ");
 
-  const clockActionGlyphClass = ({ active = false, receipt = false } = {}) =>
+  const clockActionGlyphClass = ({ active = false, receipt = false, dark = false, compact = false } = {}) =>
     [
-      "flex h-6 w-6 items-center justify-center rounded-[8px] border text-[10px] font-semibold leading-none",
+      compact
+        ? "flex h-5 w-5 items-center justify-center rounded-[6px] text-[10px] font-semibold leading-none"
+        : "flex h-6 w-6 items-center justify-center rounded-[8px] border text-[10px] font-semibold leading-none",
       active
         ? "border-white/25 bg-white/10 text-white"
         : receipt
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-          : "border-slate-200 bg-slate-50 text-[#061426]",
+          ? compact
+            ? "text-white"
+            : "border-white/25 bg-white/10 text-white"
+          : dark
+            ? compact
+              ? "text-white"
+              : "border-white/25 bg-white/10 text-white"
+            : compact
+              ? "text-[#061426]"
+              : "border-slate-200 bg-slate-50 text-[#061426]",
     ].join(" ");
 
   const renderClockActionIcon = (type) => {
@@ -15769,9 +15784,10 @@ const handlePhotoQuickUpload = async (event) => {
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
             <div className="space-y-3">
-            <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
+            <Card className="rounded-[20px] border border-[#BBF7D0] bg-white shadow-[0_8px_24px_rgba(6,20,38,0.06)] overflow-hidden">
               <CardContent className="p-4 space-y-4">
-                <div className="flex items-center gap-2">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
                   <span
                     className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#C9A227]/50 bg-[#FFF7E6]"
                     aria-hidden="true"
@@ -15780,6 +15796,8 @@ const handlePhotoQuickUpload = async (event) => {
                     <span className="absolute h-px w-2 translate-x-0.5 rounded-full bg-[#C9A227]" />
                   </span>
                   <h2 className="text-[20px] font-semibold leading-tight text-slate-950">Start shift</h2>
+                  </div>
+                  <p className="text-[12px] font-medium text-slate-500">Select your job site and task to begin.</p>
                 </div>
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
                   <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-3 space-y-1.5">
@@ -15895,10 +15913,8 @@ const handlePhotoQuickUpload = async (event) => {
                   </span>
                   Clock In
                 </Button>
-              </CardContent>
-            </Card>
 
-                <div ref={photoToolsRef} className="space-y-2.5">
+                <div ref={photoToolsRef} className="space-y-2.5 pt-1">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
@@ -15908,7 +15924,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
-                      className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo" })}
+                      className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true })}
                       onClick={() => {
                         if (!clockSetupReady) {
                           showClockSetupRequired();
@@ -15928,10 +15944,10 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
-                      <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
+                      <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true })} aria-hidden="true">
                         {renderClockActionIcon("photo")}
                       </span>
-                      <span className="block text-[11px] font-semibold leading-tight">Photo</span>
+                      <span className="block text-[11px] font-semibold leading-tight">Camera</span>
                     </button>
                     <button
                       type="button"
@@ -16192,11 +16208,13 @@ const handlePhotoQuickUpload = async (event) => {
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
                 )}
+              </CardContent>
+            </Card>
             </div>
           )}
 
           {activeTab === "clock" && visibleCurrentShift && (
-            <Card className="rounded-[22px] border border-slate-200 bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)] overflow-hidden">
+            <Card className="rounded-[22px] border border-[#BBF7D0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)] overflow-hidden">
               <CardContent className="flex flex-col gap-4 p-[18px]">
                 {isProfileArchived && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-950 leading-snug">
@@ -16218,20 +16236,20 @@ const handlePhotoQuickUpload = async (event) => {
                     </span>
                   </div>
                   <div className="mt-4 min-w-0">
-                    <p className="truncate text-[18px] font-semibold leading-tight text-slate-950" title={visibleCurrentShift.project || "Project"}>
+                    <p className="truncate text-[13px] font-black leading-tight text-[#061426]" title={visibleCurrentShift.project || "Project"}>
                       {visibleCurrentShift.project || "Project"}
                     </p>
-                    <p className="mt-1 truncate text-[16px] font-medium text-slate-600" title={visibleCurrentShift.costCenter || "Task"}>
+                    <p className="mt-1 truncate text-[12px] font-semibold text-slate-500" title={visibleCurrentShift.costCenter || "Task"}>
                       {visibleCurrentShift.costCenter || "Task"}
                     </p>
                   </div>
-                  <div className="mt-4 border-t border-slate-200 pt-4 text-center">
-                    <p className="mb-2 text-left text-[12px] font-semibold text-slate-500">Elapsed time</p>
-                    <p className="text-[46px] font-extrabold leading-none tracking-tight text-[#061426] tabular-nums">{formatTimer(liveSeconds)}</p>
-                    <p className="mt-4 text-left text-[12px] font-semibold text-slate-500">Earned</p>
-                    <p className="mt-0.5 text-left text-[20px] font-semibold text-[#C9A227] tabular-nums">
+                  <div className="mt-4 rounded-[18px] border border-[#BBF7D0] bg-white px-3 py-5 text-center shadow-[inset_0_0_0_1px_rgba(187,247,208,0.20)]">
+                    <p className="text-[11px] font-black uppercase tracking-[0.08em] text-[#15803D]">Live timer</p>
+                    <p className="mt-2 text-[48px] font-extrabold leading-none tracking-tight text-[#061426] tabular-nums">{formatTimer(liveSeconds)}</p>
+                    <p className="mt-3 text-[18px] font-black text-[#15803D] tabular-nums">
                       {formatMoney(liveEarnings)}
                     </p>
+                    <p className="mt-1 text-[12px] font-medium text-slate-500">Money earned</p>
                   </div>
                 </div>
 
@@ -16320,10 +16338,10 @@ const handlePhotoQuickUpload = async (event) => {
                       Clock Out
                     </Button>
                     <div ref={photoToolsRef} className="space-y-3">
-                      <div className="grid grid-cols-4 gap-2">
+                      <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                          className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo" })}
+                          className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "photo") {
                               stopPhotoCamera();
@@ -16339,16 +16357,17 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading}
                           aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
-                          <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
+                          <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })} aria-hidden="true">
                             {renderClockActionIcon("photo")}
                           </span>
-                          <span className="block text-[10px] font-semibold leading-tight">Photo</span>
+                          <span className="block leading-tight">Camera</span>
                         </button>
                         <button
                           type="button"
                           className={clockActionTileClass({
                             active: photoCameraOpen && photoCameraMode === "receipt",
                             receipt: true,
+                            compact: true,
                           })}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "receipt") {
@@ -16373,36 +16392,64 @@ const handlePhotoQuickUpload = async (event) => {
                             className={clockActionGlyphClass({
                               active: photoCameraOpen && photoCameraMode === "receipt",
                               receipt: true,
+                              compact: true,
                             })}
                             aria-hidden="true"
                           >
                             {renderClockActionIcon("receipt")}
                           </span>
-                          <span className="block text-[10px] font-semibold leading-tight">Receipt</span>
+                          <span className="block leading-tight">Receipt</span>
                         </button>
                         <button
                           type="button"
-                          className={clockActionTileClass()}
+                          className={clockActionTileClass({ dark: true, compact: true })}
                           onClick={handleChangeTask}
                         >
-                          <span className={clockActionGlyphClass()} aria-hidden="true">
+                          <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
                             {renderClockActionIcon("change")}
                           </span>
-                          <span className="block text-[10px] font-semibold leading-tight">Change<br />Task</span>
+                          <span className="block leading-tight">Change Task</span>
                         </button>
                         <button
                           type="button"
-                          className={clockActionTileClass()}
+                          className={clockActionTileClass({ dark: true, compact: true })}
                           onClick={handleBreak}
                         >
-                          <span className={clockActionGlyphClass()} aria-hidden="true">
+                          <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
                             {renderClockActionIcon("break")}
                           </span>
-                          <span className="block text-[10px] font-semibold leading-tight">
-                            {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Complete"}
+                          <span className="block leading-tight">
+                            {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Done"}
                           </span>
                         </button>
                       </div>
+                      <details className="group relative">
+                        <summary className="flex h-10 w-full cursor-pointer list-none items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[12px] font-semibold text-[#061426] [&::-webkit-details-marker]:hidden">
+                          {renderClockActionIcon("lists")}
+                          <span>Lists</span>
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m6 9 6 6 6-6" />
+                          </svg>
+                        </summary>
+                        <div className="absolute left-0 z-20 mt-2 w-40 overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_10px_26px_rgba(6,20,38,0.10)]">
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
+                            onClick={() => openClockProjectList("task")}
+                          >
+                            {renderClockActionIcon("lists")}
+                            Task List
+                          </button>
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
+                            onClick={() => openClockProjectList("material")}
+                          >
+                            {renderTimesheetUiIcon("folder", "h-3.5 w-3.5")}
+                            Material List
+                          </button>
+                        </div>
+                      </details>
 
                       <input
                         ref={photoFallbackCameraInputRef}
@@ -16603,7 +16650,6 @@ const handlePhotoQuickUpload = async (event) => {
                         ) : null}
                       </div>
                     </div>
-                    {renderClockListActionRow()}
                     {locationStatus && (
                       <p className="text-[14px] text-slate-600 text-center pt-0.5">{locationStatus}</p>
                     )}

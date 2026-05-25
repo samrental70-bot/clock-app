@@ -901,6 +901,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-39 Header And Clock Reference Polish
+- Updated the shared top header toward the provided light reference using the approved Royal Navy Luxury colors and Inter font stack.
+- Moved the DEV chip beside the company name, kept the user name as compact secondary text, and kept the notification bell as the only right-side control.
+- Updated the before-shift Clock state with a green-accented Start shift card, helper subtitle, Royal Navy Clock In button, and compact Camera / Receipt / Lists actions inside the same premium card.
+- Updated the active-shift Clock state with a green-accented Current shift card, Working chip, compact project/task text, bordered Live timer panel, green earned amount, Royal Navy Clock Out button, compact Camera / Receipt / Change Task / Break actions, and a Lists dropdown.
+- Preserved project/task dropdowns with add-new options, clock-in, clock-out, camera/photo, receipt, change-task, break, task-list, material-list logic, RBAC/company restrictions, and React hook order.
+- Added `screenshots/` to `.gitignore` and `.vercelignore` so local QA images are not committed or uploaded with development deployments.
+- Screenshot verification completed for the signed-in before-shift Clock state.
+- Screenshot: `screenshots/b1-fix-39-clock-before-light-header.png`
+- Active Clock Out screenshot was not created because the browser blocked safe local preview-state injection and creating a real active shift would write demo timesheet data.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-39 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-26v4d66sj-samrental70-7859s-projects.vercel.app
+- Browser verification status: Before-shift screenshot passed in signed-in demo company session; active-shift visual path verified by source/build only to avoid DB writes.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -950,6 +971,7 @@
 - B.1-fix-36 does not require new SQL.
 - B.1-fix-37 does not require new SQL.
 - B.1-fix-38 does not require new SQL.
+- B.1-fix-39 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

@@ -8,6 +8,7 @@ dist-ssr/
 .env
 .env.*
 *.log
+screenshots/
 
 # These paths are from other local experiments and must not ship with the clock app.
 census-tenant-form-2026/
