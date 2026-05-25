@@ -162,7 +162,7 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
   const itemClass = (active, emphasized = false) =>
     `relative flex min-w-0 flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 py-1.5 text-[12px] font-semibold transition ${
       active
-        ? "bg-slate-100 text-[#061426]"
+        ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.18)]"
         : emphasized
           ? "text-emerald-700 active:bg-emerald-50"
           : "text-slate-500 active:bg-slate-100"
@@ -172,22 +172,22 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
     <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
       <div className="grid grid-cols-5 gap-0.5">
         <button type="button" onClick={onHome} className={itemClass(homeActive)}>
-          {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
+          {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="home" />
           <span className="truncate">Home</span>
         </button>
         <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
-          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
+          {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="schedule" />
           <span className="truncate">Schedule</span>
         </button>
         <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>
-          {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
+          {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="clock" />
           <span className="truncate">Clock</span>
         </button>
         <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
-          {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#0B1F33]" /> : null}
+          {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="timesheet" />
           <span className="truncate">Timesheets</span>
         </button>
@@ -14630,25 +14630,42 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const renderClockListActionRow = ({ title = "" } = {}) => (
-    <div className="space-y-2">
-      {title ? <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">{title}</p> : null}
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          className="h-10 rounded-[12px] border border-slate-200 bg-slate-50 px-3 text-center transition active:bg-white"
-          onClick={() => openClockProjectList("task")}
-        >
-          <span className="block text-[14px] font-semibold leading-tight text-[#061426]">Task List</span>
-        </button>
-        <button
-          type="button"
-          className="h-10 rounded-[12px] border border-slate-200 bg-slate-50 px-3 text-center transition active:bg-white"
-          onClick={() => openClockProjectList("material")}
-        >
-          <span className="block text-[14px] font-semibold leading-tight text-[#061426]">Material List</span>
-        </button>
-      </div>
+  const clockActionTileClass = ({ active = false, receipt = false } = {}) =>
+    [
+      "flex h-[64px] w-full flex-col items-center justify-center gap-1 rounded-[14px] border px-1.5 text-center transition disabled:opacity-50",
+      active
+        ? "border-[#061426] bg-[#061426] text-white"
+        : receipt
+          ? "border-emerald-200 bg-white text-emerald-700 active:bg-emerald-50"
+          : "border-slate-200 bg-white text-[#061426] active:bg-slate-50",
+    ].join(" ");
+
+  const clockActionGlyphClass = ({ active = false, receipt = false } = {}) =>
+    [
+      "flex h-6 w-6 items-center justify-center rounded-[8px] border text-[10px] font-semibold leading-none",
+      active
+        ? "border-white/25 bg-white/10 text-white"
+        : receipt
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+          : "border-slate-200 bg-slate-50 text-[#061426]",
+    ].join(" ");
+
+  const renderClockListActionRow = () => (
+    <div className="grid grid-cols-2 gap-2 px-1">
+      <button
+        type="button"
+        className="h-9 rounded-[12px] text-center text-[13px] font-semibold text-[#061426] transition active:bg-slate-50"
+        onClick={() => openClockProjectList("task")}
+      >
+        Task List
+      </button>
+      <button
+        type="button"
+        className="flex h-9 items-center justify-center gap-1 rounded-[12px] text-center text-[13px] font-semibold text-[#061426] transition active:bg-slate-50"
+        onClick={() => openClockProjectList("material")}
+      >
+        Material List <span aria-hidden="true">&gt;</span>
+      </button>
     </div>
   );
 
@@ -15501,7 +15518,14 @@ const handlePhotoQuickUpload = async (event) => {
             <div className="space-y-3">
             <Card className="rounded-[20px] border border-slate-200 bg-white shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
               <CardContent className="p-4 space-y-4">
-                <div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#C9A227]/50 bg-[#FFF7E6]"
+                    aria-hidden="true"
+                  >
+                    <span className="absolute h-2.5 w-px -translate-y-0.5 rounded-full bg-[#C9A227]" />
+                    <span className="absolute h-px w-2 translate-x-0.5 rounded-full bg-[#C9A227]" />
+                  </span>
                   <h2 className="text-[20px] font-semibold leading-tight text-slate-950">Start shift</h2>
                 </div>
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
@@ -15609,25 +15633,29 @@ const handlePhotoQuickUpload = async (event) => {
                   className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
                   onClick={handleClockIn}
                 >
+                  <span
+                    className="relative mr-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[#C9A227]/80"
+                    aria-hidden="true"
+                  >
+                    <span className="absolute h-1.5 w-px -translate-y-0.5 rounded-full bg-[#C9A227]" />
+                    <span className="absolute h-px w-1.5 translate-x-0.5 rounded-full bg-[#C9A227]" />
+                  </span>
                   Clock In
                 </Button>
               </CardContent>
             </Card>
 
-                <div ref={photoToolsRef} className="space-y-2.5 rounded-[18px] border border-slate-200 bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
+                <div ref={photoToolsRef} className="space-y-2.5">
                   {isClockSetupWarningStatus ? (
                     <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[14px] font-black text-red-700 text-center leading-snug">
                       {locationStatus}
                     </p>
                   ) : null}
-                  <div className="grid grid-cols-2 gap-2">
+                  <p className="px-1 text-[12px] font-semibold text-slate-500">More actions</p>
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
-                      className={`h-11 w-full rounded-[12px] border text-center text-[14px] font-semibold transition disabled:opacity-50 ${
-                        photoCameraOpen && photoCameraMode === "photo"
-                          ? "border-[#061426] bg-[#061426] text-white"
-                          : "border-slate-200 bg-white text-[#061426]"
-                      }`}
+                      className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo" })}
                       onClick={() => {
                         if (!clockSetupReady) {
                           showClockSetupRequired();
@@ -15647,15 +15675,17 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                     >
-                      Photo
+                      <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
+                        Ph
+                      </span>
+                      <span className="block text-[11px] font-semibold leading-tight">Photo</span>
                     </button>
                     <button
                       type="button"
-                      className={`block h-11 w-full rounded-[12px] border text-center text-[14px] font-semibold transition disabled:opacity-50 ${
-                        photoCameraOpen && photoCameraMode === "receipt"
-                          ? "border-[#061426] bg-[#061426] text-white"
-                          : "border-emerald-200 bg-white text-emerald-700"
-                      }`}
+                      className={clockActionTileClass({
+                        active: photoCameraOpen && photoCameraMode === "receipt",
+                        receipt: true,
+                      })}
                       onClick={() => {
                         if (!clockSetupReady) {
                           showClockSetupRequired();
@@ -15679,8 +15709,41 @@ const handlePhotoQuickUpload = async (event) => {
                       disabled={photoBatchUploading || videoRecording || videoUploading}
                       aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                     >
-                      Receipt
+                      <span
+                        className={clockActionGlyphClass({
+                          active: photoCameraOpen && photoCameraMode === "receipt",
+                          receipt: true,
+                        })}
+                        aria-hidden="true"
+                      >
+                        Rc
+                      </span>
+                      <span className="block text-[11px] font-semibold leading-tight">Receipt</span>
                     </button>
+                    <details className="group relative">
+                      <summary className={`${clockActionTileClass()} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}>
+                        <span className={clockActionGlyphClass()} aria-hidden="true">
+                          Li
+                        </span>
+                        <span className="block text-[11px] font-semibold leading-tight">Lists</span>
+                      </summary>
+                      <div className="absolute right-0 z-20 mt-2 w-40 overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_10px_26px_rgba(6,20,38,0.10)]">
+                        <button
+                          type="button"
+                          className="block w-full px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
+                          onClick={() => openClockProjectList("task")}
+                        >
+                          Task List
+                        </button>
+                        <button
+                          type="button"
+                          className="block w-full border-t border-slate-100 px-3 py-2.5 text-left text-[13px] font-semibold text-[#061426] active:bg-slate-50"
+                          onClick={() => openClockProjectList("material")}
+                        >
+                          Material List
+                        </button>
+                      </div>
+                    </details>
                   </div>
 
                   {photoCameraError ? (
@@ -15717,7 +15780,7 @@ const handlePhotoQuickUpload = async (event) => {
                       {photoCameraMode === "receipt" ? (
                         <button
                           type="button"
-                          className="w-full rounded-2xl h-12 bg-green-700 text-white text-[16px] font-bold disabled:opacity-50"
+                          className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[16px] font-bold disabled:opacity-50"
                           onClick={() => void captureReceiptFromCamera()}
                           disabled={photoBatchUploading || videoRecording}
                         >
@@ -15727,7 +15790,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="grid grid-cols-2 gap-1.5">
                           <button
                             type="button"
-                            className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                            className="rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                             onClick={() => void capturePhotoFromCamera()}
                             disabled={photoBatchUploading || videoRecording}
                           >
@@ -15786,7 +15849,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <button
                         type="button"
-                        className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                        className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                         onClick={() => void uploadAllPhotoDrafts()}
                         disabled={photoBatchUploading || photoDrafts.length === 0}
                       >
@@ -15847,7 +15910,7 @@ const handlePhotoQuickUpload = async (event) => {
                         </div>
                         <button
                           type="button"
-                          className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                          className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                           onClick={() => void uploadSelectedVideo()}
                           disabled={videoUploading}
                         >
@@ -15863,7 +15926,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <>
                         <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
                           <div
-                            className="bg-slate-800 h-3 rounded-full transition-all"
+                            className="bg-[#061426] h-3 rounded-full transition-all"
                             style={{ width: `${videoUploadProgress}%` }}
                           />
                         </div>
@@ -15873,7 +15936,6 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                {renderClockListActionRow()}
                 {locationStatus && !isClockSetupWarningStatus && (
                   <p className="text-[14px] text-slate-600 text-center">{locationStatus}</p>
                 )}
@@ -15910,11 +15972,12 @@ const handlePhotoQuickUpload = async (event) => {
                       {visibleCurrentShift.costCenter || "Task"}
                     </p>
                   </div>
-                  <div className="mt-5 text-center">
+                  <div className="mt-4 border-t border-slate-200 pt-4 text-center">
+                    <p className="mb-2 text-left text-[12px] font-semibold text-slate-500">Elapsed time</p>
                     <p className="text-[46px] font-extrabold leading-none tracking-tight text-[#061426] tabular-nums">{formatTimer(liveSeconds)}</p>
-                    <p className="mt-2 text-[13px] font-semibold text-slate-500">Elapsed</p>
-                    <p className="mt-4 text-[20px] font-semibold text-[#061426] tabular-nums">
-                      <span className="text-[#C9A227]">{formatMoney(liveEarnings)}</span> earned
+                    <p className="mt-4 text-left text-[12px] font-semibold text-slate-500">Earned</p>
+                    <p className="mt-0.5 text-left text-[20px] font-semibold text-[#C9A227] tabular-nums">
+                      {formatMoney(liveEarnings)}
                     </p>
                   </div>
                 </div>
@@ -15994,17 +16057,20 @@ const handlePhotoQuickUpload = async (event) => {
                       className="h-[52px] w-full rounded-[14px] text-[16px] font-semibold !bg-[#061426] !text-white"
                       onClick={handleClockOut}
                     >
+                      <span
+                        className="relative mr-2 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-[#C9A227]/80"
+                        aria-hidden="true"
+                      >
+                        <span className="absolute h-1.5 w-px -translate-y-0.5 rounded-full bg-[#C9A227]" />
+                        <span className="absolute h-px w-1.5 translate-x-0.5 rounded-full bg-[#C9A227]" />
+                      </span>
                       Clock Out
                     </Button>
-                    <div ref={photoToolsRef} className="space-y-4">
-                      <div className="grid grid-cols-2 gap-2">
+                    <div ref={photoToolsRef} className="space-y-3">
+                      <div className="grid grid-cols-4 gap-2">
                         <button
                           type="button"
-                            className={`h-11 w-full rounded-[12px] border text-center text-[14px] font-semibold transition disabled:opacity-50 ${
-                            photoCameraOpen && photoCameraMode === "photo"
-                                ? "border-[#061426] bg-[#061426] text-white"
-                                : "border-slate-200 bg-white text-[#061426]"
-                          }`}
+                          className={clockActionTileClass({ active: photoCameraOpen && photoCameraMode === "photo" })}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "photo") {
                               stopPhotoCamera();
@@ -16020,15 +16086,17 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading}
                           aria-pressed={photoCameraOpen && photoCameraMode === "photo"}
                         >
-                          Photo
+                          <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo" })} aria-hidden="true">
+                            Ph
+                          </span>
+                          <span className="block text-[10px] font-semibold leading-tight">Photo</span>
                         </button>
                         <button
                           type="button"
-                            className={`block h-11 w-full rounded-[12px] border text-center text-[14px] font-semibold transition disabled:opacity-50 ${
-                            photoCameraOpen && photoCameraMode === "receipt"
-                                ? "border-[#061426] bg-[#061426] text-white"
-                                : "border-emerald-200 bg-white text-emerald-700"
-                          }`}
+                          className={clockActionTileClass({
+                            active: photoCameraOpen && photoCameraMode === "receipt",
+                            receipt: true,
+                          })}
                           onClick={() => {
                             if (photoCameraOpen && photoCameraMode === "receipt") {
                               stopPhotoCamera();
@@ -16048,23 +16116,38 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={photoBatchUploading || videoRecording || videoUploading}
                           aria-pressed={photoCameraOpen && photoCameraMode === "receipt"}
                         >
-                          Receipt
+                          <span
+                            className={clockActionGlyphClass({
+                              active: photoCameraOpen && photoCameraMode === "receipt",
+                              receipt: true,
+                            })}
+                            aria-hidden="true"
+                          >
+                            Rc
+                          </span>
+                          <span className="block text-[10px] font-semibold leading-tight">Receipt</span>
                         </button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
                         <button
                           type="button"
-                            className="h-11 rounded-[12px] border border-slate-200 bg-white px-2 text-[14px] font-semibold text-[#061426] active:bg-slate-50"
+                          className={clockActionTileClass()}
                           onClick={handleChangeTask}
                         >
-                          Change Task
+                          <span className={clockActionGlyphClass()} aria-hidden="true">
+                            Ch
+                          </span>
+                          <span className="block text-[10px] font-semibold leading-tight">Change<br />Task</span>
                         </button>
                         <button
                           type="button"
-                            className="h-11 rounded-[12px] border border-slate-200 bg-white px-2 text-[14px] font-semibold text-[#061426] active:bg-slate-50"
+                          className={clockActionTileClass()}
                           onClick={handleBreak}
                         >
-                          {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Complete"}
+                          <span className={clockActionGlyphClass()} aria-hidden="true">
+                            Br
+                          </span>
+                          <span className="block text-[10px] font-semibold leading-tight">
+                            {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Complete"}
+                          </span>
                         </button>
                       </div>
 
@@ -16112,7 +16195,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {photoCameraMode === "receipt" ? (
                             <button
                               type="button"
-                              className="w-full rounded-2xl h-12 bg-green-700 text-white text-[16px] font-bold disabled:opacity-50"
+                              className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[16px] font-bold disabled:opacity-50"
                               onClick={() => void captureReceiptFromCamera()}
                               disabled={photoBatchUploading || videoRecording}
                             >
@@ -16122,7 +16205,7 @@ const handlePhotoQuickUpload = async (event) => {
                             <div className="grid grid-cols-2 gap-1.5">
                               <button
                                 type="button"
-                                className="rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                                className="rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                                 onClick={() => void capturePhotoFromCamera()}
                                 disabled={photoBatchUploading || videoRecording}
                               >
@@ -16181,7 +16264,7 @@ const handlePhotoQuickUpload = async (event) => {
                           </div>
                           <button
                             type="button"
-                            className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                            className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                             onClick={() => void uploadAllPhotoDrafts()}
                             disabled={photoBatchUploading || photoDrafts.length === 0}
                           >
@@ -16242,7 +16325,7 @@ const handlePhotoQuickUpload = async (event) => {
                             </div>
                             <button
                               type="button"
-                              className="w-full rounded-2xl h-12 bg-slate-900 text-white text-[15px] font-bold disabled:opacity-50"
+                              className="w-full rounded-2xl h-12 bg-[#061426] text-white text-[15px] font-bold disabled:opacity-50"
                               onClick={() => void uploadSelectedVideo()}
                               disabled={videoUploading}
                             >
@@ -16258,7 +16341,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <>
                             <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
                               <div
-                                className="bg-slate-800 h-3 rounded-full transition-all"
+                                className="bg-[#061426] h-3 rounded-full transition-all"
                                 style={{ width: `${videoUploadProgress}%` }}
                               />
                             </div>

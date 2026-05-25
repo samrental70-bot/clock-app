@@ -608,6 +608,29 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-25 Clock Mockup Alignment Refinement
+- Refined the Clock screen toward the controller reference mockup without changing clock business logic.
+- Added a compact Royal Navy / Luxury Gold visual accent to the Start shift title and Clock In / Clock Out primary actions.
+- Before clock-in, the Start shift card remains limited to Project / Job Site, Task, and Clock In.
+- Photo, Receipt, and Lists were moved into compact secondary tiles below the main Start shift card.
+- The Lists tile opens a small menu for Task List and Material List so both existing tools remain accessible.
+- Current shift timer layout was adjusted with an Elapsed time label, centered timer emphasis, and smaller Luxury Gold earned amount.
+- Clocked-in secondary actions were converted to four compact tiles for Photo, Receipt, Change Task, and Start Break.
+- Task List and Material List remain lower-priority text actions below the clocked-in action tiles.
+- Clock-screen camera/upload action buttons that still used slate/green filled styling were aligned to Royal Navy where safe.
+- Bottom navigation active state was tightened to a Royal Navy pill with a subtle Luxury Gold indicator to match the controller reference.
+- Existing clock-in, clock-out, photo, receipt, change-task, break, task-list, material-list, project/task dropdown, `+ Add new project`, `+ Add new task`, RBAC, company restrictions, live timer, and earned calculation logic were preserved.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-25 Mockup Refinement Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-9604gulp2-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: Before-clock-in Clock screenshot captured after development alias update. After-clock-in screenshot was not captured because creating an active shift would modify live team data.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
