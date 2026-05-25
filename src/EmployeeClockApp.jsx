@@ -203,17 +203,28 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onSchedule
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
     type="button"
-    className="w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-left shadow-sm active:scale-[0.99]"
+    className="w-full min-w-0 rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 text-left shadow-[0_6px_18px_rgba(6,20,38,0.05)] transition active:scale-[0.99] active:bg-[#F8FAFC]"
     onClick={onClick}
   >
     <span className="flex items-center justify-between gap-3">
-      <span className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">{label}</span>
-      <span className="shrink-0 rounded-full bg-[#0B1F33] px-2 py-0.5 text-[10px] font-black text-white">
+      <span className="min-w-0">
+        <span className="block text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">{label}</span>
+        <span className="mt-1 flex min-w-0 items-center gap-2">
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] bg-[#EFF6FF] text-[#2563EB]">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 3v4M17 3v4" />
+              <path d="M4 8h16" />
+              <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
+            </svg>
+          </span>
+          <span className="truncate text-[14px] font-black leading-tight text-[#061426]">
+            {rangeLabel || "Choose dates"}
+          </span>
+        </span>
+      </span>
+      <span className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
         {presetLabel}
       </span>
-    </span>
-    <span className="mt-1 block text-[14px] font-black leading-tight text-slate-950">
-      {rangeLabel || "Choose dates"}
     </span>
   </button>
 );
@@ -237,39 +248,39 @@ const StandardDateRangeModal = ({
   const invalidCustom = mode === "custom" && draftFrom && draftTo && draftFrom > draftTo;
   return (
     <div
-      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 p-3 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[85] flex items-end justify-center bg-[#061426]/58 p-3 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
       onClick={onCancel}
     >
       <div
-        className="w-full max-w-sm rounded-[20px] border border-slate-200 bg-white p-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
+        className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
+        <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
         <div className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">{eyebrow}</p>
-            <h3 className="mt-1 text-[22px] font-black leading-tight text-slate-950">{title}</h3>
+            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">{eyebrow}</p>
+            <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">{title}</h3>
           </div>
           <button
             type="button"
-            className="h-10 w-10 rounded-[14px] border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
+            className="flex h-10 w-10 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
             onClick={onCancel}
             aria-label="Close date range"
           >
             x
           </button>
         </div>
-        <div className="mt-4 grid grid-cols-4 gap-1 rounded-[14px] border border-slate-200 bg-slate-50 p-1">
+        <div className="mt-4 grid grid-cols-4 overflow-hidden rounded-[16px] border border-[#E2E8F0] bg-white p-1">
           {options.map((option) => (
             <button
               key={`date-range-${option.id}`}
               type="button"
-              className={`rounded-[14px] px-1.5 py-2 text-[12px] font-black leading-tight ${
+              className={`rounded-[13px] px-1.5 py-2 text-[12px] font-black leading-tight transition ${
                 mode === option.id
-                  ? "bg-blue-600 text-white shadow-none"
-                  : "text-slate-700 active:bg-white"
+                  ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
+                  : "text-[#475569] active:bg-[#F8FAFC]"
               }`}
               onClick={() => onModeChange(option.id)}
             >
@@ -277,25 +288,25 @@ const StandardDateRangeModal = ({
             </button>
           ))}
         </div>
-        <div className="mt-4 rounded-[14px] border border-slate-200 bg-slate-50 p-3">
-          <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected range</p>
-          <p className="mt-1 text-[20px] font-black leading-tight text-slate-950">{rangeLabel}</p>
+        <div className="mt-4 rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Selected range</p>
+          <p className="mt-1 text-[20px] font-black leading-tight text-[#061426]">{rangeLabel}</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
               From
               <input
                 type="date"
-                className="h-12 w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                className="h-12 w-full min-w-0 rounded-[14px] border border-[#CBD5E1] bg-white px-2 text-[13px] font-black text-[#061426] [color-scheme:light] disabled:text-[#64748B]"
                 value={draftFrom}
                 disabled={mode !== "custom"}
                 onChange={(event) => onDraftFromChange(event.target.value)}
               />
             </label>
-            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
+            <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
               To
               <input
                 type="date"
-                className="h-12 w-full min-w-0 rounded-[14px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
+                className="h-12 w-full min-w-0 rounded-[14px] border border-[#CBD5E1] bg-white px-2 text-[13px] font-black text-[#061426] [color-scheme:light] disabled:text-[#64748B]"
                 value={draftTo}
                 disabled={mode !== "custom"}
                 onChange={(event) => onDraftToChange(event.target.value)}
@@ -304,21 +315,21 @@ const StandardDateRangeModal = ({
           </div>
         </div>
         {invalidCustom ? (
-          <p className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+          <p className="mt-3 rounded-2xl border border-red-100 bg-[#FEF2F2] px-3 py-2 text-[13px] font-bold text-[#DC2626]">
             Start date must be before end date.
           </p>
         ) : null}
         <div className="mt-4 grid grid-cols-2 gap-2">
           <button
             type="button"
-            className="rounded-[14px] border border-slate-300 bg-white px-4 py-3 text-[15px] font-semibold text-slate-700"
+            className="rounded-[14px] border border-[#CBD5E1] bg-white px-4 py-3 text-[15px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
             onClick={onCancel}
           >
             Cancel
           </button>
           <Button
             type="button"
-            className="rounded-[14px] px-4 py-3 text-[15px] font-semibold"
+            className="rounded-[14px] bg-[#061426] px-4 py-3 text-[15px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]"
             disabled={mode === "custom" && (!draftFrom || !draftTo || draftFrom > draftTo)}
             onClick={onApply}
           >
@@ -13312,6 +13323,21 @@ const handlePhotoQuickUpload = async (event) => {
         </svg>
       );
     }
+    if (type === "user") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="8" r="4" />
+          <path d="M5 21a7 7 0 0 1 14 0" />
+        </svg>
+      );
+    }
+    if (type === "folder") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+        </svg>
+      );
+    }
     if (type === "rate") {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -16737,24 +16763,24 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {timesheetFilterSheetOpen ? (
                   <div
-                    className="fixed inset-0 z-[70] flex items-end justify-center bg-[#0B1F33]/45 p-3 backdrop-blur-[2px]"
+                    className="fixed inset-0 z-[70] flex items-end justify-center bg-[#061426]/45 p-3 backdrop-blur-[2px]"
                     role="dialog"
                     aria-modal="true"
                     onClick={() => setTimesheetFilterSheetOpen(false)}
                   >
                     <div
-                      className="w-full max-w-sm rounded-[24px] border border-slate-200 bg-white p-4 shadow-[0_24px_60px_rgba(15,23,42,0.28)]"
+                      className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
                       onClick={(event) => event.stopPropagation()}
                     >
-                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
+                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">Timesheets</p>
-                          <h3 className="mt-1 text-[21px] font-black leading-tight text-slate-950">Filters</h3>
+                          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Timesheets</p>
+                          <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Filters</h3>
                         </div>
                         <button
                           type="button"
-                          className="h-9 w-9 rounded-2xl border border-slate-200 bg-slate-50 text-[16px] font-black text-slate-700"
+                          className="flex h-10 w-10 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
                           onClick={() => setTimesheetFilterSheetOpen(false)}
                           aria-label="Close filters"
                         >
@@ -16768,49 +16794,76 @@ const handlePhotoQuickUpload = async (event) => {
                           presetLabel={timesheetSelectedRangeLabel}
                           onClick={openTimesheetDatePicker}
                         />
-                        <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                        <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
                           Employee
-                          <select
-                            className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
-                            value={timesheetEmployeeFilter}
-                            onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
-                          >
-                            <option value="all">All Employees</option>
-                            {timesheetEmployeeOptions.map((employee) => (
-                              <option key={employee.id} value={employee.id}>
-                                {employee.name}
-                              </option>
-                            ))}
-                          </select>
+                          <span className="relative block">
+                            <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+                              {renderTimesheetUiIcon("user", "h-4 w-4")}
+                            </span>
+                            <select
+                              className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                              value={timesheetEmployeeFilter}
+                              onChange={(event) => setTimesheetEmployeeFilter(event.target.value)}
+                            >
+                              <option value="all">All Employees</option>
+                              {timesheetEmployeeOptions.map((employee) => (
+                                <option key={employee.id} value={employee.id}>
+                                  {employee.name}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </span>
+                          </span>
                         </label>
-                        <label className="block space-y-1 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                        <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
                           Project
-                          <select
-                            className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-[14px] font-black text-slate-950"
-                            value={timesheetProjectFilter}
-                            onChange={(event) => setTimesheetProjectFilter(event.target.value)}
-                          >
-                            <option value="all">All Projects</option>
-                            {timesheetProjectOptions.map((project) => (
-                              <option key={project.id} value={project.id}>
-                                {project.name}
-                              </option>
-                            ))}
-                          </select>
+                          <span className="relative block">
+                            <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+                              {renderTimesheetUiIcon("folder", "h-4 w-4")}
+                            </span>
+                            <select
+                              className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                              value={timesheetProjectFilter}
+                              onChange={(event) => setTimesheetProjectFilter(event.target.value)}
+                            >
+                              <option value="all">All Projects</option>
+                              {timesheetProjectOptions.map((project) => (
+                                <option key={project.id} value={project.id}>
+                                  {project.name}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </span>
+                          </span>
                         </label>
-                        <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] font-black text-slate-800">
-                          Completed shifts only
+                        <label className="flex h-12 items-center justify-between gap-3 rounded-[14px] border border-[#E2E8F0] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                          <span>Completed shifts only</span>
                           <input
                             type="checkbox"
-                            className="h-5 w-5 rounded border-slate-300"
+                            className="peer sr-only"
                             checked={timesheetCompletedOnly}
                             onChange={(event) => setTimesheetCompletedOnly(event.target.checked)}
                           />
+                          <span className={`relative h-8 w-12 rounded-full border transition ${
+                            timesheetCompletedOnly ? "border-[#061426] bg-[#061426]" : "border-[#CBD5E1] bg-[#E2E8F0]"
+                          }`}>
+                            <span className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-white shadow-[0_4px_10px_rgba(6,20,38,0.18)] transition ${
+                              timesheetCompletedOnly ? "translate-x-4" : ""
+                            }`} />
+                          </span>
                         </label>
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
-                            className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-[13px] font-black text-slate-800"
+                            className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[14px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
                             onClick={() => {
                               setTimesheetEmployeeFilter("all");
                               setTimesheetProjectFilter("all");
@@ -16821,7 +16874,7 @@ const handlePhotoQuickUpload = async (event) => {
                           </button>
                           <button
                             type="button"
-                            className="rounded-2xl bg-[#0B1F33] px-3 py-2.5 text-[13px] font-black text-white"
+                            className="h-12 rounded-[14px] bg-[#061426] px-3 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]"
                             onClick={() => setTimesheetFilterSheetOpen(false)}
                           >
                             Apply
@@ -19147,23 +19200,12 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
 
                   <div className="mt-3">
-                    <button
-                      type="button"
-                      className="w-full min-w-0 rounded-[22px] border border-slate-200 bg-white px-4 py-3 text-left shadow-[0_10px_22px_rgba(15,23,42,0.07)] active:scale-[0.99]"
+                    <DateRangeButton
+                      label="Date range"
+                      rangeLabel={reportsDateRangeLabel}
+                      presetLabel={reportsSelectedRangeLabel}
                       onClick={openReportsDatePicker}
-                    >
-                      <span className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">
-                          Date range
-                        </span>
-                        <span className="shrink-0 rounded-full bg-[#0B1F33] px-2.5 py-1 text-[10px] font-black text-white">
-                          {reportsSelectedRangeLabel}
-                        </span>
-                      </span>
-                      <span className="mt-2 block text-[18px] font-black leading-tight text-slate-950">
-                        {reportsDateRangeLabel}
-                      </span>
-                    </button>
+                    />
                   </div>
                 </div>
 
@@ -19340,119 +19382,28 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </>
                 ) : null}
-                {reportsDatePickerOpen && (
-                  <div
-                    className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 p-3 backdrop-blur-[2px]"
-                    role="dialog"
-                    aria-modal="true"
-                    onClick={() => setReportsDatePickerOpen(false)}
-                  >
-                    <div
-                      className="w-full max-w-sm rounded-[30px] border border-slate-200 bg-white p-4 shadow-[0_28px_80px_rgba(15,23,42,0.34)]"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-slate-200" />
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-700">Date range</p>
-                          <h3 className="mt-1 text-[22px] font-black leading-tight text-slate-950">
-                            {reportsDatePickerMode === "custom"
-                              ? "Custom dates"
-                              : reportsDatePickerMode === "monthly"
-                                ? "This month"
-                                : reportsDatePickerMode === "today"
-                                  ? "Today"
-                                  : "This week"}
-                          </h3>
-                        </div>
-                        <button
-                          type="button"
-                          className="h-10 w-10 rounded-2xl border border-slate-200 bg-slate-50 text-[18px] font-black text-slate-700"
-                          onClick={() => setReportsDatePickerOpen(false)}
-                          aria-label="Close date range"
-                        >
-                          x
-                        </button>
-                      </div>
-                      <div className="mt-4 grid grid-cols-4 gap-1 rounded-[18px] border border-slate-200 bg-slate-50 p-1">
-                        {[...reportsQuickRangeOptions, { id: "custom", label: "Custom" }].map((option) => (
-                          <button
-                            key={`reports-range-${option.id}`}
-                            type="button"
-                            className={`rounded-[14px] px-1.5 py-2 text-[12px] font-black leading-tight ${
-                              reportsDatePickerMode === option.id
-                                ? "bg-blue-600 text-white shadow-[0_10px_20px_rgba(37,99,235,0.22)]"
-                                : "text-slate-700 active:bg-white"
-                            }`}
-                            onClick={() => {
-                              setReportsDatePickerMode(option.id);
-                              if (option.id !== "custom") {
-                                const { from, to } = computeReportsQuickRange(option.id, new Date(), companyTimeZone);
-                                if (from) setReportsDraftDateFrom(from);
-                                if (to) setReportsDraftDateTo(to);
-                              }
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="mt-4 rounded-[24px] border border-slate-200 bg-slate-50 p-3">
-                        <p className="text-[12px] font-black uppercase tracking-[0.16em] text-slate-500">Selected range</p>
-                        <p className="mt-1 text-[20px] font-black leading-tight text-slate-950">
-                          {formatReportDateRangeLabel(reportsDraftDateFrom, reportsDraftDateTo)}
-                        </p>
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
-                            From
-                            <input
-                              type="date"
-                              className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
-                              value={reportsDraftDateFrom}
-                              disabled={reportsDatePickerMode !== "custom"}
-                              onChange={(event) => setReportsDraftDateFrom(event.target.value)}
-                            />
-                          </label>
-                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">
-                            To
-                            <input
-                              type="date"
-                              className="h-12 w-full min-w-0 rounded-[16px] border border-slate-200 bg-white px-2 text-[14px] font-black text-slate-950 [color-scheme:light] disabled:text-slate-500"
-                              value={reportsDraftDateTo}
-                              disabled={reportsDatePickerMode !== "custom"}
-                              onChange={(event) => setReportsDraftDateTo(event.target.value)}
-                            />
-                          </label>
-                        </div>
-                      </div>
-                      {reportsDatePickerMode === "custom" && reportsDraftDateFrom && reportsDraftDateTo && reportsDraftDateFrom > reportsDraftDateTo ? (
-                        <p className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
-                          Start date must be before end date.
-                        </p>
-                      ) : null}
-                      <div className="mt-4 grid grid-cols-2 gap-2">
-                        <button
-                          type="button"
-                          className="rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[15px] font-black text-slate-900"
-                          onClick={() => setReportsDatePickerOpen(false)}
-                        >
-                          Cancel
-                        </button>
-                        <Button
-                          type="button"
-                          className="rounded-2xl px-4 py-3 text-[15px] font-black"
-                          disabled={
-                            reportsDatePickerMode === "custom" &&
-                            (!reportsDraftDateFrom || !reportsDraftDateTo || reportsDraftDateFrom > reportsDraftDateTo)
-                          }
-                          onClick={applyReportsDatePicker}
-                        >
-                          Apply
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                <StandardDateRangeModal
+                  open={reportsDatePickerOpen}
+                  eyebrow="Reports"
+                  title="Choose dates"
+                  mode={reportsDatePickerMode}
+                  options={[...reportsQuickRangeOptions, { id: "custom", label: "Custom" }]}
+                  draftFrom={reportsDraftDateFrom}
+                  draftTo={reportsDraftDateTo}
+                  rangeLabel={formatReportDateRangeLabel(reportsDraftDateFrom, reportsDraftDateTo)}
+                  onModeChange={(mode) => {
+                    setReportsDatePickerMode(mode);
+                    if (mode !== "custom") {
+                      const { from, to } = computeReportsQuickRange(mode, new Date(), companyTimeZone);
+                      if (from) setReportsDraftDateFrom(from);
+                      if (to) setReportsDraftDateTo(to);
+                    }
+                  }}
+                  onDraftFromChange={setReportsDraftDateFrom}
+                  onDraftToChange={setReportsDraftDateTo}
+                  onCancel={() => setReportsDatePickerOpen(false)}
+                  onApply={applyReportsDatePicker}
+                />
               </CardContent>
             </Card>
           )}

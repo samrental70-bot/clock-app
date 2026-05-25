@@ -685,6 +685,23 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-28 Royal Navy Date Picker / Filter Sheet Polish
+- Updated the shared date range button to the approved Royal Navy field-operations style with compact label, calendar icon, date range text, and navy preset chip.
+- Redesigned the shared standard date range modal used by Timesheets, Photos, and Receipts to match the controller reference: bottom sheet, drag handle, Royal Navy title treatment, segmented Today/Week/Month/Custom controls, selected range card, native date inputs, and Reset/Apply-style button hierarchy.
+- Updated the Timesheets filter sheet to match the provided filter mockup with compact bottom-sheet layout, Date Range row, Employee and Project select rows with icons/chevrons, Completed shifts control, and Royal Navy Reset/Apply buttons.
+- Reused the shared date picker styling for Reports so the old bright-blue Reports date picker no longer uses a separate modal style.
+- Preserved existing date range logic, quick ranges, custom date entry, employee/project filters, completed-only filtering, share report, RBAC/company restrictions, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-28 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-oplqo17ij-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: Authenticated Timesheets filter sheet and date picker sheet screenshots captured after development alias update.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -723,6 +740,7 @@
 - B.1-fix-25 does not require new SQL.
 - B.1-fix-26 does not require new SQL.
 - B.1-fix-27 does not require new SQL.
+- B.1-fix-28 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
