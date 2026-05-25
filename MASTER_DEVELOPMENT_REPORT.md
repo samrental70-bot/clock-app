@@ -986,6 +986,21 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-42 Clock Lists Default Collapsed
+- Updated the shared Clock screen Lists control so it is collapsed by default in both before clock-in and active clock-out states.
+- Task List and Material List remain accessible after tapping Lists.
+- Preserved Clock In, Clock Out, photo/camera, receipt, change-task, break, list modal logic, RBAC/company restrictions, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-42 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-6qrltxjsh-samrental70-7859s-projects.vercel.app
+- Browser screenshot status: Not captured in this environment; authenticated in-app browser bridge remains unavailable.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -1038,6 +1053,7 @@
 - B.1-fix-39 does not require new SQL.
 - B.1-fix-40 does not require new SQL.
 - B.1-fix-41 does not require new SQL.
+- B.1-fix-42 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

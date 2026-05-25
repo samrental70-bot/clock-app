@@ -14984,7 +14984,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const renderClockListsDropdown = () => (
-    <details className="group w-[126px]" open>
+    <details className="group w-[126px]">
       <summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-2 rounded-[8px] border border-[#CBD5E1] bg-white px-3 text-[11px] font-semibold text-[#061426] [&::-webkit-details-marker]:hidden">
         <span>Lists</span>
         <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
