@@ -122,7 +122,7 @@ const AppHeader = ({
   );
 };
 
-const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onClock, onTimesheets, onMore }) => {
+const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onTimesheets, onMore }) => {
   const NavIcon = ({ type }) => {
     if (type === "home") {
       return (
@@ -172,6 +172,35 @@ const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onClock, o
           ? "text-emerald-700 active:bg-emerald-50"
           : "text-slate-500 active:bg-slate-100"
     }`;
+  if (isEmployeeRole) {
+    const employeeMoreActive = !["clock", "schedule", "timesheet"].includes(activeTab);
+    return (
+      <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
+        <div className="grid grid-cols-4 gap-0.5">
+          <button type="button" onClick={onClock} className={itemClass(activeTab === "clock", Boolean(visibleCurrentShift) && activeTab !== "clock")}>
+            {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+            <NavIcon type="clock" />
+            <span className="truncate">Clock</span>
+          </button>
+          <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
+            {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+            <NavIcon type="schedule" />
+            <span className="truncate">Schedule</span>
+          </button>
+          <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
+            {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+            <NavIcon type="timesheet" />
+            <span className="truncate">Timesheets</span>
+          </button>
+          <button type="button" onClick={onMore} className={itemClass(employeeMoreActive)}>
+            {employeeMoreActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+            <NavIcon type="more" />
+            <span className="truncate">More</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
   const homeActive = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
   const moreActive = !homeActive && !["clock", "timesheet"].includes(activeTab);
   return (
@@ -3105,6 +3134,23 @@ export default function EmployeeClockApp() {
     employeeScheduleLandingAppliedRef.current = true;
     setActiveTab("clock");
   }, [authUser?.id, companyChecked, userCompany?.id, isEmployeeRole]);
+
+  useEffect(() => {
+    if (!authUser?.id || !companyChecked || !userCompany?.id || !isEmployeeRole) return;
+    const employeeAllowedTabs = new Set(["clock", "schedule", "timesheet", "photos", "receipts", "settings", "notifications", "lists"]);
+    if (companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation) {
+      employeeAllowedTabs.add("projects");
+    }
+    if (!employeeAllowedTabs.has(activeTab)) setActiveTab("clock");
+  }, [
+    activeTab,
+    authUser?.id,
+    companyAllowEmployeeProjectTaskCreation,
+    companyAssignAllProjectsToAllEmployees,
+    companyChecked,
+    isEmployeeRole,
+    userCompany?.id,
+  ]);
 
   useEffect(() => {
     if (!authUser?.id || !companyChecked || !userCompany?.id || !isAdmin) return;
@@ -11517,7 +11563,7 @@ const handlePhotoQuickUpload = async (event) => {
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
       setIsMenuOpen(false);
-      setActiveTab("schedule");
+      setActiveTab("clock");
       return;
     }
     if (tabName === "timesheet") setTimesheetCompletedOnly(false);
@@ -15653,25 +15699,27 @@ const handlePhotoQuickUpload = async (event) => {
     {
       title: "Admin",
       items: [
-        {
-          label: "Request Center",
-          subtitle: "Time approvals",
-          icon: "Rq",
-          color: "blue",
-          badge: isAdmin && pendingTimesheetRequests.length > 0 ? (pendingTimesheetRequests.length > 99 ? "99+" : String(pendingTimesheetRequests.length)) : "",
-          onClick: () => {
-            setTimesheetCompletedOnly(false);
-            openMenuTab("timesheet");
-          },
-        },
+        isAdmin
+          ? {
+              label: "Request Center",
+              subtitle: "Time approvals",
+              icon: "Rq",
+              color: "blue",
+              badge: pendingTimesheetRequests.length > 0 ? (pendingTimesheetRequests.length > 99 ? "99+" : String(pendingTimesheetRequests.length)) : "",
+              onClick: () => {
+                setTimesheetCompletedOnly(false);
+                openMenuTab("timesheet");
+              },
+            }
+          : null,
         {
           label: "Settings",
-          subtitle: "Company controls",
+          subtitle: isAdmin ? "Company controls" : "App preferences",
           icon: "St",
           color: "navy",
           onClick: () => openMenuTab("settings"),
         },
-      ],
+      ].filter(Boolean),
     },
   ].filter((section) => section.items.length > 0);
 
@@ -20322,7 +20370,7 @@ const handlePhotoQuickUpload = async (event) => {
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="text-[28px] font-black leading-tight tracking-normal text-[#061426]">Schedule</h2>
-                      <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Team work plan</p>
+                      <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Upcoming assigned work</p>
                     </div>
                   </div>
                   <button
@@ -20648,7 +20696,7 @@ const handlePhotoQuickUpload = async (event) => {
                   )
                 ) : (employeeScheduleTasksGroupedByDate || []).length === 0 ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-center">
-                    <p className="text-sm text-slate-700 leading-snug">Your assigned tasks will appear here.</p>
+                    <p className="text-sm text-slate-700 leading-snug">No upcoming scheduled tasks.</p>
                   </div>
                 ) : (
                   <div className="space-y-5">
@@ -24613,9 +24661,11 @@ const handlePhotoQuickUpload = async (event) => {
 
         <BottomNav
           isAdmin={isAdmin}
+          isEmployeeRole={isEmployeeRole}
           activeTab={activeTab}
           visibleCurrentShift={visibleCurrentShift}
           onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
+          onSchedule={() => setActiveTab("schedule")}
           onClock={() => setActiveTab("clock")}
           onTimesheets={() => setActiveTab("timesheet")}
           onMore={() => {

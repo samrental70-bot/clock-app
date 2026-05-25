@@ -944,6 +944,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-28 Employee Role Navigation + Default Clock Screen
+- Employee role navigation now defaults to the Clock screen after login/session load.
+- Employee bottom navigation now renders Clock / Schedule / Timesheets / More and removes Home for employee users.
+- Added employee tab normalization so saved or manually reached restricted tabs such as Home/activities, dashboard, team, reports, and admin-only areas redirect back to Clock.
+- Employee Schedule remains assigned-work focused and preserves the existing accept/decline workflow.
+- Employee Schedule empty state now says `No upcoming scheduled tasks.`
+- Employee More menu no longer exposes Request Center, Team, Reports, or owner/admin controls; Settings remains available as App preferences.
+- Employee Timesheets remains scoped through existing RBAC/company filtering logic.
+- Owner/Supervisor/Admin navigation and Home dashboard behavior were preserved.
+- Royal Navy design system styling, RBAC/company restrictions, existing data safety, and React hook order were preserved.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-28 Employee Role Navigation Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-q42yo87t8-samrental70-7859s-projects.vercel.app
+- Browser screenshot status: Authenticated screenshot verification was attempted, but the bundled in-app browser bridge file was unavailable in this Codex environment and temporary Chromium automation exited before opening a debuggable session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
