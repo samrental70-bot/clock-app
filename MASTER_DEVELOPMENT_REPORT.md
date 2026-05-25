@@ -882,6 +882,25 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-38 Reports Overview No-Icon Polish
+- Updated the Reports overview card toward the provided no-icon reference using approved Royal Navy Luxury colors.
+- Removed circular KPI icons from Team Hours, Entries, Employees, Projects, and Estimated Pay.
+- Rebuilt the Overview grid with clean labels, large numeric values, subtle dividers, a gold Overview accent, and a soft green Estimated Pay panel.
+- Kept the Reports title, gold scope label, compact Date Range card, Today action, View by control, report calculations, drill-down logic, RBAC/company restrictions, and React hook order unchanged.
+- Replaced the remaining blue Breakdown label accent with approved Luxury Gold.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-38-reports-no-icons.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-38 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-3sg7uhg9a-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -930,6 +949,7 @@
 - B.1-fix-35 does not require new SQL.
 - B.1-fix-36 does not require new SQL.
 - B.1-fix-37 does not require new SQL.
+- B.1-fix-38 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql

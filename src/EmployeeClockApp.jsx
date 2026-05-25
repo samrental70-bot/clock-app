@@ -19332,70 +19332,35 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[18px] font-black leading-tight text-[#061426]">Overview</p>
                       </div>
                       <div className="grid grid-cols-3 divide-x divide-y divide-[#E2E8F0]">
-                        <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#061426]">
-                              {renderTimesheetUiIcon("clock", "h-4 w-4")}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Team Hours</span>
-                              <span className="mt-1 block text-[20px] font-black leading-none tabular-nums text-[#061426]">
-                                {formatDuration(reportsVisibleSummary.minutes)}
-                              </span>
-                            </span>
-                          </div>
+                        <div className="min-w-0 px-3 py-5 text-center">
+                          <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Team Hours</span>
+                          <span className="mt-1.5 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
+                            {formatDuration(reportsVisibleSummary.minutes)}
+                          </span>
                         </div>
-                        <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFF7E6] text-[#F59E0B]">
-                              {renderTimesheetUiIcon("task", "h-4 w-4")}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Entries</span>
-                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
-                                {reportsVisibleEntryCount}
-                              </span>
-                            </span>
-                          </div>
+                        <div className="min-w-0 px-3 py-5 text-center">
+                          <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Entries</span>
+                          <span className="mt-1.5 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
+                            {reportsVisibleEntryCount}
+                          </span>
                         </div>
-                        <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
-                              {renderTimesheetUiIcon("user", "h-4 w-4")}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Employees</span>
-                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
-                                {reportsVisibleEmployeeCount}
-                              </span>
-                            </span>
-                          </div>
+                        <div className="min-w-0 px-3 py-5 text-center">
+                          <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Employees</span>
+                          <span className="mt-1.5 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
+                            {reportsVisibleEmployeeCount}
+                          </span>
                         </div>
-                        <div className="min-w-0 px-3 py-4">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F8FAFC] text-[#061426]">
-                              {renderTimesheetUiIcon("folder", "h-4 w-4")}
-                            </span>
-                            <span className="min-w-0">
-                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Projects</span>
-                              <span className="mt-1 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
-                                {reportsVisibleProjectCount}
-                              </span>
-                            </span>
-                          </div>
+                        <div className="min-w-0 px-3 py-5 text-center">
+                          <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Projects</span>
+                          <span className="mt-1.5 block text-[21px] font-black leading-none tabular-nums text-[#061426]">
+                            {reportsVisibleProjectCount}
+                          </span>
                         </div>
-                        <div className="col-span-2 min-w-0 bg-[#ECFDF5] px-3 py-4">
-                          <div className="flex items-center justify-center gap-3">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#ECFDF5] text-[#15803D]">
-                              {renderTimesheetUiIcon("rate", "h-5 w-5")}
-                            </span>
-                            <span className="min-w-0 text-center">
-                              <span className="block text-[10px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
-                              <span className="mt-1 block truncate text-[34px] font-black leading-none tabular-nums text-[#15803D]">
-                                {formatMoneyWhole(reportsVisibleSummary.cost)}
-                              </span>
-                            </span>
-                          </div>
+                        <div className="col-span-2 min-w-0 bg-[linear-gradient(135deg,#FFFFFF_0%,#ECFDF5_100%)] px-3 py-4 text-center">
+                          <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
+                          <span className="mt-1.5 block truncate text-[34px] font-black leading-none tabular-nums text-[#15803D]">
+                            {formatMoneyWhole(reportsVisibleSummary.cost)}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -19423,8 +19388,8 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
                       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
                         <div>
-                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-blue-700">Breakdown</p>
-                          <p className="mt-0.5 text-[15px] font-black text-slate-950 leading-tight">
+                          <p className="text-[10px] font-black uppercase tracking-[0.18em] text-[#C9A227]">Breakdown</p>
+                          <p className="mt-0.5 text-[15px] font-black text-[#061426] leading-tight">
                             {reportsCurrentViewBy === "project"
                               ? "Project view"
                               : reportsCurrentViewBy === "employee"
