@@ -965,6 +965,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-41 Timesheets Reference Layout Polish
+- Updated the Timesheets screen to match the latest controller reference using approved Royal Navy Luxury colors and font styling.
+- Replaced the dark Timesheets hero with a white header area, clock icon tile, large Timesheets title, and compact review subtitle.
+- Enlarged and polished the Today / Week / Month / Custom segmented control.
+- Updated the date/filter row to a compact white card with calendar icon, date range, active employee/project labels, and chevron.
+- Added a two-column summary KPI card showing Total time and Total labour for the currently visible filtered records.
+- Moved Share report and Add manual time into the reference-style two-button action row while preserving existing manual-time role logic.
+- Redesigned the empty Timesheets state with a larger white card, muted clipboard/time icon, and approved empty-state copy.
+- Slightly polished timesheet record cards to align with the same rounded white-card system.
+- Preserved existing timesheet fetching, filters, date picker/filter sheet, share report, manual time requests, edit/delete overflow logic, RBAC/company restrictions, and React hook order.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-41 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-brs7a6ze6-samrental70-7859s-projects.vercel.app
+- Browser screenshot status: Not captured in this environment; authenticated in-app browser bridge remains unavailable.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -1016,6 +1037,7 @@
 - B.1-fix-38 does not require new SQL.
 - B.1-fix-39 does not require new SQL.
 - B.1-fix-40 does not require new SQL.
+- B.1-fix-41 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
