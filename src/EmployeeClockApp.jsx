@@ -13406,7 +13406,7 @@ const handlePhotoQuickUpload = async (event) => {
         : st === "active"
         ? "Active"
         : st === "submitted"
-          ? "Submitted"
+          ? "Completed"
           : (String(record.status ?? "").trim() || "Submitted");
     const statusBadgeClass =
       autoTimedOut
@@ -13458,89 +13458,37 @@ const handlePhotoQuickUpload = async (event) => {
       authUser,
       teamProfileFullNameByUserId,
     });
-    const timesheetEmailSecondary = resolveTimesheetEmployeeSecondary(record, timesheetTitle);
-
     const rateFromTimesheet = Number(record.hourlyRate ?? 0);
     const totalCostDisplay =
       record.clockOut && record.labour_cost != null && record.labour_cost !== ""
         ? Number(record.labour_cost)
         : getLabourCost(record);
-    const timesheetInitials =
-      String(timesheetTitle || "TS")
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((part) => part.slice(0, 1))
-        .join("")
-        .slice(0, 2)
-        .toUpperCase() || "TS";
     const projectTaskLabel = `${record.project || "Unassigned"} / ${record.costCenter || "Unassigned"}`;
-    const metricTiles = [
-      {
-        label: "Hours",
-        value: formatHoursMinutes(getWorkedMinutes(record)),
-        icon: "clock",
-        tone: "border-blue-100 bg-[#EFF6FF] text-[#2563EB]",
-      },
-      {
-        label: "Rate",
-        value: `${formatMoney(rateFromTimesheet)}/hr`,
-        icon: "rate",
-        tone: "border-blue-100 bg-[#EFF6FF] text-[#2563EB]",
-      },
-      {
-        label: "Cost",
-        value: formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record)),
-        icon: "clock",
-        tone: "border-blue-100 bg-[#EFF6FF] text-[#2563EB]",
-      },
-    ];
+    const timesheetAmountDisplay = formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record));
+    const timesheetTotalDisplay = formatHoursMinutes(getWorkedMinutes(record));
     const canShowMoreMenu = isAdmin || record.clockInLocation || record.clockOutLocation;
 
     return (
-    <div key={record.id} className="rounded-[22px] border border-[#E2E8F0] bg-white p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-      <div className="flex items-start gap-3">
-        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
-          {timesheetInitials}
-        </span>
+    <div key={record.id} className="rounded-[10px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-[17px] font-black leading-snug text-[#061426]">{timesheetTitle}</p>
-              {timesheetEmailSecondary && (
-                <p className="mt-0.5 truncate text-[12px] font-semibold text-[#64748B]">{timesheetEmailSecondary}</p>
-              )}
-            </div>
-            <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black h-fit ${statusBadgeClass}`}>
-              <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-current align-middle" />
-              {statusBadgeLabel}
-            </span>
-          </div>
-          <p className="mt-2 flex min-w-0 items-center gap-1.5 truncate text-[13px] font-black text-[#061426]">
-            <span className="shrink-0 text-[#2563EB]">{renderTimesheetUiIcon("project", "h-3.5 w-3.5")}</span>
+          <p className="truncate text-[15px] font-black leading-snug text-[#061426]">{timesheetTitle}</p>
+          <p className="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[11px] font-bold text-[#64748B]">
             <span className="truncate">{projectTaskLabel}</span>
           </p>
         </div>
-      </div>
-
-      <div className="mt-3 border-t border-[#E2E8F0] pt-3">
-        <div className="grid grid-cols-3 gap-2">
-          {metricTiles.map((metric) => (
-            <div key={`${record.id}-${metric.label}`} className="min-w-0 rounded-[14px] border border-[#E2E8F0] bg-white px-2 py-2 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-              <div className="flex items-center gap-1.5">
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${metric.tone}`}>
-                  {renderTimesheetUiIcon(metric.icon, "h-3 w-3")}
-                </span>
-                <p className="min-w-0 truncate text-[8px] font-black uppercase tracking-[0.06em] text-[#64748B]">{metric.label}</p>
-              </div>
-              <p className="mt-1 truncate text-[12px] font-black leading-tight text-[#061426]">{metric.value}</p>
-            </div>
-          ))}
+        <div className="shrink-0 text-right">
+          <p className="text-[13px] font-black leading-none text-[#061426]">{timesheetAmountDisplay}</p>
+          <span className={`mt-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-black ${statusBadgeClass}`}>
+            {statusBadgeLabel}
+          </span>
         </div>
       </div>
       {editingRecordId === record.id ? (
         <div className="mt-3 border-t pt-2 space-y-2">
           <p className="text-[13px] text-slate-500 leading-tight">
             {isAdmin ? `Edit in ${companyTimeZone}` : `Send requested changes for supervisor approval (${companyTimeZone})`}
+            {isAdmin && rateFromTimesheet > 0 ? ` - rate ${formatMoney(rateFromTimesheet)}/hr` : ""}
           </p>
           <div className="space-y-1">
             <label className="text-[13px] text-slate-500">Clock in</label>
@@ -13640,32 +13588,18 @@ const handlePhotoQuickUpload = async (event) => {
         </div>
       ) : (
         <>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <div className="rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]">
-                  {renderTimesheetUiIcon("clock", "h-4 w-4")}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
-                  <p className="truncate text-[13px] font-black text-[#061426]">{formatTime(record.clockIn, companyTimeZone)}</p>
-                </div>
-              </div>
+          <div className="mt-3 grid grid-cols-3 border-t border-[#E2E8F0] pt-3">
+            <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
+              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
+              <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{formatTime(record.clockIn, companyTimeZone)}</p>
             </div>
-            <div className="rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5">
-              <div className="flex items-center gap-2">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border ${
-                  outText === "Working"
-                    ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
-                    : "border-blue-100 bg-[#EFF6FF] text-[#2563EB]"
-                }`}>
-                  {renderTimesheetUiIcon("clock", "h-4 w-4")}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
-                  <p className={`truncate text-[13px] ${outClass}`}>{outText}</p>
-                </div>
-              </div>
+            <div className="min-w-0 border-r border-[#E2E8F0] px-2">
+              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
+              <p className={`mt-1 truncate text-[12px] ${outClass}`}>{outText}</p>
+            </div>
+            <div className="min-w-0 pl-2">
+              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total</p>
+              <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{timesheetTotalDisplay}</p>
             </div>
           </div>
           {staleActiveMissingOut && (
@@ -13696,22 +13630,21 @@ const handlePhotoQuickUpload = async (event) => {
             </p>
           ) : null}
           {((allowEdit && canEditTimesheetRecord(record)) || canShowMoreMenu) && (
-            <div className="mt-3 flex items-center justify-between gap-2">
+            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#E2E8F0] pt-2">
               {allowEdit && canEditTimesheetRecord(record) && (
-                <Button
+                <button
                   type="button"
-                  className="h-10 rounded-[14px] border border-[#E2E8F0] !bg-white px-4 text-[13px] font-black !text-[#061426] shadow-none"
+                  className="h-8 rounded-[10px] bg-transparent px-0 text-[12px] font-black text-[#061426] active:text-[#0B1F33]"
                   disabled={busyDelete || Boolean(pendingEditRequest)}
                   onClick={() => startEditRecord(record)}
                 >
-                  <span className="mr-2 text-[#2563EB]">{renderTimesheetUiIcon("edit", "h-4 w-4")}</span>
                   {isAdmin ? "Edit" : "Request edit"}
-                </Button>
+                </button>
               )}
               {canShowMoreMenu && (
                 <details className="relative ml-auto">
-                  <summary className="flex h-10 w-12 cursor-pointer list-none items-center justify-center rounded-[14px] border border-[#E2E8F0] bg-white text-[#061426] shadow-none active:bg-[#F8FAFC]" aria-label="More timesheet actions">
-                    {renderTimesheetUiIcon("more", "h-5 w-5")}
+                  <summary className="flex h-8 w-10 cursor-pointer list-none items-center justify-center rounded-[10px] bg-white text-[#061426] shadow-none active:bg-[#F8FAFC]" aria-label="More timesheet actions">
+                    {renderTimesheetUiIcon("more", "h-4 w-4")}
                   </summary>
                   <div className="absolute right-0 z-30 mt-1 w-44 rounded-[16px] border border-slate-200 bg-white p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
                     {record.clockInLocation ? (
@@ -16574,35 +16507,16 @@ const handlePhotoQuickUpload = async (event) => {
           )}
 
           {activeTab === "timesheet" && (
-            <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-              <CardContent className="space-y-3 p-3">
-                <div className="flex items-start gap-3 px-1 pt-1">
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]">
-                    {renderTimesheetUiIcon("clock", "h-5 w-5")}
-                  </span>
-                  <div className="min-w-0">
-                    <h2 className="text-[30px] font-black leading-none tracking-tight text-[#061426]">Timesheets</h2>
-                    <p className="mt-1 truncate text-[13px] font-semibold text-[#64748B]">
-                      Review labour hours and costs
-                    </p>
-                  </div>
+            <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-[#F4F7FB] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+              <CardContent className="p-0">
+                <div className="bg-[#061426] px-4 pb-5 pt-5 text-white">
+                  <h2 className="text-[24px] font-black leading-none tracking-tight">Timesheets</h2>
+                  <p className="mt-1 text-[12px] font-medium text-white/75">
+                    Review labour hours and costs
+                  </p>
                 </div>
-                <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-2 text-[13px] font-black text-[#475569]">
-                      <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
-                      Filters
-                    </p>
-                    <button
-                      type="button"
-                      className="inline-flex h-11 shrink-0 items-center gap-2 rounded-[14px] bg-[#061426] px-3.5 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                      onClick={() => void handleShareTimesheetReport()}
-                    >
-                      {renderTimesheetUiIcon("share", "h-4 w-4")}
-                      Share report
-                    </button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-4 gap-2">
+                <div className="space-y-3 p-3">
+                  <div className="grid grid-cols-4 gap-1 rounded-[10px] border border-[#E2E8F0] bg-white p-1 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
                     {[
                       { id: "today", label: "Today" },
                       { id: "weekly", label: "Week" },
@@ -16612,10 +16526,10 @@ const handlePhotoQuickUpload = async (event) => {
                       <button
                         key={`ts-range-${option.id}`}
                         type="button"
-                        className={`h-10 rounded-[12px] border px-2 text-[12px] font-black ${
+                        className={`h-9 rounded-[8px] px-2 text-[11px] font-black ${
                           timesheetRangePreset === option.id
-                            ? "border-[#061426] bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
-                            : "border-[#E2E8F0] bg-white text-[#475569] active:bg-[#F8FAFC]"
+                            ? "bg-[#061426] text-white shadow-[0_6px_14px_rgba(6,20,38,0.16)]"
+                            : "text-[#061426] active:bg-[#F8FAFC]"
                         }`}
                         onClick={() => applyTimesheetQuickRange(option.id)}
                       >
@@ -16625,31 +16539,45 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                   <button
                     type="button"
-                    className="mt-3 flex w-full items-center gap-3 rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3 text-left active:bg-white"
+                    className="flex h-12 w-full items-center justify-between gap-3 rounded-[10px] border border-[#E2E8F0] bg-white px-3 text-left shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
                     onClick={() => setTimesheetFilterSheetOpen(true)}
                   >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#EFF6FF] text-[#2563EB]">
-                      {renderTimesheetUiIcon("calendar", "h-5 w-5")}
+                    <span className="flex min-w-0 items-center gap-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center text-[#061426]">
+                        {renderTimesheetUiIcon("calendar", "h-4 w-4")}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-black text-[#061426]">
+                          {timesheetDateRangeLabel}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] font-semibold text-[#64748B]">
+                          {timesheetEmployeeFilterLabel} &bull; {timesheetProjectFilterLabel}
+                          {timesheetCompletedOnly ? " &bull; Completed only" : ""}
+                        </span>
+                      </span>
                     </span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[14px] font-black text-[#061426]">
-                        {timesheetDateRangeLabel}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[12px] font-semibold text-[#64748B]">
-                        {timesheetEmployeeFilterLabel} &bull; {timesheetProjectFilterLabel}
-                        {timesheetCompletedOnly ? " &bull; Completed only" : ""}
-                      </span>
+                    <span className="shrink-0 text-[#061426]">
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m6 9 6 6 6-6" />
+                      </svg>
                     </span>
                   </button>
-                </div>
+                  <button
+                    type="button"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[8px] bg-[#061426] px-4 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                    onClick={() => void handleShareTimesheetReport()}
+                  >
+                    <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
+                    Share report
+                  </button>
                 {!isAdmin ? (
                   <button
                     type="button"
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-[16px] border border-[#E2E8F0] bg-white px-4 text-[14px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[8px] border border-[#C9A227] bg-white px-4 text-[12px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
                     onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
                   >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#EFF6FF] text-[#2563EB]">
-                      {renderTimesheetUiIcon("plus", "h-4 w-4")}
+                    <span className="text-[#C9A227]">
+                      {renderTimesheetUiIcon("plus", "h-3.5 w-3.5")}
                     </span>
                     {manualTimeOpen ? "Close manual time" : "Add manual time"}
                   </button>
@@ -16934,6 +16862,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onCancel={() => setTimesheetDatePickerOpen(false)}
                   onApply={applyTimesheetDatePicker}
                 />
+                </div>
               </CardContent>
             </Card>
           )}

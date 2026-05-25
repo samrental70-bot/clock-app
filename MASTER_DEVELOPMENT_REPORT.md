@@ -739,6 +739,27 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-31 Timesheets Reference Layout Update
+- Updated the Timesheets screen toward the provided reference design.
+- Added a Royal Navy header band with compact title/subtitle treatment.
+- Moved the Today/Week/Month/Custom range controls into a compact segmented strip under the header.
+- Simplified the date/filter row into one compact white control with date range, employee, project, and completed-only summary.
+- Converted Share report into a full-width Royal Navy action with subtle gold icon accent.
+- Converted Add manual time into a compact gold-outline action for employee manual-time requests.
+- Redesigned timesheet entry cards into slimmer white cards with employee, project/task, amount, status, and In/Out/Total columns.
+- Large metric tiles were removed from the normal card view; edit, map, delete, and approval actions remain available through existing edit/overflow flows.
+- Preserved existing date filtering, employee filtering, project filtering, Share Report, manual time request, edit/delete confirmation, map, RBAC/company restriction, and React hook order logic.
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-31 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-j1m4pyrf1-samrental70-7859s-projects.vercel.app
+- Browser verification status: Development app loads; signed-in Timesheets visual QA is gated by login session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -780,6 +801,7 @@
 - B.1-fix-28 does not require new SQL.
 - B.1-fix-29 does not require new SQL.
 - B.1-fix-30 does not require new SQL.
+- B.1-fix-31 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
