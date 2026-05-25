@@ -527,6 +527,28 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-24 Royal Navy Luxury Design System Implementation
+- Permanent design source-of-truth document added at `CLOCK_APP_DESIGN_SYSTEM.md`.
+- Royal Navy FieldOps UI brand direction, color palette, typography scale, buttons, cards, inputs, chips, navigation, empty states, do/don't rules, and screenshot checklist were documented.
+- Future UI rule added: all future UI work must use the Royal Navy FieldOps UI tokens and must be checked against the design document before completion.
+- Global CSS tokens were standardized around Royal Navy 950 `#061426`, Royal Navy 900 `#0B1F33`, background `#F4F7FB`, white surfaces, soft surfaces, borders, dividers, semantic status colors, shadows, and radius tokens.
+- Existing `opera-*` component helpers were mapped to the new token names so PageCard, SectionCard, KPIBox, buttons, danger actions, empty states, status chips, activity rows, AppHeader, BottomNav, filters, forms, and schedule forms share the same system.
+- Legacy slate/black/near-black visual utility classes were routed through Royal Navy compatibility overrides where safe.
+- Visible pure black overlays/media backgrounds and old near-black chart strokes in the app code were converted to Royal Navy `#061426`.
+- App error boundary primary action was converted from the older navy value to Royal Navy `#061426`.
+- Top header and bottom nav theme inheritance remains centralized through the shared `opera-*` CSS layer.
+- Existing Home, Clock, Schedule, Timesheets, Team, Photos, Receipts, More/Menu, Settings, Reports, Request Center, modal, dropdown, toast, empty-state, form, RBAC, and company-scoped logic remains unchanged.
+- No SQL, database, AI, or destructive data changes were made.
+
+## B.1-fix-24 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-4gmo54mt6-samrental70-7859s-projects.vercel.app
+- Screenshots/checklist status: In-app browser screenshot attempt reached a signed-in loading state and did not expose authenticated app screens; authenticated screenshots require a signed-in QA session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -561,6 +583,7 @@
 - B.1-fix-21 does not require new SQL.
 - B.1-fix-22 does not require new SQL.
 - B.1-fix-23 does not require new SQL.
+- B.1-fix-24 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
