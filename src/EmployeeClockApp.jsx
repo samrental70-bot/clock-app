@@ -87,35 +87,39 @@ const AppHeader = ({
   isDevelopment,
   unreadCount = 0,
   onNotifications,
-}) => (
-  <div className="opera-app-header">
-    <div className="flex min-h-[48px] items-center justify-between gap-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <img src={iconSrc} alt="" className="h-9 w-9 shrink-0 rounded-[12px]" />
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-1.5">
-            <h1 className="truncate text-[16px] font-semibold leading-tight text-slate-950">{companyName || "Company"}</h1>
-            {isDevelopment ? (
-              <span className="opera-dev-chip">Dev</span>
-            ) : null}
+}) => {
+  const userLabel = String(metaLabel || "").trim().split(/\s+/).slice(0, 2).join(" ");
+  return (
+    <div className="opera-app-header">
+      <div className="flex min-h-[52px] items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="opera-header-logo-wrap">
+            <img src={iconSrc} alt="" className="h-full w-full rounded-[10px]" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h1 className="opera-header-company">{companyName || "Company"}</h1>
+            <p className="opera-header-brand-line">Field operations</p>
           </div>
-          {metaLabel ? (
-            <p className="mt-0.5 truncate text-[13px] font-medium leading-snug text-slate-500">{metaLabel}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {userLabel ? <span className="opera-header-user">{userLabel}</span> : null}
+          {isDevelopment ? (
+            <span className="opera-dev-chip">Dev</span>
           ) : null}
+          <button type="button" onClick={onNotifications} className="opera-header-icon-button relative shrink-0" aria-label="Notifications">
+            <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+              <path d="M10 21h4" />
+            </svg>
+            {unreadCount > 0 ? (
+              <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+            ) : null}
+          </button>
         </div>
       </div>
-      <button type="button" onClick={onNotifications} className="opera-header-icon-button relative shrink-0" aria-label="Notifications">
-        <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-          <path d="M10 21h4" />
-        </svg>
-        {unreadCount > 0 ? (
-          <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
-        ) : null}
-      </button>
     </div>
-  </div>
-);
+  );
+};
 
 const BottomNav = ({ isAdmin, activeTab, visibleCurrentShift, onHome, onClock, onTimesheets, onMore }) => {
   const NavIcon = ({ type }) => {

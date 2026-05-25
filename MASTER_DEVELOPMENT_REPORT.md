@@ -843,6 +843,25 @@
 - Production/main deployment: Not run.
 - Secrets/env files: Not changed.
 
+## B.1-fix-36 Royal Navy Top Header Update
+- Updated the shared global AppHeader toward the provided dark Royal Navy reference.
+- Replaced the white header card treatment with a full-width Royal Navy brand bar using approved `#061426`, `#0B1F33`, and Luxury Gold accents.
+- Reworked header layout to show the company/logo lockup on the left and compact user name, gold DEV chip, and notification bell on the right.
+- Reduced header spacing and badge sizes so the bar feels more like a premium mobile SaaS app header.
+- Preserved notification click behavior, unread badge logic, dynamic company name, dynamic user label, development-only chip behavior, and React hook order.
+- Screenshot verification completed in the signed-in demo company session.
+- Screenshot: `screenshots/b1-fix-36-royal-navy-header.png`
+- No SQL, database, AI, production deployment, main push, or destructive data action was run.
+
+## B.1-fix-36 Build / Deployment
+- Local build status: Passed on develop.
+- Development preview deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-50rvo8unc-samrental70-7859s-projects.vercel.app
+- Browser verification status: Passed in signed-in demo company session.
+- Production/main deployment: Not run.
+- Secrets/env files: Not changed.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
@@ -889,6 +908,7 @@
 - B.1-fix-33 does not require new SQL.
 - B.1-fix-34 does not require new SQL.
 - B.1-fix-35 does not require new SQL.
+- B.1-fix-36 does not require new SQL.
 - B.1-fix-5 reviewed SQL package for manual Supabase execution:
 
 ```sql
