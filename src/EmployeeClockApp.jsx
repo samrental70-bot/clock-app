@@ -16838,26 +16838,16 @@ const handlePhotoQuickUpload = async (event) => {
                 </button>
 
                 <div className="grid grid-cols-2 rounded-[14px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_8px_22px_rgba(6,20,38,0.06)]">
-                  <div className="flex min-w-0 items-center gap-3 border-r border-[#E2E8F0] pr-4">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#EFF6FF] text-[#2563EB]">
-                      {renderTimesheetUiIcon("clock", "h-6 w-6")}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[12px] font-semibold leading-tight text-[#64748B]">Total time</span>
-                      <span className="mt-1 block truncate text-[24px] font-black leading-none tabular-nums text-[#061426]">
-                        {formatHoursMinutes(visibleTimesheetSummary.minutes)}
-                      </span>
+                  <div className="min-w-0 border-r border-[#E2E8F0] pr-4">
+                    <span className="block text-[12px] font-semibold leading-tight text-[#64748B]">Total time</span>
+                    <span className="mt-1 block whitespace-nowrap text-[24px] font-black leading-none tabular-nums text-[#061426]">
+                      {formatHoursMinutes(visibleTimesheetSummary.minutes)}
                     </span>
                   </div>
-                  <div className="flex min-w-0 items-center gap-3 pl-4">
-                    <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#ECFDF5] text-[#15803D]">
-                      {renderTimesheetUiIcon("rate", "h-6 w-6")}
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-[12px] font-semibold leading-tight text-[#64748B]">Total labour</span>
-                      <span className="mt-1 block truncate text-[24px] font-black leading-none tabular-nums text-[#061426]">
-                        {formatMoney(visibleTimesheetSummary.labour)}
-                      </span>
+                  <div className="min-w-0 pl-4">
+                    <span className="block text-[12px] font-semibold leading-tight text-[#64748B]">Total labour</span>
+                    <span className="mt-1 block whitespace-nowrap text-[24px] font-black leading-none tabular-nums text-[#061426]">
+                      {formatMoney(visibleTimesheetSummary.labour)}
                     </span>
                   </div>
                 </div>
