@@ -26,6 +26,15 @@ dist-ssr
 .vercel
 .env*.local
 
+# Local Codex/browser/render/cache output.
+.codex_renders/
+.codex_pdf_deps/
+.tmp-chrome-*/
+.tmp-edge-*/
+rent_receipts_output/
+*.tmp
+*.cache
+
 # Non-OPERA files accidentally dropped into this workspace.
 # Keep these out of commits and Vercel deployments.
 screenshots/

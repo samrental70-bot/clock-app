@@ -1076,6 +1076,26 @@
 - OCR work: Not run.
 - SQL/database changes: Not run.
 
+## Beta Release B App Store / Google Play Launch Package
+- Store launch package prepared under `store-launch/Beta-B/`.
+- App Store Connect metadata draft created.
+- Google Play metadata draft created.
+- Privacy policy draft created for legal review.
+- Google Play Data Safety notes created.
+- Apple App Privacy notes created.
+- App review notes and demo-account placeholders created.
+- Screenshot plan created for real Beta Release B UI using safe demo data.
+- Asset checklist created for common, Apple-specific, and Google-specific store assets.
+- Technical build plan documented current app as a Vite/React PWA with manifest, service worker, and icons already present.
+- Native wrapper plan documented Capacitor as the recommended future path, but no native packages were installed and no native folders were created.
+- Beta Release B store release notes and pre-submission testing checklist created.
+- Build status: Passed on develop via approval wrapper.
+- Next step is controller decision on final app name, legal company name, privacy/support URLs, demo accounts, screenshots, and native wrapper implementation.
+- Existing app functionality unchanged.
+- OCR work not started.
+- SQL/database changes: Not run.
+- Production deployment: Not run for this launch-preparation task.
+
 ## Required SQL
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
