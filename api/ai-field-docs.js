@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getSharedAiConfig, getSharedAiStatus } from "../api-shared/sharedEnv.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -14,6 +15,20 @@ function parseBody(req) {
     }
   }
   return req.body || {};
+}
+
+function sendJson(res, status, payload) {
+  res.status(status).json(payload);
+}
+
+function sendApiError(res, status, code, message, extra = {}) {
+  sendJson(res, status, {
+    ok: false,
+    code,
+    error: message,
+    message,
+    ...extra,
+  });
 }
 
 function normalizeRole(role) {
@@ -85,6 +100,42 @@ function parseJsonFromText(text) {
   return null;
 }
 
+function normalizeCurrency(value) {
+  const text = normalizeText(value, "CAD").toUpperCase();
+  return text || "CAD";
+}
+
+function normalizeNumberOrNull(value) {
+  if (value == null || value === "") return null;
+  const cleaned = String(value).replace(/[^0-9.-]/g, "");
+  const number = Number(cleaned);
+  return Number.isFinite(number) ? number : null;
+}
+
+export function normalizeReceiptJson(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const total = normalizeNumberOrNull(source.total_amount ?? source.receipt_total ?? source.total ?? source.amount);
+  const subtotal = normalizeNumberOrNull(source.subtotal ?? source.receipt_subtotal);
+  const hst = normalizeNumberOrNull(source.hst ?? source.tax ?? source.receipt_hst);
+  const materialCategory = normalizeText(
+    source.material_category ?? source.likely_category ?? source.category,
+    "other"
+  );
+  return {
+    supplier: normalizeText(source.supplier ?? source.store ?? source.vendor) || null,
+    receipt_date: normalizeText(source.receipt_date ?? source.date) || null,
+    subtotal,
+    hst,
+    total_amount: total,
+    currency: normalizeCurrency(source.currency),
+    material_category: materialCategory || "other",
+    material_type: normalizeText(source.material_type ?? source.material ?? source.type) || null,
+    confidence: normalizeNumberOrNull(source.confidence),
+    notes: normalizeText(source.notes) || null,
+    raw_extracted_json: source,
+  };
+}
+
 function compactMediaRow(row) {
   const mediaType = normalizeMediaType(row?.media_type);
   return {
@@ -97,6 +148,11 @@ function compactMediaRow(row) {
     captured_at: row?.captured_at || row?.created_at || "",
     amount: row?.amount ?? null,
     supplier: row?.supplier || "",
+    receipt_supplier: row?.receipt_supplier || "",
+    receipt_date: row?.receipt_date || "",
+    receipt_total: row?.receipt_total ?? null,
+    receipt_material_category: row?.receipt_material_category || "",
+    receipt_material_type: row?.receipt_material_type || "",
     receipt_status: row?.receipt_status || "",
     duration_seconds: row?.duration_seconds ?? null,
     notes: row?.notes || "",
@@ -129,16 +185,21 @@ function compactListItem(row) {
 }
 
 async function callOpenAi({ action, mediaRow, context }) {
-  const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_V4 || "";
+  const aiConfig = getSharedAiConfig();
+  const apiKey = aiConfig.apiKey;
   if (!apiKey) {
     return {
       ok: false,
       configured: false,
+      code: "provider_not_configured",
+      action,
       message: "AI not configured yet.",
+      provider: "openai",
+      sourceType: aiConfig.sourceType,
     };
   }
 
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = aiConfig.model || "gpt-4.1-mini";
   const baseInstructions = [
     "You are OPERA.AI's field documentation assistant for construction teams.",
     "Return concise, practical output for supervisors.",
@@ -151,8 +212,10 @@ async function callOpenAi({ action, mediaRow, context }) {
   if (action === "receipt_ocr") {
     prompt = [
       "Read this receipt image if available. Return JSON with keys:",
-      "supplier, date, subtotal, tax, total_amount, likely_category, line_items, confidence, notes.",
-      "Use null when a value is not visible. Categories should be one of Plumbing, Electrical, Drywall, Framing, Flooring, Paint, Tools, Rental, General materials, Other.",
+      "supplier, receipt_date, subtotal, hst, total_amount, currency, material_category, material_type, confidence, notes, line_items.",
+      "Use null when a value is not visible. Currency defaults to CAD.",
+      "material_category must be one of lumber, drywall, electrical, plumbing, paint, flooring, fasteners, tools, rental, safety, general material, other.",
+      "material_type should be a short practical material type such as screws, primer, lumber, drywall compound, rental, or other.",
       `Metadata: ${JSON.stringify(compactMediaRow(mediaRow))}`,
     ].join("\n");
   } else if (action === "photo_tags") {
@@ -196,37 +259,66 @@ async function callOpenAi({ action, mediaRow, context }) {
   const mediaType = normalizeMediaType(mediaRow?.media_type);
   if (imageUrl && ["photo", "receipt"].includes(mediaType) && (action === "receipt_ocr" || action === "photo_tags")) {
     content.push({ type: "input_image", image_url: imageUrl, detail: "low" });
+  } else if (action === "receipt_ocr") {
+    return {
+      ok: false,
+      configured: true,
+      code: "image_unavailable",
+      action,
+      message: "Receipt image is not available for OCR. Review and save receipt details manually.",
+    };
   }
 
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      instructions: wantsJson ? `${baseInstructions} Return only valid JSON.` : baseInstructions,
-      input: [{ role: "user", content }],
-      temperature: 0.2,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  let response;
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        instructions: wantsJson ? `${baseInstructions} Return only valid JSON.` : baseInstructions,
+        input: [{ role: "user", content }],
+        temperature: 0.2,
+      }),
+    });
+  } catch (err) {
+    const timedOut = err?.name === "AbortError";
+    return {
+      ok: false,
+      configured: true,
+      code: timedOut ? "provider_timeout" : "provider_request_failed",
+      action,
+      message: timedOut ? "Receipt OCR timed out. Review and save receipt details manually." : "Receipt OCR request failed. Review and save receipt details manually.",
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = data?.error?.message || "AI request failed.";
-    return { ok: false, configured: true, message };
+    return { ok: false, configured: true, code: "provider_bad_response", action, message };
   }
 
   const text = outputTextFromResponse(data);
   const parsedJson = wantsJson ? parseJsonFromText(text) : null;
+  const json = action === "receipt_ocr" ? normalizeReceiptJson(parsedJson) : parsedJson;
   return {
     ok: true,
     configured: true,
+    code: "",
+    action,
     model,
     text,
-    json: parsedJson,
-    warning: wantsJson && !parsedJson ? "AI response was not valid JSON. Review the raw output before saving." : "",
+    json,
+    warning: wantsJson && !parsedJson ? "AI response was not valid JSON. Review and save receipt details manually." : "",
+    warningCode: wantsJson && !parsedJson ? "provider_bad_response" : "",
   };
 }
 
@@ -284,21 +376,21 @@ async function loadContextRows(supabase, { companyId, callerId, callerIsAdmin, f
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    res.status(405).json({ error: "Method not allowed" });
+    sendApiError(res, 405, "method_not_allowed", "Method not allowed");
     return;
   }
 
   const url = getSupabaseUrl();
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
-    res.status(500).json({ ok: false, error: "Server misconfigured" });
+    sendApiError(res, 500, "server_misconfigured", "Server misconfigured");
     return;
   }
 
   const authHeader = typeof req.headers.authorization === "string" ? req.headers.authorization : "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (!token) {
-    res.status(401).json({ ok: false, error: "Missing authorization" });
+    sendApiError(res, 401, "invalid_auth", "Missing authorization");
     return;
   }
 
@@ -312,26 +404,34 @@ export default async function handler(req, res) {
   const { data: userData, error: userErr } = await supabase.auth.getUser(token);
   const caller = userData?.user;
   if (userErr || !caller?.id) {
-    res.status(401).json({ ok: false, error: "Invalid authorization" });
+    sendApiError(res, 401, "invalid_auth", "Invalid authorization");
     return;
   }
 
   if (action === "status") {
-    res.status(200).json({
+    const aiStatus = getSharedAiStatus();
+    const configured = Boolean(aiStatus.configured);
+    sendJson(res, 200, {
       ok: true,
-      configured: Boolean(process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_V4),
-      message: process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY_V4 ? "AI configured" : "AI not configured yet.",
+      action,
+      configured,
+      code: configured ? "" : "provider_not_configured",
+      message: configured ? "AI configured" : "AI not configured yet.",
+      provider: aiStatus.provider,
+      model: aiStatus.model,
+      sourceType: aiStatus.sourceType,
+      keyName: aiStatus.keyName,
     });
     return;
   }
 
   if (!action) {
-    res.status(400).json({ ok: false, error: "action is required" });
+    sendApiError(res, 400, "validation_failed", "action is required");
     return;
   }
 
   if (!companyId) {
-    res.status(400).json({ ok: false, error: "companyId is required" });
+    sendApiError(res, 400, "validation_failed", "companyId is required");
     return;
   }
 
@@ -342,13 +442,13 @@ export default async function handler(req, res) {
     .eq("user_id", caller.id)
     .maybeSingle();
   if (memberError || !member) {
-    res.status(403).json({ ok: false, error: "Caller is not in this company" });
+    sendApiError(res, 403, "forbidden_company", "Caller is not in this company");
     return;
   }
 
   const callerIsAdmin = isAdminRole(member.role);
-  if (["receipt_ocr", "photo_tags", "daily_summary", "customer_update", "alerts"].includes(action) && !callerIsAdmin) {
-    res.status(403).json({ ok: false, error: "AI review is supervisor-only" });
+  if (["photo_tags", "daily_summary", "customer_update", "alerts"].includes(action) && !callerIsAdmin) {
+    sendApiError(res, 403, "forbidden_role", "AI review is supervisor-only");
     return;
   }
 
@@ -356,7 +456,7 @@ export default async function handler(req, res) {
     if (action === "receipt_ocr" || action === "photo_tags") {
       const mediaId = normalizeText(body.mediaId || body.media_id);
       if (!mediaId) {
-        res.status(400).json({ ok: false, error: "mediaId is required" });
+        sendApiError(res, 400, "validation_failed", "mediaId is required");
         return;
       }
       const { data: row, error } = await supabase
@@ -366,15 +466,15 @@ export default async function handler(req, res) {
         .eq("id", mediaId)
         .maybeSingle();
       if (error || !row) {
-        res.status(404).json({ ok: false, error: "Media record not found" });
+        sendApiError(res, 404, "media_not_found", "Media record not found");
         return;
       }
       if (!callerIsAdmin && String(row.user_id) !== String(caller.id)) {
-        res.status(403).json({ ok: false, error: "Not allowed" });
+        sendApiError(res, 403, "forbidden_media", "Not allowed");
         return;
       }
       const result = await callOpenAi({ action, mediaRow: row });
-      res.status(200).json(result);
+      sendJson(res, 200, result);
       return;
     }
 
@@ -386,7 +486,7 @@ export default async function handler(req, res) {
         filters: body.filters || {},
       });
       const result = await callOpenAi({ action, context });
-      res.status(200).json({ ...result, context_counts: {
+      sendJson(res, 200, { ...result, context_counts: {
         media: context.media.length,
         timesheets: context.timesheets.length,
         list_items: context.list_items.length,
@@ -394,9 +494,9 @@ export default async function handler(req, res) {
       return;
     }
 
-    res.status(400).json({ ok: false, error: "Unsupported action" });
+    sendApiError(res, 400, "unsupported_action", "Unsupported action");
   } catch (err) {
     console.warn("[AI_FIELD_DOCS] request failed", err);
-    res.status(500).json({ ok: false, error: err?.message || "AI request failed" });
+    sendApiError(res, 500, "server_error", err?.message || "AI request failed");
   }
 }

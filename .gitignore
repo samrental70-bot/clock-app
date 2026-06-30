@@ -24,7 +24,14 @@ dist-ssr
 *.sw?
 
 .vercel
+.env
+.env.local
+.env.development
+.env.production
 .env*.local
+*.env
+MCP/.local/
+MCP/*.enc.json
 
 # Local Codex/browser/render/cache output.
 .codex_renders/
@@ -34,10 +41,13 @@ dist-ssr
 rent_receipts_output/
 *.tmp
 *.cache
+supabase/.temp/
+supabase/dev-only/
 
 # Non-OPERA files accidentally dropped into this workspace.
 # Keep these out of commits and Vercel deployments.
 screenshots/
+bridge/
 census-tenant-form-2026/
 charts/
 public/audio/

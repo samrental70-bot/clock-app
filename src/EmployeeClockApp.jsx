@@ -1,9 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
+import { buildTimesheetSanityChecks, getVisibleTimesheetSanityIssues } from "./lib/timesheetSanity";
 
 const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
 const OPERA_APP_CHANNEL = import.meta.env.VITE_OPERA_APP_CHANNEL || "production";
-const IS_OPERA_DEVELOPMENT_APP = OPERA_APP_CHANNEL !== "production";
+const OPERA_APP_HOSTNAME = typeof window !== "undefined" ? window.location.hostname : "";
+const IS_OPERA_DEVELOPMENT_APP =
+  OPERA_APP_CHANNEL !== "production" ||
+  OPERA_APP_HOSTNAME === "localhost" ||
+  OPERA_APP_HOSTNAME === "127.0.0.1" ||
+  OPERA_APP_HOSTNAME.includes("development");
 const OPERA_APP_ICON = IS_OPERA_DEVELOPMENT_APP ? "/icon-development-192.png" : "/icon-192.png";
 
 const Card = ({ children, className }) => (
@@ -122,7 +128,7 @@ const AppHeader = ({
   );
 };
 
-const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onTimesheets, onMore }) => {
+const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onChat, onTimesheets, onMore }) => {
   const NavIcon = ({ type }) => {
     if (type === "home") {
       return (
@@ -158,6 +164,14 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
         </svg>
       );
     }
+    if (type === "chat") {
+      return (
+        <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12a7.5 7.5 0 0 1-7.5 7.5H8l-5 2 1.7-4.4A7.5 7.5 0 1 1 21 12Z" />
+          <path d="M8 11h8M8 15h5" />
+        </svg>
+      );
+    }
     return (
       <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M5 7h14M5 12h14M5 17h14" />
@@ -173,7 +187,7 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
           : "text-slate-500 active:bg-slate-100"
     }`;
   if (isEmployeeRole) {
-    const employeeMoreActive = !["clock", "schedule", "timesheet"].includes(activeTab);
+    const employeeMoreActive = !["clock", "chat", "timesheet"].includes(activeTab);
     return (
       <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
         <div className="grid grid-cols-4 gap-0.5">
@@ -182,10 +196,10 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
             <NavIcon type="clock" />
             <span className="truncate">Clock</span>
           </button>
-          <button type="button" onClick={onSchedule} className={itemClass(activeTab === "schedule")}>
-            {activeTab === "schedule" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
-            <NavIcon type="schedule" />
-            <span className="truncate">Schedule</span>
+          <button type="button" onClick={onChat} className={itemClass(activeTab === "chat")}>
+            {activeTab === "chat" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+            <NavIcon type="chat" />
+            <span className="truncate">Chat</span>
           </button>
           <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
             {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
@@ -202,10 +216,10 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
     );
   }
   const homeActive = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
-  const moreActive = !homeActive && !["clock", "timesheet"].includes(activeTab);
+  const moreActive = !homeActive && !["clock", "chat", "timesheet"].includes(activeTab);
   return (
     <div className="opera-bottom-nav fixed bottom-0 left-1/2 z-50 w-full max-w-sm -translate-x-1/2 border-t border-slate-200 bg-white/95 px-2 pt-1.5 backdrop-blur-2xl pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
-      <div className="grid grid-cols-4 gap-0.5">
+      <div className="grid grid-cols-5 gap-0.5">
         <button type="button" onClick={onHome} className={itemClass(homeActive)}>
           {homeActive ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="home" />
@@ -215,6 +229,11 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
           {activeTab === "clock" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
           <NavIcon type="clock" />
           <span className="truncate">Clock</span>
+        </button>
+        <button type="button" onClick={onChat} className={itemClass(activeTab === "chat")}>
+          {activeTab === "chat" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
+          <NavIcon type="chat" />
+          <span className="truncate">Chat</span>
         </button>
         <button type="button" onClick={onTimesheets} className={itemClass(activeTab === "timesheet")}>
           {activeTab === "timesheet" ? <span className="absolute top-0 h-0.5 w-5 rounded-full bg-[#C9A227]" /> : null}
@@ -733,6 +752,22 @@ function getOperaCompanyInviteUrl(companyCode = "") {
   const cleanCode = String(companyCode || "").trim().toUpperCase();
   if (cleanCode) url.searchParams.set("companyCode", cleanCode);
   return url.toString();
+}
+
+function getOperaApiUrl(path) {
+  const cleanPath = String(path || "").startsWith("/") ? String(path || "") : `/${path || ""}`;
+  if (typeof window === "undefined") return cleanPath;
+  const hostname = window.location?.hostname || "";
+  if (isLocalOperaHost()) {
+    return `https://project-rui1d-development.vercel.app${cleanPath}`;
+  }
+  return cleanPath;
+}
+
+function isLocalOperaHost() {
+  if (typeof window === "undefined") return false;
+  const hostname = window.location?.hostname || "";
+  return hostname === "localhost" || hostname === "127.0.0.1";
 }
 
 function getCameraTorchTrack(stream) {
@@ -1527,6 +1562,32 @@ function projectMediaRowToLocalItem(row) {
       receiptStatus: row?.receipt_status || "Receipt Uploaded",
       receiptUploadedAt: row?.uploaded_at || capturedAt,
       receipt_uploaded_at: row?.uploaded_at || capturedAt,
+      receipt_supplier: row?.receipt_supplier || "",
+      receiptSupplier: row?.receipt_supplier || "",
+      receipt_date: row?.receipt_date || "",
+      receiptDate: row?.receipt_date || "",
+      receipt_subtotal: row?.receipt_subtotal ?? null,
+      receiptSubtotal: row?.receipt_subtotal ?? null,
+      receipt_hst: row?.receipt_hst ?? null,
+      receiptHst: row?.receipt_hst ?? null,
+      receipt_total: row?.receipt_total ?? null,
+      receiptTotal: row?.receipt_total ?? null,
+      receipt_currency: row?.receipt_currency || "CAD",
+      receiptCurrency: row?.receipt_currency || "CAD",
+      receipt_material_category: row?.receipt_material_category || "",
+      receiptMaterialCategory: row?.receipt_material_category || "",
+      receipt_material_type: row?.receipt_material_type || "",
+      receiptMaterialType: row?.receipt_material_type || "",
+      receipt_ocr_status: row?.receipt_ocr_status || "",
+      receiptOcrStatus: row?.receipt_ocr_status || "",
+      receipt_ocr_confidence: row?.receipt_ocr_confidence ?? null,
+      receiptOcrConfidence: row?.receipt_ocr_confidence ?? null,
+      receipt_reviewed_at: row?.receipt_reviewed_at || null,
+      receiptReviewedAt: row?.receipt_reviewed_at || null,
+      receipt_reviewed_by: row?.receipt_reviewed_by || null,
+      receiptReviewedBy: row?.receipt_reviewed_by || null,
+      receipt_source: row?.receipt_source || "",
+      receiptSource: row?.receipt_source || "",
     };
   }
 
@@ -2033,6 +2094,88 @@ function hourlyRateFromProfileValue(hr) {
   return n;
 }
 
+function isMissingPayRatesTableError(error) {
+  const m = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || m.includes("employee_pay_rates") || (m.includes("relation") && m.includes("does not exist"));
+}
+
+async function getEffectiveHourlyRate(supabaseClient, { companyId, employeeId, shiftDate, timeZone, fallbackRate = 0 }) {
+  const fallback = hourlyRateFromProfileValue(fallbackRate);
+  if (!supabaseClient || !employeeId) return fallback;
+  const effectiveDate = calendarDateKeyInTimeZone(shiftDate || new Date(), timeZone || DEFAULT_COMPANY_TIME_ZONE);
+  if (companyId && effectiveDate) {
+    try {
+      const { data, error } = await supabaseClient
+        .from("employee_pay_rates")
+        .select("hourly_rate, effective_date")
+        .eq("company_id", companyId)
+        .eq("employee_id", employeeId)
+        .lte("effective_date", effectiveDate)
+        .order("effective_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        if (!isMissingPayRatesTableError(error)) {
+          console.warn("[PAY_RATES] effective rate lookup failed", error);
+        }
+      } else {
+        const rate = hourlyRateFromProfileValue(data?.hourly_rate);
+        if (rate > 0 || data?.hourly_rate === 0) return rate;
+      }
+    } catch (err) {
+      if (!isMissingPayRatesTableError(err)) {
+        console.warn("[PAY_RATES] effective rate lookup exception", err);
+      }
+    }
+  }
+  if (fallback > 0) return fallback;
+  try {
+    const { data: prof } = await supabaseClient
+      .from("profiles")
+      .select("hourly_rate")
+      .eq("id", employeeId)
+      .maybeSingle();
+    return hourlyRateFromProfileValue(prof?.hourly_rate);
+  } catch {
+    return fallback;
+  }
+}
+
+async function fetchCurrentEffectivePayRatesByUserId(supabaseClient, { companyId, userIds, timeZone, asOf = new Date() }) {
+  const ids = [...new Set((userIds || []).filter(Boolean).map(String))];
+  if (!supabaseClient || !companyId || ids.length === 0) return {};
+  const effectiveDate = calendarDateKeyInTimeZone(asOf, timeZone || DEFAULT_COMPANY_TIME_ZONE);
+  if (!effectiveDate) return {};
+  try {
+    const { data, error } = await supabaseClient
+      .from("employee_pay_rates")
+      .select("employee_id, hourly_rate, effective_date")
+      .eq("company_id", companyId)
+      .in("employee_id", ids)
+      .lte("effective_date", effectiveDate)
+      .order("effective_date", { ascending: false });
+    if (error) {
+      if (!isMissingPayRatesTableError(error)) console.warn("[PAY_RATES] current rates lookup failed", error);
+      return {};
+    }
+    const out = {};
+    for (const row of data || []) {
+      const uid = String(row?.employee_id || "");
+      if (!uid || out[uid]) continue;
+      const rate = hourlyRateFromProfileValue(row?.hourly_rate);
+      out[uid] = {
+        hourlyRate: rate,
+        effectiveDate: row?.effective_date || null,
+      };
+    }
+    return out;
+  } catch (err) {
+    if (!isMissingPayRatesTableError(err)) console.warn("[PAY_RATES] current rates lookup exception", err);
+    return {};
+  }
+}
+
 /** labour_cost = ((clock_out - clock_in) ms / 3600000) * hourly_rate */
 function computeLabourCostFromWallTimes(clockInIso, clockOutIso, hourlyRate) {
   const t0 = new Date(clockInIso).getTime();
@@ -2080,14 +2223,16 @@ function isAutoClockOutDue(record, nowMs = Date.now(), timeZone = DEFAULT_COMPAN
 }
 
 /**
- * Build Supabase timesheets update for clock-out with profile hourly_rate fallback when timesheet rate is missing/0.
+ * Build Supabase timesheets update for clock-out with effective-date pay-rate fallback.
  */
-async function buildTimesheetClockOutUpdate(supabase, { userId, clockInIso, clockOutIso, timesheetHourlyRate, breakStartIso, breakEndIso, status = "Submitted" }) {
-  let rate = Number(timesheetHourlyRate);
-  if (!Number.isFinite(rate) || rate <= 0) {
-    const { data: prof } = await supabase.from("profiles").select("hourly_rate").eq("id", userId).maybeSingle();
-    rate = hourlyRateFromProfileValue(prof?.hourly_rate);
-  }
+async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZone, clockInIso, clockOutIso, timesheetHourlyRate, breakStartIso, breakEndIso, status = "Submitted" }) {
+  const rate = await getEffectiveHourlyRate(supabase, {
+    companyId,
+    employeeId: userId,
+    shiftDate: clockInIso,
+    timeZone,
+    fallbackRate: timesheetHourlyRate,
+  });
   const workedMinutes = workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEndIso);
   const hours = workedMinutes / 60;
   const labourCost = hours * rate;
@@ -2097,7 +2242,7 @@ async function buildTimesheetClockOutUpdate(supabase, { userId, clockInIso, cloc
     labour_cost: labourCost,
   };
   const rawTs = Number(timesheetHourlyRate);
-  if ((!Number.isFinite(rawTs) || rawTs <= 0) && rate > 0) {
+  if ((!Number.isFinite(rawTs) || rawTs <= 0 || Math.abs(rawTs - rate) > 0.0001) && rate >= 0) {
     update.hourly_rate = rate;
   }
   return {
@@ -2134,6 +2279,7 @@ function mapTimesheetRowFromSupabase(row) {
     })(),
     clockIn: row.clock_in,
     clockOut: row.clock_out ?? null,
+    updatedAt: row.updated_at ?? null,
     status: row.status || "Submitted",
     labour_cost: (() => {
       if (row.labour_cost == null || row.labour_cost === "") return undefined;
@@ -2165,6 +2311,110 @@ function mapTimesheetRowFromSupabase(row) {
     profileDisplayName: "",
     profileEmailForRow: "",
   };
+}
+
+function dedupeTimesheetRowsByStableId(rows = []) {
+  const byKey = new Map();
+  const passthrough = [];
+  for (const row of normalizeArray(rows)) {
+    const key = String(row?.supabaseTimesheetId ?? row?.id ?? "").trim();
+    if (!key) {
+      passthrough.push(row);
+      continue;
+    }
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, row);
+      continue;
+    }
+    const existingUpdated = parseStoredInstant(existing.updatedAt || existing.updated_at || existing.clockOut || existing.clockIn).getTime();
+    const nextUpdated = parseStoredInstant(row.updatedAt || row.updated_at || row.clockOut || row.clockIn).getTime();
+    if (Number.isFinite(nextUpdated) && (!Number.isFinite(existingUpdated) || nextUpdated >= existingUpdated)) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values(), ...passthrough];
+}
+
+function makeCurrentShiftFromActiveTimesheetRecord(record, { fallbackName = "", fallbackEmail = "", existingShift = null, photosTaken = 0 } = {}) {
+  if (!record) return null;
+  const existingId = existingShift?.supabaseTimesheetId ?? existingShift?.id;
+  const recordId = record.supabaseTimesheetId ?? record.id;
+  const sameExistingShift = existingId != null && recordId != null && String(existingId) === String(recordId);
+  return {
+    ...(sameExistingShift ? existingShift : {}),
+    userId: record.userId || record.user_id || record.employeeId || null,
+    employee: record.employee || record.employeeName || record.profileDisplayName || fallbackName || fallbackEmail || "Employee",
+    employeeName: record.employeeName || record.employee || record.profileDisplayName || fallbackName || fallbackEmail || "",
+    employeeEmail: record.employeeEmail || record.profileEmailForRow || fallbackEmail || null,
+    profileDisplayName: record.profileDisplayName || fallbackName || "",
+    profileEmailForRow: record.profileEmailForRow || fallbackEmail || "",
+    companyId: record.companyId ?? null,
+    companyName: record.companyName ?? null,
+    hourlyRate: Number.isFinite(Number(record.hourlyRate)) ? Number(record.hourlyRate) : 0,
+    project: record.project || "",
+    projectId: record.projectId ?? null,
+    costCenter: record.costCenter || "",
+    date: record.clockIn,
+    clockIn: record.clockIn,
+    clockInLocation: record.clockInLocation || null,
+    breakStart: sameExistingShift ? existingShift?.breakStart || null : null,
+    breakEnd: sameExistingShift ? existingShift?.breakEnd || null : null,
+    status: "Active",
+    photosTaken: Math.max(
+      Number(sameExistingShift ? existingShift?.photosTaken || 0 : 0),
+      Number(photosTaken || 0)
+    ),
+    lastPhotoAt: sameExistingShift ? existingShift?.lastPhotoAt || null : null,
+    employeeId: record.userId || record.user_id || record.employeeId || null,
+    projectFolder: record.projectFolder || (record.project ? getProjectFolderName(record.project) : ""),
+    liveLocation: sameExistingShift ? existingShift?.liveLocation || null : null,
+    locationTrail: sameExistingShift ? existingShift?.locationTrail || [] : [],
+    supabaseTimesheetId: recordId ?? null,
+  };
+}
+
+function isMissingProjectMediaRelatedTimesheetError(error) {
+  const m = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return (
+    code === "42p01" ||
+    m.includes("project_media") ||
+    m.includes("related_timesheet_id") ||
+    (m.includes("relation") && m.includes("does not exist")) ||
+    (m.includes("column") && m.includes("does not exist"))
+  );
+}
+
+async function fetchPhotoCountsByTimesheetId(supabaseClient, { companyId, timesheetIds }) {
+  const ids = [...new Set((timesheetIds || []).map((id) => String(id || "").trim()).filter(Boolean))];
+  if (!supabaseClient || !companyId || ids.length === 0) return {};
+  try {
+    const { data, error } = await supabaseClient
+      .from("project_media")
+      .select("related_timesheet_id, captured_at")
+      .eq("company_id", companyId)
+      .eq("media_type", "photo")
+      .in("related_timesheet_id", ids);
+    if (error) {
+      if (!isMissingProjectMediaRelatedTimesheetError(error)) {
+        console.warn("[CLOCK_REHYDRATE] photo count lookup failed", error);
+      }
+      return {};
+    }
+    const counts = {};
+    for (const row of data || []) {
+      const key = String(row?.related_timesheet_id || "");
+      if (!key) continue;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return counts;
+  } catch (err) {
+    if (!isMissingProjectMediaRelatedTimesheetError(err)) {
+      console.warn("[CLOCK_REHYDRATE] photo count lookup exception", err);
+    }
+    return {};
+  }
 }
 
 function mapTimesheetChangeRequestFromSupabase(row) {
@@ -2332,6 +2582,7 @@ async function saveLiveLocationRowManual(
     .from("live_locations")
     .select("id, employee_id, company_id, status, updated_at")
     .eq("employee_id", employeeId)
+    .eq("company_id", companyId)
     .maybeSingle();
 
   if (exErr) {
@@ -2387,6 +2638,60 @@ function isMissingDbColumnError(error) {
   return (
     (m.includes("column") && (m.includes("does not exist") || m.includes("undefined"))) ||
     m.includes("42703")
+  );
+}
+
+const RECEIPT_MATERIAL_CATEGORIES = [
+  "lumber",
+  "drywall",
+  "electrical",
+  "plumbing",
+  "paint",
+  "flooring",
+  "fasteners",
+  "tools",
+  "rental",
+  "safety",
+  "general material",
+  "other",
+];
+
+function normalizeReceiptMoneyValue(value, fallback = "") {
+  if (value == null || value === "") return fallback;
+  const cleaned = String(value).replace(/[^0-9.-]/g, "");
+  const number = Number(cleaned);
+  if (!Number.isFinite(number)) return fallback;
+  return number.toFixed(2);
+}
+
+function receiptMoneyNumber(value) {
+  if (value == null || value === "") return null;
+  const number = Number(String(value).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeReceiptDateInput(value, fallback = "") {
+  const raw = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const source = raw || fallback;
+  if (!source) return "";
+  const date = parseStoredInstant(source);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function normalizeReceiptCurrency(value) {
+  const text = String(value || "CAD").trim().toUpperCase();
+  return text || "CAD";
+}
+
+function isMissingReceiptOcrColumnError(error) {
+  const m = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  return (
+    isMissingDbColumnError(error) ||
+    m.includes("schema cache") ||
+    m.includes("receipt_") ||
+    m.includes("ai_extracted_json") ||
+    m.includes("ai_review_status")
   );
 }
 
@@ -2834,10 +3139,526 @@ function PublicPhotoShareView({ share, index, setIndex }) {
   );
 }
 
+function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
+  const [conversations, setConversations] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupMemberIds, setGroupMemberIds] = useState([]);
+
+  const companyId = userCompany?.id || "";
+  const currentUserId = authUser?.id || "";
+  const chatErrorMessage = useCallback((err) => {
+    const message = getErrorMessage(err);
+    return /failed to fetch/i.test(message)
+      ? "Company chat is not connected in this local build yet."
+      : message;
+  }, []);
+
+  const memberById = useMemo(
+    () => Object.fromEntries((members || []).map((member) => [String(member.user_id), member])),
+    [members]
+  );
+  const availableMembers = useMemo(
+    () => members.filter((member) => String(member.user_id) !== String(currentUserId)),
+    [currentUserId, members]
+  );
+  const conversationRows = useMemo(() => {
+    const rows = [...(conversations || [])].sort((a, b) => {
+      const aCompany = a?.type === "company" && a?.is_default;
+      const bCompany = b?.type === "company" && b?.is_default;
+      if (aCompany !== bCompany) return aCompany ? -1 : 1;
+      return String(b?.last_message_at || "").localeCompare(String(a?.last_message_at || ""));
+    });
+    const hasCompanyChat = rows.some((conversation) => conversation?.type === "company" && conversation?.is_default);
+    if (!hasCompanyChat && companyId) {
+      rows.unshift({
+        id: "__company_all_employees__",
+        type: "company",
+        name: "All employees",
+        is_default: true,
+        last_message: "Company-wide chat",
+        last_message_at: "",
+        member_user_ids: members.map((member) => member.user_id).filter(Boolean),
+        pendingSetup: true,
+      });
+    }
+    return rows;
+  }, [companyId, conversations, members]);
+  const selectedConversation = useMemo(
+    () =>
+      conversationRows.find((conversation) => String(conversation.id) === String(selectedConversationId)) ||
+      conversationRows[0] ||
+      null,
+    [conversationRows, selectedConversationId]
+  );
+
+  const getToken = useCallback(async () => {
+    const { data, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    const token = data?.session?.access_token;
+    if (!token) throw new Error("Sign in again to use chat.");
+    return token;
+  }, []);
+
+  const chatFetch = useCallback(
+    async (path, options = {}) => {
+      const token = await getToken();
+      const response = await fetch(getOperaApiUrl(path), {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          ...(options.headers || {}),
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || "Chat request failed");
+      return data;
+    },
+    [getToken]
+  );
+
+  const formatChatTime = useCallback(
+    (value) => {
+      if (!value) return "";
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(value));
+      } catch {
+        return "";
+      }
+    },
+    [companyTimeZone]
+  );
+
+  const displayConversationName = useCallback(
+    (conversation) => {
+      if (!conversation) return "Chat";
+      if (conversation.type === "company") return "All employees";
+      if (conversation.type === "direct") {
+        const otherUserId = (conversation.member_user_ids || []).find((userId) => String(userId) !== String(currentUserId));
+        return memberById[String(otherUserId)]?.name || conversation.name || "Direct message";
+      }
+      return conversation.name || "Group chat";
+    },
+    [currentUserId, memberById]
+  );
+
+  const loadConversations = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!companyId || !currentUserId) return;
+      if (!silent) setLoading(true);
+      setError("");
+      try {
+        const query = new URLSearchParams({ action: "list", company_id: companyId });
+        const data = await chatFetch(`/api/chat?${query.toString()}`);
+        const nextConversations = data.conversations || [];
+        setConversations(nextConversations);
+        setMembers(data.members || []);
+        setSelectedConversationId((previous) => {
+          if (previous && nextConversations.some((conversation) => String(conversation.id) === String(previous))) {
+            return previous;
+          }
+          return nextConversations[0]?.id || "";
+        });
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [chatErrorMessage, chatFetch, companyId, currentUserId]
+  );
+
+  const loadMessages = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!companyId || !selectedConversationId || String(selectedConversationId).startsWith("__company_")) {
+        setMessages([]);
+        return;
+      }
+      if (!silent) setMessagesLoading(true);
+      setError("");
+      try {
+        const query = new URLSearchParams({
+          action: "messages",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          limit: "60",
+        });
+        const data = await chatFetch(`/api/chat?${query.toString()}`);
+        setMessages(data.messages || []);
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      } finally {
+        if (!silent) setMessagesLoading(false);
+      }
+    },
+    [chatErrorMessage, chatFetch, companyId, selectedConversationId]
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    void loadConversations();
+  }, [active, loadConversations]);
+
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    void loadMessages();
+  }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => {
+      void loadConversations({ silent: true });
+      if (selectedConversationId && !selectedConversation?.pendingSetup) void loadMessages({ silent: true });
+    }, 9000);
+    return () => window.clearInterval(timer);
+  }, [active, loadConversations, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  const sendChatMessage = async () => {
+    const body = messageDraft.trim();
+    if (!body || !selectedConversationId || selectedConversation?.pendingSetup || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "send",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          body,
+          client_id: `${currentUserId}-${Date.now()}`,
+        }),
+      });
+      setMessageDraft("");
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const createDirectChat = async (targetUserId) => {
+    setError("");
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "create_direct", company_id: companyId, target_user_id: targetUserId }),
+      });
+      setComposerOpen(null);
+      await loadConversations({ silent: true });
+      setSelectedConversationId(data?.conversation?.id || "");
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const createGroupChat = async () => {
+    setError("");
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create_group",
+          company_id: companyId,
+          name: groupName,
+          member_user_ids: groupMemberIds,
+        }),
+      });
+      setComposerOpen(null);
+      setGroupName("");
+      setGroupMemberIds([]);
+      await loadConversations({ silent: true });
+      setSelectedConversationId(data?.conversation?.id || "");
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const toggleGroupMember = (userId) => {
+    setGroupMemberIds((previous) =>
+      previous.includes(userId) ? previous.filter((id) => id !== userId) : [...previous, userId]
+    );
+  };
+
+  return (
+    <PageCard className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#C9A227]">Team</p>
+          <h1 className="mt-1 text-[28px] font-black leading-tight text-[#061426]">Chat</h1>
+          <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Company messages and crew groups</p>
+        </div>
+        <button
+          type="button"
+          className="h-10 rounded-[14px] border border-[#E2E8F0] bg-white px-3 text-[13px] font-black text-[#061426] shadow-sm"
+          onClick={() => void loadConversations()}
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          className="h-11 rounded-[14px] bg-[#061426] text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.18)]"
+          onClick={() => setComposerOpen("direct")}
+        >
+          New chat
+        </button>
+        <button
+          type="button"
+          className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white text-[14px] font-black text-[#061426]"
+          onClick={() => setComposerOpen("group")}
+        >
+          New group
+        </button>
+      </div>
+
+      {error ? (
+        <div className="rounded-[16px] border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+          {error}
+        </div>
+      ) : null}
+
+      <section className="rounded-[20px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+        <div className="border-b border-[#E2E8F0] p-3">
+          <p className="text-[12px] font-black uppercase tracking-[0.08em] text-[#64748B]">Conversations</p>
+        </div>
+        <div className="divide-y divide-[#E2E8F0]">
+          {loading ? (
+            <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chat...</p>
+          ) : conversationRows.length === 0 ? (
+            <EmptyState title="No conversations yet" body="Start a direct chat or create a group." className="m-3" />
+          ) : (
+            conversationRows.map((conversation) => {
+              const activeConversation =
+                String(conversation.id) === String(selectedConversationId) ||
+                (!selectedConversationId && String(conversation.id).startsWith("__company_"));
+              const name = displayConversationName(conversation);
+              return (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`flex w-full items-center gap-3 px-3 py-3 text-left active:bg-[#F8FAFC] ${
+                    activeConversation ? "bg-[#F8FAFC]" : "bg-white"
+                  }`}
+                  onClick={() => setSelectedConversationId(conversation.id)}
+                >
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#061426] text-[12px] font-black text-white">
+                    {name.slice(0, 2).toUpperCase()}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-black text-[#061426]">{name}</span>
+                    <span className="block truncate text-[12px] font-semibold text-[#64748B]">
+                      {conversation.pendingSetup
+                        ? "Company-wide chat"
+                        : conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet")}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] font-bold text-[#94A3B8]">
+                    {formatChatTime(conversation.last_message_at)}
+                  </span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </section>
+
+      {selectedConversation ? (
+        <section className="rounded-[20px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+          <div className="flex items-center gap-3 border-b border-[#E2E8F0] p-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#F8FAFC] text-[12px] font-black text-[#061426]">
+              {displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-[16px] font-black text-[#061426]">{displayConversationName(selectedConversation)}</h2>
+              <p className="truncate text-[12px] font-semibold text-[#64748B]">
+                {selectedConversation.pendingSetup
+                  ? "Setting up company chat"
+                  : selectedConversation.type === "company"
+                    ? "Everyone in the company"
+                  : `${selectedConversation.member_user_ids?.length || 0} members`}
+              </p>
+            </div>
+          </div>
+          <div className="max-h-[48dvh] min-h-[220px] space-y-2 overflow-y-auto bg-[#F8FAFC] p-3">
+            {selectedConversation.pendingSetup ? (
+              <EmptyState title="All employees" body="Company-wide chat will appear here once the chat service is connected." />
+            ) : messagesLoading ? (
+              <p className="text-center text-[13px] font-semibold text-[#64748B]">Loading messages...</p>
+            ) : messages.length === 0 ? (
+              <EmptyState title="No messages yet" body="Send the first update to this chat." />
+            ) : (
+              messages.map((message) => {
+                const mine = String(message.sender_user_id) === String(currentUserId);
+                return (
+                  <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[82%] rounded-[18px] px-3 py-2 shadow-sm ${
+                        mine
+                          ? "rounded-br-[6px] bg-[#061426] text-white"
+                          : "rounded-bl-[6px] border border-[#E2E8F0] bg-white text-[#061426]"
+                      }`}
+                    >
+                      {!mine ? <p className="mb-0.5 text-[11px] font-black text-[#64748B]">{message.sender_name}</p> : null}
+                      <p className="whitespace-pre-wrap break-words text-[14px] font-semibold leading-snug">{message.body}</p>
+                      <p className={`mt-1 text-right text-[10px] font-bold ${mine ? "text-white/70" : "text-[#94A3B8]"}`}>
+                        {formatChatTime(message.created_at)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <div className="flex gap-2 border-t border-[#E2E8F0] p-3">
+            <textarea
+              className="min-h-[44px] flex-1 resize-none rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+              value={messageDraft}
+              maxLength={2000}
+              placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
+              disabled={selectedConversation.pendingSetup}
+              onChange={(event) => setMessageDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendChatMessage();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="h-11 self-end rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white disabled:bg-[#CBD5E1]"
+              disabled={selectedConversation.pendingSetup || !messageDraft.trim() || sending}
+              onClick={() => void sendChatMessage()}
+            >
+              Send
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {composerOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Chat</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">
+                  {composerOpen === "direct" ? "New chat" : "New group"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => setComposerOpen(null)}
+                aria-label="Close chat composer"
+              >
+                x
+              </button>
+            </div>
+
+            {composerOpen === "group" ? (
+              <label className="mt-4 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                Group name
+                <input
+                  className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                  value={groupName}
+                  maxLength={80}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="Crew chat"
+                />
+              </label>
+            ) : null}
+
+            <div className="mt-4 max-h-[45dvh] space-y-2 overflow-y-auto">
+              {availableMembers.length === 0 ? (
+                <EmptyState title="No team members" body="Add employees before starting a chat." />
+              ) : (
+                availableMembers.map((member) => {
+                  const selected = groupMemberIds.includes(member.user_id);
+                  return (
+                    <button
+                      key={member.user_id}
+                      type="button"
+                      className={`flex w-full items-center gap-3 rounded-[16px] border px-3 py-2.5 text-left ${
+                        selected ? "border-[#061426] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-white"
+                      }`}
+                      onClick={() =>
+                        composerOpen === "direct" ? void createDirectChat(member.user_id) : toggleGroupMember(member.user_id)
+                      }
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#061426] text-[12px] font-black text-white">
+                        {member.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-black text-[#061426]">{member.name}</span>
+                        <span className="block truncate text-[12px] font-semibold text-[#64748B]">{member.email || member.role}</span>
+                      </span>
+                      {composerOpen === "group" ? (
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                            selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#CBD5E1]"
+                          }`}
+                        >
+                          {selected ? "OK" : ""}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {composerOpen === "group" ? (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                  onClick={() => setComposerOpen(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
+                  disabled={!groupName.trim() || groupMemberIds.length === 0}
+                  onClick={() => void createGroupChat()}
+                >
+                  Create
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </PageCard>
+  );
+}
+
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
   const [projectId, setProjectId] = useState("");
   const [costCenter, setCostCenter] = useState("");
+  const [clockCreateDraft, setClockCreateDraft] = useState({ open: false, itemType: "project", name: "" });
+  const [clockCreateSaving, setClockCreateSaving] = useState(false);
+  const [clockCreateError, setClockCreateError] = useState("");
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
   const [records, setRecords] = useState(() => []);
   const localTimesheetBackupRef = useRef(normalizeArray(safeRead("orp_timesheet_records", sampleRecords)));
@@ -2893,11 +3714,9 @@ export default function EmployeeClockApp() {
   const [photoFlashOn, setPhotoFlashOn] = useState(false);
   const [photoBatchUploading, setPhotoBatchUploading] = useState(false);
   const [photoBatchProgress, setPhotoBatchProgress] = useState(null);
-  const [receiptDraftFile, setReceiptDraftFile] = useState(null);
-  const [receiptEntryStep, setReceiptEntryStep] = useState(null);
-  const [receiptAmountDraft, setReceiptAmountDraft] = useState("");
-  const [receiptCategoryDraft, setReceiptCategoryDraft] = useState("");
   const [receiptSaving, setReceiptSaving] = useState(false);
+  const [receiptOcrReview, setReceiptOcrReview] = useState(null);
+  const [receiptReviewSaving, setReceiptReviewSaving] = useState(false);
   const [materialPaymentOpen, setMaterialPaymentOpen] = useState(false);
   const [materialPaymentStep, setMaterialPaymentStep] = useState("form");
   const [materialPaymentCountdown, setMaterialPaymentCountdown] = useState(10);
@@ -2913,14 +3732,18 @@ export default function EmployeeClockApp() {
   const photoFallbackCameraInputRef = useRef(null);
   const photoStatusClearTimerRef = useRef(null);
   const latestPhotoStatusRef = useRef("");
+  const pendingClockOutPhotoRef = useRef(false);
+  const uploadProjectPhotoFileRef = useRef(null);
+  const uploadClockOutPhotoAndFinishRef = useRef(null);
+  const handleClockOutRef = useRef(null);
   const projectMediaLocalSyncAttemptedRef = useRef(false);
   const clockSetupWarningTimerRef = useRef(null);
   const latestLocationStatusRef = useRef("");
+  const currentShiftRef = useRef(currentShift);
+  const lastLiveLocationSavedAtRef = useRef(0);
   const materialPaymentCountdownTimerRef = useRef(null);
   const materialPaymentOpenReceiptTimerRef = useRef(null);
   const materialPaymentPendingRef = useRef(null);
-  const receiptAmountInputRef = useRef(null);
-  const receiptCategoryInputRef = useRef(null);
   const [videoDraft, setVideoDraft] = useState(null);
   const [videoStatus, setVideoStatus] = useState("");
   const [videoUploadProgress, setVideoUploadProgress] = useState(null);
@@ -3095,11 +3918,7 @@ export default function EmployeeClockApp() {
     userCompany?.assign_all_tasks_to_all_projects,
     true
   );
-  const companyAllowEmployeeProjectTaskCreation = companySettingEnabled(
-    userCompany?.allow_employee_project_task_creation,
-    false
-  );
-  const canCreateProjectTaskFromClock = isAdmin || (isEmployeeRole && companyAllowEmployeeProjectTaskCreation);
+  const canCreateProjectTaskFromClock = isAdmin || (isEmployeeRole && !isProfileArchived);
   const publicPhotoShare = useMemo(() => {
     if (typeof window === "undefined") return null;
     const raw = new URLSearchParams(window.location.search).get("photoShare");
@@ -3166,15 +3985,15 @@ export default function EmployeeClockApp() {
 
   useEffect(() => {
     if (!authUser?.id || !companyChecked || !userCompany?.id || !isEmployeeRole) return;
-    const employeeAllowedTabs = new Set(["clock", "schedule", "timesheet", "photos", "receipts", "settings", "notifications", "lists"]);
-    if (companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation) {
+    const employeeAllowedTabs = new Set(["clock", "schedule", "timesheet", "photos", "receipts", "settings", "notifications", "lists", "chat"]);
+    if (companyAssignAllProjectsToAllEmployees || canCreateProjectTaskFromClock) {
       employeeAllowedTabs.add("projects");
     }
     if (!employeeAllowedTabs.has(activeTab)) setActiveTab("clock");
   }, [
     activeTab,
     authUser?.id,
-    companyAllowEmployeeProjectTaskCreation,
+    canCreateProjectTaskFromClock,
     companyAssignAllProjectsToAllEmployees,
     companyChecked,
     isEmployeeRole,
@@ -3192,25 +4011,49 @@ export default function EmployeeClockApp() {
     const buckets = normalizeMediaBuckets(projectPhotos);
     if (!isEmployeeRole || !authUser?.id) return buckets;
     const uid = String(authUser.id);
+    const allowedLabels = new Set(
+      [profileFullName, authUser?.email]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const isCurrentEmployeeMedia = (item) => {
+      const employeeId = String(item?.employeeId || item?.userId || item?.user_id || "");
+      if (employeeId !== uid) return false;
+      const employeeLabel = String(item?.employee || item?.employeeName || item?.employee_name || "").trim().toLowerCase();
+      if (!employeeLabel || employeeLabel === "employee") return true;
+      return allowedLabels.has(employeeLabel);
+    };
     const out = {};
     for (const [folder, photos] of Object.entries(buckets)) {
-      const filtered = normalizeArray(photos).filter((p) => String(p?.employeeId) === uid);
+      const filtered = normalizeArray(photos).filter(isCurrentEmployeeMedia);
       if (filtered.length > 0) out[folder] = filtered;
     }
     return out;
-  }, [isEmployeeRole, authUser?.id, projectPhotos]);
+  }, [isEmployeeRole, authUser?.id, authUser?.email, profileFullName, projectPhotos]);
 
   const scopedProjectReceipts = useMemo(() => {
     const buckets = normalizeMediaBuckets(projectReceipts);
     if (!isEmployeeRole || !authUser?.id) return buckets;
     const uid = String(authUser.id);
+    const allowedLabels = new Set(
+      [profileFullName, authUser?.email]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const isCurrentEmployeeMedia = (item) => {
+      const employeeId = String(item?.employeeId || item?.userId || item?.user_id || "");
+      if (employeeId !== uid) return false;
+      const employeeLabel = String(item?.employee || item?.employeeName || item?.employee_name || "").trim().toLowerCase();
+      if (!employeeLabel || employeeLabel === "employee") return true;
+      return allowedLabels.has(employeeLabel);
+    };
     const out = {};
     for (const [folder, receipts] of Object.entries(buckets)) {
-      const filtered = normalizeArray(receipts).filter((r) => String(r?.employeeId) === uid);
+      const filtered = normalizeArray(receipts).filter(isCurrentEmployeeMedia);
       if (filtered.length > 0) out[folder] = filtered;
     }
     return out;
-  }, [isEmployeeRole, authUser?.id, projectReceipts]);
+  }, [isEmployeeRole, authUser?.id, authUser?.email, profileFullName, projectReceipts]);
 
   const mediaFilterOptions = useMemo(() => {
     const people = new Map();
@@ -3234,20 +4077,22 @@ export default function EmployeeClockApp() {
     };
   }, [scopedProjectPhotos, scopedProjectReceipts]);
 
+  const effectiveMediaFilterEmployeeId = isEmployeeRole && authUser?.id ? String(authUser.id) : mediaFilterEmployeeId;
+
   const filteredProjectPhotos = useMemo(
     () =>
       filterMediaBucketsByDocumentationFilters(scopedProjectPhotos, {
         dateFrom: mediaFilterDateFrom,
         dateTo: mediaFilterDateTo,
-        employeeId: mediaFilterEmployeeId,
+        employeeId: effectiveMediaFilterEmployeeId,
         costCentre: "all",
         mediaType: "all",
         documentationType: "all",
       }),
     [
+      effectiveMediaFilterEmployeeId,
       mediaFilterDateFrom,
       mediaFilterDateTo,
-      mediaFilterEmployeeId,
       scopedProjectPhotos,
     ]
   );
@@ -3257,16 +4102,16 @@ export default function EmployeeClockApp() {
       filterMediaBucketsByDocumentationFilters(scopedProjectReceipts, {
         dateFrom: mediaFilterDateFrom,
         dateTo: mediaFilterDateTo,
-        employeeId: mediaFilterEmployeeId,
+        employeeId: effectiveMediaFilterEmployeeId,
         costCentre: mediaFilterCostCentre,
         mediaType: "receipt",
         documentationType: "receipt",
       }),
     [
+      effectiveMediaFilterEmployeeId,
       mediaFilterCostCentre,
       mediaFilterDateFrom,
       mediaFilterDateTo,
-      mediaFilterEmployeeId,
       scopedProjectReceipts,
     ]
   );
@@ -3276,17 +4121,17 @@ export default function EmployeeClockApp() {
     return filterMediaBucketsByDocumentationFilters(scopedProjectReceipts, {
       dateFrom: mediaFilterDateFrom,
       dateTo: mediaFilterDateTo,
-      employeeId: mediaFilterEmployeeId,
+      employeeId: effectiveMediaFilterEmployeeId,
       costCentre: mediaFilterCostCentre,
       mediaType: "receipt",
       documentationType: mediaFilterDocumentationType,
     });
   }, [
+    effectiveMediaFilterEmployeeId,
     mediaFilterCostCentre,
     mediaFilterDateFrom,
     mediaFilterDateTo,
     mediaFilterDocumentationType,
-    mediaFilterEmployeeId,
     mediaFilterMediaType,
     scopedProjectReceipts,
   ]);
@@ -3304,7 +4149,6 @@ export default function EmployeeClockApp() {
   const [settingsAutoClockOutDraft, setSettingsAutoClockOutDraft] = useState(DEFAULT_AUTO_CLOCK_OUT_TIME);
   const [settingsAssignAllProjectsDraft, setSettingsAssignAllProjectsDraft] = useState(true);
   const [settingsAssignAllTasksDraft, setSettingsAssignAllTasksDraft] = useState(true);
-  const [settingsAllowEmployeeProjectTaskDraft, setSettingsAllowEmployeeProjectTaskDraft] = useState(false);
   const [autoClockOutNotice, setAutoClockOutNotice] = useState("");
 
   const [teamRows, setTeamRows] = useState([]);
@@ -3341,6 +4185,7 @@ export default function EmployeeClockApp() {
   const [timesheetRangePreset, setTimesheetRangePreset] = useState("today");
   const [timesheetDatePickerOpen, setTimesheetDatePickerOpen] = useState(false);
   const [timesheetFilterSheetOpen, setTimesheetFilterSheetOpen] = useState(false);
+  const [timesheetSanityExpanded, setTimesheetSanityExpanded] = useState(false);
   const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
   const [timesheetDraftDateFrom, setTimesheetDraftDateFrom] = useState("");
   const [timesheetDraftDateTo, setTimesheetDraftDateTo] = useState("");
@@ -3463,6 +4308,29 @@ export default function EmployeeClockApp() {
   const [reportsCostCentrePicked, setReportsCostCentrePicked] = useState([]);
   const [reportsExpandedL1, setReportsExpandedL1] = useState({});
   const [reportsExpandedL2, setReportsExpandedL2] = useState({});
+  const [dailyReportPreviewOpen, setDailyReportPreviewOpen] = useState(false);
+  const [dailyReportPreviewText, setDailyReportPreviewText] = useState("");
+  const [dailyReportPreviewStatus, setDailyReportPreviewStatus] = useState("");
+  const [dailyEmailRecipient, setDailyEmailRecipient] = useState("");
+  const [dailyEmailLoading, setDailyEmailLoading] = useState(false);
+  const [dailyEmailStatus, setDailyEmailStatus] = useState("");
+  const [dailyEmailSubject, setDailyEmailSubject] = useState("");
+  const [dailyEmailPreviewText, setDailyEmailPreviewText] = useState("");
+  const [dailyEmailConfig, setDailyEmailConfig] = useState({
+    configured: false,
+    sendEnabled: false,
+    senderConfigured: false,
+  });
+  const [whatsappReportPhone, setWhatsappReportPhone] = useState("");
+  const [whatsappReportLoading, setWhatsappReportLoading] = useState(false);
+  const [whatsappReportStatus, setWhatsappReportStatus] = useState("");
+  const [whatsappReportPreviewText, setWhatsappReportPreviewText] = useState("");
+  const [whatsappReportConfig, setWhatsappReportConfig] = useState({
+    configured: false,
+    sendEnabled: false,
+    templateName: "daily_timesheet_report",
+    templateLanguage: "en",
+  });
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -3470,7 +4338,6 @@ export default function EmployeeClockApp() {
     setSettingsAutoClockOutDraft(normalizeAutoClockOutTime(userCompany?.auto_clock_out_time));
     setSettingsAssignAllProjectsDraft(companySettingEnabled(userCompany?.assign_all_projects_to_all_employees, true));
     setSettingsAssignAllTasksDraft(companySettingEnabled(userCompany?.assign_all_tasks_to_all_projects, true));
-    setSettingsAllowEmployeeProjectTaskDraft(companySettingEnabled(userCompany?.allow_employee_project_task_creation, false));
   }, [
     userCompany?.id,
     userCompany?.time_zone,
@@ -3478,7 +4345,6 @@ export default function EmployeeClockApp() {
     userCompany?.auto_clock_out_time,
     userCompany?.assign_all_projects_to_all_employees,
     userCompany?.assign_all_tasks_to_all_projects,
-    userCompany?.allow_employee_project_task_creation,
   ]);
 
   useEffect(() => {
@@ -3560,7 +4426,7 @@ export default function EmployeeClockApp() {
           .lte("clock_in", endIso)
           .order("clock_in", { ascending: false });
         if (error) throw error;
-        const mapped = (data || []).map(mapTimesheetRowFromSupabase);
+        const mapped = dedupeTimesheetRowsByStableId((data || []).map(mapTimesheetRowFromSupabase));
         const filtered = mapped.filter((r) => {
           const k = calendarDateKeyInTimeZone(r.clockIn, companyTimeZone);
           return k >= fromKey && k <= toKey;
@@ -3634,12 +4500,18 @@ export default function EmployeeClockApp() {
             profilesMap[p.id] = p;
           });
         }
+        const currentPayByUserId = await fetchCurrentEffectivePayRatesByUserId(supabase, {
+          companyId: userCompany.id,
+          userIds: ids,
+          timeZone: companyTimeZone,
+        });
         const rows = list.map((m) => {
           const p = profilesMap[m.user_id] || {};
+          const currentPay = currentPayByUserId[String(m.user_id)] || null;
           const profileFull = (p.full_name && String(p.full_name).trim()) || "";
           const profileEmailRaw = (p.email && String(p.email).trim()) || "";
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
-          const hr = p.hourly_rate;
+          const hr = currentPay ? currentPay.hourlyRate : p.hourly_rate;
           const hourlyRateNum =
             hr != null && hr !== "" && Number.isFinite(Number(hr)) ? Number(hr) : null;
           const empRaw = p.employment_status != null ? String(p.employment_status).trim().toLowerCase() : "active";
@@ -3658,7 +4530,7 @@ export default function EmployeeClockApp() {
             profileEmailRaw,
             displayName: displayName || shortUserLabel(m.user_id),
             hourlyRate: hourlyRateNum,
-            payRateEffectiveDate: p.pay_rate_effective_date ?? null,
+            payRateEffectiveDate: currentPay?.effectiveDate ?? p.pay_rate_effective_date ?? null,
             employmentStatus,
             joiningDate,
           };
@@ -3677,7 +4549,7 @@ export default function EmployeeClockApp() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, teamRefreshKey]);
+  }, [activeTab, isAdmin, userCompany?.id, authUser?.id, teamRefreshKey, companyTimeZone]);
 
   useEffect(() => {
     if (!isAdmin || !userCompany?.id || !authUser?.id || !companyChecked) {
@@ -4306,8 +5178,29 @@ export default function EmployeeClockApp() {
     return m;
   }, [scheduledTasks]);
 
+  const employeeUpcomingScheduledTasks = useMemo(() => {
+    const todayKey = String(scheduleWallTodayKey || "").trim();
+    if (!todayKey) return [];
+    return (Array.isArray(employeeScheduledTasks) ? employeeScheduledTasks : [])
+      .filter((task) => {
+        const taskDayKey = calendarDateKeyInTimeZone(task?.start_time, companyTimeZone);
+        return Boolean(taskDayKey) && taskDayKey >= todayKey;
+      })
+      .sort(compareScheduleTaskStart);
+  }, [employeeScheduledTasks, companyTimeZone, scheduleWallTodayKey]);
+
+  const employeeUpcomingScheduleAssigneeIds = useMemo(() => {
+    const ids = new Set();
+    for (const task of Array.isArray(employeeUpcomingScheduledTasks) ? employeeUpcomingScheduledTasks : []) {
+      const linkRow = task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : null;
+      const id = String(linkRow?.id || "").trim();
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [employeeUpcomingScheduledTasks, employeeScheduleLinkByTaskId]);
+
   const employeeScheduleTasksGroupedByDate = useMemo(() => {
-    const rows = Array.isArray(employeeScheduledTasks) ? employeeScheduledTasks : [];
+    const rows = Array.isArray(employeeUpcomingScheduledTasks) ? employeeUpcomingScheduledTasks : [];
     const groups = {};
     for (const task of rows) {
       const rawStart = task?.start_time;
@@ -4321,7 +5214,7 @@ export default function EmployeeClockApp() {
     }
     const keys = sortScheduleDateKeysTodayFirst(Object.keys(groups), scheduleWallTodayKey);
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
-  }, [employeeScheduledTasks, companyTimeZone, scheduleWallTodayKey]);
+  }, [employeeUpcomingScheduledTasks, companyTimeZone, scheduleWallTodayKey]);
 
   const scheduleCalendarDaySpan = useMemo(() => {
     if (scheduleViewMode === "cal1") return 1;
@@ -4403,17 +5296,17 @@ export default function EmployeeClockApp() {
       if (!Number.isFinite(y) || !Number.isFinite(m)) return [];
       const fromKey = `${y}-${String(m).padStart(2, "0")}-01`;
       const toKey = lastWallDayOfMonthInTimeZone(y, m, tz);
-      return filterScheduledTasksByWallDateRange(employeeScheduledTasks, fromKey, toKey, tz);
+      return filterScheduledTasksByWallDateRange(employeeUpcomingScheduledTasks, fromKey, toKey, tz);
     }
     const end = scheduleCalendarRangeEndKey;
     if (!end) return [];
-    return filterScheduledTasksByWallDateRange(employeeScheduledTasks, start, end, tz);
+    return filterScheduledTasksByWallDateRange(employeeUpcomingScheduledTasks, start, end, tz);
   }, [
     scheduleViewMode,
     scheduleCalendarDaySpan,
     scheduleCalendarAnchor,
     scheduleCalendarRangeEndKey,
-    employeeScheduledTasks,
+    employeeUpcomingScheduledTasks,
     companyTimeZone,
   ]);
 
@@ -4507,8 +5400,7 @@ export default function EmployeeClockApp() {
       const { data, error } = await query;
       if (error) throw error;
 
-      const mapped = (data || [])
-        .map(mapTimesheetRowFromSupabase)
+      const mapped = dedupeTimesheetRowsByStableId((data || []).map(mapTimesheetRowFromSupabase))
         .filter((record) => !isEmployeeRole || timesheetRecordBelongsToUser(record, authUser));
       const uids = mapped.map((r) => r.userId).filter(Boolean);
       const pmap = await fetchProfilesByTimesheetUserIds(supabase, uids);
@@ -4521,6 +5413,35 @@ export default function EmployeeClockApp() {
         };
       });
       setRecords(enriched);
+      const ownActiveRows = enriched
+        .filter((record) => timesheetRecordBelongsToUser(record, authUser))
+        .filter(isTimesheetRowActiveForLiveDashboard)
+        .sort((a, b) => parseStoredInstant(b.clockIn).getTime() - parseStoredInstant(a.clockIn).getTime());
+      const latestOwnActive = ownActiveRows[0] || null;
+      const activeIds = ownActiveRows.map((record) => record.supabaseTimesheetId ?? record.id).filter(Boolean);
+      const photoCountsByTimesheetId = await fetchPhotoCountsByTimesheetId(supabase, {
+        companyId: userCompany.id,
+        timesheetIds: activeIds,
+      });
+      setCurrentShift((previousShift) => {
+        if (latestOwnActive) {
+          const activeId = latestOwnActive.supabaseTimesheetId ?? latestOwnActive.id;
+          return makeCurrentShiftFromActiveTimesheetRecord(latestOwnActive, {
+            fallbackName: (profileFullName || "").trim(),
+            fallbackEmail: authUser?.email || "",
+            existingShift: previousShift,
+            photosTaken: photoCountsByTimesheetId[String(activeId)] || 0,
+          });
+        }
+        const previousUserId = previousShift?.userId || previousShift?.user_id || previousShift?.employeeId;
+        const previousCompanyId = previousShift?.companyId || previousShift?.company_id;
+        const previousBelongsToCurrentUser =
+          previousShift &&
+          String(previousUserId || "") === String(authUser.id || "") &&
+          (!previousCompanyId || String(previousCompanyId) === String(userCompany.id));
+        if (previousBelongsToCurrentUser && previousShift?.supabaseTimesheetId) return null;
+        return previousShift;
+      });
     } catch (err) {
       const msg = getErrorMessage(err);
       setTimesheetsError(msg);
@@ -4533,7 +5454,7 @@ export default function EmployeeClockApp() {
     } finally {
       setTimesheetsLoading(false);
     }
-  }, [authUser?.id, userCompany?.id, userCompanyRole, isEmployeeRole]);
+  }, [authUser, profileFullName, userCompany?.id, userCompanyRole, isEmployeeRole]);
 
   const fetchTimesheetChangeRequests = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -5000,7 +5921,7 @@ export default function EmployeeClockApp() {
     async ({ status, projectName, costCentre, coords }) => {
       if (!authUser?.id || !userCompany?.id) return;
       if (isAdmin) return; // employee-only for now
-      if (!coords) return;
+      if (!coords && status !== "clocked_out") return;
       const { error } = await saveLiveLocationRowManual(supabase, {
         companyId: userCompany.id,
         employeeId: authUser.id,
@@ -5142,9 +6063,11 @@ export default function EmployeeClockApp() {
     return Number.isFinite(raw) ? raw : 0;
   };
 
-  const visibleRecords = isAdmin
-    ? records
-    : records.filter((record) => timesheetRecordBelongsToUser(record, authUser));
+  const visibleRecords = dedupeTimesheetRowsByStableId(
+    isAdmin
+      ? records
+      : records.filter((record) => timesheetRecordBelongsToUser(record, authUser))
+  );
   const teamActiveShiftByUserId = useMemo(() => {
     const grouped = {};
     for (const record of normalizeArray(visibleRecords)) {
@@ -5900,6 +6823,15 @@ export default function EmployeeClockApp() {
     );
   }, [getLabourCost, getWorkedMinutes, visibleTimesheetRecords]);
 
+  const timesheetSanityChecks = useMemo(() => {
+    if (!isAdmin) return [];
+    return buildTimesheetSanityChecks(visibleTimesheetRecords);
+  }, [isAdmin, visibleTimesheetRecords]);
+
+  const visibleTimesheetSanityIssues = useMemo(() => {
+    return getVisibleTimesheetSanityIssues(timesheetSanityChecks, timesheetSanityExpanded);
+  }, [timesheetSanityChecks, timesheetSanityExpanded]);
+
   const buildTimesheetShareText = useCallback(() => {
     const rangeLabel =
       timesheetRangeBounds.from && timesheetRangeBounds.to
@@ -6485,10 +7417,10 @@ export default function EmployeeClockApp() {
   }, [isAdmin, activeTab]);
 
   useEffect(() => {
-    if (!isAdmin && activeTab === "projects" && !companyAssignAllProjectsToAllEmployees) {
+    if (!isAdmin && activeTab === "projects" && !companyAssignAllProjectsToAllEmployees && !canCreateProjectTaskFromClock) {
       setActiveTab("clock");
     }
-  }, [companyAssignAllProjectsToAllEmployees, isAdmin, activeTab]);
+  }, [canCreateProjectTaskFromClock, companyAssignAllProjectsToAllEmployees, isAdmin, activeTab]);
 
   useEffect(() => {
     if (isEmployeeRole && activeTab === "team") setActiveTab("clock");
@@ -6718,7 +7650,11 @@ export default function EmployeeClockApp() {
     [projectDocumentationRows]
   );
   const receiptTotal = visibleReceiptFolders.reduce((total, folder) => {
-    return total + normalizeArray(filteredProjectReceipts[folder]).reduce((sum, receipt) => sum + Number(receipt?.amount || 0), 0);
+    return total + normalizeArray(filteredProjectReceipts[folder]).reduce(
+      (sum, receipt) =>
+        sum + (receiptMoneyNumber(receipt?.receiptTotal ?? receipt?.receipt_total ?? receipt?.total_amount ?? receipt?.amount) ?? 0),
+      0
+    );
   }, 0);
 
   useEffect(() => {
@@ -6918,7 +7854,7 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (
       activeTab !== "projects" ||
-      (!isAdmin && !companyAssignAllProjectsToAllEmployees && !companyAllowEmployeeProjectTaskCreation) ||
+      (!isAdmin && !companyAssignAllProjectsToAllEmployees && !canCreateProjectTaskFromClock) ||
       !userCompany?.id
     ) {
       return;
@@ -7072,7 +8008,7 @@ export default function EmployeeClockApp() {
     activeTab,
     isAdmin,
     companyAssignAllProjectsToAllEmployees,
-    companyAllowEmployeeProjectTaskCreation,
+    canCreateProjectTaskFromClock,
     userCompany?.id,
     projectsScreenRefreshKey,
   ]);
@@ -7100,8 +8036,23 @@ export default function EmployeeClockApp() {
   }, [clockSelectableProjects, clockCostCentreOptionsForProject, projectId, costCenter]);
 
   useEffect(() => {
+    currentShiftRef.current = currentShift;
     safeWrite("orp_current_shift", currentShift);
   }, [currentShift]);
+
+  useEffect(() => {
+    if (!authUser?.id || isAdmin || !currentShift || watchId !== null) return;
+    if (!(clockLocationEnabled || clockLocationPermissionState === "granted")) return;
+    startLiveLocationTracking();
+  }, [
+    authUser?.id,
+    isAdmin,
+    currentShift?.supabaseTimesheetId,
+    currentShift?.clockIn,
+    clockLocationEnabled,
+    clockLocationPermissionState,
+    watchId,
+  ]);
 
   useEffect(() => {
     safeWrite("orp_timesheet_records", records);
@@ -7336,6 +8287,13 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     const ensureProfile = async (user, fullName) => {
       if (!user) return;
+      const { data: existingProfile, error: existingProfileError } = await supabase
+        .from("profiles")
+        .select("id, role, full_name, email")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (existingProfileError) throw existingProfileError;
+
       const payload = { id: user.id };
       const metaName =
         String(
@@ -7345,11 +8303,13 @@ export default function EmployeeClockApp() {
             user.user_metadata?.user_name ||
             ""
         ).trim();
-      if (metaName) payload.full_name = metaName;
-      if (user.email) payload.email = user.email;
-      // Leave role as-is if it already exists; default to employee for new users.
-      payload.role = "employee";
-      const { error } = await supabase.from("profiles").upsert(payload, { onConflict: "id" });
+      if (metaName && !String(existingProfile?.full_name || "").trim()) payload.full_name = metaName;
+      if (user.email && !String(existingProfile?.email || "").trim()) payload.email = user.email;
+      if (!existingProfile?.id) payload.role = "employee";
+      if (Object.keys(payload).length <= 1) return;
+      const { error } = existingProfile?.id
+        ? await supabase.from("profiles").update(payload).eq("id", user.id)
+        : await supabase.from("profiles").upsert(payload, { onConflict: "id" });
       if (error) throw error;
     };
 
@@ -7978,6 +8938,140 @@ export default function EmployeeClockApp() {
     return Number.isFinite(earned) ? earned : 0;
   })();
 
+  const createProjectTaskViaApi = async ({ itemType, name, projectId: targetProjectId = "", projectName = "" }) => {
+    if (!authUser?.id || !userCompany?.id) throw new Error("Company/user missing. Please logout and login again.");
+    if (!canCreateProjectTaskFromClock) {
+      throw new Error("Project/task creation is not available for this profile.");
+    }
+    const cleanName = String(name || "").trim();
+    if (!cleanName) throw new Error(itemType === "task" ? "Task name is required." : "Project name is required.");
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) throw sessionError;
+    const accessToken = sessionData?.session?.access_token;
+    if (!accessToken) throw new Error("Sign in again before creating project/task.");
+    try {
+      const response = await fetch(getOperaApiUrl("/api/create-project-task"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          company_id: userCompany.id,
+          item_type: itemType,
+          name: cleanName,
+          project_id: targetProjectId || null,
+          project_name: projectName || "",
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || "Project/task creation failed.");
+      }
+      return json;
+    } catch (error) {
+      if (isLocalOperaHost()) {
+        console.warn("[PROJECT_TASK] API unavailable in local dev, using Supabase fallback", error);
+        return createProjectTaskDirectly({ itemType, name: cleanName, projectId: targetProjectId, projectName });
+      }
+      throw error;
+    }
+  };
+
+  const createClockProjectTask = async (itemType) => {
+    const isTask = itemType === "task";
+    if (!canCreateProjectTaskFromClock) {
+      setLocationStatus(
+        isTask
+          ? "Project/task creation is not available for this profile."
+          : "Project/task creation is not available for this profile."
+      );
+      setTimeout(() => setLocationStatus(""), 5000);
+      return;
+    }
+    if (isTask && !clockSelectedProject) {
+      setLocationStatus("Choose a project before adding a task.");
+      setTimeout(() => setLocationStatus(""), 5000);
+      return;
+    }
+    setClockCreateDraft({ open: true, itemType, name: "" });
+    setClockCreateError("");
+  };
+
+  const submitClockCreateProjectTask = async (event) => {
+    event?.preventDefault?.();
+    const itemType = clockCreateDraft.itemType === "task" ? "task" : "project";
+    const isTask = itemType === "task";
+    const cleanName = String(clockCreateDraft.name || "").trim();
+    if (!cleanName) {
+      setClockCreateError(`${isTask ? "Task" : "Project"} name is required.`);
+      return;
+    }
+
+    setClockCreateSaving(true);
+    setClockCreateError("");
+    const label = isTask ? "task" : "project";
+    setLocationStatus(`Creating ${label}...`);
+    try {
+      const json = await createProjectTaskViaApi({
+        itemType,
+        name: cleanName,
+        projectId: isTask ? clockSelectedProject?.id || projectId : "",
+        projectName: isTask ? clockSelectedProject?.name || "" : "",
+      });
+
+      if (itemType === "project" && json?.project?.id) {
+        const nextProject = { id: json.project.id, name: json.project.name || cleanName };
+        setCompanyProjects((prev) => {
+          const existing = (prev || []).filter((p) => String(p.id) !== String(nextProject.id));
+          return [...existing, nextProject].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+        });
+        const createdNames = (json.cost_centres || []).map((row) => row?.name).filter(Boolean);
+        if (createdNames.length > 0) {
+          setCostCentresByProjectId((prev) => ({
+            ...prev,
+            [String(nextProject.id)]: [...new Set([...(prev[String(nextProject.id)] || []), ...createdNames])].sort((a, b) => a.localeCompare(b)),
+          }));
+          setCostCenter(createdNames[0] || "");
+        } else {
+          setCostCenter("");
+        }
+        setProjectId(nextProject.id);
+      } else if (itemType === "task") {
+        const inserted = Array.isArray(json?.tasks) ? json.tasks : [];
+        setCostCentresByProjectId((prev) => {
+          const next = { ...prev };
+          const selectedPid = String(clockSelectedProject?.id || projectId || "");
+          const touchedProjectIds = inserted.length > 0
+            ? inserted.map((row) => String(row.project_id || "")).filter(Boolean)
+            : [selectedPid].filter(Boolean);
+          for (const pid of touchedProjectIds) {
+            const current = Array.isArray(next[pid]) ? next[pid] : [];
+            next[pid] = [...new Set([...current, cleanName])].sort((a, b) => a.localeCompare(b));
+          }
+          return next;
+        });
+        setCostCenter(cleanName);
+      }
+
+      setClockSelectedScheduledTaskId("");
+      setCompanyProjectsRefreshKey((key) => key + 1);
+      setProjectsScreenRefreshKey((key) => key + 1);
+      const status = json?.existed
+        ? `${isTask ? "Task" : "Project"} already exists.`
+        : `${isTask ? "Task" : "Project"} created.`;
+      setClockCreateDraft({ open: false, itemType: "project", name: "" });
+      setLocationStatus(status);
+      setTimeout(() => setLocationStatus(""), 5000);
+    } catch (err) {
+      setClockCreateError(getErrorMessage(err));
+      setLocationStatus(getErrorMessage(err));
+      setTimeout(() => setLocationStatus(""), 7000);
+    } finally {
+      setClockCreateSaving(false);
+    }
+  };
+
   const handleProjectChange = (newProjectId) => {
     if (!newProjectId) {
       setProjectId("");
@@ -7997,8 +9091,8 @@ export default function EmployeeClockApp() {
       if (!canCreateProjectTaskFromClock) {
         setLocationStatus(
           mode === "costCentre"
-            ? "Ask a supervisor to add the task, or ask them to enable employee project/task creation."
-            : "Ask a supervisor to add the project, or ask them to enable employee project/task creation."
+            ? "Project/task creation is not available for this profile."
+            : "Project/task creation is not available for this profile."
         );
         setTimeout(() => setLocationStatus(""), 5000);
         return;
@@ -8134,7 +9228,7 @@ export default function EmployeeClockApp() {
     return { users: userIds.length, costCentres: pccaRows.length };
   };
 
-  const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv }) => {
+  const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv, assignCreatorWhenNotGlobal = false }) => {
     const name = String(projectName || "").trim();
     if (!name) {
       const err = new Error("Project name is required.");
@@ -8186,16 +9280,172 @@ export default function EmployeeClockApp() {
       createdCentres = insertedCentres || [];
     }
 
+    let assignments = { users: 0, costCentres: 0 };
     if (companyAssignAllProjectsToAllEmployees) {
-      await assignNewProjectToActiveMembers({
+      assignments = await assignNewProjectToActiveMembers({
         companyId,
         projectId: created.id,
         costCentreRows: companyAssignAllTasksToAllProjects ? createdCentres : [],
         assignedBy: userId,
       });
+    } else if (assignCreatorWhenNotGlobal) {
+      const { error: projectAssignErr } = await supabase.from("project_assignments").insert({
+        company_id: companyId,
+        project_id: created.id,
+        user_id: userId,
+        assigned_by: userId,
+        status: "active",
+      });
+      if (projectAssignErr) throw projectAssignErr;
+
+      const pccaRows = (createdCentres || [])
+        .filter((cc) => cc?.id)
+        .map((cc) => ({
+          company_id: companyId,
+          project_id: created.id,
+          cost_centre_id: cc.id,
+          user_id: userId,
+          assigned_by: userId,
+          status: "active",
+        }));
+      if (pccaRows.length > 0) {
+        const { error: pccaErr } = await supabase.from("project_cost_centre_assignments").insert(pccaRows);
+        if (pccaErr) throw pccaErr;
+      }
+      assignments = { users: 1, costCentres: pccaRows.length };
     }
 
-    return created;
+    return { project: created, cost_centres: createdCentres, assignments };
+  };
+
+  const createProjectTaskDirectly = async ({ itemType, name, projectId: targetProjectId = "", projectName = "" }) => {
+    if (!authUser?.id || !userCompany?.id) throw new Error("Company/user missing. Please logout and login again.");
+    if (!canCreateProjectTaskFromClock) throw new Error("Project/task creation is not available for this profile.");
+
+    const cleanName = String(name || "").trim();
+    if (!cleanName) throw new Error(itemType === "task" ? "Task name is required." : "Project name is required.");
+
+    if (itemType === "project") {
+      const existing = (companyProjects || []).find(
+        (project) => String(project?.name || "").trim().toLowerCase() === cleanName.toLowerCase()
+      );
+      if (existing?.id) {
+        return {
+          ok: true,
+          item_type: "project",
+          project: { id: existing.id, name: existing.name || cleanName },
+          cost_centres: [],
+          existed: true,
+          assignments: { projects: 0, costCentres: 0 },
+        };
+      }
+
+      const created = await insertCompanyProjectWithCentres({
+        companyId: userCompany.id,
+        userId: authUser.id,
+        projectName: cleanName,
+        costCentresCsv: "",
+        assignCreatorWhenNotGlobal: !isAdmin,
+      });
+      if (!isAdmin) await notifyEmployeeProjectTaskCreated({ itemType: "project", itemName: cleanName });
+
+      return {
+        ok: true,
+        item_type: "project",
+        project: created.project,
+        cost_centres: created.cost_centres || [],
+        existed: false,
+        assignments: {
+          projects: created.assignments?.users || 0,
+          costCentres: created.assignments?.costCentres || 0,
+        },
+      };
+    }
+
+    const activeProjects = (companyProjects || []).filter((project) => project?.id != null);
+    const targetProjectIds = companyAssignAllTasksToAllProjects
+      ? activeProjects.map((project) => project.id).filter(Boolean)
+      : [targetProjectId].filter(Boolean);
+
+    if (targetProjectIds.length === 0) {
+      throw new Error(companyAssignAllTasksToAllProjects ? "Add an active project before adding a task." : "Choose a project before adding a task.");
+    }
+
+    const { data: existingRows, error: existingError } = await supabase
+      .from("cost_centres")
+      .select("project_id, name, status")
+      .eq("company_id", userCompany.id)
+      .in("project_id", targetProjectIds);
+    if (existingError) throw existingError;
+
+    const wantedNameKey = cleanName.toLowerCase();
+    const existingActive = new Set(
+      (existingRows || [])
+        .filter((row) => String(row?.status || "active").toLowerCase() !== "archived")
+        .map((row) => `${String(row.project_id)}::${String(row.name || "").trim().toLowerCase()}`)
+    );
+    const rows = targetProjectIds
+      .filter((pid) => !existingActive.has(`${String(pid)}::${wantedNameKey}`))
+      .map((pid, index) => ({
+        company_id: userCompany.id,
+        project_id: pid,
+        name: cleanName,
+        status: "active",
+        display_order: 1000 + index,
+        created_by: authUser.id,
+      }));
+
+    let insertedTasks = [];
+    if (rows.length > 0) {
+      const { data: inserted, error: insertError } = await supabase
+        .from("cost_centres")
+        .insert(rows)
+        .select("id, name, project_id");
+      if (insertError) throw insertError;
+      insertedTasks = inserted || [];
+    }
+
+    let assignedCount = 0;
+    if (insertedTasks.length > 0) {
+      const assignedUserIds = companyAssignAllProjectsToAllEmployees && companyAssignAllTasksToAllProjects
+        ? await fetchActiveCompanyMemberUserIds(userCompany.id)
+        : [authUser.id];
+      const assignmentRows = [];
+      for (const uid of assignedUserIds) {
+        for (const task of insertedTasks) {
+          if (!uid || !task?.id || !task?.project_id) continue;
+          assignmentRows.push({
+            company_id: userCompany.id,
+            project_id: task.project_id,
+            cost_centre_id: task.id,
+            user_id: uid,
+            assigned_by: authUser.id,
+            status: "active",
+          });
+        }
+      }
+      if (assignmentRows.length > 0) {
+        const { error: assignmentError } = await supabase.from("project_cost_centre_assignments").insert(assignmentRows);
+        if (assignmentError) throw assignmentError;
+        assignedCount = assignmentRows.length;
+      }
+    }
+
+    if (!isAdmin && insertedTasks.length > 0) {
+      const projectLabel =
+        companyAssignAllTasksToAllProjects
+          ? "All active projects"
+          : projectName || companyProjects.find((project) => String(project.id) === String(targetProjectId))?.name || "";
+      await notifyEmployeeProjectTaskCreated({ itemType: "task", itemName: cleanName, projectName: projectLabel });
+    }
+
+    return {
+      ok: true,
+      item_type: "task",
+      tasks: insertedTasks,
+      existed: insertedTasks.length === 0,
+      assignments: { costCentres: assignedCount },
+    };
   };
 
   const handleAddProject = async (event) => {
@@ -8213,6 +9463,15 @@ export default function EmployeeClockApp() {
       const name = newProjectName.trim();
       if (!name) {
         setAddProjectError("Project name is required.");
+        return;
+      }
+
+      if (!isAdmin) {
+        await createProjectTaskViaApi({ itemType: "project", name });
+        setNewProjectName("");
+        setNewProjectCostCentres("");
+        setCompanyProjectsRefreshKey((k) => k + 1);
+        setProjectsScreenRefreshKey((k) => k + 1);
         return;
       }
 
@@ -8286,6 +9545,30 @@ export default function EmployeeClockApp() {
     setProjectsEditSuccess("");
     setAssignmentsSuccess("");
     try {
+      if (!isAdmin) {
+        const projectLabel =
+          companyAssignAllTasksToAllProjects
+            ? "All active projects"
+            : companyProjects.find((project) => String(project.id) === String(projectsTaskProjectId))?.name || "";
+        const json = await createProjectTaskViaApi({
+          itemType: "task",
+          name: taskName,
+          projectId: companyAssignAllTasksToAllProjects ? "" : projectsTaskProjectId,
+          projectName: projectLabel,
+        });
+        setProjectsTaskName("");
+        setProjectsTaskProjectId("");
+        setProjectsTaskFormOpen(false);
+        setCompanyProjectsRefreshKey((key) => key + 1);
+        setProjectsScreenRefreshKey((key) => key + 1);
+        setProjectsTaskSuccess(
+          json?.existed
+            ? "Task already exists for the selected project."
+            : `Task added${companyAssignAllTasksToAllProjects ? " to active projects" : ""}.`
+        );
+        return;
+      }
+
       const { data: existingRows, error: existingError } = await supabase
         .from("cost_centres")
         .select("project_id, name, status")
@@ -8386,6 +9669,19 @@ export default function EmployeeClockApp() {
       const name = projectsAddName.trim();
       if (!name) {
         setProjectsAddError("Project name is required.");
+        return;
+      }
+
+      if (!isAdmin) {
+        const json = await createProjectTaskViaApi({ itemType: "project", name });
+        setCompanyProjectsRefreshKey((k) => k + 1);
+        setProjectsScreenRefreshKey((k) => k + 1);
+        setProjectsAddName("");
+        setProjectsAddCostCentres("");
+        setProjectsAddFormOpen(false);
+        setProjectsAddError("");
+        setProjectsEditSuccess("");
+        setProjectsAddSuccess(json?.existed ? "Project already exists." : "Project added.");
         return;
       }
 
@@ -8853,7 +10149,8 @@ export default function EmployeeClockApp() {
     alert(getInstallInstructions());
   };
 
-  const startLiveLocationTracking = () => {
+  function startLiveLocationTracking() {
+    if (watchId !== null) return;
     if (!navigator.geolocation) {
       setLocationStatus("Live GPS not supported on this device");
       return;
@@ -8876,13 +10173,24 @@ export default function EmployeeClockApp() {
             locationTrail: [...(previousShift.locationTrail || []), liveLocation].slice(-50),
           };
         });
+        const activeShift = currentShiftRef.current;
+        const nowMs = Date.now();
+        if (activeShift && nowMs - lastLiveLocationSavedAtRef.current >= 15000) {
+          lastLiveLocationSavedAtRef.current = nowMs;
+          void updateLiveLocationOnce({
+            status: "clocked_in",
+            projectName: activeShift.project,
+            costCentre: activeShift.costCenter,
+            coords: liveLocation,
+          });
+        }
       },
       () => setLocationStatus("Live GPS permission denied or unavailable"),
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
     );
 
     setWatchId(id);
-  };
+  }
 
 const handleClockIn = async () => {
     if (isProfileArchived) {
@@ -8947,19 +10255,6 @@ const handleClockIn = async () => {
     }
     const gps = locResult.coords;
 
-    let employeeHourlyRate = 0;
-    try {
-      const { data: payProf } = await supabase
-        .from("profiles")
-        .select("hourly_rate")
-        .eq("id", authUser.id)
-        .maybeSingle();
-      employeeHourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
-    } catch {
-      employeeHourlyRate = 0;
-    }
-    console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
-
     const clockInLocation = gps
       ? {
           latitude: gps.latitude,
@@ -8969,6 +10264,14 @@ const handleClockIn = async () => {
         }
       : null;
   const clockInTime = new Date().toISOString();
+    const employeeHourlyRate = await getEffectiveHourlyRate(supabase, {
+      companyId: userCompany?.id,
+      employeeId: authUser.id,
+      shiftDate: clockInTime,
+      timeZone: companyTimeZone,
+      fallbackRate: 0,
+    });
+    console.log("[LABOUR] clockIn hourlyRate", employeeHourlyRate);
     const clockInEmployeeName = (profileFullName || "").trim() || authUser?.email || null;
 
   const newShift = {
@@ -9053,6 +10356,7 @@ const handleClockIn = async () => {
           costCentre: costCenter,
           coords: gps,
         });
+        startLiveLocationTracking();
         const actorLabel = clockInEmployeeName || authUser?.email || "Someone";
         void createCompanyNotifications(supabase, {
           companyId: userCompany?.id,
@@ -9085,6 +10389,7 @@ const handleClockIn = async () => {
       costCentre: costCenter,
       coords: gps,
     });
+    startLiveLocationTracking();
     const actorLabelMain = clockInEmployeeName || authUser?.email || "Someone";
     void createCompanyNotifications(supabase, {
       companyId: userCompany?.id,
@@ -9492,24 +10797,6 @@ const handlePhotoQuickUpload = async (event) => {
     if (!isModalCameraActive && !isPageCameraActive) stopListTaskCamera();
   }, [activeTab, clockListModal, listCameraOpen, listCameraTarget, stopListTaskCamera]);
 
-  useEffect(() => {
-    if (receiptEntryStep !== "amount") return;
-    const id = setTimeout(() => {
-      receiptAmountInputRef.current?.focus?.();
-      receiptAmountInputRef.current?.select?.();
-    }, 80);
-    return () => clearTimeout(id);
-  }, [receiptEntryStep]);
-
-  useEffect(() => {
-    if (receiptEntryStep !== "category") return;
-    const id = setTimeout(() => {
-      receiptCategoryInputRef.current?.focus?.();
-      receiptCategoryInputRef.current?.select?.();
-    }, 80);
-    return () => clearTimeout(id);
-  }, [receiptEntryStep]);
-
   const addPhotoDraftFiles = useCallback(
     (files, source = "gallery") => {
       const incoming = Array.from(files || []).filter((file) => file?.type?.startsWith("image/"));
@@ -9537,7 +10824,13 @@ const handlePhotoQuickUpload = async (event) => {
 
   const handlePhotoCapture = useCallback(
     (event) => {
-      addPhotoDraftFiles(event.target.files, "gallery");
+      const files = Array.from(event.target.files || []).filter((file) => file?.type?.startsWith("image/"));
+      const autoFinishClockOut = uploadClockOutPhotoAndFinishRef.current;
+      if (pendingClockOutPhotoRef.current && files[0] && autoFinishClockOut) {
+        void autoFinishClockOut(files[0], "clockout");
+      } else {
+        addPhotoDraftFiles(files, "gallery");
+      }
       event.target.value = "";
     },
     [addPhotoDraftFiles]
@@ -9790,18 +11083,65 @@ const handlePhotoQuickUpload = async (event) => {
     });
   }, []);
 
+  const uploadClockOutPhotoAndFinish = useCallback(
+    async (file, source = "clockout") => {
+      if (!file) return false;
+      const uploadFn = uploadProjectPhotoFileRef.current;
+      const clockOutFn = handleClockOutRef.current;
+      if (!uploadFn || !clockOutFn) {
+        setPhotoStatus("Clock-out photo flow is still loading. Try again.");
+        return false;
+      }
+
+      setPhotoBatchUploading(true);
+      setPhotoBatchProgress({ current: 0, total: 1, label: "Saving clock-out photo" });
+      setUploadProgress(0);
+      try {
+        await uploadFn(file, 1, 1, source);
+        pendingClockOutPhotoRef.current = false;
+        setPhotoBatchProgress({ current: 1, total: 1, label: "Clocking out" });
+        setPhotoStatus("Photo saved. Clocking out...");
+        stopPhotoCamera();
+        await clockOutFn({ skipRequiredPhoto: true });
+        schedulePhotoStatusClear("Photo saved. Clocking out...", 1500, {
+          clearUploadProgress: true,
+          clearBatchProgress: true,
+        });
+        return true;
+      } catch (err) {
+        console.warn("Clock-out photo flow failed:", err);
+        pendingClockOutPhotoRef.current = true;
+        setPhotoStatus(getErrorMessage(err));
+        setPhotoBatchProgress(null);
+        setUploadProgress(null);
+        return false;
+      } finally {
+        setPhotoBatchUploading(false);
+      }
+    },
+    [schedulePhotoStatusClear, stopPhotoCamera]
+  );
+
+  useEffect(() => {
+    uploadClockOutPhotoAndFinishRef.current = uploadClockOutPhotoAndFinish;
+  }, [uploadClockOutPhotoAndFinish]);
+
   const capturePhotoFromCamera = useCallback(async () => {
-    let file = null;
+    let file;
     try {
       file = await captureCameraFrameFile("camera-photo");
     } catch (err) {
       setPhotoStatus(getErrorMessage(err));
       return;
     }
+    if (pendingClockOutPhotoRef.current) {
+      await uploadClockOutPhotoAndFinish(file, "clockout");
+      return;
+    }
     addPhotoDraftFiles([file], "camera");
     setPhotoStatus("");
     scrollClockMediaIntoView("upload");
-  }, [addPhotoDraftFiles, captureCameraFrameFile, scrollClockMediaIntoView]);
+  }, [addPhotoDraftFiles, captureCameraFrameFile, scrollClockMediaIntoView, uploadClockOutPhotoAndFinish]);
 
   const uploadProjectPhotoFile = useCallback(
     async (file, index = 1, total = 1, source = "camera") => {
@@ -9854,7 +11194,7 @@ const handlePhotoQuickUpload = async (event) => {
       const photoUrl = data?.publicUrl || "";
       const capturedAt = new Date().toISOString();
       const isClockOutPhoto =
-        Boolean(visibleCurrentShift) && Number(visibleCurrentShift?.photosTaken || 0) < 1;
+        source === "clockout" && Boolean(visibleCurrentShift);
       const selectedDocumentationType = normalizeDocumentationType(photoDocumentationType, "photo");
       const photo = {
         id: Date.now() + index,
@@ -9908,6 +11248,10 @@ const handlePhotoQuickUpload = async (event) => {
     },
     [authUser, clockMediaContext, insertProjectMediaMetadata, photoDocumentationType, schedulePhotoNotificationAfterUpload, userCompany?.id, visibleCurrentShift]
   );
+
+  useEffect(() => {
+    uploadProjectPhotoFileRef.current = uploadProjectPhotoFile;
+  }, [uploadProjectPhotoFile]);
 
   const uploadAllPhotoDrafts = useCallback(async () => {
     const queued = [...(photoDraftsRef.current || [])];
@@ -10443,7 +11787,7 @@ const handlePhotoQuickUpload = async (event) => {
           itemCount: null,
         });
       }
-      return true;
+      return receipt;
     } catch (err) {
       console.warn("Receipt save failed:", err);
       setPhotoStatus("Receipt save failed.");
@@ -10452,82 +11796,56 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
-  const openReceiptDetailsForm = (file) => {
-    if (!file) return;
+  const uploadReceiptForOcrReview = async (file) => {
+    if (!file || receiptSaving) return;
     const pendingPayment = materialPaymentPendingRef.current;
-    setReceiptDraftFile(file);
-    setReceiptAmountDraft(pendingPayment?.amount != null ? String(pendingPayment.amount) : "");
-    setReceiptCategoryDraft(pendingPayment?.supplier || "");
-    setReceiptEntryStep("amount");
-    setPhotoStatus(pendingPayment ? "Confirm receipt amount." : "Enter receipt amount.");
+    setReceiptSaving(true);
+    const saved = await saveReceiptFile(file, {
+      amount: pendingPayment?.amount ?? "",
+      category: pendingPayment?.supplier || "Receipt",
+      supplier: pendingPayment?.supplier || "",
+      materialPayment: pendingPayment,
+    });
+    setReceiptSaving(false);
+    if (saved) {
+      stopPhotoCamera();
+      void startReceiptOcrReview(saved);
+    }
   };
 
   const handleReceiptCapture = async (event) => {
     const file = event.target.files?.[0];
     try {
-      openReceiptDetailsForm(file);
+      await uploadReceiptForOcrReview(file);
     } finally {
       event.target.value = "";
     }
   };
 
   const captureReceiptFromCamera = async () => {
-    let file = null;
+    let file;
     try {
       file = await captureCameraFrameFile("receipt");
-      openReceiptDetailsForm(file);
+      await uploadReceiptForOcrReview(file);
     } catch (err) {
       console.warn("Receipt capture failed:", err);
       setPhotoStatus(getErrorMessage(err));
     }
   };
 
-  const cancelReceiptDetailsForm = () => {
-    if (materialPaymentPendingRef.current?.id) {
-      markPendingMaterialReceiptStatus("Receipt Missing");
-      materialPaymentPendingRef.current = null;
-    }
-    setReceiptDraftFile(null);
-    setReceiptEntryStep(null);
-    setReceiptAmountDraft("");
-    setReceiptCategoryDraft("");
-    setReceiptSaving(false);
-  };
-
-  const submitReceiptAmount = (event) => {
-    event.preventDefault();
-    setReceiptEntryStep("category");
-    setPhotoStatus("Enter receipt category.");
-  };
-
-  const submitReceiptCategory = async (event) => {
-    event.preventDefault();
-    if (!receiptDraftFile || receiptSaving) return;
-    setReceiptSaving(true);
-    const pendingPayment = materialPaymentPendingRef.current;
-    const saved = await saveReceiptFile(receiptDraftFile, {
-      amount: receiptAmountDraft,
-      category: receiptCategoryDraft,
-      supplier: pendingPayment?.supplier || receiptCategoryDraft,
-      materialPayment: pendingPayment,
-    });
-    setReceiptSaving(false);
-    if (saved) {
-      cancelReceiptDetailsForm();
-      stopPhotoCamera();
-    }
-  };
-
-  const handleClockOut = async () => {
+  const handleClockOut = async (options = {}) => {
     if (!visibleCurrentShift) return;
+    const skipRequiredPhoto = Boolean(options?.skipRequiredPhoto);
 
-    if (!visibleCurrentShift.photosTaken || visibleCurrentShift.photosTaken < 1) {
+    if (!skipRequiredPhoto && (!visibleCurrentShift.photosTaken || visibleCurrentShift.photosTaken < 1)) {
+      pendingClockOutPhotoRef.current = true;
       setPhotoCameraError("");
-      setPhotoStatus("Capture photo before clock out");
-      if (!photoCameraOpen) {
+      setPhotoStatus("Capture photo to finish clock out");
+      if (!photoCameraOpen || photoCameraMode !== "photo") {
         await startPhotoCamera({
           allowFallback: false,
-          readyMessage: "Capture photo before clock out",
+          mode: "photo",
+          readyMessage: "Capture photo to finish clock out",
         });
       }
       setTimeout(() => {
@@ -10552,6 +11870,8 @@ const handlePhotoQuickUpload = async (event) => {
     if (visibleCurrentShift.supabaseTimesheetId) {
       const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
         userId: authUser.id,
+        companyId: userCompany?.id,
+        timeZone: companyTimeZone,
         clockInIso: visibleCurrentShift.clockIn,
         clockOutIso: clockOutTime,
         timesheetHourlyRate: visibleCurrentShift.hourlyRate,
@@ -10601,6 +11921,7 @@ const handlePhotoQuickUpload = async (event) => {
       }
     }
 
+    pendingClockOutPhotoRef.current = false;
     setCurrentShift(null);
     if (didSaveClockOut) {
       void updateLiveLocationOnce({
@@ -10614,6 +11935,10 @@ const handlePhotoQuickUpload = async (event) => {
     setActiveTab("clock");
     void fetchTimesheetsFromSupabase();
   };
+
+  useEffect(() => {
+    handleClockOutRef.current = handleClockOut;
+  });
 
   const costCentresForEditProject = (pid) =>
     effectiveCostCentresByProjectId[String(pid)] ||
@@ -10778,15 +12103,13 @@ const handlePhotoQuickUpload = async (event) => {
     const clockInTime = new Date().toISOString();
     const employeeName = (row.displayName || "").trim() || shortUserLabel(row.userId);
     const employeeEmail = row.profileEmailRaw || null;
-    let hourlyRate = hourlyRateFromProfileValue(row.hourlyRate);
-    if (!hourlyRate) {
-      const { data: payProf } = await supabase
-        .from("profiles")
-        .select("hourly_rate")
-        .eq("id", row.userId)
-        .maybeSingle();
-      hourlyRate = hourlyRateFromProfileValue(payProf?.hourly_rate);
-    }
+    const hourlyRate = await getEffectiveHourlyRate(supabase, {
+      companyId: userCompany?.id,
+      employeeId: row.userId,
+      shiftDate: clockInTime,
+      timeZone: companyTimeZone,
+      fallbackRate: row.hourlyRate,
+    });
     console.log("[LABOUR] clockIn hourlyRate", hourlyRate);
 
     try {
@@ -10868,6 +12191,8 @@ const handlePhotoQuickUpload = async (event) => {
     const clockOutTime = new Date().toISOString();
     const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
       userId: row.userId,
+      companyId: userCompany?.id,
+      timeZone: companyTimeZone,
       clockInIso: rep.clockIn,
       clockOutIso: clockOutTime,
       timesheetHourlyRate: rep.hourlyRate,
@@ -10891,6 +12216,14 @@ const handlePhotoQuickUpload = async (event) => {
       });
       if (error) throw error;
       const successText = mode === "fix" ? "Clock-out saved." : "Employee clocked out.";
+      void saveLiveLocationRowManual(supabase, {
+        companyId: userCompany.id,
+        employeeId: row.userId,
+        status: "clocked_out",
+        projectName: rep.project,
+        costCentre: rep.costCenter,
+        coords: null,
+      });
       if (activeTab === "team") {
         setTeamSuccessToast(successText);
         setDashboardActionFeedback(null);
@@ -11010,6 +12343,8 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
         userId: record.userId,
+        companyId: userCompany?.id || record.companyId,
+        timeZone: companyTimeZone,
         clockInIso,
         clockOutIso,
         timesheetHourlyRate: record.hourlyRate,
@@ -11084,6 +12419,8 @@ const handlePhotoQuickUpload = async (event) => {
       const clockOutIso = request.requestedClockOut;
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
         userId: request.userId,
+        companyId: request.companyId || userCompany?.id,
+        timeZone: companyTimeZone,
         clockInIso,
         clockOutIso,
         timesheetHourlyRate:
@@ -11091,12 +12428,7 @@ const handlePhotoQuickUpload = async (event) => {
       });
 
       if (request.requestType === "manual_time") {
-        const { data: prof } = await supabase
-          .from("profiles")
-          .select("hourly_rate")
-          .eq("id", request.userId)
-          .maybeSingle();
-        const hourlyRate = hourlyRateFromProfileValue(prof?.hourly_rate);
+        const hourlyRate = hourlyRateFromProfileValue(labourUpdate.hourly_rate);
         const insertRow = {
           company_id: request.companyId,
           user_id: request.userId,
@@ -11440,6 +12772,336 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
+  const buildReceiptOcrReviewDraft = (item = {}, extracted = {}, meta = {}) => {
+    const raw = extracted && typeof extracted === "object" && !Array.isArray(extracted) ? extracted : {};
+    const rawJson = raw.raw_extracted_json && typeof raw.raw_extracted_json === "object" ? raw.raw_extracted_json : raw;
+    const projectToken =
+      item?.projectId ??
+      item?.project_id ??
+      clockMediaContext?.projectId ??
+      projectId ??
+      "";
+    const projectNameCandidate =
+      item?.project ||
+      item?.project_name ||
+      clockMediaContext?.project ||
+      clockSelectedProject?.name ||
+      "";
+    const projectMatch =
+      effectiveProjects.find((p) => String(p.id) === String(projectToken)) ||
+      effectiveProjects.find((p) => String(p.name || "").trim().toLowerCase() === String(projectNameCandidate || "").trim().toLowerCase()) ||
+      null;
+    const resolvedProjectId = projectMatch?.id != null ? String(projectMatch.id) : String(projectToken || "");
+    const resolvedProjectName = projectMatch?.name || projectNameCandidate || "";
+    const centres = resolvedProjectId ? costCentresForEditProject(resolvedProjectId) : [];
+    const costCandidate =
+      raw.cost_centre ||
+      raw.costCentre ||
+      raw.task ||
+      item?.costCenter ||
+      item?.cost_centre ||
+      clockMediaContext?.costCenter ||
+      costCenter ||
+      "";
+    const resolvedCostCentre =
+      centres.find((name) => String(name).toLowerCase() === String(costCandidate).toLowerCase()) ||
+      costCandidate ||
+      centres[0] ||
+      "";
+    const totalValue =
+      raw.total_amount ??
+      raw.receipt_total ??
+      raw.total ??
+      raw.amount ??
+      item?.receipt_total ??
+      item?.receiptTotal ??
+      item?.amount ??
+      "";
+    const subtotalValue = raw.subtotal ?? raw.receipt_subtotal ?? item?.receipt_subtotal ?? item?.receiptSubtotal ?? "";
+    const hstValue = raw.hst ?? raw.tax ?? raw.receipt_hst ?? item?.receipt_hst ?? item?.receiptHst ?? "";
+    const materialCategory =
+      String(raw.material_category || raw.likely_category || raw.category || item?.receipt_material_category || item?.receiptMaterialCategory || item?.category || "general material")
+        .trim()
+        .toLowerCase() || "general material";
+    return {
+      mediaId: String(item?.dbId || item?.id || ""),
+      item,
+      imageUrl: mediaItemUrl(item),
+      loading: Boolean(meta.loading),
+      configured: meta.configured !== false,
+      code: meta.code || "",
+      error: meta.error || "",
+      warning: meta.warning || "",
+      message: meta.message || "",
+      savedWithLegacyFallback: false,
+      source: meta.source || "manual",
+      projectId: resolvedProjectId,
+      projectName: resolvedProjectName,
+      costCentre: resolvedCostCentre,
+      supplier: String(raw.supplier || raw.store || raw.vendor || item?.receipt_supplier || item?.receiptSupplier || item?.supplier || "").trim(),
+      receiptDate: normalizeReceiptDateInput(
+        raw.receipt_date || raw.date || item?.receipt_date || item?.receiptDate,
+        item?.capturedAt || item?.timestamp || new Date().toISOString()
+      ),
+      subtotal: normalizeReceiptMoneyValue(subtotalValue, ""),
+      hst: normalizeReceiptMoneyValue(hstValue, ""),
+      total: normalizeReceiptMoneyValue(totalValue, ""),
+      currency: normalizeReceiptCurrency(raw.currency || item?.receipt_currency || item?.receiptCurrency || "CAD"),
+      materialCategory: RECEIPT_MATERIAL_CATEGORIES.includes(materialCategory) ? materialCategory : "other",
+      materialType: String(raw.material_type || raw.material || raw.type || item?.receipt_material_type || item?.receiptMaterialType || "").trim(),
+      confidence:
+        raw.confidence != null && Number.isFinite(Number(raw.confidence))
+          ? String(Number(raw.confidence))
+          : item?.receipt_ocr_confidence != null && Number.isFinite(Number(item.receipt_ocr_confidence))
+            ? String(Number(item.receipt_ocr_confidence))
+            : "",
+      notes: String(raw.notes || item?.notes || "").trim(),
+      rawJson,
+    };
+  };
+
+  const startReceiptOcrReview = async (item) => {
+    const initial = buildReceiptOcrReviewDraft(item, {}, { loading: true, source: "manual" });
+    setReceiptOcrReview(initial);
+    if (!initial.mediaId || !userCompany?.id) {
+      setReceiptOcrReview((prev) => ({
+        ...(prev || initial),
+        loading: false,
+        configured: false,
+        warning: "Receipt uploaded, but shared metadata is still syncing. Review and save details manually.",
+      }));
+      return;
+    }
+    setPhotoStatus("Reading receipt...");
+    try {
+      const result = await callFieldAi("receipt_ocr", {
+        companyId: userCompany.id,
+        mediaId: initial.mediaId,
+      });
+      setFieldAiStatus({
+        checked: true,
+        configured: Boolean(result?.configured),
+        message: result?.configured ? "AI configured" : result?.message || "AI not configured yet.",
+      });
+      const next = buildReceiptOcrReviewDraft(item, result?.json || {}, {
+        configured: Boolean(result?.configured),
+        source: result?.configured ? "ocr" : "manual",
+        code: result?.code || result?.warningCode || "",
+        message: result?.message || "",
+        warning:
+          result?.warning ||
+          (!result?.configured ? result?.message || "AI is not configured. Review and save details manually." : ""),
+        error:
+          result?.ok === false && result?.code !== "provider_not_configured"
+            ? result?.message || "Receipt OCR failed."
+            : "",
+      });
+      setReceiptOcrReview({ ...next, loading: false });
+      setPhotoStatus(result?.configured ? "Review receipt details." : "Receipt uploaded. Enter details manually.");
+    } catch (err) {
+      setReceiptOcrReview((prev) => ({
+        ...(prev || initial),
+        loading: false,
+        configured: false,
+        source: "manual",
+        error: `OCR unavailable: ${getErrorMessage(err)}`,
+        warning: "Review and save receipt details manually.",
+      }));
+      setPhotoStatus("Receipt uploaded. Enter details manually.");
+    }
+  };
+
+  const updateReceiptReviewDraft = (updates) => {
+    setReceiptOcrReview((prev) => (prev ? { ...prev, ...updates, error: "" } : prev));
+  };
+
+  const retryReceiptOcrReview = () => {
+    const review = receiptOcrReview;
+    if (!review?.item || review.loading || receiptReviewSaving) return;
+    void startReceiptOcrReview(review.item);
+  };
+
+  const saveReceiptOcrReview = async (event) => {
+    event?.preventDefault?.();
+    const review = receiptOcrReview;
+    if (!review || receiptReviewSaving) return;
+    if (!review.mediaId || !userCompany?.id) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "Receipt metadata is not synced yet. Try again after refresh." } : prev));
+      return;
+    }
+
+    const selectedProject =
+      effectiveProjects.find((p) => String(p.id) === String(review.projectId)) ||
+      effectiveProjects.find((p) => String(p.name || "").trim().toLowerCase() === String(review.projectName || "").trim().toLowerCase()) ||
+      null;
+    const projectNameForSave = selectedProject?.name || String(review.projectName || "").trim();
+    const projectIdForSave = selectedProject?.id != null ? String(selectedProject.id) : String(review.projectId || "").trim();
+    if (!projectNameForSave) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "Choose a project before saving receipt details." } : prev));
+      return;
+    }
+
+    const total = receiptMoneyNumber(review.total);
+    const subtotal = receiptMoneyNumber(review.subtotal);
+    const hst = receiptMoneyNumber(review.hst);
+    const confidence = receiptMoneyNumber(review.confidence);
+    if (total == null || total < 0) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "Enter the receipt total, or choose Save image only." } : prev));
+      return;
+    }
+    if ((subtotal != null && subtotal < 0) || (hst != null && hst < 0)) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "Subtotal and HST cannot be negative." } : prev));
+      return;
+    }
+    if (subtotal != null && total != null && subtotal > total) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "Subtotal cannot be greater than total." } : prev));
+      return;
+    }
+    if (hst != null && total != null && hst > total) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: "HST cannot be greater than total." } : prev));
+      return;
+    }
+    const reviewedAt = new Date().toISOString();
+    const materialCategory = String(review.materialCategory || "other").trim() || "other";
+    const normalizedJson = {
+      ...(review.rawJson && typeof review.rawJson === "object" && !Array.isArray(review.rawJson) ? review.rawJson : {}),
+      supplier: String(review.supplier || "").trim() || null,
+      receipt_date: review.receiptDate || null,
+      subtotal,
+      hst,
+      total_amount: total,
+      currency: normalizeReceiptCurrency(review.currency),
+      material_category: materialCategory,
+      material_type: String(review.materialType || "").trim() || null,
+      confidence,
+      notes: String(review.notes || "").trim() || null,
+    };
+    const legacyPayload = {
+      project_id: projectIdForSave || null,
+      project_name: projectNameForSave,
+      cost_centre: String(review.costCentre || "").trim() || null,
+      supplier: String(review.supplier || "").trim() || null,
+      amount: total,
+      receipt_status: "Reviewed",
+      notes: String(review.notes || "").trim() || null,
+    };
+    const aiPayload = {
+      ...legacyPayload,
+      ai_extracted_json: normalizedJson,
+      ai_category: materialCategory,
+      ai_review_status: "confirmed",
+      ai_processed_at: reviewedAt,
+      ai_confidence: confidence,
+      ai_error: null,
+    };
+    const fullPayload = {
+      ...aiPayload,
+      receipt_supplier: legacyPayload.supplier,
+      receipt_date: review.receiptDate || null,
+      receipt_subtotal: subtotal,
+      receipt_hst: hst,
+      receipt_total: total,
+      receipt_currency: normalizeReceiptCurrency(review.currency),
+      receipt_material_category: materialCategory,
+      receipt_material_type: String(review.materialType || "").trim() || null,
+      receipt_ocr_status: review.source === "ocr" ? "reviewed" : "manual_reviewed",
+      receipt_ocr_confidence: confidence,
+      receipt_reviewed_at: reviewedAt,
+      receipt_reviewed_by: authUser?.id || null,
+      receipt_source: review.source === "ocr" ? "ocr_reviewed" : "manual",
+    };
+
+    setReceiptReviewSaving(true);
+    try {
+      let usedLegacyFallback = false;
+      let { error } = await supabase
+        .from("project_media")
+        .update(fullPayload)
+        .eq("company_id", userCompany.id)
+        .eq("id", review.mediaId);
+      if (error && isMissingReceiptOcrColumnError(error)) {
+        ({ error } = await supabase
+          .from("project_media")
+          .update(aiPayload)
+          .eq("company_id", userCompany.id)
+          .eq("id", review.mediaId));
+        usedLegacyFallback = true;
+      }
+      if (error && isMissingReceiptOcrColumnError(error)) {
+        ({ error } = await supabase
+          .from("project_media")
+          .update(legacyPayload)
+          .eq("company_id", userCompany.id)
+          .eq("id", review.mediaId));
+        usedLegacyFallback = true;
+      }
+      if (error) throw error;
+
+      const localUpdates = {
+        project: projectNameForSave,
+        project_name: projectNameForSave,
+        projectId: projectIdForSave || null,
+        project_id: projectIdForSave || null,
+        costCenter: legacyPayload.cost_centre || "",
+        cost_centre: legacyPayload.cost_centre || "",
+        supplier: legacyPayload.supplier || "",
+        amount: total ?? 0,
+        category: materialCategory,
+        notes: legacyPayload.notes || "",
+        status: "Reviewed",
+        receiptStatus: "Reviewed",
+        receipt_status: "Reviewed",
+        ai_extracted_json: normalizedJson,
+        aiExtractedJson: normalizedJson,
+        ai_category: materialCategory,
+        aiCategory: materialCategory,
+        ai_review_status: "confirmed",
+        aiReviewStatus: "confirmed",
+        ai_processed_at: reviewedAt,
+        aiProcessedAt: reviewedAt,
+        ai_confidence: confidence,
+        aiConfidence: confidence,
+        receipt_supplier: legacyPayload.supplier || "",
+        receiptSupplier: legacyPayload.supplier || "",
+        receipt_date: review.receiptDate || "",
+        receiptDate: review.receiptDate || "",
+        receipt_subtotal: subtotal,
+        receiptSubtotal: subtotal,
+        receipt_hst: hst,
+        receiptHst: hst,
+        receipt_total: total,
+        receiptTotal: total,
+        receipt_currency: normalizeReceiptCurrency(review.currency),
+        receiptCurrency: normalizeReceiptCurrency(review.currency),
+        receipt_material_category: materialCategory,
+        receiptMaterialCategory: materialCategory,
+        receipt_material_type: String(review.materialType || "").trim(),
+        receiptMaterialType: String(review.materialType || "").trim(),
+        receipt_ocr_status: fullPayload.receipt_ocr_status,
+        receiptOcrStatus: fullPayload.receipt_ocr_status,
+        receipt_ocr_confidence: confidence,
+        receiptOcrConfidence: confidence,
+        receipt_reviewed_at: reviewedAt,
+        receiptReviewedAt: reviewedAt,
+        receipt_reviewed_by: authUser?.id || null,
+        receiptReviewedBy: authUser?.id || null,
+        receipt_source: fullPayload.receipt_source,
+        receiptSource: fullPayload.receipt_source,
+      };
+      setProjectReceipts((previous) => updateMediaBucketsItem(previous, review.mediaId, localUpdates));
+      setReceiptOcrReview(null);
+      const savedStatus = usedLegacyFallback
+        ? "Receipt details saved. Apply the B.2 SQL migration to store structured OCR fields."
+        : "Receipt details saved.";
+      setPhotoStatus(savedStatus);
+      schedulePhotoStatusClear(savedStatus, 6000);
+    } catch (err) {
+      setReceiptOcrReview((prev) => (prev ? { ...prev, error: getErrorMessage(err) } : prev));
+    } finally {
+      setReceiptReviewSaving(false);
+    }
+  };
+
   const runFieldAiSummary = async (mode) => {
     if (!userCompany?.id) return;
     const action =
@@ -11500,41 +13162,116 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       const rawAmount = extracted.total_amount ?? extracted.total ?? extracted.amount ?? item?.amount;
       const amount = Number(rawAmount);
+      const subtotal = receiptMoneyNumber(extracted.subtotal ?? extracted.receipt_subtotal);
+      const hst = receiptMoneyNumber(extracted.hst ?? extracted.tax ?? extracted.receipt_hst);
       const confidence = Number(extracted.confidence);
-      const payload = {
+      const reviewedAt = new Date().toISOString();
+      const materialCategory = String(extracted.material_category || extracted.likely_category || extracted.category || "other").trim() || "other";
+      const legacyPayload = {
         supplier: String(extracted.supplier || item?.supplier || "").trim() || null,
         amount: Number.isFinite(amount) ? amount : null,
         notes: String(extracted.notes || item?.notes || "").trim() || null,
+        receipt_status: "Reviewed",
+      };
+      const aiPayload = {
+        ...legacyPayload,
         ai_extracted_json: extracted,
-        ai_category: String(extracted.likely_category || extracted.category || "").trim() || null,
+        ai_category: materialCategory,
         ai_review_status: "confirmed",
-        ai_processed_at: new Date().toISOString(),
+        ai_processed_at: reviewedAt,
         ai_confidence: Number.isFinite(confidence) ? confidence : null,
         ai_error: null,
       };
-      const { error } = await supabase
+      const payload = {
+        ...aiPayload,
+        receipt_supplier: legacyPayload.supplier,
+        receipt_date: normalizeReceiptDateInput(extracted.receipt_date || extracted.date),
+        receipt_subtotal: subtotal,
+        receipt_hst: hst,
+        receipt_total: Number.isFinite(amount) ? amount : null,
+        receipt_currency: normalizeReceiptCurrency(extracted.currency),
+        receipt_material_category: materialCategory,
+        receipt_material_type: String(extracted.material_type || extracted.material || extracted.type || "").trim() || null,
+        receipt_ocr_status: "reviewed",
+        receipt_ocr_confidence: Number.isFinite(confidence) ? confidence : null,
+        receipt_reviewed_at: reviewedAt,
+        receipt_reviewed_by: authUser?.id || null,
+        receipt_source: "ocr_reviewed",
+      };
+      let usedLegacyFallback = false;
+      let { error } = await supabase
         .from("project_media")
         .update(payload)
         .eq("company_id", userCompany.id)
         .eq("id", mediaId);
+      if (error && isMissingReceiptOcrColumnError(error)) {
+        ({ error } = await supabase
+          .from("project_media")
+          .update(aiPayload)
+          .eq("company_id", userCompany.id)
+          .eq("id", mediaId));
+        usedLegacyFallback = true;
+      }
+      if (error && isMissingReceiptOcrColumnError(error)) {
+        ({ error } = await supabase
+          .from("project_media")
+          .update(legacyPayload)
+          .eq("company_id", userCompany.id)
+          .eq("id", mediaId));
+        usedLegacyFallback = true;
+      }
       if (error) throw error;
       const localUpdates = {
         supplier: payload.supplier || "",
         amount: payload.amount ?? item?.amount ?? 0,
-        category: payload.supplier || item?.category || "Receipt",
+        category: materialCategory || payload.supplier || item?.category || "Receipt",
+        notes: payload.notes || "",
+        status: "Reviewed",
+        receiptStatus: "Reviewed",
+        receipt_status: "Reviewed",
         ai_extracted_json: extracted,
         aiExtractedJson: extracted,
-        ai_category: payload.ai_category || "",
-        aiCategory: payload.ai_category || "",
+        ai_category: materialCategory,
+        aiCategory: materialCategory,
         ai_review_status: "confirmed",
         aiReviewStatus: "confirmed",
-        ai_processed_at: payload.ai_processed_at,
-        aiProcessedAt: payload.ai_processed_at,
+        ai_processed_at: reviewedAt,
+        aiProcessedAt: reviewedAt,
         ai_confidence: payload.ai_confidence,
         aiConfidence: payload.ai_confidence,
+        receipt_supplier: payload.receipt_supplier || "",
+        receiptSupplier: payload.receipt_supplier || "",
+        receipt_date: payload.receipt_date || "",
+        receiptDate: payload.receipt_date || "",
+        receipt_subtotal: subtotal,
+        receiptSubtotal: subtotal,
+        receipt_hst: hst,
+        receiptHst: hst,
+        receipt_total: payload.receipt_total,
+        receiptTotal: payload.receipt_total,
+        receipt_currency: payload.receipt_currency,
+        receiptCurrency: payload.receipt_currency,
+        receipt_material_category: materialCategory,
+        receiptMaterialCategory: materialCategory,
+        receipt_material_type: payload.receipt_material_type || "",
+        receiptMaterialType: payload.receipt_material_type || "",
+        receipt_ocr_status: payload.receipt_ocr_status,
+        receiptOcrStatus: payload.receipt_ocr_status,
+        receipt_ocr_confidence: payload.receipt_ocr_confidence,
+        receiptOcrConfidence: payload.receipt_ocr_confidence,
+        receipt_reviewed_at: reviewedAt,
+        receiptReviewedAt: reviewedAt,
+        receipt_reviewed_by: authUser?.id || null,
+        receiptReviewedBy: authUser?.id || null,
+        receipt_source: payload.receipt_source,
+        receiptSource: payload.receipt_source,
       };
       setProjectReceipts((previous) => updateMediaBucketsItem(previous, mediaId, localUpdates));
-      setFieldAiPanel((previous) => ({ ...previous, saved: true, error: "" }));
+      setFieldAiPanel((previous) => ({
+        ...previous,
+        saved: true,
+        error: usedLegacyFallback ? "Saved core receipt details. Apply the B.2 SQL migration to store structured OCR fields." : "",
+      }));
     } catch (err) {
       setFieldAiPanel((previous) => ({
         ...previous,
@@ -11609,9 +13346,9 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const openMenuTab = (tabName) => {
-    const employeeAllowedTabs = new Set(["activities", "clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists"]);
+    const employeeAllowedTabs = new Set(["activities", "clock", "timesheet", "photos", "receipts", "settings", "schedule", "notifications", "lists", "chat"]);
     if (companyAssignAllProjectsToAllEmployees) employeeAllowedTabs.add("projects");
-    if (companyAllowEmployeeProjectTaskCreation) employeeAllowedTabs.add("projects");
+    if (canCreateProjectTaskFromClock) employeeAllowedTabs.add("projects");
     if (isEmployeeRole && !employeeAllowedTabs.has(tabName)) {
       setMenuPanel("main");
       setIsMenuOpen(false);
@@ -11629,6 +13366,10 @@ const handlePhotoQuickUpload = async (event) => {
     async (assigneeRowId) => {
       const aid = assigneeRowId != null ? String(assigneeRowId).trim() : "";
       if (!aid || !authUser?.id || !userCompany?.id) return;
+      if (!employeeUpcomingScheduleAssigneeIds.has(aid)) {
+        setScheduleEmployeeResponseInlineError("This scheduled task is no longer upcoming.");
+        return;
+      }
       setScheduleEmployeeResponseInlineError("");
       setScheduleResponseSavingAssigneeId(aid);
       try {
@@ -11653,7 +13394,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleResponseSavingAssigneeId(null);
       }
     },
-    [authUser?.id, userCompany?.id]
+    [authUser?.id, employeeUpcomingScheduleAssigneeIds, userCompany?.id]
   );
 
   const handleEmployeeScheduleDecline = useCallback(
@@ -11661,6 +13402,10 @@ const handlePhotoQuickUpload = async (event) => {
       const aid = assigneeRowId != null ? String(assigneeRowId).trim() : "";
       const reason = String(reasonRaw ?? "").trim();
       if (!aid || !authUser?.id || !userCompany?.id) return;
+      if (!employeeUpcomingScheduleAssigneeIds.has(aid)) {
+        setScheduleEmployeeResponseInlineError("This scheduled task is no longer upcoming.");
+        return;
+      }
       if (!reason) {
         setScheduleEmployeeResponseInlineError("Please enter a reason for declining.");
         return;
@@ -11689,7 +13434,7 @@ const handlePhotoQuickUpload = async (event) => {
         setScheduleResponseSavingAssigneeId(null);
       }
     },
-    [authUser?.id, userCompany?.id]
+    [authUser?.id, employeeUpcomingScheduleAssigneeIds, userCompany?.id]
   );
 
   const scheduleRestoreWindowScrollY = useCallback((targetScrollY, { keepPending = false } = {}) => {
@@ -13147,7 +14892,6 @@ const handlePhotoQuickUpload = async (event) => {
         auto_clock_out_time: normalizeAutoClockOutTime(settingsAutoClockOutDraft),
         assign_all_projects_to_all_employees: Boolean(settingsAssignAllProjectsDraft),
         assign_all_tasks_to_all_projects: Boolean(settingsAssignAllTasksDraft),
-        allow_employee_project_task_creation: Boolean(settingsAllowEmployeeProjectTaskDraft),
       };
       let { error } = await supabase
         .from("companies")
@@ -13173,7 +14917,6 @@ const handlePhotoQuickUpload = async (event) => {
                     auto_clock_out_time: payload.auto_clock_out_time,
                     assign_all_projects_to_all_employees: payload.assign_all_projects_to_all_employees,
                     assign_all_tasks_to_all_projects: payload.assign_all_tasks_to_all_projects,
-                    allow_employee_project_task_creation: payload.allow_employee_project_task_creation,
                   }
                 : {}),
             })
@@ -13334,6 +15077,8 @@ const handlePhotoQuickUpload = async (event) => {
       const clockOutTime = new Date().toISOString();
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
         userId: record.userId,
+        companyId: userCompany?.id || record.companyId,
+        timeZone: companyTimeZone,
         clockInIso: record.clockIn,
         clockOutIso: clockOutTime,
         timesheetHourlyRate: record.hourlyRate,
@@ -13601,7 +15346,10 @@ const handlePhotoQuickUpload = async (event) => {
     const recordRowId = record.supabaseTimesheetId ?? record.id;
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
 
-    let outText = "—";
+    const inDateText = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "—";
+    const inTimeText = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "";
+    let outDateText = "—";
+    let outTimeText = "";
     let outClass = "font-black text-[#061426]";
     let staleActiveMissingOut = false;
     let submittedMissingClockOut = false;
@@ -13611,21 +15359,23 @@ const handlePhotoQuickUpload = async (event) => {
       const rowDateKey = calendarDateKeyInTimeZone(record.clockIn, companyTimeZone);
       const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
       if (isLiveOpen || (rowDateKey && todayKey && rowDateKey >= todayKey)) {
-        outText = "Working";
+        outDateText = "Working";
       } else {
-        outText = "Missing clock-out";
+        outDateText = "Missing clock-out";
         outClass = "font-black text-[#D97706]";
         staleActiveMissingOut = true;
         if (isAdmin) showCloseShift = true;
       }
     } else if (st === "submitted" && record.clockOut) {
-      outText = formatTime(record.clockOut, companyTimeZone);
+      outDateText = formatDateParts(record.clockOut, companyTimeZone).fullDate;
+      outTimeText = formatTime(record.clockOut, companyTimeZone);
     } else if (st === "submitted" && !record.clockOut) {
-      outText = "Missing clock-out";
+      outDateText = "Missing clock-out";
       outClass = "font-black text-[#D97706]";
       submittedMissingClockOut = true;
     } else if (record.clockOut) {
-      outText = formatTime(record.clockOut, companyTimeZone);
+      outDateText = formatDateParts(record.clockOut, companyTimeZone).fullDate;
+      outTimeText = formatTime(record.clockOut, companyTimeZone);
     }
 
     const busyClose = closingShiftId != null && String(recordRowId) === closingShiftId;
@@ -13774,11 +15524,13 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="mt-3 grid grid-cols-3 border-t border-[#E2E8F0] pt-3">
             <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
               <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
-              <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{formatTime(record.clockIn, companyTimeZone)}</p>
+              <p className="mt-1 truncate text-[11px] font-black leading-tight text-[#061426]">{inDateText}</p>
+              {inTimeText ? <p className="mt-0.5 truncate text-[12px] font-black leading-tight text-[#061426]">{inTimeText}</p> : null}
             </div>
             <div className="min-w-0 border-r border-[#E2E8F0] px-2">
               <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
-              <p className={`mt-1 truncate text-[12px] ${outClass}`}>{outText}</p>
+              <p className={`mt-1 truncate text-[11px] leading-tight ${outClass}`}>{outDateText}</p>
+              {outTimeText ? <p className={`mt-0.5 truncate text-[12px] leading-tight ${outClass}`}>{outTimeText}</p> : null}
             </div>
             <div className="min-w-0 pl-2">
               <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total</p>
@@ -13870,46 +15622,25 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const renderOAuthButtons = () => {
-    const providers = [
-      {
-        id: "google",
-        label: "Google",
-        icon: <span className="text-[17px] font-black leading-none text-[#4285F4]">G</span>,
-      },
-      {
-        id: "facebook",
-        label: "Facebook",
-        icon: <span className="text-[21px] font-black leading-none text-[#1877F2]">f</span>,
-      },
-      {
-        id: "apple",
-        label: "Apple",
-        icon: <span className="text-[16px] font-black leading-none text-slate-950">A</span>,
-      },
-    ];
+    const loadingGoogle = oauthLoading === "google";
 
     return (
       <div className="space-y-2">
-        <div className="grid grid-cols-3 gap-2">
-          {providers.map((provider) => {
-            const loadingThisProvider = oauthLoading === provider.id;
-            return (
-              <button
-                key={provider.id}
-                type="button"
-                className="min-w-0 rounded-2xl border border-slate-200 bg-white px-2 py-2.5 text-[12px] font-black text-slate-800 shadow-sm transition active:scale-[0.98] active:bg-slate-50 disabled:opacity-60"
-                onClick={() => void handleOAuthLogin(provider.id)}
-                disabled={Boolean(oauthLoading) || loginLoading || signupLoading}
-                aria-label={`Continue with ${provider.label}`}
-              >
-                <span className="mx-auto mb-1 flex h-6 w-6 items-center justify-center rounded-full bg-slate-50">
-                  {provider.icon}
-                </span>
-                <span className="block truncate">{loadingThisProvider ? "Opening..." : provider.label}</span>
-              </button>
-            );
-          })}
-        </div>
+        <button
+          type="button"
+          className="flex w-full items-center justify-center gap-3 rounded-[16px] border border-[#CBD5E1] bg-white px-4 py-3 text-[15px] font-black text-[#061426] shadow-[0_8px_18px_rgba(6,20,38,0.05)] transition active:scale-[0.98] active:bg-[#F8FAFC] disabled:opacity-60"
+          onClick={() => void handleOAuthLogin("google")}
+          disabled={Boolean(oauthLoading) || loginLoading || signupLoading}
+          aria-label="Continue with Google"
+        >
+          <span className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[15px] font-black text-[#061426]">
+            G
+          </span>
+          <span>{loadingGoogle ? "Opening Google..." : "Continue with Google"}</span>
+        </button>
+        <p className="text-center text-[11px] font-semibold leading-snug text-[#64748B]">
+          Google login uses identity only. Email reports are configured separately.
+        </p>
         <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">
           <span className="h-px flex-1 bg-slate-200" />
           <span>or</span>
@@ -13963,7 +15694,7 @@ const handlePhotoQuickUpload = async (event) => {
             <form onSubmit={handleSignup} className="p-5 space-y-4">
               <div>
                 <h2 className="text-xl font-bold">Sign up</h2>
-                <p className="text-sm text-slate-500 mt-1">Create with Google, Facebook, Apple, or email.</p>
+                <p className="text-sm text-slate-500 mt-1">Create with Google or email.</p>
               </div>
 
               {renderOAuthButtons()}
@@ -14049,7 +15780,7 @@ const handlePhotoQuickUpload = async (event) => {
           <form onSubmit={handleLogin} className="p-5 space-y-4">
             <div>
               <h2 className="text-xl font-bold">Login</h2>
-              <p className="text-sm text-slate-500 mt-1">Use Google, Facebook, Apple, or your user ID.</p>
+              <p className="text-sm text-slate-500 mt-1">Use Google or your user ID.</p>
             </div>
 
             {renderOAuthButtons()}
@@ -14718,8 +16449,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const clockListContextReady = Boolean(
-    String(clockListContext.projectName || "").trim() &&
-      String(clockListContext.costCenter || "").trim()
+    String(clockListContext.projectName || "").trim()
   );
 
   const employeeClockActionLabel = visibleCurrentShift ? "Clock Out" : "Clock In";
@@ -14737,7 +16467,7 @@ const handlePhotoQuickUpload = async (event) => {
     authUser?.id || "anonymous",
     userCompany?.id || "company",
     clockListContext.projectId || getProjectFolderName(clockListContext.projectName || "project"),
-    clockListContext.costCenter || "cost",
+    "project",
   ].join("|");
   const clockProjectListProjectPrefix = [
     authUser?.id || "anonymous",
@@ -14767,8 +16497,14 @@ const handlePhotoQuickUpload = async (event) => {
 
   const getClockProjectListItems = (kind, completed = clockListShowCompleted) => {
     const bucket = completed ? clockProjectLists?.completed?.[kind] || {} : clockProjectLists?.[kind] || {};
-    const rows = bucket?.[clockProjectListKey] || [];
-    const savedRows = Array.isArray(rows) ? rows : [];
+    const savedRows = Object.entries(bucket || {})
+      .filter(([key, rows]) => key.startsWith(clockProjectListProjectPrefix) && Array.isArray(rows))
+      .flatMap(([sourceKey, rows]) =>
+        rows.map((item) => ({
+          ...item,
+          sourceKey,
+        }))
+      );
     if (kind !== "task" || completed) return savedRows;
     return [...getClockScheduledTaskItemsForClockContext(), ...savedRows];
   };
@@ -14891,7 +16627,19 @@ const handlePhotoQuickUpload = async (event) => {
 
   const openClockProjectList = (kind) => {
     if (!clockListContextReady) {
-      showClockSetupRequired();
+      const message =
+        clockSelectableProjects.length === 0
+          ? companyAssignAllProjectsToAllEmployees
+            ? "No active projects available. Please contact your supervisor."
+            : "No projects assigned. Please contact your supervisor."
+          : "Select a project first.";
+      if (clockSetupWarningTimerRef.current) clearTimeout(clockSetupWarningTimerRef.current);
+      setPhotoStatus("");
+      setLocationStatus(message);
+      clockSetupWarningTimerRef.current = setTimeout(() => {
+        if (latestLocationStatusRef.current === message) setLocationStatus("");
+        clockSetupWarningTimerRef.current = null;
+      }, 5000);
       return;
     }
     setClockListDraft("");
@@ -14941,39 +16689,40 @@ const handlePhotoQuickUpload = async (event) => {
     setClockListImageDraft(null);
   };
 
-  const completeClockProjectListItem = (kind, itemId) => {
+  const completeClockProjectListItem = (kind, itemId, sourceKey = clockProjectListKey) => {
     if (!kind || !itemId) return;
     if (kind === "task") {
       const scheduledItem = getClockScheduledTaskItemsForClockContext().find(
         (item) => String(item?.id) === String(itemId)
       );
       if (scheduledItem) {
-        pushClockListUndo({ kind: "task", key: clockProjectListKey, item: scheduledItem });
+        pushClockListUndo({ kind: "task", key: sourceKey || clockProjectListKey, item: scheduledItem });
         setClockScheduledTaskListDone((prev) => ({ ...(prev || {}), [String(scheduledItem.id)]: true }));
         return;
       }
     }
-    const existingNow = Array.isArray(clockProjectLists?.[kind]?.[clockProjectListKey])
-      ? clockProjectLists[kind][clockProjectListKey]
+    const itemSourceKey = sourceKey || clockProjectListKey;
+    const existingNow = Array.isArray(clockProjectLists?.[kind]?.[itemSourceKey])
+      ? clockProjectLists[kind][itemSourceKey]
       : [];
     const removedItem = existingNow.find((item) => String(item?.id) === String(itemId));
     if (removedItem) {
-      pushClockListUndo({ kind, key: clockProjectListKey, item: removedItem });
+      pushClockListUndo({ kind, key: itemSourceKey, item: removedItem });
     }
     setClockProjectLists((prev) => {
       const next = normalizeClockProjectListsState(prev);
-      const existing = Array.isArray(next[kind]?.[clockProjectListKey])
-        ? next[kind][clockProjectListKey]
+      const existing = Array.isArray(next[kind]?.[itemSourceKey])
+        ? next[kind][itemSourceKey]
         : [];
-      next[kind][clockProjectListKey] = existing.filter(
+      next[kind][itemSourceKey] = existing.filter(
         (item) => String(item?.id) !== String(itemId)
       );
       if (removedItem) {
-        const completedRows = Array.isArray(next.completed?.[kind]?.[clockProjectListKey])
-          ? next.completed[kind][clockProjectListKey]
+        const completedRows = Array.isArray(next.completed?.[kind]?.[itemSourceKey])
+          ? next.completed[kind][itemSourceKey]
           : [];
         const completedExists = completedRows.some((item) => String(item?.id) === String(itemId));
-        next.completed[kind][clockProjectListKey] = completedExists
+        next.completed[kind][itemSourceKey] = completedExists
           ? completedRows
           : [{ ...removedItem, completedAt: new Date().toISOString() }, ...completedRows];
       }
@@ -14983,7 +16732,7 @@ const handlePhotoQuickUpload = async (event) => {
       void saveProjectListItemToSupabase({
         kind,
         item: { ...removedItem, completedAt: new Date().toISOString() },
-        storageKey: clockProjectListKey,
+        storageKey: itemSourceKey,
         status: "completed",
       });
     }
@@ -15068,34 +16817,31 @@ const handlePhotoQuickUpload = async (event) => {
     );
   };
 
-  const renderClockListsDropdown = () => (
-    <details className="group w-[126px]">
-      <summary className="flex h-8 cursor-pointer list-none items-center justify-center gap-2 rounded-[8px] border border-[#CBD5E1] bg-white px-3 text-[11px] font-semibold text-[#061426] [&::-webkit-details-marker]:hidden">
-        <span>Lists</span>
-        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 transition group-open:rotate-180" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="m6 9 6 6 6-6" />
-        </svg>
-      </summary>
-      <div className="mt-2 w-[156px] overflow-hidden rounded-[12px] border border-slate-200 bg-white shadow-[0_10px_24px_rgba(6,20,38,0.12)]">
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-[11px] font-semibold text-[#061426] active:bg-slate-50"
-          onClick={() => openClockProjectList("task")}
-        >
-          {renderClockActionIcon("lists")}
-          Task List
-        </button>
-        <button
-          type="button"
-          className="flex w-full items-center gap-2 border-t border-slate-100 px-3 py-2.5 text-left text-[11px] font-semibold text-[#061426] active:bg-slate-50"
-          onClick={() => openClockProjectList("material")}
-        >
-          {renderTimesheetUiIcon("folder", "h-3.5 w-3.5")}
-          Material List
-        </button>
-      </div>
-    </details>
-  );
+  const renderClockPendingListButton = () => {
+    const pendingCount = clockListContextReady ? getClockProjectListItems("task", false).length : 0;
+    return (
+      <button
+        type="button"
+        className="flex h-10 w-full items-center justify-between gap-3 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-left text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+        onClick={() => openClockProjectList("task")}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#FBF8F1] text-[#C9A227]" aria-hidden="true">
+            {renderClockActionIcon("lists")}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-[13px] font-black leading-tight">Pending list</span>
+            <span className="block truncate text-[11px] font-semibold leading-tight text-[#64748B]">
+              {clockListContextReady ? `${pendingCount} open` : "Select a project"}
+            </span>
+          </span>
+        </span>
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#061426] text-[18px] font-black leading-none text-white" aria-hidden="true">
+          +
+        </span>
+      </button>
+    );
+  };
 
   const listProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter(
     (project) => project?.id != null || String(project?.name || "").trim()
@@ -15557,6 +17303,256 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsVisibleProjectCount = new Set(
     (reportsVisibleRows || []).map((row) => getReportsDimForRow("project", row).key).filter(Boolean)
   ).size;
+
+  const reportsReceiptRowsForPreview = (() => {
+    if (!isAdmin || activeTab !== "reports" || !reportsDateFrom || !reportsDateTo) return [];
+    return flattenMediaBuckets(scopedProjectReceipts).filter((item) => {
+      const capturedKey = calendarDateKeyInTimeZone(
+        item?.capturedAt || item?.captured_at || item?.timestamp || item?.uploadedAt || item?.uploaded_at,
+        companyTimeZone
+      );
+      return capturedKey && capturedKey >= reportsDateFrom && capturedKey <= reportsDateTo;
+    });
+  })();
+
+  const reportsReceiptSummaryForPreview = (() => {
+    const byProject = new Map();
+    let total = 0;
+    for (const item of reportsReceiptRowsForPreview) {
+      const amount =
+        receiptMoneyNumber(item?.receiptTotal ?? item?.receipt_total ?? item?.total_amount ?? item?.amount) ?? 0;
+      total += amount;
+      const project = mediaItemProjectName(item) || "Unassigned";
+      if (!byProject.has(project)) byProject.set(project, { project, count: 0, total: 0 });
+      const row = byProject.get(project);
+      row.count += 1;
+      row.total += amount;
+    }
+    return {
+      count: reportsReceiptRowsForPreview.length,
+      total,
+      byProject: [...byProject.values()].sort((a, b) => Number(b.total || 0) - Number(a.total || 0)),
+    };
+  })();
+
+  const buildDailyTimesheetReportPreview = () => {
+    const rows = Array.isArray(reportsRowsFilteredForUi) ? reportsRowsFilteredForUi : [];
+    const issueRows = (Array.isArray(reportsScreenRows) ? reportsScreenRows : []).filter(
+      (row) => !isCompletedReportTimesheet(row)
+    );
+    const employeeRows = buildReportsGroups(rows, "employee");
+    const projectRows = buildReportsGroups(rows, "project");
+    const taskRows = buildReportsGroups(rows, "cost_center");
+    const appLink = getOperaAppShareUrl();
+    const lines = [
+      `${userCompany?.name || "OPERA.AI"} Daily Timesheet Report`,
+      `Date range: ${reportsDateRangeLabel}`,
+      `Generated: ${formatDate(new Date(), companyTimeZone)} ${formatTime(new Date(), companyTimeZone)}`,
+      `Generated by: ${employeeDisplayName || authUser?.email || "Manager/Admin"}`,
+      `App link: ${appLink}`,
+      "",
+      "Summary",
+      `- Total hours: ${formatDuration(reportsVisibleSummary.minutes)}`,
+      `- Total labour cost: ${formatMoney(reportsVisibleSummary.cost)}`,
+      `- Entries: ${reportsVisibleEntryCount}`,
+      `- Employees: ${reportsVisibleEmployeeCount}`,
+      `- Projects: ${reportsVisibleProjectCount}`,
+      "",
+      "Employee summary",
+    ];
+    if (employeeRows.length === 0) {
+      lines.push("- No completed timesheets in this range.");
+    } else {
+      employeeRows.forEach((row) => {
+        lines.push(`- ${row.label}: ${formatDuration(row.minutes)} / ${formatMoney(row.cost)} / ${row.rows.length} entries`);
+      });
+    }
+    lines.push("", "Project breakdown");
+    if (projectRows.length === 0) {
+      lines.push("- No project labour in this range.");
+    } else {
+      projectRows.forEach((row) => {
+        lines.push(`- ${row.label}: ${formatDuration(row.minutes)} / ${formatMoney(row.cost)}`);
+      });
+    }
+    lines.push("", "Task breakdown");
+    if (taskRows.length === 0) {
+      lines.push("- No task/cost-centre labour in this range.");
+    } else {
+      taskRows.forEach((row) => {
+        lines.push(`- ${row.label}: ${formatDuration(row.minutes)} / ${formatMoney(row.cost)}`);
+      });
+    }
+    lines.push("", "Missing clock-out / issues");
+    if (issueRows.length === 0) {
+      lines.push("- No missing clock-out issues found in this range.");
+    } else {
+      issueRows.forEach((row) => {
+        const employee =
+          resolveTimesheetEmployeeTitle(row, {
+            profileFullName,
+            authUser,
+            teamProfileFullNameByUserId,
+          }) || "Employee";
+        const clockIn = row?.clockIn ? `${formatDate(row.clockIn, companyTimeZone)} ${formatTime(row.clockIn, companyTimeZone)}` : "No clock in";
+        lines.push(`- ${employee}: ${row?.project || "Unassigned"} / ${row?.costCenter || row?.cost_centre || "No task"} / In ${clockIn}`);
+      });
+    }
+    lines.push("", "Receipt summary");
+    if (reportsReceiptSummaryForPreview.count === 0) {
+      lines.push("- No receipt metadata loaded for this range.");
+    } else {
+      lines.push(`- Receipts: ${reportsReceiptSummaryForPreview.count}`);
+      lines.push(`- Receipt total: ${formatMoney(reportsReceiptSummaryForPreview.total)}`);
+      reportsReceiptSummaryForPreview.byProject.slice(0, 8).forEach((row) => {
+        lines.push(`- ${row.project}: ${row.count} receipts / ${formatMoney(row.total)}`);
+      });
+    }
+    lines.push(
+      "",
+      "Email delivery status",
+      "- Preview only. No real email was sent.",
+      "- Backend Gmail route controls provider configuration and real-send approval.",
+      "- Configure Gmail provider env and Manager/Admin send consent before enabling scheduled delivery.",
+      "- Gmail login uses identity only; Gmail send scope is not requested by the frontend."
+    );
+    return lines.join("\n");
+  };
+
+  const handleGenerateDailyReportPreview = () => {
+    if (!isAdmin) return;
+    const text = buildDailyTimesheetReportPreview();
+    setDailyReportPreviewText(text);
+    setDailyReportPreviewStatus("Preview generated. No email sent.");
+    setDailyReportPreviewOpen(true);
+  };
+
+  const handleCopyDailyReportPreview = async () => {
+    if (!dailyReportPreviewText) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(dailyReportPreviewText);
+        setDailyReportPreviewStatus("Preview copied. No email sent.");
+        return;
+      }
+      setDailyReportPreviewStatus("Copy is not available in this browser.");
+    } catch (err) {
+      setDailyReportPreviewStatus(`Copy failed: ${getErrorMessage(err)}`);
+    }
+  };
+
+  const callDailyEmailReport = async ({ send = false } = {}) => {
+    if (!isAdmin || !userCompany?.id) return;
+    setDailyEmailLoading(true);
+    setDailyEmailStatus("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Login session is not ready.");
+      const reportDate = reportsDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+      const response = await fetch("/api/send-daily-timesheet-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          channel: "email",
+          company_id: userCompany.id,
+          report_date: reportDate,
+          recipient_email: dailyEmailRecipient,
+          send,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.ok === false) {
+        throw new Error(json?.error || "Email report request failed.");
+      }
+      const config = json?.config || {};
+      setDailyEmailConfig({
+        configured: Boolean(json?.configured ?? config.configured),
+        sendEnabled: Boolean(json?.sendEnabled ?? config.sendEnabled),
+        senderConfigured: Boolean(config.senderConfigured),
+      });
+      setDailyEmailSubject(json?.subject || "");
+      setDailyEmailPreviewText(json?.text || "");
+      if (json?.sent) {
+        setDailyEmailStatus("Email test sent.");
+      } else if (json?.warning) {
+        setDailyEmailStatus(json.warning);
+      } else {
+        setDailyEmailStatus("Email preview generated. No email sent.");
+      }
+    } catch (err) {
+      setDailyEmailStatus(getErrorMessage(err));
+    } finally {
+      setDailyEmailLoading(false);
+    }
+  };
+
+  const callWhatsAppDailyReport = async ({ send = false } = {}) => {
+    if (!isAdmin || !userCompany?.id) return;
+    setWhatsappReportLoading(true);
+    setWhatsappReportStatus("");
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Login session is not ready.");
+      const reportDate = reportsDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+      const response = await fetch("/api/send-daily-timesheet-report", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          channel: "whatsapp",
+          company_id: userCompany.id,
+          report_date: reportDate,
+          recipient_phone: whatsappReportPhone,
+          send,
+        }),
+      });
+      const json = await response.json().catch(() => ({}));
+      if (!response.ok || json?.ok === false) {
+        throw new Error(json?.error || "WhatsApp report request failed.");
+      }
+      const config = json?.config || {};
+      setWhatsappReportConfig({
+        configured: Boolean(json?.configured ?? config.configured),
+        sendEnabled: Boolean(json?.sendEnabled ?? config.sendEnabled),
+        templateName: config.templateName || "daily_timesheet_report",
+        templateLanguage: config.templateLanguage || "en",
+      });
+      setWhatsappReportPreviewText(json?.message || "");
+      if (json?.sent) {
+        setWhatsappReportStatus("WhatsApp test sent.");
+      } else if (json?.warning) {
+        setWhatsappReportStatus(json.warning);
+      } else {
+        setWhatsappReportStatus("WhatsApp preview generated. No message sent.");
+      }
+    } catch (err) {
+      setWhatsappReportStatus(getErrorMessage(err));
+    } finally {
+      setWhatsappReportLoading(false);
+    }
+  };
+
+  const handleCopyWhatsAppPreview = async () => {
+    if (!whatsappReportPreviewText) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(whatsappReportPreviewText);
+        setWhatsappReportStatus("WhatsApp preview copied. No message sent.");
+        return;
+      }
+      setWhatsappReportStatus("Copy is not available in this browser.");
+    } catch (err) {
+      setWhatsappReportStatus(`Copy failed: ${getErrorMessage(err)}`);
+    }
+  };
+
   const reportsCurrentTitle = reportsSafeDrillStack.length
     ? reportsSafeDrillStack.map((step) => step.label).join(" / ")
     : "All reports";
@@ -15730,7 +17726,7 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const menuUserName = (profileFullName || authUser?.email || "").trim() || "User";
-  const canOpenProjectsFromMenu = isAdmin || companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation;
+  const canOpenProjectsFromMenu = isAdmin || companyAssignAllProjectsToAllEmployees || canCreateProjectTaskFromClock;
   const menuSections = [
     {
       title: "Work",
@@ -15779,6 +17775,13 @@ const handlePhotoQuickUpload = async (event) => {
               onClick: () => openMenuTab("team"),
             }
           : null,
+        {
+          label: "Chat",
+          subtitle: "Team messages",
+          icon: "Ch",
+          color: "navy",
+          onClick: () => openMenuTab("chat"),
+        },
         {
           label: "Photos",
           subtitle: "Field media",
@@ -15897,6 +17900,87 @@ const handlePhotoQuickUpload = async (event) => {
             </div>
           ) : null}
 
+          {clockCreateDraft.open ? (
+            <div className="fixed inset-0 z-[86] flex items-end justify-center bg-[#061426]/45 p-3 backdrop-blur-[2px]" role="dialog" aria-modal="true">
+              <form
+                onSubmit={(event) => void submitClockCreateProjectTask(event)}
+                className="w-full max-w-sm rounded-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_16px_40px_rgba(6,20,38,0.18)]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[12px] font-black uppercase tracking-[0.04em] text-[#C9A227]">
+                      Clock setup
+                    </p>
+                    <h3 className="mt-1 text-[22px] font-black leading-tight text-[#061426]">
+                      {clockCreateDraft.itemType === "task" ? "Add task" : "Add project"}
+                    </h3>
+                    {clockCreateDraft.itemType === "task" ? (
+                      <p className="mt-1 text-[13px] font-semibold text-[#64748B]">
+                        {clockSelectedProject?.name || "Selected project"}
+                      </p>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={clockCreateSaving}
+                    onClick={() => {
+                      setClockCreateDraft({ open: false, itemType: "project", name: "" });
+                      setClockCreateError("");
+                    }}
+                    className="grid h-9 w-9 place-items-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426] disabled:opacity-50"
+                    aria-label="Close"
+                  >
+                    x
+                  </button>
+                </div>
+
+                <label className="mt-4 block space-y-2">
+                  <span className="text-[12px] font-black uppercase tracking-[0.04em] text-[#475569]">
+                    {clockCreateDraft.itemType === "task" ? "Task name" : "Project name"}
+                  </span>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={clockCreateDraft.name}
+                    onChange={(event) => {
+                      setClockCreateDraft((prev) => ({ ...prev, name: event.target.value }));
+                      setClockCreateError("");
+                    }}
+                    placeholder={clockCreateDraft.itemType === "task" ? "Enter task name" : "Enter project name"}
+                    className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#C9A227] focus:ring-2 focus:ring-[#C9A227]/25"
+                  />
+                </label>
+
+                {clockCreateError ? (
+                  <p className="mt-3 rounded-[14px] border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+                    {clockCreateError}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={clockCreateSaving}
+                    onClick={() => {
+                      setClockCreateDraft({ open: false, itemType: "project", name: "" });
+                      setClockCreateError("");
+                    }}
+                    className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426] disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={clockCreateSaving || !clockCreateDraft.name.trim()}
+                    className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white shadow-[0_10px_22px_rgba(6,20,38,0.18)] disabled:bg-[#CBD5E1]"
+                  >
+                    {clockCreateSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
+
           {autoClockOutNotice ? (
             <div className="rounded-[22px] border border-amber-200 bg-amber-50 px-4 py-3 text-[14px] font-bold leading-snug text-amber-900 shadow-sm">
               <div className="flex items-start justify-between gap-3">
@@ -16002,7 +18086,7 @@ const handlePhotoQuickUpload = async (event) => {
                     disabled={projectsLoading}
                     onChange={(event) => {
                       if (event.target.value === "__add_project__") {
-                        openProjectManagementFromClock("project");
+                        void createClockProjectTask("project");
                         return;
                       }
                       setClockSelectedScheduledTaskId("");
@@ -16032,7 +18116,7 @@ const handlePhotoQuickUpload = async (event) => {
                     }
                     onChange={(event) => {
                       if (event.target.value === "__add_cost_centre__") {
-                        openProjectManagementFromClock("costCentre");
+                        void createClockProjectTask("task");
                         return;
                       }
                       setClockSelectedScheduledTaskId("");
@@ -16114,7 +18198,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })} aria-hidden="true">
                         {renderClockActionIcon("photo")}
                       </span>
-                      <span className="block leading-tight">Camera</span>
+                      <span className="block leading-tight">Photo</span>
                     </button>
                     <button
                       type="button"
@@ -16176,10 +18260,10 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
                         {renderClockActionIcon("break")}
                       </span>
-                      <span className="block leading-tight">Break</span>
+                      <span className="block leading-tight">Start Break</span>
                     </button>
                   </div>
-                  {renderClockListsDropdown()}
+                  {renderClockPendingListButton()}
 
                   {photoCameraError ? (
                     <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] font-semibold text-amber-900 leading-snug">
@@ -16429,7 +18513,7 @@ const handlePhotoQuickUpload = async (event) => {
                         value={projectId}
                         onChange={(e) => {
                           if (e.target.value === "__add_project__") {
-                            openProjectManagementFromClock("project");
+                            void createClockProjectTask("project");
                             return;
                           }
                           handleProjectChange(e.target.value);
@@ -16451,7 +18535,7 @@ const handlePhotoQuickUpload = async (event) => {
                         disabled={!clockSelectedProject}
                         onChange={(e) => {
                           if (e.target.value === "__add_cost_centre__") {
-                            openProjectManagementFromClock("costCentre");
+                            void createClockProjectTask("task");
                             return;
                           }
                           setCostCenter(e.target.value);
@@ -16526,7 +18610,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <span className={clockActionGlyphClass({ active: photoCameraOpen && photoCameraMode === "photo", dark: true, compact: true })} aria-hidden="true">
                             {renderClockActionIcon("photo")}
                           </span>
-                          <span className="block leading-tight">Camera</span>
+                          <span className="block leading-tight">Photo</span>
                         </button>
                         <button
                           type="button"
@@ -16585,11 +18669,11 @@ const handlePhotoQuickUpload = async (event) => {
                             {renderClockActionIcon("break")}
                           </span>
                           <span className="block leading-tight">
-                            {!visibleCurrentShift.breakStart ? "Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Done"}
+                            {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Done"}
                           </span>
                         </button>
                       </div>
-                      {renderClockListsDropdown()}
+                      {renderClockPendingListButton()}
 
                       <input
                         ref={photoFallbackCameraInputRef}
@@ -17025,6 +19109,71 @@ const handlePhotoQuickUpload = async (event) => {
                     {timesheetShareMessage}
                   </p>
                 ) : null}
+                {isAdmin && !timesheetsLoading && visibleTimesheetRecords.length > 0 ? (
+                  <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-4 shadow-[0_8px_22px_rgba(6,20,38,0.06)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[15px] font-black leading-tight text-[#061426]">Timesheet sanity check</p>
+                        <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                          Read-only review for payroll issues.
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-black ${
+                          timesheetSanityChecks.length === 0
+                            ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+                            : "border-[#FDE68A] bg-[#FFF7E6] text-[#9A6B12]"
+                        }`}
+                      >
+                        {timesheetSanityChecks.length === 0 ? "All clear" : `${timesheetSanityChecks.length} to review`}
+                      </span>
+                    </div>
+                    {timesheetSanityChecks.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {visibleTimesheetSanityIssues.map((issue) => (
+                          <div
+                            key={issue.id}
+                            className={`rounded-[14px] border px-3 py-2 ${
+                              issue.severity === "danger"
+                                ? "border-[#FECACA] bg-[#FEF2F2]"
+                                : issue.severity === "warning"
+                                  ? "border-[#FDE68A] bg-[#FFF7E6]"
+                                  : "border-[#BFDBFE] bg-[#EFF6FF]"
+                            }`}
+                          >
+                            <p
+                              className={`text-[13px] font-black leading-tight ${
+                                issue.severity === "danger"
+                                  ? "text-[#DC2626]"
+                                  : issue.severity === "warning"
+                                    ? "text-[#9A6B12]"
+                                    : "text-[#163B5C]"
+                              }`}
+                            >
+                              {issue.title}
+                            </p>
+                            <p className="mt-1 text-[12px] font-semibold leading-snug text-[#475569]">{issue.detail}</p>
+                          </div>
+                        ))}
+                        {timesheetSanityChecks.length > 5 ? (
+                          <button
+                            type="button"
+                            className="h-9 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[12px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                            onClick={() => setTimesheetSanityExpanded((value) => !value)}
+                          >
+                            {timesheetSanityExpanded
+                              ? "Show fewer"
+                              : `Show all ${timesheetSanityChecks.length} issues`}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="mt-3 rounded-[14px] border border-[#BBF7D0] bg-[#ECFDF5] px-3 py-2 text-[12px] font-bold text-[#15803D]">
+                        No missing clock-outs, long shifts, overlaps, or missing assignments found in this filtered range.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
                 <div className="space-y-3">
                   {!timesheetsLoading && visibleTimesheetRecords.length === 0 && (
                     <div className="rounded-[20px] border border-[#E2E8F0] bg-white px-6 py-10 text-center shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
@@ -17243,7 +19392,17 @@ const handlePhotoQuickUpload = async (event) => {
                         </>
                       ),
                     })}
-                    {renderRoyalNavyFilterSelect({
+                    {isEmployeeRole ? (
+                      <div className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                        Employee
+                        <div className="flex h-12 items-center gap-3 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[14px] font-black normal-case tracking-normal text-[#061426]">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[#061426]">
+                            {renderTimesheetUiIcon("user", "h-4 w-4")}
+                          </span>
+                          <span className="truncate">My media</span>
+                        </div>
+                      </div>
+                    ) : renderRoyalNavyFilterSelect({
                       label: "Employee",
                       icon: "user",
                       value: mediaFilterEmployeeId,
@@ -17672,7 +19831,17 @@ const handlePhotoQuickUpload = async (event) => {
                         </>
                       ),
                     })}
-                    {renderRoyalNavyFilterSelect({
+                    {isEmployeeRole ? (
+                      <div className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                        Employee
+                        <div className="flex h-12 items-center gap-3 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[14px] font-black normal-case tracking-normal text-[#061426]">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[#061426]">
+                            {renderTimesheetUiIcon("user", "h-4 w-4")}
+                          </span>
+                          <span className="truncate">My media</span>
+                        </div>
+                      </div>
+                    ) : renderRoyalNavyFilterSelect({
                       label: "Employee",
                       icon: "user",
                       value: mediaFilterEmployeeId,
@@ -17714,7 +19883,11 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="space-y-3">
                   {visibleReceiptFolders.map((folder) => {
                     const folderReceipts = normalizeArray(filteredProjectReceipts[folder]);
-                    const folderTotal = folderReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0);
+                    const folderTotal = folderReceipts.reduce(
+                      (sum, receipt) =>
+                        sum + (receiptMoneyNumber(receipt.receiptTotal ?? receipt.receipt_total ?? receipt.total_amount ?? receipt.amount) ?? 0),
+                      0
+                    );
                     const projectLabel = receiptProjectOptions.find((project) => project.folder === folder)?.label || folder;
                     return (
                       <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
@@ -17735,6 +19908,12 @@ const handlePhotoQuickUpload = async (event) => {
                             const receiptDateTime = receipt.capturedAt || receipt.captured_at || receipt.receiptUploadedAt || receipt.receipt_uploaded_at || receipt.timestamp;
                             const receiptStatus = receipt.status || receipt.receiptStatus || receipt.receipt_status || "";
                             const receiptProject = mediaItemProjectName(receipt) || projectLabel;
+                            const receiptDisplayTotal =
+                              receiptMoneyNumber(receipt.receiptTotal ?? receipt.receipt_total ?? receipt.total_amount ?? receipt.amount) ?? 0;
+                            const receiptDisplaySupplier =
+                              receipt.receiptSupplier || receipt.receipt_supplier || receipt.supplier || receipt.category || "Receipt";
+                            const receiptDisplayDate = receipt.receiptDate || receipt.receipt_date || "";
+                            const receiptDisplayHst = receiptMoneyNumber(receipt.receiptHst ?? receipt.receipt_hst);
                             return (
                               <div key={mediaItemId(receipt, index)} className="rounded-[16px] border border-slate-200 bg-slate-50 p-2.5">
                                 <div className="flex gap-3">
@@ -17756,12 +19935,18 @@ const handlePhotoQuickUpload = async (event) => {
                                   <div className="min-w-0 flex-1 text-[12px] font-semibold text-slate-500">
                                     <div className="flex items-start justify-between gap-2">
                                       <div className="min-w-0">
-                                        <p className="truncate text-[14px] font-black text-slate-950">{receipt.supplier || receipt.category || "Receipt"}</p>
+                                        <p className="truncate text-[14px] font-black text-slate-950">{receiptDisplaySupplier}</p>
                                         <p className="mt-0.5 truncate">{receiptProject}{receiptTask ? ` / ${receiptTask}` : ""}</p>
                                       </div>
-                                      <p className="shrink-0 text-[14px] font-black text-slate-950">{formatMoney(receipt.amount)}</p>
+                                      <p className="shrink-0 text-[14px] font-black text-slate-950">{formatMoney(receiptDisplayTotal)}</p>
                                     </div>
                                     <p className="mt-1 truncate">Uploaded by {receiptEmployee}</p>
+                                    {receiptDisplayDate ? (
+                                      <p className="mt-0.5 truncate">Receipt date {formatDate(receiptDisplayDate, companyTimeZone)}</p>
+                                    ) : null}
+                                    {receiptDisplayHst != null ? (
+                                      <p className="mt-0.5 truncate">HST {formatMoney(receiptDisplayHst)}</p>
+                                    ) : null}
                                     {receiptDateTime ? (
                                       <p className="mt-0.5 truncate">{formatDate(receiptDateTime, companyTimeZone)} - {formatTime(receiptDateTime, companyTimeZone)}</p>
                                     ) : null}
@@ -17784,7 +19969,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         <button
                                           type="button"
                                           className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[10px] font-black text-amber-700 disabled:opacity-50"
-                                          onClick={() => void runFieldAiForMedia(receipt, "receipt")}
+                                          onClick={() => void startReceiptOcrReview(receipt)}
                                           disabled={Boolean(fieldAiWorkingKey)}
                                         >
                                           AI read
@@ -18218,6 +20403,15 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
               </CardContent>
             </Card>
+          )}
+
+          {activeTab === "chat" && (
+            <ChatScreen
+              active={activeTab === "chat"}
+              authUser={authUser}
+              userCompany={userCompany}
+              companyTimeZone={companyTimeZone}
+            />
           )}
 
           {activeTab === "activities" && (
@@ -19519,6 +21713,157 @@ const handlePhotoQuickUpload = async (event) => {
                   </span>
                 </button>
 
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[16px] font-black leading-tight text-[#061426]">Daily timesheet email</p>
+                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                        Backend Gmail preview/test route for Manager/Admin reports. Real sends require approved env setup.
+                      </p>
+                    </div>
+                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
+                      dailyEmailConfig.configured
+                        ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+                        : "border-[#FFF7E6] bg-[#FFF7E6] text-[#D97706]"
+                    }`}>
+                      {dailyEmailConfig.configured ? "Configured" : "Draft"}
+                    </span>
+                  </div>
+                  <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
+                    Manager/Admin email
+                    <input
+                      type="email"
+                      className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                      value={dailyEmailRecipient}
+                      onChange={(event) => setDailyEmailRecipient(event.target.value)}
+                      placeholder="manager@example.com"
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      className="h-11 rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                      onClick={() => void callDailyEmailReport({ send: false })}
+                      disabled={dailyEmailLoading}
+                    >
+                      {dailyEmailLoading ? "Generating..." : "Preview email report"}
+                    </button>
+                    <button
+                      type="button"
+                      className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
+                      onClick={() => void callDailyEmailReport({ send: true })}
+                      disabled={
+                        dailyEmailLoading ||
+                        !dailyEmailConfig.configured ||
+                        !dailyEmailConfig.sendEnabled ||
+                        !String(dailyEmailRecipient || "").trim()
+                      }
+                    >
+                      {dailyEmailConfig.configured && dailyEmailConfig.sendEnabled ? "Send Email Test" : "Send test pending setup"}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 text-[13px] font-black text-[#061426]"
+                    onClick={handleGenerateDailyReportPreview}
+                  >
+                    Open local report text preview
+                  </button>
+                  {dailyEmailPreviewText ? (
+                    <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                      <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Email preview</p>
+                      {dailyEmailSubject ? (
+                        <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{dailyEmailSubject}</p>
+                      ) : null}
+                      <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
+                        {dailyEmailPreviewText}
+                      </pre>
+                    </div>
+                  ) : null}
+                  <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
+                    Gmail: {dailyEmailConfig.configured ? "configured" : "not configured"}. Scheduler: disabled until DAILY_REPORT_CRON_ENABLED=true and approval is complete.
+                  </div>
+                  {dailyReportPreviewStatus ? (
+                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyReportPreviewStatus}</p>
+                  ) : null}
+                  {dailyEmailStatus ? (
+                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyEmailStatus}</p>
+                  ) : null}
+                </div>
+
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[16px] font-black leading-tight text-[#061426]">WhatsApp Business reports</p>
+                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                        Uses WhatsApp Cloud API templates from the backend. Preview first; no personal WhatsApp Web automation.
+                      </p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-[#EFF6FF] bg-[#EFF6FF] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#2563EB]">
+                      Preview
+                    </span>
+                  </div>
+                  <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
+                    Manager/Admin phone
+                    <input
+                      type="tel"
+                      className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                      value={whatsappReportPhone}
+                      onChange={(event) => setWhatsappReportPhone(event.target.value)}
+                      placeholder="+1 613 555 0100"
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      className="h-11 rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33] disabled:opacity-60"
+                      onClick={() => void callWhatsAppDailyReport({ send: false })}
+                      disabled={whatsappReportLoading}
+                    >
+                      {whatsappReportLoading ? "Generating..." : "Preview WhatsApp report"}
+                    </button>
+                    <button
+                      type="button"
+                      className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
+                      onClick={() => void callWhatsAppDailyReport({ send: true })}
+                      disabled={
+                        whatsappReportLoading ||
+                        !whatsappReportConfig.configured ||
+                        !whatsappReportConfig.sendEnabled ||
+                        !String(whatsappReportPhone || "").trim()
+                      }
+                    >
+                      {whatsappReportConfig.configured && whatsappReportConfig.sendEnabled
+                        ? "Send WhatsApp Test"
+                        : "Send test pending setup"}
+                    </button>
+                  </div>
+                  {whatsappReportPreviewText ? (
+                    <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Message preview</p>
+                        <button
+                          type="button"
+                          className="rounded-full border border-[#CBD5E1] bg-white px-3 py-1 text-[11px] font-black text-[#061426]"
+                          onClick={() => void handleCopyWhatsAppPreview()}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
+                        {whatsappReportPreviewText}
+                      </pre>
+                    </div>
+                  ) : null}
+                  <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
+                    Template: {whatsappReportConfig.templateName || "daily_timesheet_report"} / {whatsappReportConfig.templateLanguage || "en"}.
+                    {whatsappReportConfig.configured ? " WhatsApp env detected." : " WhatsApp Business is not configured yet."}
+                  </div>
+                  {whatsappReportStatus ? (
+                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{whatsappReportStatus}</p>
+                  ) : null}
+                </div>
+
                 {reportsContextCards.length ? (
                   <div className="flex flex-wrap gap-2 px-1">
                     {reportsContextCards.map((card) => (
@@ -19708,6 +22053,49 @@ const handlePhotoQuickUpload = async (event) => {
                   onCancel={() => setReportsDatePickerOpen(false)}
                   onApply={applyReportsDatePicker}
                 />
+                {dailyReportPreviewOpen ? (
+                  <div className="fixed inset-0 z-[78] flex items-end justify-center bg-[#061426]/45 p-3 sm:items-center" role="dialog" aria-modal="true">
+                    <div className="w-full max-w-lg overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-white shadow-[0_24px_60px_rgba(6,20,38,0.22)]">
+                      <div className="flex items-start justify-between gap-3 border-b border-[#E2E8F0] px-4 py-3.5">
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#C9A227]">Daily report</p>
+                          <h3 className="mt-1 text-[22px] font-black leading-tight text-[#061426]">Email preview</h3>
+                          <p className="mt-1 text-[12px] font-semibold text-[#64748B]">No email has been sent.</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426]"
+                          onClick={() => setDailyReportPreviewOpen(false)}
+                          aria-label="Close report preview"
+                        >
+                          X
+                        </button>
+                      </div>
+                      <div className="max-h-[58dvh] overflow-y-auto p-4">
+                        <pre className="whitespace-pre-wrap rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 text-[12px] font-semibold leading-relaxed text-[#061426]">
+                          {dailyReportPreviewText || "Generate a preview to review report content."}
+                        </pre>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 border-t border-[#E2E8F0] p-4">
+                        <button
+                          type="button"
+                          className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426]"
+                          onClick={() => setDailyReportPreviewOpen(false)}
+                        >
+                          Close
+                        </button>
+                        <button
+                          type="button"
+                          className="h-11 rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white active:bg-[#0B1F33]"
+                          onClick={() => void handleCopyDailyReportPreview()}
+                          disabled={!dailyReportPreviewText}
+                        >
+                          Copy preview
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           )}
@@ -22182,7 +24570,7 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {activeTab === "projects" && (isAdmin || companyAssignAllProjectsToAllEmployees || companyAllowEmployeeProjectTaskCreation) && (
+          {activeTab === "projects" && (isAdmin || companyAssignAllProjectsToAllEmployees || canCreateProjectTaskFromClock) && (
             <Card className="rounded-[28px] overflow-hidden">
               <CardContent className="p-3.5 sm:p-5 space-y-3">
                 <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
@@ -23771,20 +26159,12 @@ const handlePhotoQuickUpload = async (event) => {
                           </span>
                         </span>
                       </label>
-                      <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[14px] font-bold text-slate-900">
-                        <input
-                          type="checkbox"
-                          className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
-                          checked={settingsAllowEmployeeProjectTaskDraft}
-                          onChange={(e) => setSettingsAllowEmployeeProjectTaskDraft(e.target.checked)}
-                        />
-                        <span>
-                          <span className="block">Allow employees to add projects and tasks</span>
-                          <span className="block pt-0.5 text-[12px] font-semibold text-slate-500">
-                            Default OFF. When ON, employees can add project/task names from Clock.
-                          </span>
+                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-[14px] font-bold text-emerald-950">
+                        <span className="block">Employee project/task creation</span>
+                        <span className="block pt-0.5 text-[12px] font-semibold text-emerald-700">
+                          Active employees can add project/task names from Clock. Assignment rules still control who sees each project and task.
                         </span>
-                      </label>
+                      </div>
                       {settingsTzMessage && (
                         <div
                           className={`rounded-2xl border p-3 text-xs ${
@@ -23829,7 +26209,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Employee adds</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">
-                          {companyAllowEmployeeProjectTaskCreation ? "Allowed" : "Off"}
+                          {canCreateProjectTaskFromClock ? "Allowed from Clock" : "Off"}
                         </span>
                       </div>
                       {isAdmin ? (
@@ -24106,10 +26486,10 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="text-[22px] font-black text-slate-950 leading-tight">
-                      {clockListModal === "material" ? "Material List" : "Task List"}
+                      Pending list
                     </p>
                     <p className="mt-1 truncate text-[14px] font-bold text-slate-600">
-                      {[clockListContext.projectName, clockListContext.costCenter].filter(Boolean).join(" - ")}
+                      {clockListContext.projectName || "Selected project"}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
@@ -24173,79 +26553,20 @@ const handlePhotoQuickUpload = async (event) => {
                       className="min-w-0 flex-1 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[17px] font-bold text-slate-950 outline-none focus:border-slate-500"
                       value={clockListDraft}
                       onChange={(event) => setClockListDraft(event.target.value)}
-                      placeholder={clockListModal === "material" ? "Add material" : "Add task"}
+                      placeholder="Add pending item"
                     />
                     <button
                       type="submit"
-                      className="shrink-0 rounded-2xl bg-[#0B1F33] px-5 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
+                      className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#0B1F33] text-[24px] font-black leading-none text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)] disabled:opacity-50"
                       disabled={
                         clockListModal === "task"
                           ? !String(clockListDraft || "").trim() && !clockListImageDraft?.dataUrl
                           : !String(clockListDraft || "").trim()
                       }
                     >
-                      Add
+                      +
                     </button>
                   </div>
-                  {clockListModal === "task" ? (
-                    <div className="space-y-2">
-                      <button
-                        type="button"
-                        className={`w-full rounded-2xl px-3 py-3 text-[15px] font-black transition ${
-                          listCameraOpen && listCameraTarget === "modal"
-                            ? "bg-[#0B1F33] text-white shadow-[0_12px_24px_rgba(15,23,42,0.18)]"
-                            : "border border-slate-200 bg-white text-slate-800 active:bg-slate-100"
-                        }`}
-                        onClick={() => {
-                          if (listCameraOpen && listCameraTarget === "modal") {
-                            stopListTaskCamera();
-                          } else {
-                            void startListTaskCamera("modal");
-                          }
-                        }}
-                        aria-pressed={listCameraOpen && listCameraTarget === "modal"}
-                      >
-                        {listCameraOpen && listCameraTarget === "modal" ? "Camera Off" : "Camera"}
-                      </button>
-                      {listCameraOpen && listCameraTarget === "modal" ? (
-                        <div className="rounded-[22px] border border-slate-200 bg-white p-2 shadow-sm space-y-2">
-                          <video
-                            ref={listCameraVideoRef}
-                            className="aspect-[4/3] w-full rounded-[18px] bg-[#0B1F33] object-cover"
-                            playsInline
-                            muted
-                          />
-                          <canvas ref={listCameraCanvasRef} className="hidden" />
-                          {listFlashSupported ? (
-                            <button
-                              type="button"
-                              className={`w-full rounded-2xl border px-4 py-3 text-[15px] font-black transition ${
-                                listFlashOn
-                                  ? "border-amber-400 bg-amber-400 text-slate-950 shadow-[0_10px_18px_rgba(245,158,11,0.22)]"
-                                  : "border-slate-300 bg-white text-slate-800"
-                              }`}
-                              onClick={() => void toggleListFlash()}
-                              aria-pressed={listFlashOn}
-                            >
-                              {listFlashOn ? "Flash Off" : "Flash On"}
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="w-full rounded-2xl bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.16)]"
-                            onClick={() => void captureListTaskPhoto()}
-                          >
-                            Capture Photo
-                          </button>
-                        </div>
-                      ) : null}
-                      {listCameraError && listCameraTarget === "modal" ? (
-                        <p className="rounded-2xl bg-red-50 px-3 py-2 text-[13px] font-black text-red-700">
-                          {listCameraError}
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </form>
                 ) : null}
               </div>
@@ -24271,7 +26592,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <input
                           type="checkbox"
                           className="h-6 w-6 shrink-0 rounded border-slate-300 accent-emerald-600"
-                          onChange={() => completeClockProjectListItem(clockListModal, item.id)}
+                          onChange={() => completeClockProjectListItem(clockListModal, item.id, item.sourceKey)}
                           aria-label={`Complete ${itemTitle}`}
                         />
                       )}
@@ -24387,91 +26708,304 @@ const handlePhotoQuickUpload = async (event) => {
           </div>
         )}
 
-        {receiptEntryStep && (
-          <div className="fixed inset-0 z-[75] bg-[#0B1F33]/50 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
-            <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[19px] font-black text-slate-900">Add receipt</p>
-                  <p className="text-[14px] font-semibold text-slate-500">
-                    {receiptEntryStep === "amount"
-                      ? materialPaymentPendingRef.current
-                        ? "Confirm the receipt amount."
-                        : "Enter the receipt amount."
-                      : materialPaymentPendingRef.current
-                        ? "Confirm supplier/store or material."
-                        : "Enter material or category."}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="h-10 w-10 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
-                  onClick={cancelReceiptDetailsForm}
-                  disabled={receiptSaving}
-                  aria-label="Cancel receipt"
-                >
-                  X
-                </button>
-              </div>
-
-              {receiptEntryStep === "amount" ? (
-                <form onSubmit={submitReceiptAmount} className="space-y-3">
-                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
-                    Amount
-                    <input
-                      ref={receiptAmountInputRef}
-                      type="number"
-                      inputMode="decimal"
-                      step="0.01"
-                      min="0"
-                      autoFocus
-                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[22px] font-black text-slate-900"
-                      value={receiptAmountDraft}
-                      onChange={(event) => setReceiptAmountDraft(event.target.value)}
-                      placeholder="0.00"
-                    />
-                  </label>
-                  <button type="submit" className="w-full rounded-2xl bg-[#061426] py-3 text-[16px] font-black text-white">
-                    OK
+        {receiptOcrReview && (() => {
+          const reviewProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter((p) => p?.id != null);
+          const reviewProject =
+            reviewProjectOptions.find((p) => String(p.id) === String(receiptOcrReview.projectId)) ||
+            effectiveProjects.find((p) => String(p.id) === String(receiptOcrReview.projectId)) ||
+            null;
+          const reviewCentres = receiptOcrReview.projectId ? costCentresForEditProject(receiptOcrReview.projectId) : [];
+          const receiptReviewModeLabel = receiptOcrReview.loading
+            ? "Reading receipt"
+            : receiptOcrReview.source === "ocr"
+              ? "OCR ready"
+              : "Manual review";
+          const receiptReviewModeClass = receiptOcrReview.source === "ocr"
+            ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+            : "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
+          const canRetryReceiptOcr =
+            !receiptOcrReview.loading &&
+            !receiptReviewSaving &&
+            receiptOcrReview.mediaId &&
+            receiptOcrReview.configured !== false &&
+            receiptOcrReview.code !== "provider_not_configured";
+          return (
+            <div className="fixed inset-0 z-[76] bg-[#0B1F33]/55 p-4 flex items-center justify-center" role="dialog" aria-modal="true">
+              <form
+                onSubmit={(event) => void saveReceiptOcrReview(event)}
+                className="flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl"
+              >
+                <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4">
+                  <div className="min-w-0">
+                    <p className="text-[20px] font-black leading-tight text-[#061426]">Review receipt</p>
+                    <p className="mt-0.5 text-[13px] font-semibold text-slate-500">
+                      {receiptOcrReview.source === "ocr"
+                        ? "Confirm OCR details before saving."
+                        : "Enter receipt details before saving."}
+                    </p>
+                  </div>
+                  <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${receiptReviewModeClass}`}>
+                    {receiptReviewModeLabel}
+                  </span>
+                  <button
+                    type="button"
+                    className="h-10 w-10 shrink-0 rounded-2xl bg-slate-100 text-[20px] font-black text-slate-700"
+                    onClick={() => setReceiptOcrReview(null)}
+                    disabled={receiptReviewSaving}
+                    aria-label="Close receipt review"
+                  >
+                    X
                   </button>
-                </form>
-              ) : (
-                <form onSubmit={(event) => void submitReceiptCategory(event)} className="space-y-3">
-                  <label className="block space-y-1 text-[14px] font-bold text-slate-700">
-                    {materialPaymentPendingRef.current ? "Supplier / material" : "Material / category"}
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3">
+                  {receiptOcrReview.imageUrl ? (
+                    <div className="overflow-hidden rounded-[18px] border border-slate-200 bg-slate-50">
+                      <img
+                        src={receiptOcrReview.imageUrl}
+                        alt="Receipt preview"
+                        className="max-h-52 w-full object-contain bg-white"
+                        onError={(event) => {
+                          event.currentTarget.style.display = "none";
+                        }}
+                      />
+                    </div>
+                  ) : null}
+                  {receiptOcrReview.loading ? (
+                    <div className="rounded-2xl border border-blue-100 bg-blue-50 px-3 py-2 text-[13px] font-bold text-blue-900">
+                      Reading receipt with Smart OCR...
+                    </div>
+                  ) : null}
+                  {!receiptOcrReview.loading && receiptOcrReview.configured === false ? (
+                    <div className="rounded-2xl border border-amber-200 bg-[#FFF7E6] px-3 py-2 text-[13px] font-bold text-[#D97706]">
+                      Smart OCR is not configured in this environment. The image is saved; enter the receipt details manually.
+                    </div>
+                  ) : null}
+                  {receiptOcrReview.warning ? (
+                    <div className="rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-900">
+                      {receiptOcrReview.warning}
+                    </div>
+                  ) : null}
+                  {receiptOcrReview.error ? (
+                    <div className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
+                      {receiptOcrReview.error}
+                      {canRetryReceiptOcr ? (
+                        <button
+                          type="button"
+                          className="mt-2 block rounded-xl border border-red-200 bg-white px-3 py-2 text-[12px] font-black text-red-700"
+                          onClick={retryReceiptOcrReview}
+                        >
+                          Retry OCR
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <div className="grid grid-cols-2 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <label className="col-span-2 block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Project
+                      {reviewProjectOptions.length > 0 ? (
+                        <select
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold normal-case tracking-normal text-[#061426]"
+                          value={receiptOcrReview.projectId}
+                          disabled={receiptReviewSaving}
+                          onChange={(event) => {
+                            const nextProjectId = event.target.value;
+                            const nextProject = reviewProjectOptions.find((p) => String(p.id) === String(nextProjectId));
+                            const nextCentres = nextProjectId ? costCentresForEditProject(nextProjectId) : [];
+                            updateReceiptReviewDraft({
+                              projectId: nextProjectId,
+                              projectName: nextProject?.name || "",
+                              costCentre: nextCentres.includes(receiptOcrReview.costCentre)
+                                ? receiptOcrReview.costCentre
+                                : nextCentres[0] || "",
+                            });
+                          }}
+                        >
+                          <option value="">Choose project</option>
+                          {reviewProjectOptions.map((p) => (
+                            <option key={p.id} value={String(p.id)}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold normal-case tracking-normal text-[#061426]"
+                          value={receiptOcrReview.projectName}
+                          disabled={receiptReviewSaving}
+                          onChange={(event) => updateReceiptReviewDraft({ projectName: event.target.value })}
+                          placeholder="Project"
+                        />
+                      )}
+                    </label>
+                    <label className="col-span-2 block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Task
+                      {reviewCentres.length > 0 ? (
+                        <select
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold normal-case tracking-normal text-[#061426]"
+                          value={receiptOcrReview.costCentre}
+                          disabled={receiptReviewSaving}
+                          onChange={(event) => updateReceiptReviewDraft({ costCentre: event.target.value })}
+                        >
+                          <option value="">Optional</option>
+                          {reviewCentres.map((name) => (
+                            <option key={name} value={name}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold normal-case tracking-normal text-[#061426]"
+                          value={receiptOcrReview.costCentre}
+                          disabled={receiptReviewSaving}
+                          onChange={(event) => updateReceiptReviewDraft({ costCentre: event.target.value })}
+                          placeholder="Optional task"
+                        />
+                      )}
+                    </label>
+                    {reviewProject ? (
+                      <p className="col-span-2 text-[12px] font-semibold normal-case tracking-normal text-slate-500">
+                        Defaulted to {reviewProject.name}{receiptOcrReview.costCentre ? ` / ${receiptOcrReview.costCentre}` : ""}.
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                    Supplier
                     <input
-                      ref={receiptCategoryInputRef}
                       type="text"
-                      inputMode="text"
-                      autoFocus
-                      className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-[20px] font-black text-slate-900"
-                      value={receiptCategoryDraft}
-                      onChange={(event) => setReceiptCategoryDraft(event.target.value)}
-                      placeholder={materialPaymentPendingRef.current ? "Supplier or store" : "Materials"}
+                      className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[16px] font-bold text-[#061426]"
+                      value={receiptOcrReview.supplier}
+                      disabled={receiptReviewSaving}
+                      onChange={(event) => updateReceiptReviewDraft({ supplier: event.target.value })}
+                      placeholder="Supplier or store"
                     />
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      className="rounded-2xl border border-slate-300 bg-white py-3 text-[15px] font-black text-slate-900"
-                      onClick={() => setReceiptEntryStep("amount")}
-                      disabled={receiptSaving}
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="submit"
-                      className="rounded-2xl bg-green-700 py-3 text-[15px] font-black text-white disabled:opacity-50"
-                      disabled={receiptSaving}
-                    >
-                      {receiptSaving ? "Saving..." : "Add receipt"}
-                    </button>
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Date
+                      <input
+                        type="date"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.receiptDate}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ receiptDate: event.target.value })}
+                      />
+                    </label>
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Currency
+                      <input
+                        type="text"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold uppercase text-[#061426]"
+                        value={receiptOcrReview.currency}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ currency: normalizeReceiptCurrency(event.target.value) })}
+                        maxLength={3}
+                      />
+                    </label>
                   </div>
-                </form>
-              )}
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Subtotal
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.subtotal}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ subtotal: event.target.value })}
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      HST
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.hst}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ hst: event.target.value })}
+                        placeholder="0.00"
+                      />
+                    </label>
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Total
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        step="0.01"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.total}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ total: event.target.value })}
+                        placeholder="0.00"
+                      />
+                    </label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Material category
+                      <select
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.materialCategory}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ materialCategory: event.target.value })}
+                      >
+                        {RECEIPT_MATERIAL_CATEGORIES.map((category) => (
+                          <option key={category} value={category}>
+                            {category}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                      Material type
+                      <input
+                        type="text"
+                        className="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-bold text-[#061426]"
+                        value={receiptOcrReview.materialType}
+                        disabled={receiptReviewSaving}
+                        onChange={(event) => updateReceiptReviewDraft({ materialType: event.target.value })}
+                        placeholder="Screws, primer, rental..."
+                      />
+                    </label>
+                  </div>
+                  <label className="block space-y-1 text-[13px] font-bold text-slate-700">
+                    Notes
+                    <textarea
+                      rows={2}
+                      className="w-full resize-y rounded-2xl border border-slate-300 bg-white px-3 py-2.5 text-[15px] font-semibold text-[#061426]"
+                      value={receiptOcrReview.notes}
+                      disabled={receiptReviewSaving}
+                      onChange={(event) => updateReceiptReviewDraft({ notes: event.target.value })}
+                      placeholder="Optional notes"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-4">
+                  <button
+                    type="button"
+                    className="rounded-2xl border border-slate-300 bg-white py-3 text-[15px] font-black text-[#061426]"
+                    onClick={() => setReceiptOcrReview(null)}
+                    disabled={receiptReviewSaving}
+                  >
+                    Save image only
+                  </button>
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-[#061426] py-3 text-[15px] font-black text-white disabled:opacity-50"
+                    disabled={receiptReviewSaving || receiptOcrReview.loading}
+                  >
+                    {receiptReviewSaving ? "Saving..." : "Save receipt data"}
+                  </button>
+                </div>
+              </form>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {liveToast && isAdmin && (
           <div
@@ -24816,6 +27350,7 @@ const handlePhotoQuickUpload = async (event) => {
           onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
           onSchedule={() => setActiveTab("schedule")}
           onClock={() => setActiveTab("clock")}
+          onChat={() => setActiveTab("chat")}
           onTimesheets={() => setActiveTab("timesheet")}
           onMore={() => {
             setMenuPanel("main");

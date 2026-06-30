@@ -1096,7 +1096,426 @@
 - SQL/database changes: Not run.
 - Production deployment: Not run for this launch-preparation task.
 
+## B.2 Phase 1 - Employee Project/Task Creation + Pay Rates + Smart Receipt OCR
+- Development line B.2 started from the Release B UI baseline on `develop`.
+- Added backend employee project/task creation API:
+  - Employees can create projects/tasks only when `allow_employee_project_task_creation` is true.
+  - Owner/admin/supervisor project/task creation remains allowed.
+  - Company membership, `company_id`, and role are validated server-side.
+  - Service-role inserts are used behind the API; RLS is not loosened.
+  - New project/task assignment follows `assign_all_projects_to_all_employees` and `assign_all_tasks_to_all_projects`.
+  - Owner/supervisor notifications are inserted for employee-created projects/tasks.
+- Updated Clock and Projects screen creation flows:
+  - `+ Add new project` and `+ Add new task` now call the backend API for employee-role users.
+  - Clear UI errors remain when employee project/task creation is off or save fails.
+- Added effective-date pay-rate foundation:
+  - Added `getEffectiveHourlyRate(...)` helper using `employee_pay_rates` when present.
+  - New clock-in/clock-out labour calculations use the rate effective on the shift clock-in date/time.
+  - Team screen displays the current active pay rate as of today when pay history exists.
+  - Existing `profiles.hourly_rate` remains a safe fallback if the pay-history table is not present.
+  - Existing stored timesheet hourly rate/labour data is not destructively rewritten.
+- Added additive SQL migration for manual review only:
+  - `supabase/migrations/20260610120000_add_b2_pay_rates_and_receipt_ocr_fields.sql`
+  - Creates `employee_pay_rates`.
+  - Adds structured receipt OCR fields to `project_media`.
+  - No SQL was run automatically.
+- Added Smart Receipt OCR foundation:
+  - Reused existing receipt upload, Supabase storage, and `project_media`.
+  - Updated `api/ai-field-docs.js` receipt OCR prompt and normalization for supplier/date/subtotal/HST/total/currency/material category/type/confidence/notes.
+  - `OPENAI_API_KEY` remains backend-only; no frontend key exposure was added.
+  - Employees may run receipt OCR only on their own company media rows; supervisor-only AI actions remain restricted.
+  - Receipt capture/upload now bypasses the legacy manual "Enter receipt amount" form in the normal flow.
+  - Captured receipt images upload first, then immediately open the Smart Receipt OCR review flow.
+  - OCR review pre-fills supplier/date/subtotal/HST/total/material fields when AI extraction is available, with manual correction fallback for unclear receipts.
+  - Review form defaults project/task from the active clocked-in shift where available.
+  - Legacy manual amount/category entry remains only as dormant fallback support and is no longer called by receipt capture/upload.
+  - Receipt review saves structured fields when the additive SQL is applied, and falls back to legacy receipt fields when new columns are missing.
+  - Saved receipt data is prepared for future supervisor PDF grouping by project, employee, date, supplier, category/type, subtotal, HST, total, and task/cost centre.
+- Advisor checkpoints:
+  - Pre-receipt/final checkpoints were attempted through `chatgpt_advisor`.
+  - Latest advisor attempt was rejected by the tool policy because it would send non-public internal implementation details to an external advisor service.
+  - A privacy-safe generic advisor review was completed without code, private data, or implementation details.
+  - Advisor conclusion: OCR-first receipt readiness is blocked until a signed-in QA/demo session can verify camera capture, file upload, OCR success/failure fallback, persistence, and role/company restrictions.
+  - Advisor recommended fixture receipt tests with known supplier/date/subtotal/HST/total/material values, plus authenticated regression checks for clock, schedule, timesheets, photos, receipts, reports, team/menu, RBAC, and company boundaries.
+  - Post-fix advisor review of authenticated RBAC/media QA findings was rejected by tool policy as private data exfiltration risk; no workaround was attempted.
+- Verification status:
+  - Build passed via approval wrapper after the receipt OCR-first flow correction.
+  - API syntax checks passed for changed API files.
+  - Focused API ESLint passed for changed API files.
+  - Broad ESLint remains blocked by the local `.codex_pdf_deps/bin` EPERM scan issue and historical `src/EmployeeClockApp.jsx` lint noise.
+  - Receipt capture/upload handlers were checked in code and now call `uploadReceiptForOcrReview(...)` instead of the legacy manual amount helper.
+  - Deployed development app loaded to the login screen with no browser console errors in the in-app browser.
+  - Authenticated employee QA was completed after Samrat signed in as employee `Anm`.
+  - Employee login/default navigation passed: employee lands on Clock and bottom nav shows Clock, Schedule, Timesheets, More with no Home tab.
+  - Clock project/task dropdown behavior passed: selecting project `905` loads assigned task options including `drywall`; task is disabled with helper text until a project is selected.
+  - Clock receipt entry check passed for the visible UI: clicking Receipt no longer opens a manual amount prompt; missing project/task shows "Select project and task first."
+  - Timesheets employee scoping passed: Today and Month views show `My timesheets`, no All Employees filter, and no Sam/Samrat records while logged in as Anm.
+  - Timesheets date picker passed: Custom opens the Royal Navy "Choose dates" sheet and Cancel closes it.
+  - Employee More menu passed for major admin restrictions: Reports, Team/Employees, and Request Center are not visible.
+  - Employee Photos/Receipts QA initially found an RBAC/privacy leak: employee Anm could see All Employees/Sam media filters and Sam receipt/photo metadata.
+  - Fixed employee media scoping by forcing Photos/Receipts filters to the signed-in employee and replacing the employee dropdown with a read-only "My media" state for employee role.
+  - Added stricter employee media label filtering so stale cross-account cached media with mismatched employee labels is hidden from employee Photos/Receipts.
+  - Retest passed: Photos now shows My media, no All Employees, and no Sam/Samrat text for employee Anm.
+  - Retest passed: Receipts now shows My media, no All Employees, no Sam/Samrat text, no leaked Sam receipt, and receipt total resets to $0.00 for Anm when no own receipts match.
+  - Browser console error checks passed during employee Clock/Schedule/Timesheets/Photos/Receipts/More smoke tests.
+  - Full OCR-after-upload could not be completed in browser automation because no receipt file/camera upload was performed; no test data was uploaded.
+- Build status: Passed via approval wrapper.
+- Development deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-lvq67rn54-samrental70-7859s-projects.vercel.app
+- Development URL verification: Passed, HTTP 200.
+- SQL/database changes: Not run.
+- Production deployment: Not run.
+- Main push: Not run.
+- Secrets/env files: Not changed.
+- Remaining issues:
+  - Manual Supabase review/run is required for the B.2 SQL migration before pay history and structured receipt OCR columns are fully persisted.
+  - Schedule employee past-task visibility was fixed in B.2-fix-4; employee Upcoming assigned work now filters out dates before the current company-local day.
+  - Full receipt OCR extraction still needs a real test receipt upload/camera capture in a demo account to verify OCR success/failure persistence end to end.
+  - Advisor review flags authenticated OCR and full-role workflow QA as the remaining release-readiness blocker.
+  - Build warnings remain for bundle size and existing workspace verifier Auracut docs.
+
+## B.2-fix-4 - Employee Schedule Upcoming Work Filter
+- Scope:
+  - Employee Schedule only.
+  - No Owner/Supervisor/Admin schedule redesign was performed.
+  - No database schema or SQL change was made.
+- Changes:
+  - Added a memoized `employeeUpcomingScheduledTasks` source for employee Schedule views.
+  - Employee upcoming tasks are filtered to today/future tasks only using the company-local date key.
+  - Employee upcoming tasks are sorted by soonest start date/time using the existing schedule comparator.
+  - Employee list grouping and employee calendar range views now use the upcoming-only task source.
+  - Past employee assignments, including previously observed May 7, 2026 items, no longer qualify for Upcoming assigned work on June 11, 2026.
+  - Accept/Decline actions now verify that the assignee link belongs to a valid upcoming assigned task before updating.
+  - Employee schedule scoping remains tied to the signed-in employee assignment map and company id.
+  - Owner/Supervisor/Admin schedule views continue to use the existing company schedule source.
+  - Added `bridge/` to `.vercelignore` so unrelated local files are not included in development deployment.
+- Advisor:
+  - Sanitized advisor review completed with no code, schema, secrets, employee records, or company data sent.
+  - Recommendations covered company/local date boundaries, employee-assigned RBAC, accept/decline gating, admin/supervisor regression, sorting, and UI clarity.
+- Verification:
+  - Build passed via approval wrapper.
+  - Development app deployed and aliased to `https://project-rui1d-development.vercel.app`.
+  - Development URL returned HTTP 200 after deployment.
+  - Code inspection confirmed the employee Schedule source excludes task date keys earlier than the current company-local day.
+  - Hook order was preserved; new memoized values were added before returns and are not conditional hooks.
+  - Authenticated in-app browser automation was blocked in this session because the Browser plugin runtime file `browser-client.mjs` is missing; manual signed-in QA is still recommended.
+- Build status: Passed.
+- Development deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-haer2j0c8-samrental70-7859s-projects.vercel.app
+- SQL/database changes: Not run.
+- Production deployment: Not run.
+- Main push: Not run.
+- Destructive commands: Not run.
+- Remaining issues:
+  - Full signed-in UI QA should be completed manually or when Browser plugin automation is available.
+  - Existing build warnings remain for bundle size and old Auracut docs.
+  - Existing B.2 SQL migration remains prepared only and was not run.
+
+## B.2 Phase 2 - Google Login + Daily Timesheet Email Reports + Advisor QA
+- Scope:
+  - Development-only B.2 update on `develop`.
+  - No SQL was run.
+  - No production deployment was run.
+  - No real email was sent.
+  - No OAuth/Gmail/API secrets were added or exposed.
+- Current auth inspection:
+  - The app uses Supabase Auth.
+  - Existing email/password login remains preserved.
+  - Existing OAuth login path uses Supabase `signInWithOAuth`.
+  - Company role and app access are resolved from `company_members`; OAuth provider claims are not trusted for owner/supervisor/admin access.
+  - New/no-company OAuth users remain in controlled company/create/join flow.
+- Google login changes:
+  - Visible OAuth UI was simplified to `Continue with Google`.
+  - Signup/login copy now references Google or email/user ID only.
+  - Google login remains identity-only; no Gmail send scope was requested.
+  - OAuth profile linking was tightened so existing profile roles are not overwritten to employee during OAuth/session profile upsert.
+  - Existing email/password login remains available.
+- Daily timesheet report foundation:
+  - Added Manager/Admin-only daily timesheet email preview in Reports.
+  - Preview content includes company name, selected date range, generated timestamp, employee summary, total hours, total labour, project/task breakdown, missing clock-out/issues, receipt summary from available receipt metadata, and app link.
+  - Real sending is disabled by `DAILY_REPORT_EMAIL_SEND_ENABLED = false`.
+  - `Send test report` remains disabled and labelled pending setup.
+  - Preview can be copied for review; no provider, Gmail API call, cron email job, or recipient send path was added.
+- Documentation:
+  - Added `docs/B2_PHASE2_GOOGLE_LOGIN_DAILY_REPORTS.md`.
+  - Documented Supabase Google OAuth setup, expected redirect URLs, Gmail send safety rules, provider-vs-Gmail strategy, cron plan, and advisor follow-up checklist.
+- Advisor status:
+  - Architecture advisor review attempted with sanitized summary only; blocked because the shared advisor setup could not produce a review.
+  - Final sanitized QA/security advisor review completed.
+  - Advisor final decision: `needs_changes` for production readiness.
+  - Advisor recommendations: verify provider scopes/redirects, complete RBAC and tenant-isolation tests, prove no send path can trigger real email, verify OAuth account-linking cases, validate timezone/date boundaries, and keep sending disabled until a separate backend review.
+  - No code, schemas, secrets, employee records, company records, OAuth tokens, Gmail tokens, API keys, or environment variables were sent to advisor.
+- Local QA status:
+  - Build passed via approval wrapper.
+  - Development deployment completed and aliased to `https://project-rui1d-development.vercel.app`.
+  - Development URL returned HTTP 200.
+  - Code inspection confirmed Reports UI is rendered only for `isAdmin`.
+  - Daily report generation handler returns early when `!isAdmin`.
+  - Email sending remains disabled by runtime flag and no backend email provider route was added.
+  - B.2-fix-4 schedule upcoming filter remains in place.
+  - Employee Timesheets and Photos/Receipts RBAC changes remain in the working tree.
+- Build status: Passed.
+- Development deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-3934paq1q-samrental70-7859s-projects.vercel.app
+- SQL/database changes: Not run.
+- Production deployment: Not run.
+- Main push: Not run.
+- Destructive commands: Not run.
+- Remaining issues:
+  - Full signed-in screen QA could not be automated in this session because the in-app Browser plugin runtime file `browser-client.mjs` is missing.
+  - Advisor marked production readiness as `needs_changes` until RBAC/tenant isolation, OAuth provider settings, and no-send guarantees are manually verified.
+  - Real daily email sending needs a separate provider/Gmail backend implementation and security review.
+  - Google provider setup must be verified in Supabase/Google Cloud; Codex did not inspect secrets or dashboard credentials.
+  - Existing build warnings remain for bundle size and old Auracut docs.
+  - Existing B.2 SQL migration remains prepared only and was not run.
+
+## B.2 Phase 2 Part F - WhatsApp Business Daily Timesheet Reports
+- Scope:
+  - Development-only WhatsApp Business report foundation.
+  - Official WhatsApp Business Platform / Cloud API path only.
+  - No personal WhatsApp Web automation was added.
+  - No real WhatsApp messages were sent.
+  - No WhatsApp tokens or credentials were added to code or frontend.
+  - No SQL was run.
+- Backend:
+  - Added `api/send-daily-timesheet-whatsapp.js`.
+  - Route requires authenticated Supabase bearer token.
+  - Route verifies requester membership and requires owner/admin/supervisor role for the requested company.
+  - Route generates the daily timesheet summary server-side from `timesheets`, scoped by `company_id`.
+  - Route returns preview/dry-run JSON when `send` is not requested, WhatsApp env is missing, or sending is disabled.
+  - Route uses WhatsApp Cloud API endpoint `POST /{Version}/{Phone-Number-ID}/messages` only when server env is configured and `WHATSAPP_SEND_ENABLED=true`.
+  - Route never returns or exposes `WHATSAPP_ACCESS_TOKEN`.
+- Environment placeholders documented:
+  - `WHATSAPP_ACCESS_TOKEN`
+  - `WHATSAPP_PHONE_NUMBER_ID`
+  - `WHATSAPP_BUSINESS_ACCOUNT_ID`
+  - `WHATSAPP_DAILY_REPORT_TEMPLATE_NAME`
+  - `WHATSAPP_DAILY_REPORT_TEMPLATE_LANGUAGE`
+  - `WHATSAPP_SEND_ENABLED`
+- WhatsApp report content:
+  - Daily Timesheet Report title.
+  - Company name.
+  - Report date.
+  - Employees worked.
+  - Total entries.
+  - Total hours.
+  - Labour cost.
+  - Missing clock-out issues.
+  - Top project/task summaries.
+  - App Timesheets link.
+  - Full detailed timesheet tables are intentionally not included.
+- UI:
+  - Added Manager/Admin-only WhatsApp Business Reports card inside Reports.
+  - Added manager/admin phone input.
+  - Added preview button that calls the backend route in dry-run mode.
+  - Added exact WhatsApp message preview and copy action.
+  - Added clean missing-configuration warning.
+  - `Send WhatsApp Test` remains disabled unless backend reports WhatsApp env configured and `WHATSAPP_SEND_ENABLED=true`.
+- Documentation:
+  - Added `docs/B2_PHASE2_WHATSAPP_BUSINESS_REPORTS.md`.
+  - Documented Cloud API strategy, required env placeholders, backend route behavior, template plan, scheduling strategy, and QA checklist.
+  - Suggested template name: `daily_timesheet_report`.
+  - Suggested template category: Utility.
+  - Suggested language: `en`.
+  - Documented Meta template approval requirement before production sending where required.
+- Scheduling:
+  - No cron sending was added.
+  - Manual preview/send-test path prepared only.
+  - Daily cron/external scheduler remains a future Controller-approved step.
+- Advisor status:
+  - Sanitized WhatsApp advisor review was attempted.
+  - Advisor blocked because the shared advisor setup could not produce a review.
+  - No code, schema, tokens, employee data, company data, or internal files were sent.
+  - Local security review continued.
+- Verification:
+  - New API route passed `node --check`.
+  - Build passed via approval wrapper.
+  - Development deployment completed and aliased to `https://project-rui1d-development.vercel.app`.
+  - Development URL returned HTTP 200.
+  - Code inspection confirmed no frontend WhatsApp token usage.
+  - Code inspection confirmed backend RBAC and company scoping.
+- Build status: Passed.
+- Development deployment: Completed.
+- Development URL: https://project-rui1d-development.vercel.app
+- Preview deployment URL: https://project-rui1d-78elqlq9p-samrental70-7859s-projects.vercel.app
+- SQL/database changes: Not run.
+- Production deployment: Not run.
+- Main push: Not run.
+- Destructive commands: Not run.
+- Remaining issues:
+  - WhatsApp env values are not configured by Codex.
+  - Real WhatsApp sending remains disabled until Controller approval and `WHATSAPP_SEND_ENABLED=true`.
+  - Meta WhatsApp template approval is required where business-initiated templates are needed.
+  - Full signed-in UI QA could not be automated in this session because the in-app Browser plugin runtime file `browser-client.mjs` is missing.
+  - Existing build warnings remain for bundle size and old Auracut docs.
+
+## B.2-fix-6 Daily Report Email + 12 PM Scheduler
+
+Date: 2026-06-11
+
+Status: Completed on develop for build + development deployment.
+
+Summary:
+- Added shared backend daily report generator in `api/_lib/dailyReport.js`.
+- Added Gmail/email daily report backend route in `api/send-daily-timesheet-email.js`.
+- Refactored WhatsApp daily report route to use the shared report generator where safe.
+- Added disabled-safe scheduler foundation route in `api/daily-supervisor-report-cron.js`.
+- Added duplicate-send protection SQL package in `supabase/migrations/20260611120000_create_daily_report_logs.sql`.
+- Extended Manager/Admin Reports UI with email recipient input, backend email preview, gated Email Test button, Gmail status, and scheduler-disabled note.
+- Preserved WhatsApp preview/test UI and kept real WhatsApp sending gated by `WHATSAPP_SEND_ENABLED=true`.
+- Kept real Gmail sending gated by `GMAIL_SEND_ENABLED=true`.
+- Kept automatic cron reporting disabled by default and documented that real scheduled sends need controller approval.
+
+Advisor:
+- Sanitized advisor review completed.
+- No code, database schema, tokens, employee data, payroll data, phone numbers, emails, or internal implementation files were sent.
+- Advisor final decision: `needs_changes` for real scheduled sends until duplicate-send SQL, authorization tests, tenant isolation, recipient opt-in/configuration, audit logging, dry-run parity, WhatsApp compliance, and rollback/kill-switch checks are verified.
+
+Verification:
+- `node --check` passed for:
+  - `api/_lib/dailyReport.js`
+  - `api/send-daily-timesheet-email.js`
+  - `api/send-daily-timesheet-whatsapp.js`
+  - `api/daily-supervisor-report-cron.js`
+- Build passed via approval wrapper.
+- Development deployment completed and aliased to `https://project-rui1d-development.vercel.app`.
+- Development URL returned HTTP 200.
+- Email and WhatsApp daily report routes returned unauthorized/fail-closed responses when called without auth.
+
+Deployment:
+- Development preview deployment: `https://project-rui1d-cdhevdf0b-samrental70-7859s-projects.vercel.app`
+- Development alias: `https://project-rui1d-development.vercel.app`
+- Production deployment: Not run.
+- Main push: Not run.
+
+Important limitation:
+- Vercel Hobby deployment is at the 12 Serverless Function limit after adding the email route.
+- The scheduler foundation route is committed in the repo and documented, but excluded from Vercel deployment through `.vercelignore` until the project upgrades plan capacity or consolidates API routes.
+- Automatic cron sending remains disabled and not deployed in this development build.
+
+SQL/database:
+- SQL prepared but not run:
+  - `supabase/migrations/20260611120000_create_daily_report_logs.sql`
+- No SQL was executed by Codex.
+- No database changes were made by Codex.
+
+Remaining issues:
+- Apply and test `daily_report_logs` migration before real sends.
+- Add recipient settings/opt-in before scheduled sends.
+- Validate multi-company tenant isolation and employee blocking with authenticated QA.
+- Validate daylight-saving/company-local time behavior before production scheduler enablement.
+- Configure Gmail/WhatsApp provider env only after controller approval.
+- Existing build warnings remain for bundle size and old Auracut docs.
+
+## B.2 Database Separation Preparation
+
+Date: 2026-06-11
+
+Status: Preparation completed on develop. SQL remains blocked.
+
+Current state confirmed:
+- Production app: `https://project-rui1d.vercel.app`
+- Development app: `https://project-rui1d-development.vercel.app`
+- Production app bundle references Supabase ref `...evhyjm`.
+- Development app bundle references Supabase ref `...evhyjm`.
+- Development and production currently share the same Supabase database target.
+
+Safety result:
+- This is unsafe for B.2 SQL/database testing.
+- No SQL was run.
+- No migrations were run.
+- Production Vercel environment variables were not changed.
+- Production deployment was not run.
+- Main was not pushed.
+
+Supabase project creation:
+- Supabase CLI is installed, but cloud project access is not authenticated in this workspace.
+- Manual Supabase Dashboard setup is required for a separate dev project, suggested name `opera-ai-dev`.
+
+Documentation added/updated:
+- `docs/DATABASE_ENVIRONMENT_SAFETY.md`
+  - documents the shared database risk
+  - blocks SQL until dev/prod refs differ
+  - includes Preview/Production env separation instructions
+  - includes migration strategy, QC gate, demo data plan, and rollback steps
+- `.env.development.example`
+  - placeholder-only local development env template
+- `.gitignore`
+  - explicitly protects `.env`, `.env.local`, `.env.development`, `.env.production`, and `*.env`
+
+Code safety check:
+- Runtime Supabase client uses `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+- Backend API routes use server env values and `SUPABASE_SERVICE_ROLE_KEY`.
+- No hardcoded production Supabase ref was found in runtime source.
+- Service role usage was found in backend API routes only, not frontend runtime source.
+
+Advisor:
+- Sanitized advisor review completed.
+- No code, schema, secrets, keys, project refs, employee data, or internal data were sent.
+- Advisor final decision: `needs_changes` until environment separation, credential scopes, RBAC/access, migration runbook, demo-data-only policy, and post-cutover smoke tests are verified.
+
+Manual next steps for Samrat:
+- Create a separate Supabase dev project.
+- Add dev Supabase URL/anon key/service role key to Vercel Preview/development only.
+- Keep Production env pointed to production Supabase.
+- Redeploy development only.
+- Confirm development and production deployed bundles show different masked refs.
+- Only then approve dev SQL/migration execution.
+
+## B.2 Development Database Cutover To Shared Dev Supabase
+
+Date: 2026-06-14
+
+Status: Development environment separated from production at deployed app level.
+
+Database routing:
+- Production app remains at `https://project-rui1d.vercel.app`.
+- Development app remains at `https://project-rui1d-development.vercel.app`.
+- Production app bundle verified against Supabase ref `...evhyjm`.
+- Development app bundle verified against shared development Supabase ref `...jjwbut`.
+- Development now uses the shared `bridge-app-dev` Supabase project.
+
+Environment changes:
+- Vercel Preview environment updated for:
+  - `VITE_SUPABASE_URL`
+  - `VITE_SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+- Vercel Production environment was not changed.
+- Local ignored `.env.development` was updated for the shared development Supabase project.
+- No `.env` files were committed.
+
+Deployment:
+- Build passed via approval wrapper.
+- Development preview deployed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment URL: `https://project-rui1d-dedvqlj1a-samrental70-7859s-projects.vercel.app`
+- Development app returned HTTP 200.
+- Production app returned HTTP 200.
+- Production deployment was not run.
+- Main was not pushed.
+
+SQL/database:
+- No SQL was run.
+- No migrations were run.
+- No database data was copied.
+- Production database was not touched.
+- B.2 SQL is now eligible for a separate approval review against shared development DB only; it must still not run automatically.
+
+Remaining:
+- Verify the shared dev database has the required baseline OPERA schema before app QA.
+- Run only approved additive B.2 migrations on shared development DB after Controller approval.
+- Seed/use safe demo data only.
+- Confirm no other development apps sharing `bridge-app-dev` are affected by OPERA migrations.
+
 ## Required SQL
+- B.2 Phase 1 requires manual Supabase review before enabling pay-rate history and structured receipt OCR persistence:
+  - `supabase/migrations/20260610120000_add_b2_pay_rates_and_receipt_ocr_fields.sql`
+  - SQL was prepared but not run by Codex.
+- B.2-fix-6 requires manual Supabase review before real daily email/WhatsApp sends:
+  - `supabase/migrations/20260611120000_create_daily_report_logs.sql`
+  - SQL was prepared but not run by Codex.
 - If the previous B.1-fix-2 company settings migration has not been run, run the company settings SQL migration first.
 - B.1-fix-3 adds a safe migration to update the default auto clock-out time to midnight:
   - `supabase/migrations/20260523133000_correct_auto_clock_out_default_midnight.sql`
@@ -1182,3 +1601,1221 @@ comment on column public.companies.auto_clock_out_time is
 ## Remaining Issues
 - Vercel/build warning only: the existing bundle is larger than 500 kB after minification.
 - Workspace verifier warning only: old Auracut docs exist in `docs/`; they were not touched because they are outside this OPERA.AI runtime task.
+
+## Advisor Feature Loop Iteration 1 - Timesheet Sanity Check
+
+Date: 2026-06-14
+
+Status: implemented on develop, pending build/development deployment verification.
+
+Advisor input:
+- A sanitized app status report was sent to chatgpt-advisor for the next safe feature recommendation.
+- Advisor recommended a read-only Timesheet sanity check panel using already-loaded Timesheets data.
+- Advisor constraints: no SQL, no migrations, no production deployment, no persistence, no auto-fixes, no real notifications/sends, and no secrets.
+
+Implemented:
+- Added a read-only Timesheet sanity checker for the current filtered Timesheets range.
+- The checker flags likely review items:
+  - missing clock-in time
+  - missing clock-out time
+  - long shifts over 14 hours
+  - overlapping entries for the same employee
+  - missing project/job site
+  - missing task
+- Added a compact Royal Navy themed Timesheet sanity check card above the Timesheets record list.
+- The card shows an All clear state when no issues are found and caps visible review items to the first 5 when issues exist.
+
+Safety:
+- Existing Timesheets data loading/filtering/RBAC paths are reused.
+- The feature is UI-only and read-only.
+- No SQL was run.
+- No migrations were run.
+- No database data was changed.
+- No production deployment was performed.
+
+Remaining issues:
+- Continue advisor loop one safe, scoped iteration at a time after build/development verification.
+
+## Advisor Feature Loop Iteration 2 - Timesheet Sanity Issue Expansion
+
+Date: 2026-06-14
+
+Status: implemented on develop, pending build/development deployment verification.
+
+Advisor input:
+- Advisor approved Iteration 1 as safe for development.
+- Advisor recommended the next single safe feature: add a compact Show all / Show fewer control for the Timesheet sanity check panel.
+
+Implemented:
+- Added collapsed-by-default local UI state for Timesheet sanity issues.
+- The panel still shows the first 5 issues by default.
+- When more than 5 issues exist, users can tap Show all to reveal all read-only review items and Show fewer to collapse again.
+
+Safety:
+- UI-only local state.
+- No SQL was run.
+- No migrations were run.
+- No database writes were added.
+- No RBAC paths were changed.
+- No production deployment was performed.
+
+Remaining issues:
+- Continue advisor loop one safe, scoped iteration at a time.
+- Advisor recommended future helper-level tests and employee/admin manual QA before any production promotion.
+
+## Advisor Feature Loop Iteration 3 - Timesheet Sanity Tests
+
+Date: 2026-06-14
+
+Status: implemented on develop, pending build/development deployment verification.
+
+Advisor input:
+- Advisor approved Iteration 2 as safe for development.
+- Advisor recommended tests instead of another feature for Iteration 3.
+
+Implemented:
+- Extracted Timesheet sanity check logic into `src/lib/timesheetSanity.js`.
+- Added local fixture tests in `scripts/test-timesheet-sanity.js`.
+- Added npm script: `npm run test:timesheet-sanity`.
+
+Test coverage:
+- all-clear completed row
+- missing clock-out
+- long shift over 14 hours
+- overlapping same-employee entries
+- missing project/job site
+- missing task
+- malformed clock-in time
+- valid overnight 8-hour shift
+- collapsed versus expanded issue display
+
+Verification:
+- `npm run test:timesheet-sanity` passed.
+
+Safety:
+- Tests use local fixtures only.
+- No SQL was run.
+- No migrations were run.
+- No database writes were added.
+- No production deployment was performed.
+
+Remaining issues:
+- Authenticated dev-only manual QA is still needed for admin and employee-scoped Timesheets views.
+- Continue advisor loop one safe, scoped iteration at a time.
+
+## Advisor Feature Loop Iteration 4 - Authenticated QA Attempt
+
+Date: 2026-06-14
+
+Status: blocked by login gate in browser automation session.
+
+Advisor input:
+- Advisor approved Iteration 3 as safe for development.
+- Advisor recommended authenticated dev-only QA before additional features.
+
+QA attempted:
+- Opened `https://project-rui1d-development.vercel.app/` in the in-app browser automation session.
+- App loaded successfully with title `OPERA.AI Development`.
+- The automation session reached the Login screen.
+
+Result:
+- Authenticated Timesheets UI/RBAC QA could not be completed because the automation browser session was not signed in.
+- No app data was changed.
+- No SQL was run.
+- No production deployment was performed.
+
+Remaining issues:
+- Sign in to the dev app in the browser automation-accessible session, then verify:
+  - Timesheet sanity all-clear state
+  - 1-5 issue state
+  - more than 5 issues with Show all / Show fewer
+  - employee role only sees own Timesheets rows
+  - admin/supervisor role sees allowed company/team rows
+
+## Development Login Fetch Header Fix
+
+Date: 2026-06-14
+
+Issue:
+- Development login showed browser error: `Failed to execute 'fetch' on 'Window': Failed to read the 'headers' property from 'RequestInit': String contains non ISO-8859-1 code point.`
+
+Root cause:
+- The deployed development bundle contained an invisible BOM character before the public Supabase URL / anon key values.
+- Supabase uses the anon key in request headers, and the browser rejects header strings containing that non-Latin character.
+
+Fix:
+- Added public env value cleaning in `src/lib/supabaseClient.js`.
+- The Supabase URL and anon key now strip hidden BOM characters and trim whitespace before `createClient`.
+
+Verification:
+- Build passed.
+- Development preview deployed and aliased to `https://project-rui1d-development.vercel.app`.
+- Development URL returned HTTP 200.
+- Deployed bundle confirmed to include the sanitizer.
+
+Safety:
+- No SQL was run.
+- No database data was changed.
+- No production deployment was performed.
+- No push to main was performed.
+
+## Development Clock App Schema + Login Setup
+
+Date: 2026-06-14
+
+Scope:
+- Development-only Clock App schema setup on the shared development Supabase project.
+- Development login reset for `samratsood001@gmail.com`.
+- Development app render verification after schema setup.
+
+Database target:
+- Development Supabase project: `bridge-app-dev` / `...jjwbut`.
+- Production Supabase project remained untouched.
+
+Changes:
+- Added development-only Clock App bootstrap SQL under `supabase/dev-only/`.
+- Created/verified core OPERA Clock App tables in development:
+  - `profiles`
+  - `companies`
+  - `company_members`
+  - `projects`
+  - `cost_centres`
+  - `project_assignments`
+  - `project_cost_centre_assignments`
+  - `timesheets`
+  - `scheduled_tasks`
+  - `scheduled_task_assignees`
+  - `live_locations`
+  - `push_subscriptions`
+- Applied existing additive OPERA migrations to the development database only.
+- Seeded development demo company data:
+  - company `Ottawa Renovation Pro Demo`
+  - company code `ORP-DEV`
+  - projects `905`, `Euphoria`, and `Test Project`
+  - demo tasks/cost centres for each project
+- Reset development auth login for `samratsood001@gmail.com` with the temporary password requested by the controller.
+- Added dev-only RLS fixes for `company_members`, `companies`, and `live_locations`.
+- Aligned development `live_locations` schema with app expectations by adding `employee_id`, `status`, `project_name`, `cost_centre`, and `updated_at`.
+
+App fix:
+- Fixed a React hook-order crash by removing late Reports `useMemo` / `useCallback` hooks that were declared after the unauthenticated login return.
+- This prevented React #310 after login while preserving report preview behavior.
+
+Verification:
+- Development anon Supabase login verified successfully for `samratsood001@gmail.com`.
+- Profile/member/company/project/task reads verified through the dev anon client.
+- Local build passed with `npm.cmd run build`.
+- Development preview deployed and aliased to `https://project-rui1d-development.vercel.app`.
+- In-app browser verification passed:
+  - app loaded signed in as Samrat
+  - no React #310 error
+  - Home loaded with Royal Navy UI
+  - live location missing-column error cleared
+
+Safety:
+- SQL was run on development only.
+- Production SQL was not run.
+- Production deployment was not performed.
+- No push to main was performed.
+- No destructive database commands were run.
+
+## B.2 Receipt Capture + OCR Hardening QA
+
+Date: 2026-06-14
+
+Scope:
+- Receipt capture, upload, OCR/manual review fallback, receipt display, and receipt OCR API safety on `develop`.
+- Development Supabase only: `bridge-app-dev` / `...jjwbut`.
+
+Advisor review:
+- Sent a sanitized receipt/OCR implementation report to advisor.
+- Advisor required stronger fallback, error-code, persistence, and browser QA evidence before calling the receipt section ready.
+- Sent a follow-up QC report after implementation; advisor confirmed provider configuration remains the main automatic-OCR blocker but requested browser/readback/error-branch evidence.
+
+Implemented:
+- Hardened `api/ai-field-docs.js` with stable receipt OCR/API error codes:
+  - `invalid_auth`
+  - `validation_failed`
+  - `forbidden_company`
+  - `forbidden_role`
+  - `media_not_found`
+  - `forbidden_media`
+  - `provider_not_configured`
+  - `provider_timeout`
+  - `provider_request_failed`
+  - `provider_bad_response`
+  - `image_unavailable`
+  - `server_error`
+- Added OCR provider timeout handling.
+- Added receipt OCR normalization coverage for supplier, date, subtotal, HST, total, currency, material category/type, confidence, and notes.
+- Removed the legacy receipt amount/category prompt path so the normal receipt flow no longer asks for a manual amount before OCR/manual review.
+- Receipt capture now saves the image and opens a single receipt review flow.
+- Receipt review supports OCR results when available and manual review fallback when OCR is not configured.
+- Receipt review save validates totals/subtotal/HST and persists structured receipt fields.
+- Receipts screen totals/cards now prefer structured receipt metadata.
+- Receipts `AI read` now opens the receipt review modal in-place instead of switching to the Photos screen.
+- Added focused receipt OCR normalization test script:
+  - `scripts/test-receipt-ocr-normalization.js`
+  - `npm.cmd run test:receipt-ocr`
+- Added dev-only storage policy fix for the `project-photos` bucket:
+  - `supabase/dev-only/20260614_clock_app_dev_storage_policy_fix.sql`
+
+Development database/storage verification:
+- Created/verified development storage bucket `project-photos`.
+- Applied dev-only storage upload/read/update policy for authenticated development users.
+- Synthetic receipt image upload to development storage passed.
+- `project_media` metadata insert for the receipt passed.
+- Manual fallback structured receipt save/readback passed:
+  - supplier `QA Supplier`
+  - subtotal `$50.25`
+  - HST `$6.53`
+  - total `$56.78`
+  - status `manual_reviewed`
+
+API verification:
+- Deployed development `/api/ai-field-docs` status endpoint returned:
+  - HTTP 200
+  - `configured: false`
+  - `code: provider_not_configured`
+- Authenticated receipt OCR call against saved dev receipt returned:
+  - HTTP 200
+  - `ok: false`
+  - `configured: false`
+  - `code: provider_not_configured`
+- Error-code contract verified against development deployment:
+  - missing auth -> `invalid_auth`
+  - missing media id -> `validation_failed`
+  - unsupported action -> `unsupported_action`
+  - missing media -> `media_not_found`
+  - wrong company -> `forbidden_company`
+
+Browser QA:
+- Signed into development app as Samrat.
+- Home loaded with recent receipt activity.
+- Receipts screen displayed the QA receipt with structured supplier, HST, total, status, and project/task metadata.
+- Receipt total KPI reflected `$56.78`.
+- Receipts `AI read` stayed on the Receipts screen.
+- Receipt review modal opened with:
+  - receipt preview image
+  - manual review state
+  - `Smart OCR is not configured in this environment...` fallback message
+  - structured fields prefilled from saved receipt data
+- Confirmed the old `Enter receipt amount` / `Confirm receipt amount` prompt did not appear.
+
+Build/deployment:
+- `npm.cmd run test:receipt-ocr` passed.
+- `node --check api\ai-field-docs.js` passed.
+- `npm.cmd run build` passed.
+- Development preview deployed and aliased to `https://project-rui1d-development.vercel.app`.
+
+Remaining issues:
+- Automatic OCR extraction cannot run until `OPENAI_API_KEY` is configured as a server-only Vercel environment variable and the app is redeployed.
+- Provider-enabled OCR success, timeout, malformed response, and real receipt camera capture still need QA after the provider secret is configured.
+- Vercel Preview project-level `SUPABASE_SERVICE_ROLE_KEY` was not re-added through `vercel env add` because the CLI required branch/project configuration; current development deployment was created with deployment-scoped dev runtime env overrides.
+
+Safety:
+- SQL was run on development only.
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No secrets were printed or committed.
+
+## B.2 Receipt OCR Shared Bridge AI Resource
+
+Date: 2026-06-14
+
+Scope:
+- Wire OPERA.AI receipt OCR to the shared Bridge App AI resource pattern.
+- Development deployment only.
+- No production deployment, no main push, and no production database change.
+
+Bridge common resource:
+- Inspected `C:\Users\samra\bridge-app\common-resources\README.md`.
+- Inspected Bridge shared env resolver pattern under `C:\Users\samra\bridge-app\api\_lib\sdosSharedEnvResolver.js`.
+- Confirmed Bridge common env has `OPENAI_API_KEY` by variable name only; no secret value was printed or committed.
+
+Implementation:
+- Added `api/_lib/sharedEnv.js`.
+- The helper loads allowed server-side AI env names from:
+  1. active Clock App env files
+  2. Bridge common env files
+  3. process env
+- Updated `api/ai-field-docs.js` to use the shared AI config helper.
+- `/api/ai-field-docs` status now reports safe AI status fields:
+  - configured
+  - provider
+  - model
+  - source type
+  - key name only
+- No frontend/client exposure of the AI key was added.
+
+Verification:
+- Local shared AI resolver returned:
+  - configured: true
+  - provider: openai
+  - key name: `OPENAI_API_KEY`
+  - source type: Bridge common env file
+- `node --check api\_lib\sharedEnv.js` passed.
+- `node --check api\ai-field-docs.js` passed.
+- `npm.cmd run test:receipt-ocr` passed.
+- `npm.cmd run build` passed.
+
+Development deployment:
+- Deployed development preview with the shared Bridge OpenAI key passed as server-only runtime env.
+- Development alias updated:
+  - `https://project-rui1d-development.vercel.app`
+- Production was not deployed.
+
+AI/OCR smoke test:
+- Development `/api/ai-field-docs` status returned:
+  - HTTP 200
+  - configured: true
+  - provider: openai
+  - key name: `OPENAI_API_KEY`
+- Synthetic development receipt OCR call returned:
+  - HTTP 200
+  - ok: true
+  - configured: true
+  - supplier: `QA Building Supply`
+  - total: `$41.81`
+  - currency: `CAD`
+- Browser QA passed:
+  - Receipts screen stayed on Receipts after `AI read`.
+  - Review modal showed `OCR ready`.
+  - OCR fields were prefilled with supplier, subtotal, HST, total, currency, material category, and material type.
+  - Old `Enter receipt amount` prompt did not appear.
+  - Saving OCR data closed the modal and updated the Receipts KPI/card total to `$41.81`.
+
+Remaining issues:
+- The shared AI key was supplied to this development deployment as deployment-scoped runtime env.
+- If future Preview deployments are made without passing the shared AI env or setting it in Vercel Preview env, OCR will return to `provider_not_configured`.
+- Production AI OCR still requires separate explicit approval/configuration before production deployment.
+
+Safety:
+- No SQL was run for this shared AI resource pass.
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No secrets were printed or committed.
+
+## B.2 Daily Report Real-Send Readiness + Scheduler QA
+
+Date: 2026-06-14
+
+Scope:
+- Development-only implementation and QA for production-readiness.
+- No production deployment.
+- No main merge or main push.
+- No SQL run in this pass.
+- No external email or WhatsApp message sent because Gmail/WhatsApp provider credentials and recipients are not configured in local/shared/Vercel env listings.
+
+Implementation:
+- Extended `api/_lib/sharedEnv.js` so server-only daily report delivery env names can be resolved from approved shared Bridge resources when present.
+- Added `api/_lib/reportDelivery.js` for gated Gmail and WhatsApp Cloud API delivery helpers.
+- Updated email and WhatsApp report API routes to load shared server env before reading delivery config.
+- Converted daily report scheduling from dry-run-only foundation to a gated delivery path:
+  - requires `DAILY_REPORT_CRON_ENABLED=true`
+  - requires `CRON_SECRET`
+  - checks configured company-local report time
+  - supports `dryRun=true` for no-send QA
+  - supports `force=true` for secret-protected QA outside the exact report minute
+  - sends email only when Gmail config, recipients, send flag, and duplicate-send log reservation are all valid
+  - sends WhatsApp only when WhatsApp config, recipients, send flag, approved template config, and duplicate-send log reservation are all valid
+  - masks recipients in responses
+  - safely returns warnings without sending when gates are missing
+- Added `api/_lib/dailyReportScheduler.js` and wired it through the existing `/api/auto-clockout` cron function to stay under the Vercel Hobby 12-function limit.
+- Preserved source-only `api/daily-supervisor-report-cron.js` for future Pro/backend separation, but kept it excluded from Vercel Hobby deployment.
+- Kept `vercel.json` on the existing daily `/api/auto-clockout` cron schedule.
+- Updated `docs/B2_FIX_6_DAILY_REPORT_SCHEDULER.md` to reflect gated real-send readiness instead of dry-run-only foundation.
+
+Configuration status:
+- Shared Bridge common env currently provides `OPENAI_API_KEY` only by detected variable name.
+- Gmail delivery env values were not detected locally or in Vercel env listing.
+- WhatsApp delivery env values were not detected locally or in Vercel env listing.
+- Development deployment can QA OCR and dry-run scheduler behavior, but real email/WhatsApp sends still require provider credentials, approved recipients, duplicate-send table, and explicit env flags.
+
+Verification planned:
+- API syntax checks for delivery helper, cron route, email route, WhatsApp route, and shared env helper.
+- Receipt OCR normalization test.
+- Build.
+- Development deployment only.
+- Development API smoke checks for OCR status and cron dry-run behavior.
+
+Verification completed:
+- `node --check` passed for:
+  - `api/_lib/reportDelivery.js`
+  - `api/_lib/sharedEnv.js`
+  - `api/_lib/dailyReportScheduler.js`
+  - `api/auto-clockout.js`
+  - `api/daily-supervisor-report-cron.js`
+  - `api/send-daily-timesheet-email.js`
+  - `api/send-daily-timesheet-whatsapp.js`
+- Focused ESLint passed for the changed delivery/scheduler files.
+- `npm.cmd run test:receipt-ocr` passed.
+- `npm.cmd run test:timesheet-sanity` passed.
+- `npm.cmd run build` passed.
+- Full `npm.cmd run lint` remains blocked by existing unrelated generated/dist lint noise and older API lint items, not by the new delivery/scheduler files.
+- First direct deployment of `/api/daily-supervisor-report-cron` failed on Vercel Hobby because it would exceed the 12 Serverless Function limit.
+- Scheduler was refactored into `api/_lib/dailyReportScheduler.js` and invoked through the existing `/api/auto-clockout` function.
+- Development deployment passed and was aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment URL: `https://project-rui1d-adgci5i3x-samrental70-7859s-projects.vercel.app`.
+- Scheduler-only QA trigger passed:
+  - endpoint: `/api/auto-clockout?daily_report_only=true&force=true&dryRun=true`
+  - auth: hidden `CRON_SECRET`
+  - ok: true
+  - dryRun: true
+  - companies checked: 1
+  - email configured: false
+  - WhatsApp configured: false
+  - sent count: 0
+  - failed count: 0
+- Unauthenticated scheduler-only endpoint returned 401, confirming cron protection.
+- Email/WhatsApp routes returned 405 for GET, confirming routes are deployed and method-limited.
+- Browser QA loaded the development app signed in as Samrat with no console errors.
+- Browser QA confirmed the signed-in Home screen rendered after loading.
+
+Remaining production-merge blockers:
+- Configure Gmail provider credentials server-side only.
+- Configure WhatsApp Cloud API credentials server-side only.
+- Approve/test WhatsApp template and recipient consent.
+- Apply and verify `daily_report_logs` migration before real sends.
+- Configure `DAILY_REPORT_CRON_EMAIL_RECIPIENTS` and/or `DAILY_REPORT_CRON_WHATSAPP_RECIPIENTS`.
+- Set production `DAILY_REPORT_CRON_ENABLED=true`, channel send flags, and `CRON_SECRET` only after production approval.
+
+## B.2 Daily Report/OCR Advisor Remediation Gate
+
+Date: 2026-06-14
+
+Scope:
+- Resolve advisor `needs_changes` items for the B.2 daily report/OCR/scheduler gate on `develop`.
+- Development database/app only.
+- No production deployment.
+- No main push.
+- No production email/WhatsApp flags enabled.
+- No destructive SQL.
+- No secrets, tokens, env values, receipt image, customer/employee records, or full identifiers were sent to advisor.
+
+SQL safety and duplicate-send protection:
+- Reviewed `supabase/migrations/20260611120000_create_daily_report_logs.sql`.
+- Confirmed additive only:
+  - `create table if not exists public.daily_report_logs`
+  - primary key
+  - unique company/report-date/channel/recipient constraint
+  - company/date index
+- Confirmed no `DROP`, `DELETE`, `TRUNCATE`, destructive `UPDATE`, or destructive `ALTER`.
+- Confirmed local Supabase CLI target is linked to `bridge-app-dev` ending `jjwbut`.
+- Confirmed separate `clock-app` Supabase project ending `evhyjm` exists and is not the linked dev target.
+- Ran only the daily report logs migration against linked development DB.
+- Verified table exists in development.
+- Verified unique duplicate-send constraint exists in development.
+- Verified supporting indexes exist in development.
+
+RBAC and tenant safety QA:
+- Unauthenticated email report request returned 401.
+- Unauthenticated WhatsApp report request returned 401.
+- Manager/Admin own-company email preview returned 200 dry-run with Gmail missing-config warning.
+- Manager/Admin own-company WhatsApp preview returned 200 dry-run with WhatsApp missing-config warning.
+- Dev DB currently has only one company, so wrong-company API test was skipped because there is no second company fixture.
+- Created one additive dev-only QA employee account because no employee-role member existed in the dev company.
+- QA employee email report route returned 403 `Manager/Admin access required`.
+- QA employee WhatsApp report route returned 403 `Manager/Admin access required`.
+- QA employee direct timesheet visibility returned zero visible rows.
+- QA employee direct media visibility returned zero visible rows.
+- QA employee direct daily report log visibility returned zero visible rows.
+
+Gmail/WhatsApp staged-send gate:
+- Gmail provider credentials were not detected in local/shared/Vercel env listings.
+- WhatsApp Cloud API credentials/template were not detected in local/shared/Vercel env listings.
+- No real Gmail email was sent.
+- No real WhatsApp message was sent.
+- `send=true` with safe test recipient returned safe dry-run, `sent=false`, `configured=false`, and missing-config warning for Gmail.
+- `send=true` with safe test phone returned safe dry-run, `sent=false`, `configured=false`, and missing-config warning for WhatsApp.
+
+Receipt OCR real upload QA:
+- Created a synthetic fake QA receipt PNG with no real customer/vendor data.
+- Uploaded the test receipt to development storage.
+- Inserted a development receipt media row.
+- Called the deployed OCR route.
+- OCR returned:
+  - configured: true
+  - ok: true
+  - supplier: QA Building Supply
+  - subtotal: 37.00
+  - HST: 4.81
+  - total: 41.81
+  - currency: CAD
+  - material category: drywall
+  - material type: screws and compound
+- Saved structured receipt fields after review-equivalent validation.
+
+Fresh browser/UI QA:
+- Admin signed-in UI rendered with no console errors for:
+  - Home
+  - Clock
+  - Timesheets
+  - More/Menu
+  - Schedule
+  - Photos
+  - Receipts
+  - Reports
+  - Team
+  - Settings
+- Reports screen showed daily email and WhatsApp report controls with send-test pending setup state.
+- Employee signed-in UI rendered with no console errors.
+- Employee landed on Clock.
+- Employee bottom nav showed Clock, Schedule, Timesheets, More.
+- Employee Home/Reports were not visible.
+- Employee daily email and WhatsApp controls were not visible.
+- Employee More menu did not show Reports, Team, or Request Center.
+- Browser session was restored to Samrat after employee QA.
+
+Advisor re-review:
+- Sanitized advisor re-review was completed after remediation.
+- Advisor final decision: approved for the development remediation/merge gate.
+- Advisor also stated production readiness is not ready yet.
+- Advisor remaining production blockers:
+  - second-company tenant isolation fixture/test
+  - staged real Gmail send with approved test recipient
+  - staged real WhatsApp template send with approved test recipient
+  - production env/config/cron/rollback/monitoring checklist
+  - tracking pre-existing full-lint noise
+
+Build/deployment status:
+- Receipt OCR normalization test passed.
+- Timesheet sanity test passed.
+- Focused lint for changed delivery/scheduler files passed.
+- Build passed before remediation re-review.
+- Final approval-wrapper build passed.
+- Development deployment completed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment: `https://project-rui1d-mj2erxnk2-samrental70-7859s-projects.vercel.app`.
+- Development app root returned HTTP 200.
+- Scheduler endpoint returned HTTP 401 without cron authorization.
+- Authorized development scheduler dry-run returned ok/dry-run true.
+
+Safety:
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No destructive commands were run.
+
+## B.2 Dev Migration Retry Fix — June 26, 2026
+
+Context:
+- User reran release verification from `C:\Users\samra\clock-app`.
+- `npx.cmd supabase db push` reached the development database but stopped on the existing notifications policy:
+  - `policy "notifications_select_own" for table "notifications" already exists`
+- `npm.cmd run verify:b2-dev` then failed because B.2 chat tables had not yet been created:
+  - `chat_conversations` missing from schema cache
+
+Fix:
+- Updated `supabase/migrations/20260503140000_create_notifications.sql` so notification policies are created only when missing.
+- B.2 migrations were rechecked and already use guarded `pg_policies` checks for new policies.
+
+Verification:
+- `npm.cmd run verify:migrations` passed.
+- `npm.cmd run lint` passed with existing legacy warnings only.
+- `npm.cmd run build` passed.
+- `npm.cmd run test:timesheet-sanity` passed.
+- `npm.cmd run test:receipt-ocr` passed.
+
+Remaining gate:
+- Rerun development-only Supabase migration push from the authenticated terminal that has `SUPABASE_DB_PASSWORD`.
+- Rerun `npm.cmd run verify:b2-dev` and `npm.cmd run verify:release` after the push completes.
+
+Safety:
+- Production database was not touched.
+- No production deployment was performed.
+- No SQL was run from Codex during this retry fix.
+- No push to main was performed.
+- No destructive commands were run.
+
+## B.2 Dev Database Push + Development Deploy Verification — June 26, 2026
+
+Development database:
+- User reran `npx.cmd supabase db push --dry-run`; Supabase listed the pending development migrations.
+- User approved and completed `npx.cmd supabase db push` against the development/shared Supabase database ending `...jjwbut`.
+- Old already-existing objects were skipped with Supabase notices.
+- B.2 chat migration applied.
+- B.2 live locations migration applied.
+
+Verification:
+- `npm.cmd run verify:b2-dev` passed:
+  - `employee_pay_rates` readable
+  - `daily_report_logs` readable
+  - `chat_conversations` readable
+  - `chat_conversation_members` readable
+  - `chat_messages` readable
+  - `live_locations` readable
+  - `project_media` receipt OCR columns readable
+  - API auth-boundary smoke checks returned expected statuses
+- `npm.cmd run verify:release` passed from Codex:
+  - migration safety passed
+  - lint passed with existing warnings only
+  - build passed
+  - timesheet sanity test passed
+  - receipt OCR normalization test passed
+  - B.2 dev readiness passed
+
+Development deployment:
+- Preview deployment completed:
+  - `https://project-rui1d-cp09wnahk-samrental70-7859s-projects.vercel.app`
+- Development alias updated:
+  - `https://project-rui1d-development.vercel.app`
+- Root development app returned HTTP 200.
+- Development API smoke checks returned expected auth/method statuses:
+  - `/api/chat` 401
+  - `/api/project-media` 401
+  - `/api/create-project-task` 401
+  - `/api/ai-field-docs` 401
+  - `/api/send-daily-timesheet-report` 400
+
+Vercel environment note:
+- The development deployment was created with dev Supabase values injected at deploy time.
+- Vercel CLI would not add all-Preview `VITE_SUPABASE_URL` because the project is not Git-connected and the CLI required a Preview branch target.
+- During the Preview-env reset attempt, the shared public `VITE_SUPABASE_URL` env record was removed by Vercel CLI; it was immediately restored for Production from local `.env` using production Supabase ref ending `...evhyjm`.
+- Current Production site still returns HTTP 200.
+- Remaining cleanup: add/restoring Preview `VITE_SUPABASE_URL` should be done through Vercel dashboard or by continuing to use deploy-time env injection for Preview deploys.
+
+Safety:
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No destructive database command was run.
+
+## B.2 Development QA Checklist Pass — June 26, 2026
+
+Scope:
+- Development deployment only:
+  - `https://project-rui1d-development.vercel.app`
+- Branch:
+  - `develop`
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+
+Automated checks:
+- `npm.cmd run verify:migrations` passed.
+- `npm.cmd run verify:b2-dev` passed against dev/shared Supabase ref ending `...jjwbut`.
+- `npm.cmd run verify:release` passed:
+  - migration safety passed
+  - lint exited 0 with existing warnings only
+  - build passed
+  - timesheet sanity passed
+  - receipt OCR normalization passed
+  - B.2 dev readiness passed
+
+Development deployment correction:
+- Browser QA initially found the development app loading the error boundary:
+  - `Cannot read properties of null (reading 'auth')`
+- Root cause:
+  - Preview runtime env existed through deploy-time injection, but Vite public Supabase env was missing at build time.
+- Fix applied:
+  - Redeployed development/Preview only with both build-time and runtime dev Supabase env.
+  - Updated development alias to the fixed Preview deployment.
+- Recheck:
+  - Login screen loaded.
+  - Owner login succeeded.
+  - Employee login succeeded using `samratsood003@gmail.com`.
+
+Browser/UI QA:
+- Owner Home loaded with company context and owner role.
+- Owner Home dashboard rendered:
+  - Team coverage
+  - Recent activity
+  - Live job sites
+  - Live team
+  - Worked today
+- Owner management screens rendered without error boundary:
+  - Schedule
+  - Photos
+  - Receipts
+  - Reports
+  - More/Menu
+- Employee default landing was Clock.
+- Employee bottom nav showed:
+  - Clock
+  - Chat
+  - Timesheets
+  - More
+- Employee bottom nav did not show Home or Schedule.
+- Employee Timesheets showed `My timesheets` and did not show manager-only timesheet sanity panel.
+- Employee Chat loaded the default `All employees` conversation.
+- Employee sent a dev QA chat message successfully.
+
+Schedule/notification QA:
+- Created dev-only QA scheduled assignment rows for the employee.
+- Employee received in-app schedule assignment popup.
+- Employee could open Schedule from the assignment popup.
+- Employee accepted one assignment; database showed `accepted`.
+- Employee declined one assignment with reason; database showed `declined` and stored the reason.
+
+Manual time QA:
+- Employee opened manual time request form.
+- Employee submitted a manual time request.
+- Request appeared as `Waiting for supervisor approval`.
+- Database showed one pending `manual_time` request.
+- Timesheet count did not increase immediately, confirming pending requests do not directly create real timesheets.
+- Owner approval UI surfaced Approve/Reject, but browser automation hung around the confirmation dialog; approval completion was not verified in this pass.
+
+Database/RBAC QA:
+- Owner login via Supabase auth succeeded.
+- Owner membership role was `owner`.
+- Employee login via Supabase auth succeeded for `samratsood003@gmail.com`.
+- Employee membership role was `employee`.
+- Employee timesheet RLS returned own rows only.
+- Employee media RLS returned own rows only.
+- Employee schedule assignment query returned own assignments only.
+- Authenticated employee chat API returned HTTP 200 and included `All employees`.
+- Unauthenticated API smoke checks returned expected protected responses:
+  - `/api/chat` 401
+  - `/api/project-media` 401
+  - `/api/create-project-task` 401
+  - `/api/ai-field-docs` 401
+  - `/api/send-daily-timesheet-report` 400
+
+Media/OCR/delivery QA:
+- Photos screen rendered from `project_media`.
+- Receipts screen rendered receipt totals and OCR/status metadata.
+- Receipt OCR normalization test passed.
+- `project_media` contained photo and receipt rows.
+- No video rows existed in dev data, so video upload could not be validated from existing data.
+- Browser/file/camera limitations prevented real camera, multi-photo, gallery, and video capture testing in this pass.
+- Reports showed Gmail/WhatsApp delivery as disabled/pending configuration.
+- Local env did not contain `OPENAI_API_KEY`, so AI behavior was fallback/not-configured mode.
+
+Remaining blockers before production readiness:
+- Persistent Vercel Preview env store still lacks `VITE_SUPABASE_URL`; current dev deployment is healthy because it was deployed with build-time/runtime env injection.
+- Employee clock-in/out end-to-end was blocked by browser location settings:
+  - UI showed `Location is blocked in browser settings. Location is needed for clock-in.`
+- Manual time owner approval completion was not verified because browser automation hung around the confirmation dialog.
+- Closed-app push notification and 1-hour alarm acknowledgement were not fully testable from Codex browser.
+- Real camera/gallery multi-photo and video upload were not fully testable from Codex browser.
+- Real email/WhatsApp sends remain disabled and require controlled staged provider tests before production.
+
+Production readiness recommendation:
+- Not ready for production promotion yet.
+- Recommended before promotion:
+  - Restore/persist Preview environment variables in Vercel dashboard or update deployment runbook to always include build/runtime env injection.
+  - Run manual mobile QA with location permission allowed for clock-in/out and live location.
+  - Complete owner approval/rejection manual time QA on a real browser session.
+  - Complete camera/photo/video upload QA on mobile.
+  - Complete controlled email/WhatsApp staged sends if those features are intended for production.
+
+## B.2 Production Readiness Hardening Pass
+
+Date: 2026-06-26
+
+Scope:
+- Continued on `develop`.
+- No production deployment.
+- No push to main.
+- No production SQL run.
+- No database data deleted.
+
+Changes completed:
+- Removed the debug startup Supabase `employees` query/log from `src/App.jsx`.
+- Fixed API lint issues in `api/project-media.js` and `api/send-push.js`.
+- Added `npm run verify:release` as a consolidated release gate.
+- Updated ESLint config so OPERA runtime files are checked while unrelated local artifacts are ignored.
+- Moved shared Vercel API helper modules from ignored `server/api-lib` to tracked `api-shared`.
+- Updated API imports to use `api-shared`.
+- Restored `server/` to ignored status so unrelated local server work does not ship.
+- Added `bridge/` and `supabase/dev-only/` to local/deployment ignores.
+- Tightened pending B.2 SQL migrations by removing non-additive policy replacement patterns.
+- Confirmed pending migration scan has no `DROP`, `DELETE`, `TRUNCATE`, `RESET`, or `ALTER ... DROP` statements.
+
+Verification:
+- `npm.cmd run verify:release` passed.
+- `npm.cmd run lint` exits 0 with legacy warnings only.
+- `npm.cmd run build` passed.
+- `npm.cmd run test:timesheet-sanity` passed.
+- `npm.cmd run test:receipt-ocr` passed.
+- Built frontend bundle scan found no obvious service-role/OpenAI/private-key patterns.
+- Vercel Preview deployment completed and development alias updated.
+- Development app: `https://project-rui1d-development.vercel.app`.
+- Development API smoke:
+  - `/api/chat` returns 401 without auth.
+  - `/api/project-media` returns 401 without auth.
+  - `/api/create-project-task` returns 401 without auth.
+  - `/api/ai-field-docs` returns 401 without auth.
+  - `/api/send-daily-timesheet-report` returns 400 without channel.
+- Development bundle includes DEV icon and chat code.
+- Employee bottom nav no longer includes Schedule.
+
+Advisor status:
+- Sanitized B.2 production-readiness advisor review completed.
+- Advisor final decision: blocked for production merge until remaining high-risk gates are completed.
+- No secrets, env values, receipt images, customer records, employee records, or database contents were sent.
+
+Remaining production gates:
+- Run pending migrations on a staging/production-like database and verify idempotency.
+- Complete explicit RLS/RBAC tests for chat, live locations, receipt OCR fields, daily report logs, and pay rates.
+- Complete manual QA on development app for owner/supervisor/employee accounts.
+- Verify live location privacy behavior: only while clocked in, stops on clock-out/logout, company-scoped visibility.
+- Verify chat company/membership isolation.
+- Verify receipt OCR with configured provider and safe synthetic receipt.
+- Verify email/WhatsApp disabled/enabled behavior with approved test recipients only.
+- Confirm production Vercel server-side env readiness without exposing values.
+- Prepare backup/checkpoint plan before production SQL.
+
+Production status:
+- Development candidate hardened.
+- Not yet approved to merge to main.
+- Not yet approved for production deployment.
+- No production SQL run.
+
+## B.2 Production Readiness Gate - Final Attempt Status
+
+Date: 2026-06-26
+
+Additional hardening completed:
+- Added `scripts/verify-b2-migration-safety.js`.
+- Added `scripts/verify-b2-dev-readiness.js`.
+- Added package scripts:
+  - `verify:migrations`
+  - `verify:b2-dev`
+  - updated `verify:release`
+- Updated `docs/DATABASE_ENVIRONMENT_SAFETY.md` with the exact blocked SQL command sequence.
+- Updated `docs/B2_PRODUCTION_READINESS_RUNBOOK.md` with the latest gate status.
+
+Checks completed:
+- Supabase CLI auth confirmed.
+- Supabase linked target confirmed as `bridge-app-dev` / masked ref `...jjwbut`.
+- Production/older clock project identified separately as masked ref `...evhyjm`.
+- `npm.cmd run verify:migrations` passed for the B.2 202606 migrations.
+- App-side checks passed:
+  - lint exits 0 with legacy warnings only
+  - build passes
+  - timesheet sanity test passes
+  - receipt OCR normalization test passes
+- Development app remains deployed at `https://project-rui1d-development.vercel.app`.
+
+Blocked checks:
+- `npx.cmd supabase db push --dry-run` failed because `SUPABASE_DB_PASSWORD` is missing or invalid for `bridge-app-dev`.
+- `npm.cmd run verify:b2-dev` failed because `public.chat_conversations` is not present in the `bridge-app-dev` schema cache.
+- Because B.2 migrations are not applied on dev, authenticated RBAC/RLS QA for chat/live-location/report/pay-rate/OCR tables cannot be completed yet.
+
+Advisor recheck:
+- Sanitized advisor review rerun after adding the new gates.
+- Advisor final decision: blocked.
+- Advisor confirmed production merge remains blocked until the dev DB password is supplied, migrations dry-run/apply succeeds, `verify:b2-dev` passes, and role/RBAC QA is completed.
+- No secrets, env values, customer data, employee records, receipt images, or database contents were sent.
+
+Required next command sequence once `bridge-app-dev` database password is available:
+
+```powershell
+$env:SUPABASE_DB_PASSWORD="<bridge-app-dev database password>"
+npm.cmd run verify:migrations
+npx.cmd supabase db push --dry-run
+npx.cmd supabase db push
+npm.cmd run verify:b2-dev
+npm.cmd run verify:release
+```
+
+Safety:
+- SQL run: no.
+- Production SQL run: no.
+- Production deployment: no.
+- Push to main: no.
+- Destructive commands run: no.
+
+## B.2 Chat + Employee Project/Task Creation Production-Readiness Work
+
+Date: 2026-06-26
+Branch: develop
+
+Scope:
+- Fixed the production-facing employee project/task creation blocker in code.
+- Added in-app chat foundation for default company chat, direct messages, and named group chats.
+- Kept work on develop only.
+- No production deployment.
+- No push to main.
+
+Employee project/task creation:
+- Updated `api/create-project-task.js` so authenticated active company employees can create projects/tasks from Clock.
+- Kept server-side bearer-session validation.
+- Kept same-company membership validation.
+- Added optional `company_members.status` / `company_members.employment_status` inactive-member rejection when those columns exist.
+- Kept profile `employment_status = archived` rejection.
+- Preserved existing project/task assignment behavior:
+  - all-projects setting still controls assignment breadth
+  - all-tasks setting still controls task propagation
+  - supervisor notifications remain preserved
+- Updated Clock UI so active employees see:
+  - `+ Add new project`
+  - `+ Add new task`
+- Updated Projects access rule so active employees can reach Projects when project/task creation is available from Clock.
+- Removed hidden mutation that forced the legacy `allow_employee_project_task_creation` setting to true on company Settings save.
+- Reworded Settings display to explain active employees can add from Clock and assignment rules still control visibility.
+
+Chat implementation:
+- Added `api/chat.js`.
+- Added additive migration:
+  - `supabase/migrations/20260626120000_create_company_chat.sql`
+- Migration adds:
+  - `chat_conversations`
+  - `chat_conversation_members`
+  - `chat_messages`
+- Chat API supports:
+  - default `All team` company chat
+  - one-to-one direct conversations
+  - named group conversations
+  - paginated message loading
+  - message send with idempotent client id
+- Chat authorization:
+  - validates Supabase bearer token
+  - validates active same-company membership
+  - validates conversation membership on messages and sends
+  - validates direct-chat target is an active same-company member
+  - validates group members are active same-company members
+  - rejects archived/inactive users where schema supports the status fields
+- Chat UI:
+  - added `ChatScreen` as a separate component to preserve main React hook order
+  - accessible from More/Menu
+  - includes conversation list, New chat, New group, message thread, composer, empty/loading/error states
+  - uses Royal Navy visual system
+  - does not claim attachments, read receipts, or push delivery yet
+
+Advisor review:
+- Sanitized advisor architecture review ran before implementation.
+- Advisor decision before implementation: needs changes.
+- Sanitized advisor QC review ran after implementation.
+- Advisor decision after implementation: needs changes for production promotion.
+- Mandatory blockers remaining:
+  - development chat migration has not been run yet
+  - authenticated chat end-to-end flow has not been tested against a migrated dev DB
+  - negative authorization tests are still needed for cross-company, non-member, inactive-member, and direct-client access
+  - project/task wrong-company/stale-membership tests are still needed before production promotion
+
+Verification completed:
+- `node --check api/chat.js` passed.
+- `node --check api/create-project-task.js` passed.
+- Focused lint passed:
+  - `api/chat.js`
+  - `api/create-project-task.js`
+- `npm.cmd run build` passed.
+- `npm.cmd run test:receipt-ocr` passed.
+- `npm.cmd run test:timesheet-sanity` passed.
+- Local browser smoke opened OPERA.AI at `http://127.0.0.1:5174/` with no captured console errors.
+
+Known limitations / remaining work:
+- Chat migration was created but not run.
+- No production SQL was run.
+- No development SQL was run for chat in this pass.
+- Chat live DB functionality must be tested after dev-only migration approval.
+- Repo-wide lint remains noisy due existing/generated files and older large React-file lint issues; touched API files lint clean.
+- Workspace includes prior B.2 OCR/daily report work; isolate release scope before production promotion.
+
+Safety:
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No destructive commands were run.
+
+## B.2 Cross-Device Active Shift Rehydrate
+
+Date: 2026-06-26
+Branch: develop
+
+Scope:
+- Ensured an employee who clocks in on one mobile device can log in on another mobile device and still see the ongoing shift.
+- Ensured the same active Supabase timesheet row remains the source of truth for clock-out from any signed-in device.
+
+Implementation:
+- Updated the timesheet refresh flow to detect the signed-in user’s latest open/active server timesheet.
+- Rehydrates `currentShift` from the active Supabase timesheet when local device storage has no active shift.
+- Clears stale local server-backed shifts when the server no longer has an active row for the signed-in user.
+- Preserves unsynced local-only shifts when database save failed and no server row exists.
+- Rehydrates project, task, clock-in time, employee info, hourly rate, location, and timesheet id.
+- Looks up server photo count from `project_media.related_timesheet_id` so the photo-before-clock-out rule works across devices when a photo was already uploaded from the first device.
+- If no server photo exists, the second device can still capture the required photo before clocking out.
+
+Verification:
+- `npm.cmd run build` passed.
+- `npm.cmd run test:timesheet-sanity` passed.
+- `npm.cmd run test:receipt-ocr` passed.
+- Focused API lint for current changed APIs passed.
+
+Safety:
+- No SQL run.
+- No production deployment.
+- No push to main.
+- No destructive commands run.
+
+## B.2-fix-8 Production Readiness Runbook + Real Delivery Test Plan
+
+Date: 2026-06-15
+
+Scope:
+- Prepared production readiness planning documents for B.2 daily reports, receipt OCR, scheduler, Gmail, and WhatsApp.
+- Documentation/runbook task only.
+- No SQL run.
+- No real Gmail or WhatsApp sent.
+- No production send flags enabled.
+- No production deployment.
+- No push to main.
+
+Files created:
+- `docs/B2_PRODUCTION_READINESS_RUNBOOK.md`
+- `docs/B2_REAL_DELIVERY_TEST_CHECKLIST.md`
+
+Runbook contents:
+- Current B.2 development-readiness status.
+- Production prerequisites.
+- Gmail, WhatsApp, and cron/security environment variable checklist without real values.
+- Real Gmail staged test plan.
+- Real WhatsApp staged test plan.
+- Receipt OCR retest plan.
+- Production enablement steps.
+- Rollback plan.
+- Monitoring checklist.
+- Required approvals and owners.
+- Hard go/no-go criteria.
+- Recipient allowlist and canary controls.
+- Rollback verification drill.
+- Monitoring thresholds and escalation path.
+- Provider failure matrix.
+- Sanitized evidence requirements.
+- Post-release observation window.
+
+Real delivery checklist contents:
+- Gmail real delivery checklist.
+- WhatsApp real delivery checklist.
+- Receipt OCR retest checklist.
+- RBAC/tenant safety checklist.
+- Scheduler/cron checklist.
+- Rollback drill checklist.
+- Monitoring/evidence checklist.
+- Production go/no-go checklist.
+
+Advisor production-readiness review:
+- First sanitized advisor review returned `needs_changes`.
+- Advisor requested measurable pass/fail gates, containment controls, rollback proof, monitoring thresholds/owners, scheduler-specific gates, provider failure matrix, and evidence capture.
+- Updated docs to address those recommendations.
+- Second sanitized advisor review returned `approved` for a production-readiness planning artifact only.
+- Advisor explicitly stated this is not production enablement approval.
+
+Remaining production blockers:
+- Actual real Gmail delivery test evidence.
+- Actual real WhatsApp delivery test evidence.
+- Final named approver signatures/timestamps.
+- Provider-side readiness evidence:
+  - Gmail auth/quota/sender status
+  - WhatsApp template/language/opt-in/rate-limit status
+- Allowlist enforcement proof during test execution.
+- Rollback drill execution evidence.
+- Scheduler production timing validation for timezone/DST and cron window.
+
+Safety:
+- SQL run: no.
+- Real email/WhatsApp sent: no.
+- Production deployment: no.
+- Production send flags remain disabled.
+- No secrets or env values were documented or sent to advisor.
+
+## B.2 Daily Report/OCR Advisor Remediation Gate - Follow-up
+
+Date: 2026-06-15
+
+Scope:
+- Re-ran the B.2 remediation gate after a fresh advisor review returned `needs_changes`.
+- Continued on `develop` only.
+- No production deployment.
+- No push to main.
+- No production email or WhatsApp flags enabled.
+- No real email or WhatsApp was sent.
+- No secrets, tokens, env values, receipt images, customer records, employee records, or code were sent to advisor.
+
+Advisor follow-up:
+- First fresh advisor review on 2026-06-15 returned `needs_changes`.
+- Main development-gate issue was lack of second-company tenant isolation proof.
+- Additional concerns included duplicate-send retry semantics, scheduler/idempotency evidence, OCR negative paths, and positive same-company RLS checks.
+
+RLS and tenant isolation remediation:
+- Added `supabase/migrations/20260615110000_harden_daily_report_rls.sql`.
+- Migration is non-destructive:
+  - enables RLS on `daily_report_logs`
+  - adds admin/supervisor scoped select policy for `daily_report_logs`
+  - adds restrictive company-membership policy for `timesheets`
+  - no data delete, no truncation, no table/column drop, no reset
+- Applied the RLS hardening migration on the linked development database only.
+- Created dev-only second-company/user fixture and company-scoped rows for tenant isolation QA.
+- Verified main-company owner is not a member of the second company.
+- Wrong-company email report API returned 403.
+- Wrong-company WhatsApp report API returned 403.
+- Email report GET method restriction returned 405.
+- Direct signed-in main-owner query for other-company timesheets returned zero rows after RLS hardening.
+- Direct signed-in main-owner query for other-company media returned zero rows.
+- Direct signed-in main-owner query for other-company daily report logs returned zero rows.
+- Same-company positive RLS test passed:
+  - owner membership visible
+  - owner own-company timesheet select succeeded
+  - owner own-company timesheet insert succeeded
+  - owner own-company timesheet update succeeded
+  - owner own-company report log select succeeded
+
+Duplicate-send and scheduler remediation:
+- Fixed `isMissingDailyReportLogsTable` so duplicate key errors are not misclassified as missing-table errors.
+- Updated `reserveDailyReportSend` so:
+  - already-sent reports remain duplicate-protected
+  - failed report reservations can be retried safely
+- Direct duplicate test passed:
+  - first sent reservation succeeded
+  - second sent reservation returned duplicate
+  - failed reservation retried with `retry: true`
+- Scheduler-level test used dummy dev config and stubbed provider calls only.
+- Scheduler unauthenticated request returned 403.
+- First scheduler invocation reserved and failed safely against a stubbed provider.
+- Second scheduler invocation retried the failed reservation instead of suppressing it as duplicate.
+- No real email or WhatsApp provider call was allowed during this test.
+
+Receipt OCR negative-path QA:
+- Existing synthetic receipt OCR success path remained verified.
+- Missing receipt image returned `image_unavailable` with manual review/save fallback message.
+- Missing media returned safe `media_not_found`.
+- Receipt OCR normalization test passed.
+
+Fresh UI/browser QA:
+- Refreshed development app rendered signed-in admin Home.
+- Browser smoke checked:
+  - Home
+  - Clock
+  - Timesheets
+  - Schedule
+  - Photos
+  - Receipts
+  - Reports
+  - Team
+  - More/Menu
+- Checked screens rendered without console errors.
+- Settings was present in the Admin menu DOM; the browser automation timed out clicking that offscreen item during this follow-up smoke pass.
+
+Advisor final re-review:
+- Sanitized advisor re-review completed after the RLS, duplicate retry, scheduler retry, OCR negative-path, and build checks.
+- Advisor final decision: approved for development remediation/merge readiness only.
+- Advisor explicitly stated production remains not ready.
+
+Remaining production blockers:
+- Controlled real Gmail staged send with an approved recipient.
+- Controlled real WhatsApp template staged send with an approved recipient.
+- Production cron/auth configuration verification.
+- Production monitoring/alerting for failed sends, duplicate skips, OCR failures, and scheduler failures.
+- Rollback/runbook checklist.
+- Broader existing lint-noise tracking or cleanup.
+
+Build/deployment status:
+- Receipt OCR normalization test passed.
+- Timesheet sanity test passed.
+- Focused lint for changed daily-report/OCR files passed.
+- Approval-wrapper build passed.
+- Development deployment completed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment: `https://project-rui1d-ogz8v9jsm-samrental70-7859s-projects.vercel.app`.
+- Development app root returned HTTP 200.
+- Scheduler endpoint returned HTTP 401 without cron authorization.
+- Authorized development scheduler dry-run returned ok/dry-run true.
+
+Safety:
+- Production database was not touched.
+- Production deployment was not performed.
+- No push to main was performed.
+- No destructive commands were run.

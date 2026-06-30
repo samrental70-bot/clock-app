@@ -9,6 +9,8 @@ dist-ssr/
 .env.*
 *.log
 screenshots/
+bridge/
+supabase/dev-only/
 
 # These paths are from other local experiments and must not ship with the clock app.
 census-tenant-form-2026/
@@ -19,8 +21,12 @@ tools/
 worker/
 docs/AURACUT_*.md
 api/analyze-video.js
+api/_lib/
+api/daily-supervisor-report-cron.js
 api/diagnostics.js
 api/render-video.js
+api/send-daily-timesheet-email.js
+api/send-daily-timesheet-whatsapp.js
 scripts/apply-auracut-schema.js
 scripts/ensure-auracut-storage.js
 scripts/install-ffmpeg.ps1

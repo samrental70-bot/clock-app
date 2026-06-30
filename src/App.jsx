@@ -1,6 +1,5 @@
-import React, { Component, useEffect } from "react";
+import { Component } from "react";
 import EmployeeClockApp from "./EmployeeClockApp";
-import { supabase } from "./supabaseClient";
 
 const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
 
@@ -79,20 +78,6 @@ class AppErrorBoundary extends Component {
 }
 
 export default function App() {
-  useEffect(() => {
-    testConnection();
-  }, []);
-
-  const testConnection = async () => {
-    const { data, error } = await supabase.from("employees").select("*");
-
-    if (error) {
-      console.log("Supabase error:", error);
-    } else {
-      console.log("Supabase connected:", data);
-    }
-  };
-
   return (
     <AppErrorBoundary>
       <EmployeeClockApp />

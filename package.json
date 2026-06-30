@@ -9,7 +9,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:timesheet-sanity": "node scripts/test-timesheet-sanity.js",
+    "test:receipt-ocr": "node scripts/test-receipt-ocr-normalization.js",
+    "verify:migrations": "node scripts/verify-b2-migration-safety.js",
+    "verify:b2-dev": "node scripts/verify-b2-dev-readiness.js",
+    "verify:release": "npm run verify:migrations && npm run lint && npm run build && npm run test:timesheet-sanity && npm run test:receipt-ocr && npm run verify:b2-dev"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.1",

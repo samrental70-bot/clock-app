@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { runDailySupervisorReportCron } from "../api-shared/dailyReportScheduler.js";
 
 const DEFAULT_TIME_ZONE = "America/Toronto";
 const DEFAULT_AUTO_CLOCK_OUT_TIME = "00:00";
@@ -33,6 +34,11 @@ function requestBody(req) {
   return typeof req.body === "object" ? req.body : {};
 }
 
+function requestFlag(req, body, name) {
+  const value = String(body?.[name] ?? req.query?.[name] ?? "").trim().toLowerCase();
+  return ["1", "true", "yes", "y"].includes(value);
+}
+
 function normalizeAutoClockOutTime(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/^([01]\d|2[0-3]):([0-5]\d)$/);
@@ -61,6 +67,12 @@ function hourlyRateFromValue(value) {
   if (value == null || value === "") return 0;
   const n = Number(String(value).replace(",", "."));
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function isMissingPayRatesTableError(error) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || msg.includes("employee_pay_rates") || (msg.includes("relation") && msg.includes("does not exist"));
 }
 
 function datePartsInTimeZone(dateOrIso, timeZone) {
@@ -212,9 +224,27 @@ function buildNotificationMessage(row, timeZone, recipientUserId) {
   ].filter(Boolean).join("\n");
 }
 
-async function getHourlyRateForRow(supabase, row) {
+async function getEffectiveHourlyRateForRow(supabase, row, settings) {
   const rowRate = hourlyRateFromValue(row?.hourly_rate);
-  if (rowRate > 0 || !row?.user_id) return rowRate;
+  if (!row?.user_id) return rowRate;
+  const effectiveDate = calendarDateKeyInTimeZone(row?.clock_in || new Date(), settings?.timeZone || DEFAULT_TIME_ZONE);
+  if (row?.company_id && effectiveDate) {
+    const { data, error } = await supabase
+      .from("employee_pay_rates")
+      .select("hourly_rate, effective_date")
+      .eq("company_id", row.company_id)
+      .eq("employee_id", row.user_id)
+      .lte("effective_date", effectiveDate)
+      .order("effective_date", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error && !isMissingPayRatesTableError(error)) {
+      console.warn("[AUTO_CLOCK_OUT] effective rate fetch failed", row.user_id, error);
+    }
+    const historyRate = hourlyRateFromValue(data?.hourly_rate);
+    if (historyRate > 0) return historyRate;
+  }
+  if (rowRate > 0) return rowRate;
   const { data, error } = await supabase
     .from("profiles")
     .select("hourly_rate")
@@ -257,7 +287,10 @@ async function updateTimesheetAutoClockOut(supabase, row, hourlyRate, settings) 
     isMissingOptionalAccuracyColumnError(error) &&
     ("clock_out_accuracy" in payload || "clock_out_latitude" in payload || "clock_out_longitude" in payload)
   ) {
-    const { clock_out_accuracy, clock_out_latitude, clock_out_longitude, ...rest } = payload;
+    const rest = { ...payload };
+    delete rest.clock_out_accuracy;
+    delete rest.clock_out_latitude;
+    delete rest.clock_out_longitude;
     ({ data, error } = await supabase
       .from("timesheets")
       .update(rest)
@@ -345,7 +378,11 @@ async function insertAutoClockOutNotifications(supabase, row, recipients, timeZo
 
   let { data, error } = await supabase.from("notifications").insert(rows).select("id");
   if (error && String(error.message || "").toLowerCase().includes("is_read")) {
-    const retryRows = rows.map(({ is_read, ...rest }) => rest);
+    const retryRows = rows.map((row) => {
+      const retryRow = { ...row };
+      delete retryRow.is_read;
+      return retryRow;
+    });
     ({ data, error } = await supabase.from("notifications").insert(retryRows).select("id"));
   }
   if (error) {
@@ -409,6 +446,12 @@ export default async function handler(req, res) {
   });
 
   const body = requestBody(req);
+  if (requestFlag(req, body, "daily_report_only") || requestFlag(req, body, "dailyReportOnly")) {
+    const dailyReport = await runDailySupervisorReportCron(req);
+    res.status(dailyReport.status).json(dailyReport.body);
+    return;
+  }
+
   const companyId = String(body.company_id || req.query?.company_id || "").trim();
   const userId = String(body.user_id || req.query?.user_id || "").trim();
   const nowMs = Date.now();
@@ -450,7 +493,7 @@ export default async function handler(req, res) {
         timeZone: DEFAULT_TIME_ZONE,
         autoClockOutTime: DEFAULT_AUTO_CLOCK_OUT_TIME,
       };
-      const hourlyRate = await getHourlyRateForRow(supabase, row);
+      const hourlyRate = await getEffectiveHourlyRateForRow(supabase, row, settings);
       const { data: updatedRows, error: updateError } = await updateTimesheetAutoClockOut(supabase, row, hourlyRate, settings);
       if (updateError) {
         console.warn("[AUTO_CLOCK_OUT] timesheet update failed", row.id, updateError);
@@ -471,6 +514,18 @@ export default async function handler(req, res) {
   }
 
   const pushResult = await sendPushForNotifications(req, notificationIds);
+  let dailyReport;
+  try {
+    dailyReport = await runDailySupervisorReportCron(req);
+  } catch (error) {
+    dailyReport = {
+      status: 500,
+      body: {
+        ok: false,
+        error: error?.message || "Daily report scheduler failed",
+      },
+    };
+  }
   res.status(200).json({
     ok: true,
     scanned: candidateRows.length,
@@ -479,6 +534,7 @@ export default async function handler(req, res) {
     updated_ids: updatedIds,
     notification_ids: notificationIds,
     push: pushResult,
+    daily_report: dailyReport.body,
     errors,
   });
 }

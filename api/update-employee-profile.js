@@ -29,6 +29,38 @@ function cleanDate(value) {
   return s ? s.slice(0, 10) : null;
 }
 
+function isMissingPayRatesTableError(error) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || msg.includes("employee_pay_rates") || msg.includes("relation") && msg.includes("does not exist");
+}
+
+async function recordEmployeePayRate(supabase, { companyId, employeeId, hourlyRate, effectiveDate, createdBy }) {
+  const date = effectiveDate || new Date().toISOString().slice(0, 10);
+  const { error } = await supabase
+    .from("employee_pay_rates")
+    .upsert(
+      {
+        company_id: companyId,
+        employee_id: employeeId,
+        hourly_rate: hourlyRate,
+        effective_date: date,
+        created_by: createdBy || null,
+        note: "profile_update",
+      },
+      { onConflict: "company_id,employee_id,effective_date" }
+    );
+  if (error) {
+    if (isMissingPayRatesTableError(error)) {
+      console.warn("[PAY_RATES] employee_pay_rates table not installed; profile rate saved only.");
+      return { skipped: "missing_table" };
+    }
+    console.warn("[PAY_RATES] history upsert failed; profile rate saved", error);
+    return { skipped: "history_failed", error: error.message || String(error) };
+  }
+  return { saved: true };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -186,9 +218,18 @@ export default async function handler(req, res) {
     return;
   }
 
+  const payHistory = await recordEmployeePayRate(supabase, {
+    companyId: company_id,
+    employeeId: target_user_id,
+    hourlyRate: hourly_rate,
+    effectiveDate: pay_rate_effective_date || joining_date,
+    createdBy: callerId,
+  });
+
   res.status(200).json({
     success: true,
     employment_status: updatedProfile.employment_status,
     role: finalRole,
+    pay_history: payHistory,
   });
 }

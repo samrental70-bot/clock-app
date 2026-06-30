@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  let body = {};
+  let body;
   try {
     body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
   } catch {

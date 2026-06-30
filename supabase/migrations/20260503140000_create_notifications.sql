@@ -26,18 +26,51 @@ create index if not exists notifications_recipient_unread_idx
 
 alter table public.notifications enable row level security;
 
-create policy "notifications_select_own"
-  on public.notifications for select
-  using (recipient_user_id = auth.uid());
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notifications'
+      and policyname = 'notifications_select_own'
+  ) then
+    create policy "notifications_select_own"
+      on public.notifications for select
+      using (recipient_user_id = auth.uid());
+  end if;
+end $$;
 
-create policy "notifications_update_own"
-  on public.notifications for update
-  using (recipient_user_id = auth.uid());
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notifications'
+      and policyname = 'notifications_update_own'
+  ) then
+    create policy "notifications_update_own"
+      on public.notifications for update
+      using (recipient_user_id = auth.uid());
+  end if;
+end $$;
 
-create policy "notifications_insert_company_member"
-  on public.notifications for insert
-  with check (
-    company_id in (
-      select cm.company_id from public.company_members cm where cm.user_id = auth.uid()
-    )
-  );
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'notifications'
+      and policyname = 'notifications_insert_company_member'
+  ) then
+    create policy "notifications_insert_company_member"
+      on public.notifications for insert
+      with check (
+        company_id in (
+          select cm.company_id from public.company_members cm where cm.user_id = auth.uid()
+        )
+      );
+  end if;
+end $$;

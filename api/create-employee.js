@@ -103,6 +103,38 @@ function isMissingCompanySettingsColumnError(error) {
   );
 }
 
+function isMissingPayRatesTableError(error) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || msg.includes("employee_pay_rates") || (msg.includes("relation") && msg.includes("does not exist"));
+}
+
+async function recordEmployeePayRate(supabase, { companyId, employeeId, hourlyRate, effectiveDate, createdBy }) {
+  const date = effectiveDate || new Date().toISOString().slice(0, 10);
+  const { error } = await supabase
+    .from("employee_pay_rates")
+    .upsert(
+      {
+        company_id: companyId,
+        employee_id: employeeId,
+        hourly_rate: hourlyRate,
+        effective_date: date,
+        created_by: createdBy || null,
+        note: "employee_create",
+      },
+      { onConflict: "company_id,employee_id,effective_date" }
+    );
+  if (error) {
+    if (isMissingPayRatesTableError(error)) {
+      console.warn("[CREATE_EMPLOYEE] employee_pay_rates table not installed; profile rate saved only.");
+      return { skipped: "missing_table" };
+    }
+    console.warn("[CREATE_EMPLOYEE] pay history upsert failed; profile rate saved", error);
+    return { skipped: "history_failed", error: error.message || String(error) };
+  }
+  return { saved: true };
+}
+
 async function getCompanyAssignmentSettings(supabase, companyId) {
   let { data, error } = await supabase
     .from("companies")
@@ -290,6 +322,19 @@ export default async function handler(req, res) {
   }
 
   let defaultAssignments = { projects: 0, costCentres: 0 };
+  let payHistory = { skipped: "not_attempted" };
+  try {
+    payHistory = await recordEmployeePayRate(supabase, {
+      companyId: company_id,
+      employeeId: newUserId,
+      hourlyRate: hrNum,
+      effectiveDate: pay_date || joining_date,
+      createdBy: callerId,
+    });
+  } catch (payHistoryErr) {
+    console.warn("[CREATE_EMPLOYEE] pay history save failed", payHistoryErr);
+  }
+
   try {
     const assignmentSettings = await getCompanyAssignmentSettings(supabase, company_id);
     if (assignmentSettings.assignAllProjects) {
@@ -304,5 +349,5 @@ export default async function handler(req, res) {
     console.warn("[CREATE_EMPLOYEE] default project assignment failed", assignErr);
   }
 
-  res.status(200).json({ success: true, user_id: newUserId, email, default_assignments: defaultAssignments });
+  res.status(200).json({ success: true, user_id: newUserId, email, default_assignments: defaultAssignments, pay_history: payHistory });
 }
