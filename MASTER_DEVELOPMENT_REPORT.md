@@ -2948,3 +2948,9 @@ Safety:
 - Dev smoke check confirmed payroll settings load, alternate Friday anchor saves, payroll tracker opens, filters render, and payment tracking/balance UI remains available.
 - Break exclusion and worked-vs-paid balance behavior remain in place on the deployed development app.
 - Production deploy was not performed and production DB was not touched.
+
+- Payroll UI refinement pass completed on develop.
+- Payroll settings now clearly show the current payroll period range and pay date.
+- Payroll tracker now includes a Payroll period filter alongside time range and employee filters.
+- Payroll summary was compacted into a single slim row for hours, worked, paid, and balance.
+- Development deployment refreshed again after the payroll UI refinement.

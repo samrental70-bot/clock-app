@@ -1573,6 +1573,77 @@ function payrollRangePresetLabel(value) {
   return PAYROLL_RANGE_OPTIONS.find((option) => option.id === key)?.label || "All";
 }
 
+function formatPayrollDateLong(dateKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const key = String(dateKey || "").trim();
+  if (!key) return "â€”";
+  const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
+  if (!iso) return key;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(iso));
+}
+
+function formatPayrollPeriodLabelLong(startKey, endKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const start = formatPayrollDateKeyShort(startKey, tz, { includeYear: true });
+  const end = formatPayrollDateKeyShort(endKey, tz, { includeYear: true });
+  if (start && end) return `${start} - ${end}`;
+  return "Payroll period";
+}
+
+function payrollPeriodOptionKey(startKey, endKey) {
+  return `${String(startKey || "").trim()}__${String(endKey || "").trim()}`;
+}
+
+function payrollPeriodOptionsForRange(settings, rangeFrom, rangeTo, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const from = String(rangeFrom || "").trim();
+  const to = String(rangeTo || "").trim();
+  const fallbackDateKey = to || calendarDateKeyInTimeZone(new Date(), tz);
+  const seedPeriod = getPayrollPeriodWindowForDateKey(fallbackDateKey, settings, tz);
+  if (!seedPeriod) return [];
+
+  const seen = new Set();
+  const options = [];
+  let period = seedPeriod;
+  let guard = 0;
+
+  while (period && guard < 240) {
+    const startKey = String(period.startKey || "").trim();
+    const endKey = String(period.endKey || "").trim();
+    if (!startKey || !endKey) break;
+    if (to && startKey > to) {
+      const prevDate = addWallDaysInTimeZone(startKey, -1, tz);
+      period = prevDate ? getPayrollPeriodWindowForDateKey(prevDate, settings, tz) : null;
+      guard += 1;
+      continue;
+    }
+    if (from && endKey < from) break;
+    const key = payrollPeriodOptionKey(startKey, endKey);
+    if (!seen.has(key)) {
+      seen.add(key);
+      options.push({
+        id: key,
+        startKey,
+        endKey,
+        payDateKey: String(period.payDateKey || endKey).trim() || endKey,
+        label: `${formatPayrollPeriodLabelLong(startKey, endKey, tz)} • Pay ${formatPayrollDateLong(period.payDateKey || endKey, tz)}`,
+      });
+    }
+    const prevDate = addWallDaysInTimeZone(startKey, -1, tz);
+    if (!prevDate || prevDate === startKey) break;
+    period = getPayrollPeriodWindowForDateKey(prevDate, settings, tz);
+    guard += 1;
+  }
+
+  return options;
+}
+
 function payrollBalanceBadgeClass(balance) {
   const value = Number(balance) || 0;
   if (value > 0) return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
@@ -5201,6 +5272,7 @@ export default function EmployeeClockApp() {
   const [payrollPanelOpen, setPayrollPanelOpen] = useState(false);
   const [payrollRangePreset, setPayrollRangePreset] = useState("last_3_months");
   const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState("all");
+  const [payrollPeriodFilter, setPayrollPeriodFilter] = useState("all");
   const [payrollSettings, setPayrollSettings] = useState(null);
   const [payrollSettingsLoading, setPayrollSettingsLoading] = useState(false);
   const [payrollSettingsError, setPayrollSettingsError] = useState("");
@@ -8420,6 +8492,15 @@ export default function EmployeeClockApp() {
     () => payrollRangeBoundsForPreset(payrollRangePreset, now, companyTimeZone),
     [companyTimeZone, now, payrollRangePreset]
   );
+  const payrollPeriodOptions = useMemo(
+    () => payrollPeriodOptionsForRange(payrollEffectiveSettings, payrollDateBounds.from, payrollDateBounds.to, companyTimeZone),
+    [companyTimeZone, payrollDateBounds.from, payrollDateBounds.to, payrollEffectiveSettings]
+  );
+  useEffect(() => {
+    if (payrollPeriodFilter === "all") return;
+    if (payrollPeriodOptions.some((option) => option.id === payrollPeriodFilter)) return;
+    setPayrollPeriodFilter("all");
+  }, [payrollPeriodFilter, payrollPeriodOptions]);
 
   const payrollEmployeeLabelById = useMemo(() => {
     const out = {};
@@ -8454,9 +8535,21 @@ export default function EmployeeClockApp() {
         if (!clockKey) return false;
         if (payrollDateBounds.from && clockKey < payrollDateBounds.from) return false;
         if (payrollDateBounds.to && clockKey > payrollDateBounds.to) return false;
+        if (payrollPeriodFilter !== "all") {
+          const period = getPayrollPeriodWindowForDateKey(clockKey, payrollEffectiveSettings, companyTimeZone);
+          if (!period || payrollPeriodOptionKey(period.startKey, period.endKey) !== payrollPeriodFilter) return false;
+        }
         return true;
       });
-  }, [companyTimeZone, payrollDateBounds.from, payrollDateBounds.to, payrollEmployeeFilter, visibleRecords]);
+  }, [
+    companyTimeZone,
+    payrollDateBounds.from,
+    payrollDateBounds.to,
+    payrollEffectiveSettings,
+    payrollEmployeeFilter,
+    payrollPeriodFilter,
+    visibleRecords,
+  ]);
 
   const payrollPaymentsActive = useMemo(() => {
     return normalizeArray(payrollPayments).filter((row) => !row?.deleted_at);
@@ -8517,6 +8610,7 @@ export default function EmployeeClockApp() {
       const startKey = String(payment?.period_start ?? "").trim();
       const endKey = String(payment?.period_end ?? "").trim();
       if (!startKey || !endKey) continue;
+      if (payrollPeriodFilter !== "all" && payrollPeriodOptionKey(startKey, endKey) !== payrollPeriodFilter) continue;
       const period = {
         startKey,
         endKey,
@@ -8557,6 +8651,7 @@ export default function EmployeeClockApp() {
     payrollEmployeeFilter,
     payrollEmployeeLabelById,
     payrollPaymentsActive,
+    payrollPeriodFilter,
     profileFullName,
     teamProfileFullNameByUserId,
   ]);
@@ -17756,8 +17851,11 @@ const handlePhotoQuickUpload = async (event) => {
       payrollEmployeeFilter === "all"
         ? "All employees"
         : payrollEmployeeOptions.find((employee) => String(employee.id) === String(payrollEmployeeFilter))?.name || "Selected employee";
+    const currentPayrollPeriodLabel = payrollCurrentPeriod
+      ? formatPayrollPeriodLabelLong(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
+      : "—";
     const currentPayDateLabel = payrollCurrentPeriod?.payDateKey
-      ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
+      ? formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)
       : "—";
 
     return (
@@ -17807,32 +17905,27 @@ const handlePhotoQuickUpload = async (event) => {
                 {payrollSettingsLoading ? (
                   <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
                 ) : payrollSettings ? (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
+                      <div className="min-w-0">
                         <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current schedule</p>
                         <p className="mt-1 text-[15px] font-black text-[#061426]">{payrollFrequencyLabel(payrollSettings.frequency)}</p>
                       </div>
-                      <span className="rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
+                      <span className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
                         {currentPayDateLabel}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Payroll day</p>
-                        <p className="mt-1 text-[13px] font-black capitalize text-[#061426]">
-                          {(payrollSettings.payroll_day || "friday").toLowerCase()}
-                        </p>
-                      </div>
-                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Anchor</p>
-                        <p className="mt-1 text-[13px] font-black text-[#061426]">
-                          {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
-                        </p>
-                      </div>
-                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current pay date</p>
-                        <p className="mt-1 text-[13px] font-black text-[#061426]">{currentPayDateLabel}</p>
+                    <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3">
+                      <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current payroll period</p>
+                      <p className="mt-1 text-[14px] font-black text-[#061426]">{currentPayrollPeriodLabel}</p>
+                      <p className="mt-1 text-[12px] font-semibold text-[#64748B]">Pay date: {currentPayDateLabel}</p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                          Payroll day: {(payrollSettings.payroll_day || "friday").toLowerCase()}
+                        </span>
+                        <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                          Anchor: {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -17883,7 +17976,23 @@ const handlePhotoQuickUpload = async (event) => {
               </div>
             </div>
 
-            <div className="mt-3 px-4">
+            <div className="mt-3 grid gap-3 px-4">
+              {renderRoyalNavyFilterSelect({
+                label: "Payroll period",
+                icon: "calendar",
+                value: payrollPeriodFilter,
+                onChange: (event) => setPayrollPeriodFilter(event.target.value),
+                children: (
+                  <>
+                    <option value="all">All periods</option>
+                    {payrollPeriodOptions.map((period) => (
+                      <option key={period.id} value={period.id}>
+                        {period.label}
+                      </option>
+                    ))}
+                  </>
+                ),
+              })}
               {renderRoyalNavyFilterSelect({
                 label: "Employee",
                 icon: "user",
@@ -17902,22 +18011,29 @@ const handlePhotoQuickUpload = async (event) => {
               })}
             </div>
 
-            <div className="grid grid-cols-2 gap-2 px-4 pt-3">
-              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
-                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</p>
-              </div>
-              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
-                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</p>
-              </div>
-              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
-                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</p>
-              </div>
-              <div className={`rounded-[16px] border p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)] ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
-                <p className="text-[10px] font-black uppercase tracking-[0.08em]">Balance</p>
-                <p className="mt-1 text-[18px] font-black tabular-nums">{formatMoney(payrollSummary.balance)}</p>
+            <div className="px-4 pt-3">
+              <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-semibold text-[#64748B]">
+                  <div className="flex items-baseline gap-1">
+                    <span>Hours:</span>
+                    <span className="font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</span>
+                  </div>
+                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                  <div className="flex items-baseline gap-1">
+                    <span>Worked:</span>
+                    <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</span>
+                  </div>
+                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                  <div className="flex items-baseline gap-1">
+                    <span>Paid:</span>
+                    <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</span>
+                  </div>
+                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                  <div className={`flex items-baseline gap-1 rounded-full border px-2.5 py-1 ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
+                    <span>Balance:</span>
+                    <span className="font-black tabular-nums">{formatMoney(payrollSummary.balance)}</span>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -28806,6 +28922,25 @@ const handlePhotoQuickUpload = async (event) => {
                           {canCreateProjectTaskFromClock ? "Allowed from Clock" : "Off"}
                         </span>
                       </div>
+                      {payrollCurrentPeriod ? (
+                        <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3">
+                          <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Current payroll period</p>
+                          <p className="mt-1 text-[14px] font-black text-slate-900">
+                            {formatPayrollPeriodLabelLong(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
+                          </p>
+                          <p className="mt-1 text-[12px] font-semibold text-slate-600">
+                            Pay date: {formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)}
+                          </p>
+                        </div>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-800">
+                          Payroll day: {(payrollSettings?.payroll_day || "friday").toLowerCase()}
+                        </span>
+                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-800">
+                          Anchor: {payrollSettings?.anchor_date ? formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true }) : "â€”"}
+                        </span>
+                      </div>
                       {isAdmin ? (
                         <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
                           <span className="text-[14px] font-semibold text-slate-500">Company code</span>
@@ -30095,3 +30230,4 @@ const handlePhotoQuickUpload = async (event) => {
     </div>
   );
 }
+
