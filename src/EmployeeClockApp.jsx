@@ -91,10 +91,12 @@ const AppHeader = ({
   metaLabel,
   iconSrc,
   isDevelopment,
+  showCompanyName = true,
   unreadCount = 0,
   onNotifications,
 }) => {
   const userLabel = String(metaLabel || "").trim().split(/\s+/).slice(0, 2).join(" ");
+  const headerTitle = showCompanyName ? companyName : metaLabel;
   return (
     <div className="opera-app-header">
       <div className="flex min-h-[48px] items-center justify-between gap-3">
@@ -104,12 +106,12 @@ const AppHeader = ({
           </span>
           <div className="min-w-0 flex-1">
             <div className="opera-header-title-row">
-              <h1 className="opera-header-company">{companyName || "Company"}</h1>
+              <h1 className="opera-header-company">{headerTitle || "Company"}</h1>
               {isDevelopment ? (
                 <span className="opera-dev-chip">Dev</span>
               ) : null}
             </div>
-            {userLabel ? <p className="opera-header-brand-line">{userLabel}</p> : null}
+            {showCompanyName && userLabel ? <p className="opera-header-brand-line">{userLabel}</p> : null}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1400,6 +1402,184 @@ function standardDateRangePresetLabel(preset) {
   return "Custom";
 }
 
+const PAYROLL_RANGE_OPTIONS = [
+  { id: "last_3_months", label: "Last 3 months" },
+  { id: "last_12_months", label: "Last 12 months" },
+  { id: "all", label: "All" },
+];
+
+const PAYROLL_FREQUENCY_OPTIONS = [
+  { id: "alternate_friday", label: "Alternate Friday" },
+  { id: "weekly_friday", label: "Every Friday" },
+  { id: "monthly", label: "Monthly" },
+];
+
+function payrollFrequencyLabel(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (key === "weekly_friday") return "Every Friday";
+  if (key === "monthly") return "Monthly";
+  return "Alternate Friday";
+}
+
+function payrollFrequencyCycleDays(value) {
+  const key = String(value || "").trim().toLowerCase();
+  if (key === "weekly_friday") return 7;
+  if (key === "monthly") return null;
+  return 14;
+}
+
+function payrollSettingsDefaults(timeZone, now = new Date()) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const todayKey = calendarDateKeyInTimeZone(now, tz);
+  const anchorDate =
+    (todayKey && previousWeekdayKeyInTimeZone(todayKey, "Friday", tz)) ||
+    todayKey ||
+    calendarDateKeyInTimeZone(new Date(), tz);
+  return {
+    frequency: "alternate_friday",
+    payrollDay: payrollDayValueFromAnchor(anchorDate, tz),
+    anchorDate,
+  };
+}
+
+function payrollDayValueFromAnchor(anchorDate, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const weekday = wallWeekdayLongInTimeZone(anchorDate, tz);
+  return weekday ? weekday.toLowerCase() : "friday";
+}
+
+function previousWeekdayKeyInTimeZone(dateKey, weekdayLong, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  let key = String(dateKey || "").trim();
+  if (!key) return "";
+  for (let guard = 0; guard < 8; guard += 1) {
+    if (wallWeekdayLongInTimeZone(key, tz) === weekdayLong) return key;
+    const prev = addWallDaysInTimeZone(key, -1, tz);
+    if (!prev || prev === key) return "";
+    key = prev;
+  }
+  return "";
+}
+
+function formatPayrollDateKeyShort(dateKey, timeZone, { includeYear = false } = {}) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const key = String(dateKey || "").trim();
+  if (!key) return "—";
+  const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
+  if (!iso) return key;
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    month: "short",
+    day: "numeric",
+    ...(includeYear ? { year: "numeric" } : {}),
+  });
+  return fmt.format(new Date(iso));
+}
+
+function formatPayrollPeriodLabel(startKey, endKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const start = formatPayrollDateKeyShort(startKey, tz);
+  const end = formatPayrollDateKeyShort(endKey, tz);
+  if (start && end) return `${start} - ${end}`;
+  return "Payroll period";
+}
+
+function getPayrollPeriodWindowForDateKey(dateKey, settings, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const anchorDate = String(settings?.anchorDate || settings?.anchor_date || "").trim();
+  const frequency = String(settings?.frequency || "").trim().toLowerCase() || "alternate_friday";
+  const normalizedDateKey = String(dateKey || "").trim();
+  if (!normalizedDateKey) return null;
+
+  if (frequency === "monthly") {
+    const [yearStr, monthStr] = normalizedDateKey.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+    const startKey = `${year}-${String(month).padStart(2, "0")}-01`;
+    const endKey = lastWallDayOfMonthInTimeZone(year, month, tz);
+    return {
+      startKey,
+      endKey,
+      payDateKey: endKey,
+      label: formatPayrollPeriodLabel(startKey, endKey, tz),
+      frequency,
+    };
+  }
+
+  const cycleDays = payrollFrequencyCycleDays(frequency);
+  if (!cycleDays || !anchorDate) return null;
+
+  let endKey = anchorDate;
+  let guard = 0;
+  if (normalizedDateKey > endKey) {
+    while (guard < 200) {
+      const nextKey = addWallDaysInTimeZone(endKey, cycleDays, tz);
+      if (!nextKey || nextKey === endKey) break;
+      endKey = nextKey;
+      if (endKey >= normalizedDateKey) break;
+      guard += 1;
+    }
+  } else if (normalizedDateKey < endKey) {
+    while (guard < 200) {
+      const prevKey = addWallDaysInTimeZone(endKey, -cycleDays, tz);
+      if (!prevKey || prevKey === endKey) break;
+      if (prevKey >= normalizedDateKey) {
+        endKey = prevKey;
+        guard += 1;
+        continue;
+      }
+      break;
+    }
+  }
+
+  const startKey = addWallDaysInTimeZone(endKey, 1 - cycleDays, tz);
+  return {
+    startKey,
+    endKey,
+    payDateKey: endKey,
+    label: formatPayrollPeriodLabel(startKey, endKey, tz),
+    frequency,
+  };
+}
+
+function payrollRangeBoundsForPreset(preset, now, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const todayKey = calendarDateKeyInTimeZone(now, tz);
+  if (!todayKey) return { from: "", to: "" };
+  if (preset === "last_3_months") {
+    return { from: addWallMonthsSafe(todayKey, -3, tz) || todayKey, to: todayKey };
+  }
+  if (preset === "last_12_months") {
+    return { from: addWallMonthsSafe(todayKey, -12, tz) || todayKey, to: todayKey };
+  }
+  return { from: "", to: "" };
+}
+
+function payrollPeriodOverlapsRange(period, rangeFrom, rangeTo) {
+  const periodStart = String(period?.startKey || "").trim();
+  const periodEnd = String(period?.endKey || "").trim();
+  const from = String(rangeFrom || "").trim();
+  const to = String(rangeTo || "").trim();
+  if (!periodStart || !periodEnd) return false;
+  if (!from && !to) return true;
+  if (from && periodEnd < from) return false;
+  if (to && periodStart > to) return false;
+  return true;
+}
+
+function payrollRangePresetLabel(value) {
+  const key = String(value || "").trim().toLowerCase();
+  return PAYROLL_RANGE_OPTIONS.find((option) => option.id === key)?.label || "All";
+}
+
+function payrollBalanceBadgeClass(balance) {
+  const value = Number(balance) || 0;
+  if (value > 0) return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
+  if (value < 0) return "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]";
+  return "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]";
+}
+
 function reportsCostCentreKeyFromRow(row) {
   return String(row?.costCenter ?? "").trim() || "—";
 }
@@ -2193,6 +2373,20 @@ function workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEn
   return Math.max(0, total - breakTotal);
 }
 
+function breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso) {
+  if (!breakStartIso || !breakEndIso) return 0;
+  const shiftStart = new Date(clockInIso).getTime();
+  const shiftEnd = new Date(clockOutIso).getTime();
+  const breakStart = new Date(breakStartIso).getTime();
+  const breakEnd = new Date(breakEndIso).getTime();
+  if (![shiftStart, shiftEnd, breakStart, breakEnd].every(Number.isFinite)) return 0;
+  if (shiftEnd <= shiftStart || breakEnd <= breakStart) return 0;
+  const clippedStart = Math.max(shiftStart, breakStart);
+  const clippedEnd = Math.min(shiftEnd, breakEnd);
+  if (clippedEnd <= clippedStart) return 0;
+  return Math.round((clippedEnd - clippedStart) / 60000);
+}
+
 function isAutoTimedOutStatus(status) {
   return normalizeStatus(status) === normalizeStatus(AUTO_TIMED_OUT_STATUS);
 }
@@ -2234,12 +2428,16 @@ async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZ
     fallbackRate: timesheetHourlyRate,
   });
   const workedMinutes = workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEndIso);
+  const breakMinutes = breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso);
   const hours = workedMinutes / 60;
   const labourCost = hours * rate;
   const update = {
     clock_out: clockOutIso,
     status,
     labour_cost: labourCost,
+    break_start_at: breakStartIso || null,
+    break_end_at: breakEndIso || null,
+    break_minutes: breakMinutes,
   };
   const rawTs = Number(timesheetHourlyRate);
   if ((!Number.isFinite(rawTs) || rawTs <= 0 || Math.abs(rawTs - rate) > 0.0001) && rate >= 0) {
@@ -2286,8 +2484,10 @@ function mapTimesheetRowFromSupabase(row) {
       const n = Number(row.labour_cost);
       return Number.isFinite(n) ? n : undefined;
     })(),
-    breakStart: null,
-    breakEnd: null,
+    breakStart: row.break_start_at || row.break_start || null,
+    breakEnd: row.break_end_at || row.break_end || null,
+    breakMinutes: Number.isFinite(Number(row.break_minutes)) ? Math.max(0, Number(row.break_minutes)) : 0,
+    breakNote: row.break_note || "",
     employeeId: row.user_id,
     projectFolder: projectName ? getProjectFolderName(projectName) : "",
     clockInLocation:
@@ -2358,8 +2558,9 @@ function makeCurrentShiftFromActiveTimesheetRecord(record, { fallbackName = "", 
     date: record.clockIn,
     clockIn: record.clockIn,
     clockInLocation: record.clockInLocation || null,
-    breakStart: sameExistingShift ? existingShift?.breakStart || null : null,
-    breakEnd: sameExistingShift ? existingShift?.breakEnd || null : null,
+    breakStart: record.breakStart || (sameExistingShift ? existingShift?.breakStart || null : null),
+    breakEnd: record.breakEnd || (sameExistingShift ? existingShift?.breakEnd || null : null),
+    breakMinutes: Number.isFinite(Number(record.breakMinutes)) ? Math.max(0, Number(record.breakMinutes)) : 0,
     status: "Active",
     photosTaken: Math.max(
       Number(sameExistingShift ? existingShift?.photosTaken || 0 : 0),
@@ -2430,6 +2631,10 @@ function mapTimesheetChangeRequestFromSupabase(row) {
     originalSnapshot: row.original_snapshot || null,
     requestedClockIn: row.requested_clock_in,
     requestedClockOut: row.requested_clock_out,
+    requestedBreakStartAt: row.requested_break_start_at || null,
+    requestedBreakEndAt: row.requested_break_end_at || null,
+    requestedBreakMinutes: Number.isFinite(Number(row.requested_break_minutes)) ? Math.max(0, Number(row.requested_break_minutes)) : 0,
+    requestedBreakNote: row.requested_break_note || "",
     requestedProjectId: row.requested_project_id || "",
     requestedProjectName: row.requested_project_name || "",
     requestedCostCentre: row.requested_cost_centre || "",
@@ -2522,12 +2727,29 @@ function clockLocationStorageKey(userId) {
   return `orp_clock_location_enabled_${userId || "anonymous"}`;
 }
 
-function isMissingOptionalAccuracyColumnError(error) {
+function isMissingOptionalTimesheetColumnError(error) {
   const m = String(error?.message || "").toLowerCase();
   return (
     m.includes("column") &&
-    (m.includes("accuracy") || m.includes("clock_in_accuracy") || m.includes("clock_out_accuracy"))
+    (m.includes("accuracy") ||
+      m.includes("clock_in_accuracy") ||
+      m.includes("clock_out_accuracy") ||
+      m.includes("break_start_at") ||
+      m.includes("break_end_at") ||
+      m.includes("break_minutes") ||
+      m.includes("break_note"))
   );
+}
+
+function removeOptionalTimesheetColumns(payload) {
+  const rest = { ...payload };
+  delete rest.clock_in_accuracy;
+  delete rest.clock_out_accuracy;
+  delete rest.break_start_at;
+  delete rest.break_end_at;
+  delete rest.break_minutes;
+  delete rest.break_note;
+  return rest;
 }
 
 async function supabaseInsertTimesheetRow(supabase, row) {
@@ -2535,10 +2757,15 @@ async function supabaseInsertTimesheetRow(supabase, row) {
   let { data, error } = await supabase.from("timesheets").insert([payload]).select();
   if (
     error &&
-    isMissingOptionalAccuracyColumnError(error) &&
-    ("clock_in_accuracy" in payload || "clock_out_accuracy" in payload)
+    isMissingOptionalTimesheetColumnError(error) &&
+    ("clock_in_accuracy" in payload ||
+      "clock_out_accuracy" in payload ||
+      "break_start_at" in payload ||
+      "break_end_at" in payload ||
+      "break_minutes" in payload ||
+      "break_note" in payload)
   ) {
-    const { clock_in_accuracy, clock_out_accuracy, ...rest } = payload;
+    const rest = removeOptionalTimesheetColumns(payload);
     ({ data, error } = await supabase.from("timesheets").insert([rest]).select());
   }
   return { data, error };
@@ -2549,10 +2776,15 @@ async function supabaseUpdateTimesheetRow(supabase, id, partial) {
   let { data, error } = await supabase.from("timesheets").update(payload).eq("id", id).select();
   if (
     error &&
-    isMissingOptionalAccuracyColumnError(error) &&
-    ("clock_in_accuracy" in payload || "clock_out_accuracy" in payload)
+    isMissingOptionalTimesheetColumnError(error) &&
+    ("clock_in_accuracy" in payload ||
+      "clock_out_accuracy" in payload ||
+      "break_start_at" in payload ||
+      "break_end_at" in payload ||
+      "break_minutes" in payload ||
+      "break_note" in payload)
   ) {
-    const { clock_in_accuracy, clock_out_accuracy, ...rest } = payload;
+    const rest = removeOptionalTimesheetColumns(payload);
     ({ data, error } = await supabase.from("timesheets").update(rest).eq("id", id).select());
   }
   return { error, data };
@@ -3152,6 +3384,26 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   const [composerOpen, setComposerOpen] = useState(null);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIds, setGroupMemberIds] = useState([]);
+  const [creatingChat, setCreatingChat] = useState(false);
+  const [chatUploading, setChatUploading] = useState(false);
+  const [chatLists, setChatLists] = useState([]);
+  const [selectedChatListId, setSelectedChatListId] = useState("");
+  const [listComposerOpen, setListComposerOpen] = useState(false);
+  const [listTitle, setListTitle] = useState("");
+  const [listItemsText, setListItemsText] = useState("");
+  const [listItemDraft, setListItemDraft] = useState("");
+  const [editingListItemId, setEditingListItemId] = useState("");
+  const [editingListItemText, setEditingListItemText] = useState("");
+  const [selectedChatListShowCompleted, setSelectedChatListShowCompleted] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatFilter, setChatFilter] = useState("all");
+  const [chatPane, setChatPane] = useState("list");
+  const chatImageInputRef = useRef(null);
+  const chatMessageInputRef = useRef(null);
+  const chatListTitleInputRef = useRef(null);
+  const chatListItemInputRef = useRef(null);
+  const chatListCardRefs = useRef({});
 
   const companyId = userCompany?.id || "";
   const currentUserId = authUser?.id || "";
@@ -3198,6 +3450,77 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       conversationRows[0] ||
       null,
     [conversationRows, selectedConversationId]
+  );
+  const selectedConversationMembers = useMemo(
+    () =>
+      (selectedConversation?.member_user_ids || []).map((userId) => ({
+        user_id: userId,
+        ...(memberById[String(userId)] || {}),
+      })),
+    [memberById, selectedConversation]
+  );
+  const selectedCanManage = Boolean(selectedConversation?.can_manage);
+  const selectedCanLeave = Boolean(selectedConversation?.can_leave);
+  const selectedCanArchive = Boolean(selectedConversation?.can_archive);
+  const selectedChatList = useMemo(
+    () => chatLists.find((list) => String(list.id) === String(selectedChatListId)) || null,
+    [chatLists, selectedChatListId]
+  );
+  const selectedChatListItems = useMemo(() => {
+    const rows = Array.isArray(selectedChatList?.items) ? [...selectedChatList.items] : [];
+    rows.sort((a, b) => Number(a.item_number || 0) - Number(b.item_number || 0));
+    return selectedChatListShowCompleted ? rows : rows.filter((item) => !item.is_done);
+  }, [selectedChatList, selectedChatListShowCompleted]);
+
+  const openChatListDetail = useCallback((listId) => {
+    setSelectedChatListId(String(listId || ""));
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setListItemDraft("");
+    setSelectedChatListShowCompleted(false);
+    setChatPane("list-detail");
+  }, []);
+
+  const jumpToChatListCard = useCallback((listId) => {
+    setSelectedChatListId(String(listId || ""));
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setListItemDraft("");
+    setSelectedChatListShowCompleted(false);
+    setChatPane("thread");
+  }, []);
+
+  const summarizeChatListItems = useCallback((items) => {
+    const rows = Array.isArray(items) ? [...items] : [];
+    rows.sort((a, b) => Number(a.item_number || 0) - Number(b.item_number || 0));
+    return rows;
+  }, []);
+
+  const summarizeChatListRow = useCallback(
+    (list, items) => {
+      const rows = summarizeChatListItems(items);
+      return {
+        ...list,
+        items: rows,
+        open_count: rows.filter((item) => !item.is_done).length,
+        total_count: rows.length,
+      };
+    },
+    [summarizeChatListItems]
+  );
+
+  const updateSelectedChatListRows = useCallback(
+    (updater) => {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== String(selectedChatListId)) return list;
+          const currentRows = Array.isArray(list.items) ? list.items : [];
+          const nextRows = updater(currentRows, list) || currentRows;
+          return summarizeChatListRow(list, nextRows);
+        })
+      );
+    },
+    [selectedChatListId, summarizeChatListRow]
   );
 
   const getToken = useCallback(async () => {
@@ -3254,6 +3577,22 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     },
     [currentUserId, memberById]
   );
+  const visibleConversationRows = useMemo(() => {
+    const term = chatSearch.trim().toLowerCase();
+    return conversationRows.filter((conversation) => {
+      if (chatFilter === "pinned" && !conversation.pinned) return false;
+      if (!term) return true;
+      const name = displayConversationName(conversation).toLowerCase();
+      const preview = String(conversation.last_message || "").toLowerCase();
+      return name.includes(term) || preview.includes(term);
+    });
+  }, [chatFilter, chatSearch, conversationRows, displayConversationName]);
+
+  const safeChatFileName = useCallback((file) => {
+    const raw = String(file?.name || "chat-photo.jpg").toLowerCase();
+    const base = raw.replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    return base || "chat-photo.jpg";
+  }, []);
 
   const loadConversations = useCallback(
     async ({ silent = false } = {}) => {
@@ -3285,6 +3624,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     async ({ silent = false } = {}) => {
       if (!companyId || !selectedConversationId || String(selectedConversationId).startsWith("__company_")) {
         setMessages([]);
+        setChatLists([]);
         return;
       }
       if (!silent) setMessagesLoading(true);
@@ -3298,6 +3638,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         });
         const data = await chatFetch(`/api/chat?${query.toString()}`);
         setMessages(data.messages || []);
+        setChatLists(data.lists || []);
       } catch (err) {
         setError(chatErrorMessage(err));
       } finally {
@@ -3318,6 +3659,49 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
 
   useEffect(() => {
+    setManageOpen(false);
+    setSelectedChatListId("");
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setListItemDraft("");
+  }, [selectedConversationId]);
+
+  useEffect(() => {
+    setSelectedChatListShowCompleted(false);
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setListItemDraft("");
+  }, [selectedChatListId]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "thread") return;
+    requestAnimationFrame(() => {
+      chatListCardRefs.current[String(selectedChatListId)]?.scrollIntoView?.({
+        behavior: "smooth",
+        block: "start",
+      });
+      chatMessageInputRef.current?.focus?.();
+    });
+  }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "list-detail") return;
+    requestAnimationFrame(() => {
+      chatListItemInputRef.current?.focus?.();
+    });
+  }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (!listComposerOpen) return;
+    setListTitle("");
+    setListItemsText("");
+    requestAnimationFrame(() => {
+      chatListTitleInputRef.current?.focus?.();
+      chatListTitleInputRef.current?.select?.();
+    });
+  }, [listComposerOpen]);
+
+  useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => {
       void loadConversations({ silent: true });
@@ -3329,6 +3713,33 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   const sendChatMessage = async () => {
     const body = messageDraft.trim();
     if (!body || !selectedConversationId || selectedConversation?.pendingSetup || sending) return;
+    const clientId = `${currentUserId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticMessage = {
+      id: clientId,
+      client_id: clientId,
+      sender_user_id: currentUserId,
+      sender_name: String(
+        authUser?.user_metadata?.full_name ||
+          authUser?.user_metadata?.name ||
+          authUser?.user_metadata?.user_name ||
+          authUser?.email ||
+          "User"
+      ).trim() || "User",
+      body,
+      message_type: "text",
+      metadata: {},
+      attachments: [],
+      checklist_items: [],
+      deleted: false,
+      pinned: false,
+      can_delete: true,
+      can_pin: false,
+      created_at: new Date().toISOString(),
+      __optimistic: true,
+    };
+    setMessages((current) => [...current, optimisticMessage]);
+    setMessageDraft("");
+    requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
     setSending(true);
     setError("");
     try {
@@ -3339,21 +3750,24 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           company_id: companyId,
           conversation_id: selectedConversationId,
           body,
-          client_id: `${currentUserId}-${Date.now()}`,
+          client_id: clientId,
         }),
       });
-      setMessageDraft("");
       await loadMessages({ silent: true });
       await loadConversations({ silent: true });
     } catch (err) {
+      setMessages((current) => current.filter((message) => String(message.client_id || message.id) !== clientId));
+      setMessageDraft(body);
       setError(chatErrorMessage(err));
     } finally {
       setSending(false);
+      requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
     }
   };
 
   const createDirectChat = async (targetUserId) => {
     setError("");
+    setCreatingChat(true);
     try {
       const data = await chatFetch("/api/chat", {
         method: "POST",
@@ -3364,11 +3778,15 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       setSelectedConversationId(data?.conversation?.id || "");
     } catch (err) {
       setError(chatErrorMessage(err));
+    } finally {
+      setCreatingChat(false);
     }
   };
 
   const createGroupChat = async () => {
+    if (creatingChat) return;
     setError("");
+    setCreatingChat(true);
     try {
       const data = await chatFetch("/api/chat", {
         method: "POST",
@@ -3386,6 +3804,8 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       setSelectedConversationId(data?.conversation?.id || "");
     } catch (err) {
       setError(chatErrorMessage(err));
+    } finally {
+      setCreatingChat(false);
     }
   };
 
@@ -3395,163 +3815,1213 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     );
   };
 
-  return (
-    <PageCard className="space-y-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#C9A227]">Team</p>
-          <h1 className="mt-1 text-[28px] font-black leading-tight text-[#061426]">Chat</h1>
-          <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Company messages and crew groups</p>
-        </div>
-        <button
-          type="button"
-          className="h-10 rounded-[14px] border border-[#E2E8F0] bg-white px-3 text-[13px] font-black text-[#061426] shadow-sm"
-          onClick={() => void loadConversations()}
-        >
-          Refresh
-        </button>
-      </div>
+  const deleteChatMessage = async (message) => {
+    if (!message?.id || !message.can_delete) return;
+    const ok = window.confirm("Delete this message?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "delete_message", company_id: companyId, message_id: message.id }),
+      });
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
 
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          className="h-11 rounded-[14px] bg-[#061426] text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.18)]"
-          onClick={() => setComposerOpen("direct")}
-        >
-          New chat
-        </button>
-        <button
-          type="button"
-          className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white text-[14px] font-black text-[#061426]"
-          onClick={() => setComposerOpen("group")}
-        >
-          New group
-        </button>
-      </div>
+  const toggleChecklistItem = async (item) => {
+    if (!item?.id) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_checklist_item",
+          company_id: companyId,
+          item_id: item.id,
+          checked: !item.is_checked,
+        }),
+      });
+      await loadMessages({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
 
-      {error ? (
-        <div className="rounded-[16px] border border-red-200 bg-red-50 px-3 py-2 text-[13px] font-bold text-red-700">
-          {error}
-        </div>
-      ) : null}
+  const toggleConversationPin = async () => {
+    if (!selectedConversationId || selectedConversation?.pendingSetup) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "toggle_pin", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
 
-      <section className="rounded-[20px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-        <div className="border-b border-[#E2E8F0] p-3">
-          <p className="text-[12px] font-black uppercase tracking-[0.08em] text-[#64748B]">Conversations</p>
-        </div>
-        <div className="divide-y divide-[#E2E8F0]">
-          {loading ? (
-            <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chat...</p>
-          ) : conversationRows.length === 0 ? (
-            <EmptyState title="No conversations yet" body="Start a direct chat or create a group." className="m-3" />
-          ) : (
-            conversationRows.map((conversation) => {
-              const activeConversation =
-                String(conversation.id) === String(selectedConversationId) ||
-                (!selectedConversationId && String(conversation.id).startsWith("__company_"));
-              const name = displayConversationName(conversation);
-              return (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  className={`flex w-full items-center gap-3 px-3 py-3 text-left active:bg-[#F8FAFC] ${
-                    activeConversation ? "bg-[#F8FAFC]" : "bg-white"
-                  }`}
-                  onClick={() => setSelectedConversationId(conversation.id)}
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] bg-[#061426] text-[12px] font-black text-white">
-                    {name.slice(0, 2).toUpperCase()}
+  const toggleMessagePin = async (message) => {
+    if (!message?.id || !selectedConversationId) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_pin",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          message_id: message.id,
+        }),
+      });
+      await loadMessages({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const leaveSelectedConversation = async () => {
+    if (!selectedCanLeave || !selectedConversationId) return;
+    const ok = window.confirm("Leave this group chat?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "leave_conversation", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      setSelectedConversationId("");
+      setMessages([]);
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const archiveSelectedConversation = async () => {
+    if (!selectedCanArchive || !selectedConversationId) return;
+    const ok = window.confirm("Archive this chat for everyone?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "archive_conversation", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      setSelectedConversationId("");
+      setMessages([]);
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const removeChatMember = async (member) => {
+    if (!selectedCanManage || !selectedConversationId || !member?.user_id) return;
+    const ok = window.confirm(`Remove ${member.name || "this member"} from this group?`);
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "remove_member",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          target_user_id: member.user_id,
+        }),
+      });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const handleChatImagePick = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedConversationId || selectedConversation?.pendingSetup || chatUploading) return;
+    if (!String(file.type || "").startsWith("image/")) {
+      setError("Choose an image file.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError("Choose a photo under 8 MB.");
+      return;
+    }
+    setChatUploading(true);
+    setError("");
+    try {
+      const fileName = safeChatFileName(file);
+      const filePath = `chat/${companyId}/${selectedConversationId}/${currentUserId}/${Date.now()}-${fileName}`;
+      const upload = await supabase.storage.from("project-photos").upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || "image/jpeg",
+      });
+      if (upload.error) throw upload.error;
+      const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "send",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          message_type: "photo",
+          body: messageDraft.trim() || file.name || "Photo",
+          client_id: `${currentUserId}-photo-${Date.now()}`,
+          attachments: [
+            {
+              storage_bucket: "project-photos",
+              storage_path: filePath,
+              public_url: data?.publicUrl || "",
+              mime_type: file.type || "image/jpeg",
+              file_name: file.name || fileName,
+              file_size: file.size,
+            },
+          ],
+        }),
+      });
+      setMessageDraft("");
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setChatUploading(false);
+    }
+  };
+
+  const createPinnedChatList = async () => {
+    const items = listItemsText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+    const title = listTitle.trim();
+    if (!selectedConversationId || selectedConversation?.pendingSetup || sending || !title) return;
+    setSending(true);
+    setError("");
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create_list",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          title,
+          items,
+        }),
+      });
+      setListTitle("");
+      setListItemsText("");
+      setListComposerOpen(false);
+      setSelectedChatListId(data?.list?.id || "");
+      setChatPane("list-detail");
+      setSelectedChatListShowCompleted(false);
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const refreshSelectedChatLists = async () => {
+    await loadMessages({ silent: true });
+    await loadConversations({ silent: true });
+  };
+
+  const addChatListItem = async () => {
+    const text = listItemDraft.trim();
+    if (!selectedChatList?.id || !text || sending) return;
+    setError("");
+    const listId = String(selectedChatList.id);
+    const now = new Date().toISOString();
+    const rows = summarizeChatListItems(selectedChatList.items || []);
+    const nextNumber = rows.reduce((max, item) => Math.max(max, Number(item.item_number || 0)), 0) + 1;
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticItem = {
+      id: tempId,
+      item_number: nextNumber,
+      text,
+      is_done: false,
+      completed_at: null,
+      completed_by: null,
+      created_by: currentUserId,
+      created_at: now,
+      updated_at: now,
+      __optimistic: true,
+    };
+    updateSelectedChatListRows((currentRows) => [...currentRows, optimisticItem]);
+    setListItemDraft("");
+    requestAnimationFrame(() => chatListItemInputRef.current?.focus?.());
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add_list_item",
+          company_id: companyId,
+          list_id: listId,
+          text,
+        }),
+      });
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          const nextItems = (Array.isArray(list.items) ? list.items : []).filter((item) => String(item.id) !== tempId);
+          return summarizeChatListRow(list, nextItems);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const toggleChatListItem = async (item) => {
+    if (!item?.id) return;
+    setError("");
+    const listId = String(selectedChatList?.id || "");
+    const itemId = String(item.id);
+    const previousItem = { ...item };
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) =>
+        String(row.id) === itemId
+          ? {
+              ...row,
+              is_done: !row.is_done,
+              completed_at: !row.is_done ? new Date().toISOString() : null,
+              completed_by: !row.is_done ? currentUserId : null,
+            }
+          : row
+      )
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          done: !item.is_done,
+        }),
+      });
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          const nextItems = (Array.isArray(list.items) ? list.items : []).map((row) =>
+            String(row.id) === itemId ? previousItem : row
+          );
+          return summarizeChatListRow(list, nextItems);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const saveChatListItemEdit = async (item) => {
+    const text = editingListItemText.trim();
+    if (!item?.id || !text || sending) return;
+    setError("");
+    const listId = String(selectedChatList?.id || "");
+    const itemId = String(item.id);
+    const previousItem = { ...item };
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => (String(row.id) === itemId ? { ...row, text } : row))
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          text,
+        }),
+      });
+      setEditingListItemId("");
+      setEditingListItemText("");
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          const nextItems = (Array.isArray(list.items) ? list.items : []).map((row) =>
+            String(row.id) === itemId ? previousItem : row
+          );
+          return summarizeChatListRow(list, nextItems);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const deleteChatListItem = async (item) => {
+    if (!item?.id) return;
+    const ok = window.confirm("Delete this list item?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "delete_list_item", company_id: companyId, item_id: item.id }),
+      });
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const archiveChatList = async () => {
+    if (!selectedChatList?.id || !selectedChatList.can_archive) return;
+    const ok = window.confirm("Archive this list?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: selectedChatList.id }),
+      });
+      setSelectedChatListId("");
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const renderChatListCard = (list) => {
+    const listId = String(list?.id || "");
+    const isSelected = String(selectedChatListId) === listId;
+    const rows = summarizeChatListItems(list?.items || []);
+    const previewItems = (rows.filter((item) => !item.is_done).length ? rows.filter((item) => !item.is_done) : rows).slice(0, 2);
+    return (
+      <button
+        key={listId}
+        id={`chat-list-${listId}`}
+        ref={(node) => {
+          if (node) {
+            chatListCardRefs.current[listId] = node;
+          } else {
+            delete chatListCardRefs.current[listId];
+          }
+        }}
+        type="button"
+        className={`mx-auto block w-full max-w-[84%] scroll-mt-4 rounded-[18px] border bg-white px-3 py-2.5 text-left shadow-sm ${
+          isSelected ? "border-[#C9A227] shadow-[0_12px_28px_rgba(6,20,38,0.12)]" : "border-[#E2E8F0]"
+        }`}
+        onClick={() => openChatListDetail(list.id)}
+      >
+        <div className="flex items-start gap-2">
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M8 6h13M8 12h13M8 18h13" />
+              <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+            </svg>
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">List</p>
+                <h3 className="truncate text-[15px] font-black text-[#061426]">{list.title}</h3>
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                {list.pinned ? (
+                  <span className="rounded-full bg-[#FBF8F1] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+                    Pinned
                   </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] font-black text-[#061426]">{name}</span>
-                    <span className="block truncate text-[12px] font-semibold text-[#64748B]">
-                      {conversation.pendingSetup
-                        ? "Company-wide chat"
-                        : conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet")}
+                ) : null}
+                <span className="rounded-full bg-[#F8FAFC] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                  {list.open_count} open
+                </span>
+              </div>
+            </div>
+            <div className="mt-2 space-y-1">
+              {previewItems.length ? (
+                previewItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`flex items-start gap-2 rounded-[12px] bg-[#F8FAFC] px-2 py-1.5 ${item.is_done ? "opacity-70" : ""}`}
+                  >
+                    <span
+                      className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9px] font-black ${
+                        item.is_done ? "border-[#15803D] bg-[#15803D] text-white" : "border-[#CBD5E1] bg-white text-[#64748B]"
+                      }`}
+                    >
+                      {item.is_done ? "OK" : item.item_number}
                     </span>
+                    <span className={`min-w-0 flex-1 text-[12px] font-semibold leading-snug text-[#061426] ${item.is_done ? "line-through" : ""}`}>
+                      {item.text}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-[12px] bg-[#F8FAFC] px-2 py-1.5 text-[12px] font-semibold text-[#64748B]">
+                  All items complete
+                </div>
+              )}
+              {list.total_count > previewItems.length ? (
+                <p className="px-0.5 text-[11px] font-semibold text-[#64748B]">
+                  +{list.total_count - previewItems.length} more item{list.total_count - previewItems.length === 1 ? "" : "s"}
+                </p>
+              ) : null}
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-bold text-[#64748B]">
+              <span>Tap to open</span>
+              <span>{formatChatTime(list.updated_at || list.created_at)}</span>
+            </div>
+          </div>
+        </div>
+      </button>
+    );
+  };
+
+  const renderChatListDetail = (list) => {
+    const rows = selectedChatListItems;
+    return (
+      <div className="flex min-h-[calc(100dvh-150px)] flex-1 flex-col bg-white">
+        <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-white px-3 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+              onClick={() => {
+                setChatPane("thread");
+                setEditingListItemId("");
+                setEditingListItemText("");
+                setListItemDraft("");
+              }}
+              aria-label="Back to chat"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 6h13M8 12h13M8 18h13" />
+                <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
+                {list.pinned ? (
+                  <span className="rounded-full bg-[#FBF8F1] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+                    Pinned
                   </span>
-                  <span className="shrink-0 text-[11px] font-bold text-[#94A3B8]">
-                    {formatChatTime(conversation.last_message_at)}
-                  </span>
+                ) : null}
+              </div>
+              <p className="truncate text-[11px] font-semibold text-[#64748B]">
+                {list.open_count} open / {list.total_count} total
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+                  selectedChatListShowCompleted
+                    ? "border-[#061426] bg-[#061426] text-white"
+                    : "border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+                }`}
+                onClick={() => setSelectedChatListShowCompleted((prev) => !prev)}
+                aria-pressed={selectedChatListShowCompleted}
+                aria-label={selectedChatListShowCompleted ? "Hide completed items" : "Show completed items"}
+              >
+                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {selectedChatListShowCompleted ? (
+                    <>
+                      <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
+                      <path d="M9.5 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0Z" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 10.6a2.5 2.5 0 0 0 3.5 3.5" />
+                      <path d="M6.2 6.8C3.9 8.4 2 12 2 12s4 6 10 6c1.2 0 2.4-.2 3.5-.6" />
+                      <path d="M14.8 5.1C16.9 5.8 18.9 7.3 22 12c0 0-.8 1.2-2.1 2.5" />
+                    </>
+                  )}
+                </svg>
+              </button>
+              {list.can_archive ? (
+                <button
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+                  onClick={() => void archiveChatList()}
+                  aria-label="Archive list"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 7h16" />
+                    <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                    <path d="M9 11h6" />
+                  </svg>
                 </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-2 overflow-y-auto bg-white px-3 py-3">
+          {rows.length === 0 ? (
+            <EmptyState
+              title={list.total_count > 0 ? "Completed items hidden" : "No list items"}
+              body={list.total_count > 0 ? "Tap the eye to show completed items." : "Add the first item below."}
+            />
+          ) : (
+            rows.map((item) => {
+              const editingThis = String(editingListItemId) === String(item.id);
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-[16px] border px-3 py-2.5 shadow-sm ${
+                    item.is_done ? "border-[#DDE7DD] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-[#F8FAFC]"
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={Boolean(item.is_done)}
+                      aria-label={`${item.is_done ? "Mark open" : "Mark complete"}: ${item.text}`}
+                      onClick={() => void toggleChatListItem(item)}
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                        item.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#CBD5E1] bg-white"
+                      }`}
+                    >
+                      {item.is_done ? (
+                        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m3.2 8.3 3 3 6.5-6.6" />
+                        </svg>
+                      ) : null}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      {editingThis ? (
+                        <input
+                          className="h-10 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                          value={editingListItemText}
+                          onChange={(event) => setEditingListItemText(event.target.value)}
+                          autoFocus
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void saveChatListItemEdit(item);
+                            }
+                            if (event.key === "Escape") {
+                              setEditingListItemId("");
+                              setEditingListItemText("");
+                            }
+                          }}
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className={`block w-full rounded-[12px] px-1 py-0.5 text-left text-[15px] font-bold leading-snug text-[#061426] ${
+                            item.is_done ? "opacity-60" : ""
+                          }`}
+                          onClick={() => {
+                            setEditingListItemId(item.id);
+                            setEditingListItemText(item.text || "");
+                          }}
+                          aria-label={`Edit item ${item.item_number}`}
+                        >
+                          <span className="mr-1 text-[#64748B]">{item.item_number}.</span>
+                          <span className={item.is_done ? "line-through" : ""}>{item.text}</span>
+                        </button>
+                      )}
+                      {item.is_done ? (
+                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">
+                          Completed
+                        </p>
+                      ) : null}
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black leading-none text-[#DC2626]"
+                      onClick={() => void deleteChatListItem(item)}
+                      aria-label={`Delete item ${item.item_number}`}
+                    >
+                      ?
+                    </button>
+                  </div>
+                </div>
               );
             })
           )}
         </div>
-      </section>
 
-      {selectedConversation ? (
-        <section className="rounded-[20px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-          <div className="flex items-center gap-3 border-b border-[#E2E8F0] p-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#F8FAFC] text-[12px] font-black text-[#061426]">
-              {displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}
-            </span>
-            <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[16px] font-black text-[#061426]">{displayConversationName(selectedConversation)}</h2>
-              <p className="truncate text-[12px] font-semibold text-[#64748B]">
-                {selectedConversation.pendingSetup
-                  ? "Setting up company chat"
-                  : selectedConversation.type === "company"
-                    ? "Everyone in the company"
-                  : `${selectedConversation.member_user_ids?.length || 0} members`}
-              </p>
-            </div>
-          </div>
-          <div className="max-h-[48dvh] min-h-[220px] space-y-2 overflow-y-auto bg-[#F8FAFC] p-3">
-            {selectedConversation.pendingSetup ? (
-              <EmptyState title="All employees" body="Company-wide chat will appear here once the chat service is connected." />
-            ) : messagesLoading ? (
-              <p className="text-center text-[13px] font-semibold text-[#64748B]">Loading messages...</p>
-            ) : messages.length === 0 ? (
-              <EmptyState title="No messages yet" body="Send the first update to this chat." />
-            ) : (
-              messages.map((message) => {
-                const mine = String(message.sender_user_id) === String(currentUserId);
-                return (
-                  <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-[82%] rounded-[18px] px-3 py-2 shadow-sm ${
-                        mine
-                          ? "rounded-br-[6px] bg-[#061426] text-white"
-                          : "rounded-bl-[6px] border border-[#E2E8F0] bg-white text-[#061426]"
-                      }`}
-                    >
-                      {!mine ? <p className="mb-0.5 text-[11px] font-black text-[#64748B]">{message.sender_name}</p> : null}
-                      <p className="whitespace-pre-wrap break-words text-[14px] font-semibold leading-snug">{message.body}</p>
-                      <p className={`mt-1 text-right text-[10px] font-bold ${mine ? "text-white/70" : "text-[#94A3B8]"}`}>
-                        {formatChatTime(message.created_at)}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-          <div className="flex gap-2 border-t border-[#E2E8F0] p-3">
-            <textarea
-              className="min-h-[44px] flex-1 resize-none rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
-              value={messageDraft}
-              maxLength={2000}
-              placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
-              disabled={selectedConversation.pendingSetup}
-              onChange={(event) => setMessageDraft(event.target.value)}
+        <div className="sticky bottom-0 border-t border-[#E2E8F0] bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
+          <div className="flex gap-2">
+            <input
+              ref={chatListItemInputRef}
+              className="h-11 min-w-0 flex-1 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+              value={listItemDraft}
+              autoComplete="off"
+              inputMode="text"
+              enterKeyHint="done"
+              onChange={(event) => setListItemDraft(event.target.value)}
+              placeholder="Add item"
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (event.key === "Enter") {
                   event.preventDefault();
-                  void sendChatMessage();
+                  void addChatListItem();
                 }
               }}
             />
             <button
               type="button"
-              className="h-11 self-end rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white disabled:bg-[#CBD5E1]"
-              disabled={selectedConversation.pendingSetup || !messageDraft.trim() || sending}
-              onClick={() => void sendChatMessage()}
+              className="h-11 rounded-[14px] bg-[#061426] px-4 text-[13px] font-black text-white disabled:bg-[#CBD5E1]"
+              disabled={!listItemDraft.trim() || sending}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void addChatListItem()}
             >
-              Send
+              Add
             </button>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+
+  return (
+    <PageCard className="overflow-hidden">
+      <div className="min-h-[calc(100dvh-150px)] overflow-hidden bg-white md:grid md:grid-cols-[minmax(270px,38%)_1fr]">
+        <aside className={`${chatPane === "thread" ? "hidden md:flex" : "flex"} min-h-[calc(100dvh-150px)] flex-col border-[#E2E8F0] md:border-r`}>
+          <div className="bg-[#061426] px-4 pb-3 pt-4 text-white">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#C9A227]">Team</p>
+                <h1 className="truncate text-[25px] font-black leading-tight">Chats</h1>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-[19px] font-black text-white active:bg-white/20"
+                  onClick={() => setComposerOpen("group")}
+                  aria-label="New group"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white active:bg-white/20"
+                  onClick={() => setComposerOpen("direct")}
+                  aria-label="New chat"
+                >
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 12a8 8 0 0 1-8 8H8l-5 2 1.8-4.6A8 8 0 1 1 21 12Z" />
+                    <path d="M12 8v8M8 12h8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3 border-b border-[#E2E8F0] bg-white p-3">
+            <label className="flex h-11 items-center gap-2 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                value={chatSearch}
+                onChange={(event) => setChatSearch(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                placeholder="Search or start new chat"
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              {["all", "pinned"].map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`h-8 rounded-full px-4 text-[12px] font-black capitalize ${
+                    chatFilter === filter
+                      ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
+                      : "border border-[#E2E8F0] bg-white text-[#64748B]"
+                  }`}
+                  onClick={() => setChatFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="ml-auto h-8 rounded-full border border-[#E2E8F0] bg-white px-3 text-[12px] font-black text-[#061426]"
+                onClick={() => void loadConversations()}
+              >
+                Sync
+              </button>
+            </div>
+            {error ? (
+              <div className="rounded-[14px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
+                {error}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+            {loading ? (
+              <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chats...</p>
+            ) : visibleConversationRows.length === 0 ? (
+              <EmptyState title="No chats found" body="Start a direct chat or create a group." className="m-3" />
+            ) : (
+              visibleConversationRows.map((conversation) => {
+                const activeConversation =
+                  String(conversation.id) === String(selectedConversationId) ||
+                  (!selectedConversationId && String(conversation.id).startsWith("__company_"));
+                const name = displayConversationName(conversation);
+                const initials = name.slice(0, 2).toUpperCase();
+                const preview =
+                  conversation.pendingSetup
+                    ? "Company-wide chat"
+                    : conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet");
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    className={`flex w-full items-center gap-3 border-b border-[#E2E8F0] px-3 py-3 text-left transition active:bg-[#F8FAFC] ${
+                      activeConversation ? "bg-[#F8FAFC]" : "bg-white"
+                    }`}
+                    onClick={() => {
+                      setSelectedConversationId(conversation.id);
+                      setChatPane("thread");
+                    }}
+                  >
+                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[13px] font-black text-white ${
+                      conversation.type === "company" ? "bg-[#0B1F33]" : "bg-[#163B5C]"
+                    }`}>
+                      {initials}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span className="truncate text-[15px] font-black text-[#061426]">{name}</span>
+                        {conversation.type === "group" ? <span className="rounded-full bg-[#F8FAFC] px-1.5 text-[10px] font-black text-[#64748B]">Group</span> : null}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[13px] font-semibold text-[#64748B]">
+                        {conversation.pinned ? "Pinned • " : ""}
+                        {preview}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end gap-1 text-[11px] font-bold text-[#94A3B8]">
+                      <span>{formatChatTime(conversation.last_message_at)}</span>
+                      {conversation.pinned ? (
+                        <span className="flex h-5 items-center rounded-full bg-[#FBF8F1] px-2 text-[10px] font-black text-[#9A6B12]">
+                          Pin
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+
+        <section className={`${chatPane === "list" ? "hidden md:flex" : "flex"} relative min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB]`}>
+          {selectedConversation ? (
+            <>
+              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[#E2E8F0] bg-[#061426] px-3 py-2.5 text-white md:bg-white md:text-[#061426]">
+                <button
+                  type="button"
+                  className="flex h-10 w-9 items-center justify-center rounded-full text-white active:bg-white/10 md:hidden"
+                  onClick={() => setChatPane("list")}
+                  aria-label="Back to chats"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-[12px] font-black text-white md:bg-[#061426] md:text-white">
+                  {displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[16px] font-black">{displayConversationName(selectedConversation)}</h2>
+                  <p className="truncate text-[12px] font-semibold text-white/75 md:text-[#64748B]">
+                    {selectedConversation.pendingSetup
+                      ? "Setting up company chat"
+                      : selectedConversation.type === "company"
+                        ? "Company-wide chat"
+                        : `${selectedConversation.member_user_ids?.length || 0} members`}
+                  </p>
+                </div>
+                {!selectedConversation.pendingSetup ? (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                        selectedConversation.pinned ? "bg-[#C9A227] text-[#061426]" : "bg-white/10 text-white md:bg-[#F8FAFC] md:text-[#061426]"
+                      }`}
+                      onClick={() => void toggleConversationPin()}
+                      aria-label={selectedConversation.pinned ? "Unpin chat" : "Pin chat"}
+                    >
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="m15 4 5 5-4 4v4l-2 2-4-4-5 5 5-5-4-4 2-2h4l4-4Z" />
+                      </svg>
+                    </button>
+                    {selectedConversation.type === "group" ? (
+                      <button
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white md:bg-[#F8FAFC] md:text-[#061426]"
+                        onClick={() => setManageOpen((value) => !value)}
+                        aria-label="Chat options"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 5h.01M12 12h.01M12 19h.01" />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              {manageOpen && !selectedConversation.pendingSetup ? (
+                <div className="absolute right-3 top-[58px] z-20 w-[min(310px,calc(100%-1.5rem))] rounded-[18px] border border-[#E2E8F0] bg-white p-3 shadow-[0_18px_48px_rgba(6,20,38,0.2)]">
+                  <div className="space-y-2">
+                    {selectedCanLeave ? (
+                      <button
+                        type="button"
+                        className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                        onClick={() => void leaveSelectedConversation()}
+                      >
+                        Leave group
+                      </button>
+                    ) : null}
+                    {selectedCanArchive ? (
+                      <button
+                        type="button"
+                        className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#DC2626] active:bg-[#FEF2F2]"
+                        onClick={() => void archiveSelectedConversation()}
+                      >
+                        Archive chat
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedCanManage && selectedConversation.type === "group" ? (
+                    <div className="mt-2 border-t border-[#E2E8F0] pt-2">
+                      <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Members</p>
+                      <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {selectedConversationMembers.map((member) => (
+                          <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-[12px] px-2 py-2">
+                            <span className="min-w-0 text-[12px] font-bold text-[#061426]">
+                              <span className="block truncate">{member.name || member.email || "User"}</span>
+                              <span className="block truncate text-[10px] text-[#64748B]">{member.email || member.role || ""}</span>
+                            </span>
+                            {String(member.user_id) !== String(currentUserId) ? (
+                              <button
+                                type="button"
+                                className="h-8 rounded-full bg-[#FEF2F2] px-3 text-[11px] font-black text-[#DC2626]"
+                                onClick={() => void removeChatMember(member)}
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {selectedChatList && chatPane === "list-detail" ? (
+                renderChatListDetail(selectedChatList)
+              ) : (
+                <>
+                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
+                {!selectedConversation.pendingSetup && chatLists.some((list) => list.pinned) ? (
+                  <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+                    {chatLists
+                      .filter((list) => list.pinned)
+                      .map((list) => (
+                      <button
+                        key={list.id}
+                        type="button"
+                        className={`min-w-[160px] rounded-[16px] border px-3 py-2 text-left shadow-[0_8px_22px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC] ${
+                          String(selectedChatListId) === String(list.id)
+                            ? "border-[#C9A227] bg-[#FBF8F1]"
+                            : "border-[#E2E8F0] bg-white"
+                        }`}
+                        onClick={() => {
+                          jumpToChatListCard(list.id);
+                        }}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
+                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M8 6h13M8 12h13M8 18h13" />
+                              <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+                            </svg>
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-[13px] font-black text-[#061426]">{list.title}</span>
+                            <span className="block text-[11px] font-bold text-[#64748B]">
+                              {list.open_count} open / {list.total_count} total
+                            </span>
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {selectedConversation.pendingSetup ? (
+                  <EmptyState title="All employees" body="Company-wide chat will appear here once the chat service is connected." />
+                ) : messagesLoading ? (
+                  <p className="pt-10 text-center text-[13px] font-semibold text-[#64748B]">Loading messages...</p>
+                ) : (
+                  <>
+                    {messages.length === 0 && chatLists.length === 0 ? (
+                      <EmptyState title="No messages yet" body="Send the first update to this chat." className="mt-8" />
+                    ) : (
+                      <>
+                        {messages.length > 0 ? (
+                          <>
+                            <div className="mx-auto mb-3 flex w-fit rounded-full bg-white/90 px-3 py-1 text-[11px] font-black text-[#64748B] shadow-sm">
+                              Today
+                            </div>
+                            {messages.map((message) => {
+                              const mine = String(message.sender_user_id) === String(currentUserId);
+                              return (
+                                <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                                  <div
+                                    className={`max-w-[82%] rounded-[18px] px-3 py-2 shadow-sm ${
+                                      mine
+                                        ? "rounded-br-[5px] border border-[#BBF7D0] bg-[#ECFDF5] text-[#061426]"
+                                        : "rounded-bl-[5px] border border-[#E2E8F0] bg-white text-[#061426]"
+                                    }`}
+                                  >
+                                    {!mine ? <p className="mb-0.5 text-[11px] font-black text-[#163B5C]">{message.sender_name}</p> : null}
+                                    {message.deleted ? (
+                                      <p className="text-[13px] font-semibold italic text-[#64748B]">Message deleted</p>
+                                    ) : (
+                                      <>
+                                        {message.message_type === "checklist" ? (
+                                          <div className="space-y-2">
+                                            <p className="whitespace-pre-wrap break-words text-[14px] font-black leading-snug">{message.body}</p>
+                                            <div className="space-y-1">
+                                              {(message.checklist_items || []).map((item) => (
+                                                <label key={item.id} className="flex items-center gap-2 rounded-[12px] bg-white/70 px-2 py-1.5">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={Boolean(item.is_checked)}
+                                                    onChange={() => void toggleChecklistItem(item)}
+                                                    className="h-4 w-4 accent-[#061426]"
+                                                  />
+                                                  <span className={`text-[13px] font-semibold ${item.is_checked ? "line-through opacity-70" : ""}`}>
+                                                    {item.text}
+                                                  </span>
+                                                </label>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <p className="whitespace-pre-wrap break-words text-[14px] font-semibold leading-snug">{message.body}</p>
+                                        )}
+                                        {(message.attachments || []).length ? (
+                                          <div className="mt-2 grid gap-2">
+                                            {(message.attachments || []).map((attachment) => (
+                                              <a
+                                                key={attachment.id}
+                                                href={attachment.public_url}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="block overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white"
+                                              >
+                                                {attachment.public_url ? (
+                                                  <img
+                                                    src={attachment.public_url}
+                                                    alt={attachment.file_name || "Chat attachment"}
+                                                    className="max-h-56 w-full object-cover"
+                                                  />
+                                                ) : (
+                                                  <span className="block p-3 text-[12px] font-bold">Photo attachment</span>
+                                                )}
+                                              </a>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    )}
+                                    <div className="mt-1 flex items-center justify-end gap-2 text-[10px] font-bold text-[#64748B]">
+                                      {!message.deleted && message.can_pin ? (
+                                        <button
+                                          type="button"
+                                          className={`flex h-6 w-6 items-center justify-center rounded-full ${
+                                            message.pinned ? "bg-[#FBF8F1] text-[#9A6B12]" : "bg-white/70 text-[#061426]"
+                                          }`}
+                                          onClick={() => void toggleMessagePin(message)}
+                                          aria-label={message.pinned ? "Pinned message" : "Pin message"}
+                                        >
+                                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                            <path d="m15 4 5 5-4 4v4l-2 2-4-4-5 5 5-5-4-4 2-2h4l4-4Z" />
+                                          </svg>
+                                        </button>
+                                      ) : null}
+                                      {!message.deleted && message.can_delete ? (
+                                        <button
+                                          type="button"
+                                          className="flex h-6 w-6 items-center justify-center rounded-full bg-white/70 text-[18px] font-black leading-none text-[#DC2626]"
+                                          onClick={() => void deleteChatMessage(message)}
+                                          aria-label="Delete message"
+                                        >
+                                          −
+                                        </button>
+                                      ) : null}
+                                      <span>{formatChatTime(message.created_at)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </>
+                        ) : null}
+                        {chatLists.length > 0 ? (
+                          <div className="space-y-3 pt-3">
+                            {chatLists.map((list) => renderChatListCard(list))}
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="border-t border-[#E2E8F0] bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
+                <input
+                  ref={chatImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => void handleChatImagePick(event)}
+                />
+                <div className="flex items-end gap-2">
+                  <button
+                    type="button"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] disabled:text-[#94A3B8]"
+                    disabled={selectedConversation.pendingSetup || chatUploading}
+                    onClick={() => chatImageInputRef.current?.click()}
+                    aria-label={chatUploading ? "Uploading photo" : "Attach photo"}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M14.5 4.5 6.2 12.8a3 3 0 0 0 4.2 4.2l8.4-8.4a4.5 4.5 0 0 0-6.4-6.4L4.7 9.9a6 6 0 0 0 8.5 8.5l7.1-7.1" />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] disabled:text-[#94A3B8]"
+                    disabled={selectedConversation.pendingSetup}
+                    onClick={() => setListComposerOpen(true)}
+                    aria-label="Create list"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M8 6h13M8 12h13M8 18h13" />
+                      <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+                    </svg>
+                  </button>
+                  <textarea
+                    ref={chatMessageInputRef}
+                    className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[22px] border border-[#CBD5E1] bg-white px-4 py-2.5 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                    value={messageDraft}
+                    maxLength={2000}
+                    placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
+                    disabled={selectedConversation.pendingSetup}
+                    onChange={(event) => setMessageDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendChatMessage();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.18)] disabled:bg-[#CBD5E1]"
+                    disabled={selectedConversation.pendingSetup || !messageDraft.trim() || sending}
+                    onClick={() => void sendChatMessage()}
+                    aria-label="Send message"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m22 2-7 20-4-9-9-4Z" />
+                      <path d="M22 2 11 13" />
+                    </svg>
+                  </button>
+                </div>
+                {chatUploading ? <p className="mt-1 px-3 text-[11px] font-bold text-[#64748B]">Uploading photo...</p> : null}
+              </div>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-4">
+              <EmptyState title="Select a chat" body="Choose a conversation from the list." />
+            </div>
+          )}
         </section>
+
+      {listComposerOpen && selectedConversation && !selectedConversation.pendingSetup ? (
+        <div className="fixed inset-0 z-[92] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Chat list</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">Create list</h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => setListComposerOpen(false)}
+                aria-label="Close list composer"
+              >
+                x
+              </button>
+            </div>
+            <label className="mt-4 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+              Title
+              <input
+                ref={chatListTitleInputRef}
+                autoFocus
+                inputMode="text"
+                autoComplete="off"
+                enterKeyHint="next"
+                className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                value={listTitle}
+                maxLength={120}
+                onChange={(event) => setListTitle(event.target.value)}
+                placeholder="List name"
+              />
+            </label>
+            <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+              Items
+              <textarea
+                className="min-h-[150px] w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2 text-[16px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                value={listItemsText}
+                onChange={(event) => setListItemsText(event.target.value)}
+                placeholder={"Optional: one item per line\nPrimer\nDrywall compound\nScrews"}
+              />
+            </label>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                onClick={() => setListComposerOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
+                disabled={!listTitle.trim() || sending}
+                onClick={() => void createPinnedChatList()}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {composerOpen ? (
@@ -3603,6 +5073,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                       onClick={() =>
                         composerOpen === "direct" ? void createDirectChat(member.user_id) : toggleGroupMember(member.user_id)
                       }
+                      disabled={creatingChat}
                     >
                       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#061426] text-[12px] font-black text-white">
                         {member.name.slice(0, 2).toUpperCase()}
@@ -3641,13 +5112,14 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                   disabled={!groupName.trim() || groupMemberIds.length === 0}
                   onClick={() => void createGroupChat()}
                 >
-                  Create
+                  {creatingChat ? "Creating..." : "Create"}
                 </button>
               </div>
             ) : null}
           </div>
         </div>
       ) : null}
+      </div>
     </PageCard>
   );
 }
@@ -3677,6 +5149,10 @@ export default function EmployeeClockApp() {
   const [editClockInTime, setEditClockInTime] = useState("");
   const [editClockOutDate, setEditClockOutDate] = useState("");
   const [editClockOutTime, setEditClockOutTime] = useState("");
+  const [editBreakStartDate, setEditBreakStartDate] = useState("");
+  const [editBreakStartTime, setEditBreakStartTime] = useState("");
+  const [editBreakEndDate, setEditBreakEndDate] = useState("");
+  const [editBreakEndTime, setEditBreakEndTime] = useState("");
   const [editProjectId, setEditProjectId] = useState("");
   const [editCostCenter, setEditCostCenter] = useState("");
   const [editTimesheetSaving, setEditTimesheetSaving] = useState(false);
@@ -3722,6 +5198,31 @@ export default function EmployeeClockApp() {
   const [materialPaymentCountdown, setMaterialPaymentCountdown] = useState(10);
   const [materialSupplierDraft, setMaterialSupplierDraft] = useState("");
   const [materialAmountDraft, setMaterialAmountDraft] = useState("");
+  const [payrollPanelOpen, setPayrollPanelOpen] = useState(false);
+  const [payrollRangePreset, setPayrollRangePreset] = useState("last_3_months");
+  const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState("all");
+  const [payrollSettings, setPayrollSettings] = useState(null);
+  const [payrollSettingsLoading, setPayrollSettingsLoading] = useState(false);
+  const [payrollSettingsError, setPayrollSettingsError] = useState("");
+  const [payrollSettingsEditOpen, setPayrollSettingsEditOpen] = useState(false);
+  const [payrollSettingsDraft, setPayrollSettingsDraft] = useState(() => payrollSettingsDefaults(DEFAULT_COMPANY_TIME_ZONE));
+  const [payrollSettingsSaving, setPayrollSettingsSaving] = useState(false);
+  const [payrollSettingsMessage, setPayrollSettingsMessage] = useState("");
+  const [payrollPayments, setPayrollPayments] = useState([]);
+  const [payrollPaymentsLoading, setPayrollPaymentsLoading] = useState(false);
+  const [payrollPaymentsError, setPayrollPaymentsError] = useState("");
+  const [payrollPaymentFormOpen, setPayrollPaymentFormOpen] = useState(false);
+  const [payrollPaymentSaving, setPayrollPaymentSaving] = useState(false);
+  const [payrollPaymentDraft, setPayrollPaymentDraft] = useState(() => ({
+    id: "",
+    employeeId: "all",
+    periodStart: "",
+    periodEnd: "",
+    paidAmount: "",
+    paidDate: "",
+    note: "",
+  }));
+  const [payrollPaymentMessage, setPayrollPaymentMessage] = useState("");
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
@@ -5479,6 +6980,53 @@ export default function EmployeeClockApp() {
     }
   }, [authUser?.id, isAdmin, userCompany?.id, userCompanyRole]);
 
+  const fetchPayrollData = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    if (!isAdmin) {
+      setPayrollSettings(null);
+      setPayrollPayments([]);
+      setPayrollSettingsError("");
+      setPayrollPaymentsError("");
+      setPayrollSettingsLoading(false);
+      setPayrollPaymentsLoading(false);
+      return;
+    }
+    setPayrollSettingsLoading(true);
+    setPayrollPaymentsLoading(true);
+    setPayrollSettingsError("");
+    setPayrollPaymentsError("");
+    try {
+      const settingsPromise = supabase
+        .from("payroll_settings")
+        .select("id, company_id, frequency, payroll_day, anchor_date, created_at, updated_at, updated_by")
+        .eq("company_id", userCompany.id)
+        .maybeSingle();
+      const paymentsPromise = supabase
+        .from("payroll_payments")
+        .select(
+          "id, company_id, employee_id, period_start, period_end, paid_amount, paid_date, note, created_by, created_at, updated_at, updated_by, deleted_at, deleted_by"
+        )
+        .eq("company_id", userCompany.id)
+        .order("paid_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      const [settingsRes, paymentsRes] = await Promise.all([settingsPromise, paymentsPromise]);
+      if (settingsRes.error) throw settingsRes.error;
+      if (paymentsRes.error) throw paymentsRes.error;
+      setPayrollSettings(settingsRes.data || null);
+      setPayrollPayments(Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
+    } catch (err) {
+      const msg = getErrorMessage(err);
+      console.warn("[PAYROLL] load failed", err);
+      setPayrollSettingsError(msg);
+      setPayrollPaymentsError(msg);
+      setPayrollSettings(null);
+      setPayrollPayments([]);
+    } finally {
+      setPayrollSettingsLoading(false);
+      setPayrollPaymentsLoading(false);
+    }
+  }, [authUser?.id, isAdmin, userCompany?.id, userCompanyRole]);
+
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     fetchTimesheetsFromSupabase();
@@ -5489,6 +7037,24 @@ export default function EmployeeClockApp() {
     if (activeTab !== "timesheet") return;
     void fetchTimesheetChangeRequests();
   }, [activeTab, authUser?.id, fetchTimesheetChangeRequests, userCompany?.id, userCompanyRole]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    void fetchPayrollData();
+  }, [authUser?.id, fetchPayrollData, userCompany?.id, userCompanyRole]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    if (payrollSettingsEditOpen) return;
+    const next = payrollSettings
+      ? {
+          frequency: payrollSettings.frequency || "alternate_friday",
+          payrollDay: payrollSettings.payroll_day || "friday",
+          anchorDate: String(payrollSettings.anchor_date || "").trim() || payrollSettingsDefaults(companyTimeZone).anchorDate,
+        }
+      : payrollSettingsDefaults(companyTimeZone);
+    setPayrollSettingsDraft(next);
+  }, [companyTimeZone, isAdmin, payrollSettings, payrollSettingsEditOpen]);
 
   const runAutoClockOutSweep = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return;
@@ -6021,7 +7587,10 @@ export default function EmployeeClockApp() {
       clockOut = Number.isFinite(dueMs) && nowMs >= dueMs ? dueIso : new Date(nowMs).toISOString();
     }
     const total = minutesBetween(record.clockIn, clockOut);
-    const breakTotal = record.breakStart && record.breakEnd ? minutesBetween(record.breakStart, record.breakEnd) : 0;
+    const breakTotal =
+      record.breakStart && record.breakEnd
+        ? breakMinutesBetween(record.clockIn, clockOut, record.breakStart, record.breakEnd)
+        : Math.max(0, Number(record.breakMinutes || 0));
     return Math.max(0, total - breakTotal);
   };
 
@@ -6049,7 +7618,9 @@ export default function EmployeeClockApp() {
     if (!isCompletedReportTimesheet(record)) return 0;
     const total = minutesBetween(record.clockIn, record.clockOut);
     const breakTotal =
-      record.breakStart && record.breakEnd ? minutesBetween(record.breakStart, record.breakEnd) : 0;
+      record.breakStart && record.breakEnd
+        ? breakMinutesBetween(record.clockIn, record.clockOut, record.breakStart, record.breakEnd)
+        : Math.max(0, Number(record.breakMinutes || 0));
     return Math.max(0, total - breakTotal);
   };
 
@@ -6059,7 +7630,8 @@ export default function EmployeeClockApp() {
       const stored = Number(record.labour_cost);
       if (Number.isFinite(stored)) return stored;
     }
-    const raw = computeLabourCostFromWallTimes(record.clockIn, record.clockOut, Number(record.hourlyRate ?? 0));
+    const minutes = getReportWorkedMinutes(record);
+    const raw = (minutes / 60) * (Number(record.hourlyRate ?? 0) || 0);
     return Number.isFinite(raw) ? raw : 0;
   };
 
@@ -6831,6 +8403,214 @@ export default function EmployeeClockApp() {
   const visibleTimesheetSanityIssues = useMemo(() => {
     return getVisibleTimesheetSanityIssues(timesheetSanityChecks, timesheetSanityExpanded);
   }, [timesheetSanityChecks, timesheetSanityExpanded]);
+
+  const payrollEffectiveSettings = useMemo(() => {
+    if (payrollSettings) {
+      return {
+        frequency: payrollSettings.frequency || "alternate_friday",
+        payrollDay: payrollSettings.payroll_day || "friday",
+        anchorDate:
+          String(payrollSettings.anchor_date || "").trim() || payrollSettingsDefaults(companyTimeZone).anchorDate,
+      };
+    }
+    return payrollSettingsDefaults(companyTimeZone);
+  }, [companyTimeZone, payrollSettings]);
+
+  const payrollDateBounds = useMemo(
+    () => payrollRangeBoundsForPreset(payrollRangePreset, now, companyTimeZone),
+    [companyTimeZone, now, payrollRangePreset]
+  );
+
+  const payrollEmployeeLabelById = useMemo(() => {
+    const out = {};
+    for (const record of normalizeArray(visibleRecords)) {
+      const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
+      if (!uid || out[uid]) continue;
+      const name =
+        resolveTimesheetEmployeeTitle(record, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        }) || shortUserLabel(uid);
+      out[uid] = String(name || "").trim() || shortUserLabel(uid);
+    }
+    return out;
+  }, [authUser, profileFullName, teamProfileFullNameByUserId, visibleRecords]);
+
+  const payrollEmployeeOptions = useMemo(() => {
+    const options = Object.entries(payrollEmployeeLabelById).map(([id, name]) => ({ id, name }));
+    options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return options;
+  }, [payrollEmployeeLabelById]);
+
+  const payrollBaseRecords = useMemo(() => {
+    return normalizeArray(visibleRecords)
+      .filter((record) => isCompletedReportTimesheet(record))
+      .filter((record) => {
+        const employeeId = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
+        if (!employeeId) return false;
+        if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) return false;
+        const clockKey = calendarDateKeyInTimeZone(record?.clockOut || record?.clockIn, companyTimeZone);
+        if (!clockKey) return false;
+        if (payrollDateBounds.from && clockKey < payrollDateBounds.from) return false;
+        if (payrollDateBounds.to && clockKey > payrollDateBounds.to) return false;
+        return true;
+      });
+  }, [companyTimeZone, payrollDateBounds.from, payrollDateBounds.to, payrollEmployeeFilter, visibleRecords]);
+
+  const payrollPaymentsActive = useMemo(() => {
+    return normalizeArray(payrollPayments).filter((row) => !row?.deleted_at);
+  }, [payrollPayments]);
+
+  const payrollPeriodRows = useMemo(() => {
+    const groups = new Map();
+    const ensureGroup = (employeeId, employeeName, period) => {
+      const key = `${employeeId}__${period.startKey}__${period.endKey}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          employeeId,
+          employeeName,
+          periodStart: period.startKey,
+          periodEnd: period.endKey,
+          payDate: period.payDateKey,
+          periodLabel: period.label,
+          frequency: period.frequency,
+          workedMinutes: 0,
+          workedAmount: 0,
+          paidAmount: 0,
+          balance: 0,
+          payments: [],
+          records: [],
+        });
+      }
+      return groups.get(key);
+    };
+
+    for (const record of payrollBaseRecords) {
+      const employeeId = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
+      if (!employeeId) continue;
+      const clockKey = calendarDateKeyInTimeZone(record?.clockOut || record?.clockIn, companyTimeZone);
+      if (!clockKey) continue;
+      const period = getPayrollPeriodWindowForDateKey(clockKey, payrollEffectiveSettings, companyTimeZone);
+      if (!period || !payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
+      const employeeName =
+        payrollEmployeeLabelById[employeeId] ||
+        resolveTimesheetEmployeeTitle(record, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        }) ||
+        shortUserLabel(employeeId);
+      const group = ensureGroup(employeeId, employeeName, period);
+      const workedMinutes = getReportWorkedMinutes(record);
+      const workedAmount = getReportLabourCost(record);
+      group.workedMinutes += workedMinutes;
+      group.workedAmount += workedAmount;
+      group.records.push(record);
+    }
+
+    for (const payment of payrollPaymentsActive) {
+      const employeeId = String(payment?.employee_id ?? payment?.employeeId ?? "").trim();
+      if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
+      const startKey = String(payment?.period_start ?? "").trim();
+      const endKey = String(payment?.period_end ?? "").trim();
+      if (!startKey || !endKey) continue;
+      const period = {
+        startKey,
+        endKey,
+        payDateKey: endKey,
+        label: formatPayrollPeriodLabel(startKey, endKey, companyTimeZone),
+        frequency: payrollEffectiveSettings.frequency,
+      };
+      if (!payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
+      const employeeName =
+        payrollEmployeeLabelById[employeeId] ||
+        shortUserLabel(employeeId);
+      const group = ensureGroup(employeeId, employeeName, period);
+      const paidAmount = Number(payment?.paid_amount ?? 0);
+      group.paidAmount += Number.isFinite(paidAmount) ? paidAmount : 0;
+      group.payments.push(payment);
+    }
+
+    const rows = [...groups.values()].map((row) => ({
+      ...row,
+      balance: row.workedAmount - row.paidAmount,
+      payments: [...row.payments].sort((a, b) => String(b?.paid_date || b?.created_at || "").localeCompare(String(a?.paid_date || a?.created_at || ""))),
+    }));
+    rows.sort((a, b) => {
+      const nameCmp = String(a.employeeName || "").localeCompare(String(b.employeeName || ""));
+      if (nameCmp !== 0) return nameCmp;
+      return String(b.periodEnd || "").localeCompare(String(a.periodEnd || ""));
+    });
+    return rows;
+  }, [
+    authUser,
+    companyTimeZone,
+    getReportLabourCost,
+    getReportWorkedMinutes,
+    payrollBaseRecords,
+    payrollDateBounds.from,
+    payrollDateBounds.to,
+    payrollEffectiveSettings,
+    payrollEmployeeFilter,
+    payrollEmployeeLabelById,
+    payrollPaymentsActive,
+    profileFullName,
+    teamProfileFullNameByUserId,
+  ]);
+
+  const payrollEmployeeGroups = useMemo(() => {
+    const grouped = new Map();
+    for (const row of payrollPeriodRows) {
+      const key = String(row.employeeId || "");
+      if (!key) continue;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          employeeId: key,
+          employeeName: row.employeeName || shortUserLabel(key),
+          periods: [],
+          workedMinutes: 0,
+          workedAmount: 0,
+          paidAmount: 0,
+        });
+      }
+      const bucket = grouped.get(key);
+      bucket.periods.push(row);
+      bucket.workedMinutes += Number(row.workedMinutes) || 0;
+      bucket.workedAmount += Number(row.workedAmount) || 0;
+      bucket.paidAmount += Number(row.paidAmount) || 0;
+    }
+    const out = [...grouped.values()].map((row) => ({
+      ...row,
+      balance: row.workedAmount - row.paidAmount,
+      periods: [...row.periods].sort((a, b) => String(b.periodEnd || "").localeCompare(String(a.periodEnd || ""))),
+    }));
+    out.sort((a, b) => String(a.employeeName || "").localeCompare(String(b.employeeName || "")));
+    return out;
+  }, [payrollPeriodRows]);
+
+  const payrollSummary = useMemo(() => {
+    const summary = payrollPeriodRows.reduce(
+      (summary, row) => {
+        summary.workedMinutes += Number(row.workedMinutes) || 0;
+        summary.workedAmount += Number(row.workedAmount) || 0;
+        summary.paidAmount += Number(row.paidAmount) || 0;
+        return summary;
+      },
+      { workedMinutes: 0, workedAmount: 0, paidAmount: 0 }
+    );
+    return {
+      ...summary,
+      balance: summary.workedAmount - summary.paidAmount,
+    };
+  }, [payrollPeriodRows]);
+
+  const payrollCurrentPeriod = useMemo(
+    () => getPayrollPeriodWindowForDateKey(calendarDateKeyInTimeZone(now, companyTimeZone), payrollEffectiveSettings, companyTimeZone),
+    [companyTimeZone, now, payrollEffectiveSettings]
+  );
 
   const buildTimesheetShareText = useCallback(() => {
     const rangeLabel =
@@ -10413,7 +12193,7 @@ const handleClockIn = async () => {
     setIsChangingTask(true);
   };
 
-  const applyTaskChange = () => {
+  const applyTaskChange = async () => {
     if (!visibleCurrentShift) return;
     const updatedProject =
       clockSelectableProjects.find((p) => String(p.id) === String(projectId)) ||
@@ -10422,23 +12202,67 @@ const handleClockIn = async () => {
       adminProjects[0];
     const taskCentres = clockCostCentreOptionsForProject(updatedProject.id);
     if (taskCentres.length === 0 || !taskCentres.includes(costCenter)) return;
-    setCurrentShift({
+    const nextShift = {
       ...visibleCurrentShift,
       project: updatedProject.name,
       projectId: updatedProject.id,
       costCenter,
       projectFolder: getProjectFolderName(updatedProject.name),
-    });
+    };
+    setCurrentShift(nextShift);
+    if (visibleCurrentShift.supabaseTimesheetId) {
+      const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
+        project_id: updatedProject.id,
+        project_name: updatedProject.name,
+        cost_centre: costCenter,
+      });
+      if (error) {
+        console.warn("[CLOCK] task change persistence failed", error);
+        setLocationStatus("Task changed on this device, but server update failed.");
+      }
+    }
     setIsChangingTask(false);
   };
 
-  const handleBreak = () => {
+  const handleBreak = async () => {
     if (!visibleCurrentShift) return;
+    const nowIso = new Date().toISOString();
     if (!visibleCurrentShift.breakStart) {
-      setCurrentShift({ ...visibleCurrentShift, breakStart: new Date().toISOString() });
+      const nextShift = { ...visibleCurrentShift, breakStart: nowIso, breakEnd: null, breakMinutes: 0 };
+      setCurrentShift(nextShift);
+      if (visibleCurrentShift.supabaseTimesheetId) {
+        const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
+          break_start_at: nowIso,
+          break_end_at: null,
+          break_minutes: 0,
+        });
+        if (error) {
+          console.warn("[CLOCK] break start persistence failed", error);
+          setLocationStatus("Break started on this device, but server update failed.");
+        }
+      }
       return;
     }
-    if (!visibleCurrentShift.breakEnd) setCurrentShift({ ...visibleCurrentShift, breakEnd: new Date().toISOString() });
+    if (!visibleCurrentShift.breakEnd) {
+      const breakMinutes = breakMinutesBetween(
+        visibleCurrentShift.clockIn,
+        nowIso,
+        visibleCurrentShift.breakStart,
+        nowIso
+      );
+      const nextShift = { ...visibleCurrentShift, breakEnd: nowIso, breakMinutes };
+      setCurrentShift(nextShift);
+      if (visibleCurrentShift.supabaseTimesheetId) {
+        const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
+          break_end_at: nowIso,
+          break_minutes: breakMinutes,
+        });
+        if (error) {
+          console.warn("[CLOCK] break end persistence failed", error);
+          setLocationStatus("Break ended on this device, but server update failed.");
+        }
+      }
+    }
   };
 
 
@@ -12253,6 +14077,22 @@ const handlePhotoQuickUpload = async (event) => {
       setEditClockOutDate(inParts.dateStr);
       setEditClockOutTime("");
     }
+    if (record.breakStart) {
+      const breakStartParts = wallClockPartsInTimeZone(record.breakStart, companyTimeZone);
+      setEditBreakStartDate(breakStartParts.dateStr);
+      setEditBreakStartTime(breakStartParts.timeStr.slice(0, 5));
+    } else {
+      setEditBreakStartDate(inParts.dateStr);
+      setEditBreakStartTime("");
+    }
+    if (record.breakEnd) {
+      const breakEndParts = wallClockPartsInTimeZone(record.breakEnd, companyTimeZone);
+      setEditBreakEndDate(breakEndParts.dateStr);
+      setEditBreakEndTime(breakEndParts.timeStr.slice(0, 5));
+    } else {
+      setEditBreakEndDate(inParts.dateStr);
+      setEditBreakEndTime("");
+    }
     const pidStr = record.projectId != null ? String(record.projectId) : "";
     const matchProj = effectiveProjects.find((p) => String(p.id) === pidStr);
     const resolvedPid = matchProj ? String(matchProj.id) : String(effectiveProjects[0]?.id ?? "");
@@ -12288,6 +14128,31 @@ const handlePhotoQuickUpload = async (event) => {
       alert("Clock out must be after clock in.");
       return;
     }
+    const hasAnyBreakInput =
+      Boolean(editBreakStartDate || editBreakStartTime || editBreakEndDate || editBreakEndTime);
+    const hasCompleteBreakInput =
+      Boolean(editBreakStartDate && editBreakStartTime && editBreakEndDate && editBreakEndTime);
+    if (hasAnyBreakInput && !hasCompleteBreakInput) {
+      alert("Break start and break stop are both required.");
+      return;
+    }
+    const breakStartIso = hasCompleteBreakInput ? wallDateTimeToUtcIso(editBreakStartDate, editBreakStartTime, companyTimeZone) : null;
+    const breakEndIso = hasCompleteBreakInput ? wallDateTimeToUtcIso(editBreakEndDate, editBreakEndTime, companyTimeZone) : null;
+    if (hasCompleteBreakInput) {
+      const breakStartMs = new Date(breakStartIso).getTime();
+      const breakEndMs = new Date(breakEndIso).getTime();
+      const clockInMs = new Date(clockInIso).getTime();
+      const clockOutMs = new Date(clockOutIso).getTime();
+      if (!breakStartIso || !breakEndIso || !Number.isFinite(breakStartMs) || !Number.isFinite(breakEndMs) || breakEndMs <= breakStartMs) {
+        alert("Break stop must be after break start.");
+        return;
+      }
+      if (breakStartMs < clockInMs || breakEndMs > clockOutMs) {
+        alert("Break must be inside the shift.");
+        return;
+      }
+    }
+    const breakMinutes = breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso);
     const proj = effectiveProjects.find((p) => String(p.id) === String(editProjectId));
     if (!proj) {
       alert("Please select a project.");
@@ -12317,6 +14182,9 @@ const handlePhotoQuickUpload = async (event) => {
           original_snapshot: {
             clock_in: record.clockIn,
             clock_out: record.clockOut,
+            break_start_at: record.breakStart || null,
+            break_end_at: record.breakEnd || null,
+            break_minutes: Number(record.breakMinutes || 0),
             project_id: record.projectId,
             project_name: record.project,
             cost_centre: record.costCenter,
@@ -12324,6 +14192,9 @@ const handlePhotoQuickUpload = async (event) => {
           },
           requested_clock_in: clockInIso,
           requested_clock_out: clockOutIso,
+          requested_break_start_at: breakStartIso,
+          requested_break_end_at: breakEndIso,
+          requested_break_minutes: breakMinutes,
           requested_project_id: String(proj.id),
           requested_project_name: proj.name || "",
           requested_cost_centre: editCostCenter || "",
@@ -12348,20 +14219,20 @@ const handlePhotoQuickUpload = async (event) => {
         clockInIso,
         clockOutIso,
         timesheetHourlyRate: record.hourlyRate,
-        breakStartIso: record.breakStart,
-        breakEndIso: record.breakEnd,
+        breakStartIso,
+        breakEndIso,
       });
-      const { error } = await supabase
-        .from("timesheets")
-        .update({
-          clock_in: clockInIso,
-          clock_out: clockOutIso,
-          project_id: proj.id,
-          project_name: proj.name,
-          cost_centre: editCostCenter || "",
-          ...labourUpdate,
-        })
-        .eq("id", rowId);
+      const { error } = await supabaseUpdateTimesheetRow(supabase, rowId, {
+        clock_in: clockInIso,
+        clock_out: clockOutIso,
+        project_id: proj.id,
+        project_name: proj.name,
+        cost_centre: editCostCenter || "",
+        break_start_at: breakStartIso,
+        break_end_at: breakEndIso,
+        break_minutes: breakMinutes,
+        ...labourUpdate,
+      });
       if (error) throw error;
       cancelEditRecord();
       await fetchTimesheetsFromSupabase();
@@ -12378,6 +14249,10 @@ const handlePhotoQuickUpload = async (event) => {
     setEditClockInTime("");
     setEditClockOutDate("");
     setEditClockOutTime("");
+    setEditBreakStartDate("");
+    setEditBreakStartTime("");
+    setEditBreakEndDate("");
+    setEditBreakEndTime("");
     setEditProjectId("");
     setEditCostCenter("");
   };
@@ -12417,6 +14292,9 @@ const handlePhotoQuickUpload = async (event) => {
     try {
       const clockInIso = request.requestedClockIn;
       const clockOutIso = request.requestedClockOut;
+      const requestBreakStartIso = request.requestedBreakStartAt || null;
+      const requestBreakEndIso = request.requestedBreakEndAt || null;
+      const requestBreakMinutes = breakMinutesBetween(clockInIso, clockOutIso, requestBreakStartIso, requestBreakEndIso);
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
         userId: request.userId,
         companyId: request.companyId || userCompany?.id,
@@ -12425,6 +14303,8 @@ const handlePhotoQuickUpload = async (event) => {
         clockOutIso,
         timesheetHourlyRate:
           request.requestType === "edit_time" ? request.originalSnapshot?.hourly_rate : 0,
+        breakStartIso: requestBreakStartIso,
+        breakEndIso: requestBreakEndIso,
       });
 
       if (request.requestType === "manual_time") {
@@ -12438,6 +14318,9 @@ const handlePhotoQuickUpload = async (event) => {
           project_id: request.requestedProjectId || null,
           project_name: request.requestedProjectName || "",
           cost_centre: request.requestedCostCentre || "",
+          break_start_at: requestBreakStartIso,
+          break_end_at: requestBreakEndIso,
+          break_minutes: requestBreakMinutes,
           clock_in: clockInIso,
           hourly_rate: hourlyRate,
           ...labourUpdate,
@@ -12452,6 +14335,9 @@ const handlePhotoQuickUpload = async (event) => {
           project_id: request.requestedProjectId || null,
           project_name: request.requestedProjectName || "",
           cost_centre: request.requestedCostCentre || "",
+          break_start_at: requestBreakStartIso,
+          break_end_at: requestBreakEndIso,
+          break_minutes: requestBreakMinutes,
           ...labourUpdate,
         });
         if (error) throw error;
@@ -12530,6 +14416,12 @@ const handlePhotoQuickUpload = async (event) => {
         <p className="mt-2 text-[14px] font-bold text-slate-800">
           {request.requestedProjectName || "No project"} - {request.requestedCostCentre || "No task"}
         </p>
+        {(request.requestedBreakStartAt || request.requestedBreakEndAt || request.requestedBreakMinutes > 0) ? (
+          <p className="mt-1 text-[12px] font-semibold text-slate-500">
+            Break: {request.requestedBreakStartAt ? formatTime(request.requestedBreakStartAt, companyTimeZone) : "—"} - {request.requestedBreakEndAt ? formatTime(request.requestedBreakEndAt, companyTimeZone) : "—"}
+            {request.requestedBreakMinutes > 0 ? ` (${formatHoursMinutes(request.requestedBreakMinutes)})` : ""}
+          </p>
+        ) : null}
         {request.requestType === "edit_time" && original.clock_in ? (
           <p className="mt-1 text-[12px] font-semibold text-slate-500">
             Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "—"}
@@ -14965,6 +16857,171 @@ const handlePhotoQuickUpload = async (event) => {
     }
   };
 
+  const handleSavePayrollSettings = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || !userCompany?.id || !authUser?.id) return;
+    const frequency = String(payrollSettingsDraft.frequency || "alternate_friday").trim().toLowerCase();
+    const anchorDate = String(payrollSettingsDraft.anchorDate || "").trim();
+    if (!anchorDate) {
+      setPayrollSettingsMessage("Choose an anchor Friday date.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(anchorDate)) {
+      setPayrollSettingsMessage("Enter a valid anchor date.");
+      return;
+    }
+    setPayrollSettingsSaving(true);
+    setPayrollSettingsMessage("");
+    try {
+      const payload = {
+        company_id: userCompany.id,
+        frequency,
+        payroll_day: payrollDayValueFromAnchor(anchorDate, companyTimeZone),
+        anchor_date: anchorDate,
+        updated_by: authUser.id,
+        updated_at: new Date().toISOString(),
+      };
+      const { error } = await supabase.from("payroll_settings").upsert([payload], {
+        onConflict: "company_id",
+      });
+      if (error) throw error;
+      setPayrollSettingsEditOpen(false);
+      setPayrollSettingsMessage("Payroll schedule saved.");
+      await fetchPayrollData();
+    } catch (err) {
+      setPayrollSettingsMessage(getErrorMessage(err));
+    } finally {
+      setPayrollSettingsSaving(false);
+    }
+  };
+
+  const openPayrollPaymentForm = (row = null, defaults = {}) => {
+    const periodStart = String(defaults.periodStart || row?.periodStart || row?.period_start || "").trim();
+    const periodEnd = String(defaults.periodEnd || row?.periodEnd || row?.period_end || "").trim();
+    const employeeId =
+      String(defaults.employeeId || row?.employeeId || row?.employee_id || (payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : "") || "").trim() ||
+      "all";
+    setPayrollPaymentDraft({
+      id: row?.id ? String(row.id) : "",
+      employeeId,
+      periodStart,
+      periodEnd,
+      paidAmount:
+        defaults.paidAmount != null
+          ? String(defaults.paidAmount)
+          : row?.paid_amount != null
+            ? String(row.paid_amount)
+            : "",
+      paidDate: String(defaults.paidDate || row?.paid_date || calendarDateKeyInTimeZone(new Date(), companyTimeZone) || "").trim(),
+      note: String(defaults.note || row?.note || "").trim(),
+    });
+    setPayrollPaymentMessage("");
+    setPayrollPaymentFormOpen(true);
+  };
+
+  const handleSavePayrollPayment = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || !userCompany?.id || !authUser?.id) return;
+    const employeeId = String(payrollPaymentDraft.employeeId || "").trim();
+    const periodStart = String(payrollPaymentDraft.periodStart || "").trim();
+    const periodEnd = String(payrollPaymentDraft.periodEnd || "").trim();
+    const paidAmount = Number(String(payrollPaymentDraft.paidAmount || "").replace(",", "."));
+    const paidDate = String(payrollPaymentDraft.paidDate || "").trim();
+    if (!employeeId || employeeId === "all") {
+      setPayrollPaymentMessage("Choose an employee.");
+      return;
+    }
+    if (!periodStart || !periodEnd) {
+      setPayrollPaymentMessage("Choose a payroll period.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+      setPayrollPaymentMessage("Enter a valid payroll period.");
+      return;
+    }
+    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+      setPayrollPaymentMessage("Enter a valid paid amount.");
+      return;
+    }
+    if (!paidDate) {
+      setPayrollPaymentMessage("Choose a paid date.");
+      return;
+    }
+    setPayrollPaymentSaving(true);
+    setPayrollPaymentMessage("");
+    try {
+      const nowIso = new Date().toISOString();
+      const basePayload = {
+        company_id: userCompany.id,
+        employee_id: employeeId,
+        period_start: periodStart,
+        period_end: periodEnd,
+        paid_amount: paidAmount,
+        paid_date: paidDate,
+        note: String(payrollPaymentDraft.note || "").trim() || null,
+        updated_by: authUser.id,
+        updated_at: nowIso,
+      };
+      let error = null;
+      if (payrollPaymentDraft.id) {
+        ({ error } = await supabase.from("payroll_payments").update(basePayload).eq("id", payrollPaymentDraft.id));
+      } else {
+        ({ error } = await supabase
+          .from("payroll_payments")
+          .insert([
+            {
+              ...basePayload,
+              created_by: authUser.id,
+            },
+          ]));
+      }
+      if (error) throw error;
+      setPayrollPaymentFormOpen(false);
+      setPayrollPaymentDraft({
+        id: "",
+        employeeId: "all",
+        periodStart: "",
+        periodEnd: "",
+        paidAmount: "",
+        paidDate: "",
+        note: "",
+      });
+      setPayrollPaymentMessage(payrollPaymentDraft.id ? "Payment updated." : "Payment added.");
+      await fetchPayrollData();
+    } catch (err) {
+      setPayrollPaymentMessage(getErrorMessage(err));
+    } finally {
+      setPayrollPaymentSaving(false);
+    }
+  };
+
+  const handleVoidPayrollPayment = async (payment) => {
+    if (!isAdmin || !userCompany?.id || !authUser?.id || !payment?.id) return;
+    if (!window.confirm("Void this payment? It will stay in history but be hidden from payroll totals.")) return;
+    try {
+      const nowIso = new Date().toISOString();
+      const { error } = await supabase
+        .from("payroll_payments")
+        .update({
+          deleted_at: nowIso,
+          deleted_by: authUser.id,
+          updated_at: nowIso,
+          updated_by: authUser.id,
+        })
+        .eq("id", payment.id);
+      if (error) throw error;
+      setPayrollPaymentMessage("Payment voided.");
+      await fetchPayrollData();
+    } catch (err) {
+      setPayrollPaymentMessage(getErrorMessage(err));
+    }
+  };
+
+  const handleEditPayrollPayment = (payment) => {
+    if (!isAdmin || !payment) return;
+    openPayrollPaymentForm(payment);
+  };
+
   const updateCurrentUserPasswordMetadata = async (metadataPatch = {}) => {
     if (!authUser?.id) return null;
     const currentMetadata =
@@ -15083,7 +17140,7 @@ const handlePhotoQuickUpload = async (event) => {
         clockOutIso: clockOutTime,
         timesheetHourlyRate: record.hourlyRate,
       });
-      const { error } = await supabase.from("timesheets").update(labourUpdate).eq("id", rowId);
+      const { error } = await supabaseUpdateTimesheetRow(supabase, rowId, labourUpdate);
       if (error) throw error;
       const myLiveId = visibleCurrentShift?.supabaseTimesheetId;
       if (myLiveId != null && String(myLiveId) === String(rowId)) {
@@ -15268,6 +17325,15 @@ const handlePhotoQuickUpload = async (event) => {
         </svg>
       );
     }
+    if (type === "wallet") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 7h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+          <path d="M18 11h2v4h-2a2 2 0 0 1 0-4Z" />
+          <path d="M16 7V6a2 2 0 0 0-2-2H7" />
+        </svg>
+      );
+    }
     if (type === "edit") {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -15399,6 +17465,13 @@ const handlePhotoQuickUpload = async (event) => {
     const projectTaskLabel = `${record.project || "Unassigned"} / ${record.costCenter || "Unassigned"}`;
     const timesheetAmountDisplay = formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record));
     const timesheetTotalDisplay = formatHoursMinutes(getWorkedMinutes(record));
+    const recordBreakMinutes = record.breakStart && record.breakEnd
+      ? breakMinutesBetween(record.clockIn, record.clockOut || new Date().toISOString(), record.breakStart, record.breakEnd)
+      : Number(record.breakMinutes || 0);
+    const showBreakLine = Boolean(record.breakStart || record.breakEnd || recordBreakMinutes > 0);
+    const breakStartText = record.breakStart ? formatTime(record.breakStart, companyTimeZone) : "—";
+    const breakEndText = record.breakEnd ? formatTime(record.breakEnd, companyTimeZone) : "—";
+    const breakDurationText = formatHoursMinutes(Math.max(0, Number(recordBreakMinutes || 0)));
     const canShowMoreMenu = isAdmin || record.clockInLocation || record.clockOutLocation;
 
     return (
@@ -15456,6 +17529,45 @@ const handlePhotoQuickUpload = async (event) => {
                 onChange={(e) => setEditClockOutTime(e.target.value)}
               />
           </div>
+          </div>
+          <div className="rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] p-2">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break</p>
+            <div className="grid grid-cols-1 gap-2">
+              <div className="space-y-1">
+                <label className="text-[12px] font-bold text-slate-500">Break start</label>
+                <div className="flex gap-1">
+                  <input
+                    type="date"
+                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
+                    value={editBreakStartDate}
+                    onChange={(e) => setEditBreakStartDate(e.target.value)}
+                  />
+                  <input
+                    type="time"
+                    className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
+                    value={editBreakStartTime}
+                    onChange={(e) => setEditBreakStartTime(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[12px] font-bold text-slate-500">Break stop</label>
+                <div className="flex gap-1">
+                  <input
+                    type="date"
+                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
+                    value={editBreakEndDate}
+                    onChange={(e) => setEditBreakEndDate(e.target.value)}
+                  />
+                  <input
+                    type="time"
+                    className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
+                    value={editBreakEndTime}
+                    onChange={(e) => setEditBreakEndTime(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
           </div>
           <div className="space-y-1">
             <label className="text-[13px] text-slate-500">Project</label>
@@ -15548,6 +17660,22 @@ const handlePhotoQuickUpload = async (event) => {
               Auto clock-out applied.
             </p>
           )}
+          {showBreakLine ? (
+            <div className="mt-2 grid grid-cols-3 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+              <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break start</p>
+                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakStartText}</p>
+              </div>
+              <div className="min-w-0 border-r border-[#E2E8F0] px-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break stop</p>
+                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakEndText}</p>
+              </div>
+              <div className="min-w-0 pl-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break total</p>
+                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakDurationText}</p>
+              </div>
+            </div>
+          ) : null}
           {showCloseShift && (
             <Button
               type="button"
@@ -15619,6 +17747,461 @@ const handlePhotoQuickUpload = async (event) => {
       )}
     </div>
   );
+  };
+
+  const renderPayrollPanel = () => {
+    if (!payrollPanelOpen || !isAdmin) return null;
+    const rangeLabel = payrollRangePresetLabel(payrollRangePreset);
+    const employeeLabel =
+      payrollEmployeeFilter === "all"
+        ? "All employees"
+        : payrollEmployeeOptions.find((employee) => String(employee.id) === String(payrollEmployeeFilter))?.name || "Selected employee";
+    const currentPayDateLabel = payrollCurrentPeriod?.payDateKey
+      ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
+      : "—";
+
+    return (
+      <>
+        <div
+          className="fixed inset-0 z-[86] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            setPayrollPanelOpen(false);
+            setPayrollPaymentFormOpen(false);
+          }}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-sm flex-col overflow-hidden rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+            <div className="flex items-start justify-between gap-3 px-4 pt-1">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Payroll tracker</h3>
+                <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
+                  Pay periods, hours, payments, and balances.
+                </p>
+                <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                  Range: {rangeLabel} • Employee: {employeeLabel}
+                </p>
+              </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                onClick={() => {
+                  setPayrollPanelOpen(false);
+                  setPayrollPaymentFormOpen(false);
+                }}
+                aria-label="Close payroll"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-4 px-4">
+              <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                {payrollSettingsLoading ? (
+                  <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
+                ) : payrollSettings ? (
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current schedule</p>
+                        <p className="mt-1 text-[15px] font-black text-[#061426]">{payrollFrequencyLabel(payrollSettings.frequency)}</p>
+                      </div>
+                      <span className="rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
+                        {currentPayDateLabel}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Payroll day</p>
+                        <p className="mt-1 text-[13px] font-black capitalize text-[#061426]">
+                          {(payrollSettings.payroll_day || "friday").toLowerCase()}
+                        </p>
+                      </div>
+                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Anchor</p>
+                        <p className="mt-1 text-[13px] font-black text-[#061426]">
+                          {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
+                        </p>
+                      </div>
+                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                        <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current pay date</p>
+                        <p className="mt-1 text-[13px] font-black text-[#061426]">{currentPayDateLabel}</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-[13px] font-semibold leading-snug text-[#64748B]">
+                      Set an anchor Friday in Settings to start payroll periods and payment history.
+                    </p>
+                    <button
+                      type="button"
+                      className="w-full rounded-[14px] bg-[#061426] px-4 py-3 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                      onClick={() => {
+                        setPayrollPanelOpen(false);
+                        setActiveTab("settings");
+                      }}
+                    >
+                      Open settings
+                    </button>
+                  </div>
+                )}
+                {payrollSettingsError ? (
+                  <p className="mt-2 rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold leading-snug text-[#DC2626]">
+                    {payrollSettingsError}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="mt-4 px-4">
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {PAYROLL_RANGE_OPTIONS.map((option) => {
+                  const active = payrollRangePreset === option.id;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={`shrink-0 rounded-full border px-3 py-2 text-[12px] font-black transition ${
+                        active
+                          ? "border-[#061426] bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
+                          : "border-[#CBD5E1] bg-white text-[#475569] active:bg-[#F8FAFC]"
+                      }`}
+                      onClick={() => setPayrollRangePreset(option.id)}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-3 px-4">
+              {renderRoyalNavyFilterSelect({
+                label: "Employee",
+                icon: "user",
+                value: payrollEmployeeFilter,
+                onChange: (event) => setPayrollEmployeeFilter(event.target.value),
+                children: (
+                  <>
+                    <option value="all">All employees</option>
+                    {payrollEmployeeOptions.map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.name}
+                      </option>
+                    ))}
+                  </>
+                ),
+              })}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 px-4 pt-3">
+              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
+                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</p>
+              </div>
+              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
+                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</p>
+              </div>
+              <div className="rounded-[16px] border border-[#E2E8F0] bg-white p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
+                <p className="mt-1 text-[18px] font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</p>
+              </div>
+              <div className={`rounded-[16px] border p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)] ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
+                <p className="text-[10px] font-black uppercase tracking-[0.08em]">Balance</p>
+                <p className="mt-1 text-[18px] font-black tabular-nums">{formatMoney(payrollSummary.balance)}</p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-3">
+              <div className="space-y-3">
+                {payrollPaymentsLoading ? (
+                  <p className="rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[13px] font-semibold text-[#64748B]">
+                    Loading payroll tracker...
+                  </p>
+                ) : payrollEmployeeGroups.length === 0 ? (
+                  <div className="rounded-[20px] border border-[#E2E8F0] bg-white px-5 py-8 text-center shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]">
+                      {renderTimesheetUiIcon("wallet", "h-6 w-6")}
+                    </div>
+                    <p className="mt-4 text-[16px] font-black text-[#061426]">No payroll periods for this range</p>
+                    <p className="mx-auto mt-2 max-w-[220px] text-[13px] font-semibold leading-snug text-[#64748B]">
+                      Try a wider date range, or set up payroll in Settings first.
+                    </p>
+                  </div>
+                ) : (
+                  payrollEmployeeGroups.map((group) => (
+                    <div key={group.employeeId} className="rounded-[20px] border border-[#E2E8F0] bg-white p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-[16px] font-black leading-tight text-[#061426]">{group.employeeName}</p>
+                          <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                            {group.periods.length} period{group.periods.length === 1 ? "" : "s"} • {formatHoursMinutes(group.workedMinutes)} worked • {formatMoney(group.workedAmount)} earned
+                          </p>
+                        </div>
+                        <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
+                          {formatMoney(group.balance)}
+                        </span>
+                      </div>
+
+                      <div className="mt-3 space-y-3">
+                        {group.periods.map((period) => (
+                          <div key={period.id} className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-[15px] font-black leading-tight text-[#061426]">{period.periodLabel}</p>
+                                <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
+                                  Pay date {formatPayrollDateKeyShort(period.payDate, companyTimeZone, { includeYear: true })}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="shrink-0 rounded-full border border-[#CBD5E1] bg-white px-3 py-2 text-[11px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                                onClick={() =>
+                                  openPayrollPaymentForm(period, {
+                                    employeeId: period.employeeId,
+                                    periodStart: period.periodStart,
+                                    periodEnd: period.periodEnd,
+                                  })
+                                }
+                              >
+                                Add Payment
+                              </button>
+                            </div>
+
+                            <div className="mt-3 grid grid-cols-2 gap-2">
+                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
+                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatHoursMinutes(period.workedMinutes)}</p>
+                              </div>
+                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
+                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatMoney(period.workedAmount)}</p>
+                              </div>
+                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
+                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatMoney(period.paidAmount)}</p>
+                              </div>
+                              <div className={`rounded-[14px] border px-3 py-2 ${payrollBalanceBadgeClass(period.balance)}`}>
+                                <p className="text-[9px] font-black uppercase tracking-[0.08em]">Balance</p>
+                                <p className="mt-1 text-[13px] font-black tabular-nums">{formatMoney(period.balance)}</p>
+                              </div>
+                            </div>
+
+                            {period.payments.length > 0 ? (
+                              <div className="mt-3 space-y-2">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Payments</p>
+                                {period.payments.map((payment) => (
+                                  <div key={payment.id} className="rounded-[14px] border border-[#E2E8F0] bg-white p-3">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="text-[14px] font-black text-[#061426] tabular-nums">
+                                          {formatMoney(Number(payment.paid_amount || 0))}
+                                        </p>
+                                        <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
+                                          {formatPayrollDateKeyShort(payment.paid_date, companyTimeZone, { includeYear: true })}
+                                        </p>
+                                        {String(payment.note || "").trim() ? (
+                                          <p className="mt-1 text-[12px] font-semibold leading-snug text-[#061426]">{payment.note}</p>
+                                        ) : null}
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1.5">
+                                        <button
+                                          type="button"
+                                          className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                                          onClick={() => handleEditPayrollPayment(payment)}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="rounded-full border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1 text-[11px] font-black text-[#DC2626] active:bg-[#FFF7F7]"
+                                          onClick={() => void handleVoidPayrollPayment(payment)}
+                                        >
+                                          Void
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="mt-3 rounded-[14px] border border-dashed border-[#CBD5E1] bg-white px-3 py-2 text-[12px] font-semibold text-[#64748B]">
+                                No payments recorded yet.
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {payrollPaymentFormOpen ? (
+          <div
+            className="fixed inset-0 z-[87] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setPayrollPaymentFormOpen(false)}
+          >
+            <div
+              className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                  <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">
+                    {payrollPaymentDraft.id ? "Edit payment" : "Add payment"}
+                  </h3>
+                  <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
+                    Record a payment for a payroll period.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => setPayrollPaymentFormOpen(false)}
+                  aria-label="Close payment form"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <form onSubmit={handleSavePayrollPayment} className="mt-4 space-y-3">
+                {renderRoyalNavyFilterSelect({
+                  label: "Employee",
+                  icon: "user",
+                  value: payrollPaymentDraft.employeeId,
+                  onChange: (event) =>
+                    setPayrollPaymentDraft((draft) => ({
+                      ...draft,
+                      employeeId: event.target.value,
+                    })),
+                  children: (
+                    <>
+                      <option value="all">Choose employee</option>
+                      {payrollEmployeeOptions.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name}
+                        </option>
+                      ))}
+                    </>
+                  ),
+                })}
+                <div className="grid grid-cols-2 gap-2">
+                  <DateInputField
+                    label="Period start"
+                    value={payrollPaymentDraft.periodStart}
+                    onChange={(value) =>
+                      setPayrollPaymentDraft((draft) => ({
+                        ...draft,
+                        periodStart: value,
+                      }))
+                    }
+                  />
+                  <DateInputField
+                    label="Period end"
+                    value={payrollPaymentDraft.periodEnd}
+                    onChange={(value) =>
+                      setPayrollPaymentDraft((draft) => ({
+                        ...draft,
+                        periodEnd: value,
+                      }))
+                    }
+                  />
+                </div>
+                <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                  Amount paid
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="h-12 w-full rounded-[13px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-black text-[#061426] outline-none focus:border-[#061426]"
+                    value={payrollPaymentDraft.paidAmount}
+                    onChange={(event) =>
+                      setPayrollPaymentDraft((draft) => ({
+                        ...draft,
+                        paidAmount: event.target.value,
+                      }))
+                    }
+                    placeholder="0.00"
+                  />
+                </label>
+                <DateInputField
+                  label="Paid date"
+                  value={payrollPaymentDraft.paidDate}
+                  onChange={(value) =>
+                    setPayrollPaymentDraft((draft) => ({
+                      ...draft,
+                      paidDate: value,
+                    }))
+                  }
+                />
+                <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                  Note / reference
+                  <textarea
+                    className="min-h-[96px] w-full rounded-[13px] border border-[#CBD5E1] bg-white px-3 py-2.5 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                    value={payrollPaymentDraft.note}
+                    onChange={(event) =>
+                      setPayrollPaymentDraft((draft) => ({
+                        ...draft,
+                        note: event.target.value,
+                      }))
+                    }
+                    placeholder="Optional note"
+                  />
+                </label>
+                {payrollPaymentMessage ? (
+                  <p
+                    className={`rounded-[14px] border px-3 py-2 text-[12px] font-semibold leading-snug ${
+                      payrollPaymentMessage.toLowerCase().includes("added") ||
+                      payrollPaymentMessage.toLowerCase().includes("updated") ||
+                      payrollPaymentMessage.toLowerCase().includes("voided")
+                        ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+                        : "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]"
+                    }`}
+                  >
+                    {payrollPaymentMessage}
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[15px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                    onClick={() => setPayrollPaymentFormOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                  <Button
+                    type="submit"
+                    className="h-12 rounded-[14px] bg-[#061426] px-4 text-[15px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                    disabled={payrollPaymentSaving}
+                  >
+                    {payrollPaymentSaving ? "Saving..." : payrollPaymentDraft.id ? "Update payment" : "Save payment"}
+                  </Button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
   };
 
   const renderOAuthButtons = () => {
@@ -17692,6 +20275,7 @@ const handlePhotoQuickUpload = async (event) => {
   const appHeaderUserName = (profileFullName || "").trim() || "User";
   const appHeaderMetaSeparator = "\u2022";
   const appHeaderMetaLabel = appHeaderUserName;
+  const isHomeTab = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
   const homeTodayLabel = `Today ${appHeaderMetaSeparator} ${appHeaderDateLabel}`;
   const homeFirstName = appHeaderUserName.split(/\s+/).filter(Boolean)[0] || appHeaderUserName;
   const homeGreetingLabel = (() => {
@@ -17853,6 +20437,7 @@ const handlePhotoQuickUpload = async (event) => {
             metaLabel={appHeaderMetaLabel}
             iconSrc={OPERA_APP_ICON}
             isDevelopment={IS_OPERA_DEVELOPMENT_APP}
+            showCompanyName={isHomeTab}
             unreadCount={inAppNotifUnread}
             onNotifications={() => setActiveTab("notifications")}
           />
@@ -18565,7 +21150,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <Button
                         className="h-[46px] rounded-[14px] text-[15px] font-semibold !bg-[#061426] !text-white"
                         disabled={clockCostCentresActive.length === 0 || !costCenter}
-                        onClick={applyTaskChange}
+                        onClick={() => void applyTaskChange()}
                       >
                         Save
                       </Button>
@@ -18663,7 +21248,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <button
                           type="button"
                           className={clockActionTileClass({ dark: true, compact: true })}
-                          onClick={handleBreak}
+                          onClick={() => void handleBreak()}
                         >
                           <span className={clockActionGlyphClass({ dark: true, compact: true })} aria-hidden="true">
                             {renderClockActionIcon("break")}
@@ -18961,7 +21546,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
 
-                <div className={`grid gap-2 ${!isAdmin ? "grid-cols-2" : "grid-cols-1"}`}>
+                <div className="grid grid-cols-2 gap-2">
                   <button
                     type="button"
                     className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
@@ -18970,7 +21555,16 @@ const handlePhotoQuickUpload = async (event) => {
                     <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
                     Share report
                   </button>
-                  {!isAdmin ? (
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                      onClick={() => setPayrollPanelOpen(true)}
+                    >
+                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
+                      <span className="truncate">Payroll</span>
+                    </button>
+                  ) : (
                     <button
                       type="button"
                       className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
@@ -18981,7 +21575,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </span>
                       <span className="truncate">{manualTimeOpen ? "Close manual time" : "Add manual time"}</span>
                     </button>
-                  ) : null}
+                  )}
                 </div>
                 {manualTimeOpen && !isAdmin ? (
                   <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
@@ -26239,6 +28833,144 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                 </div>
 
+                {isAdmin ? (
+                  <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[16px] font-black text-slate-900">Payroll</p>
+                        <p className="text-[12px] font-semibold text-slate-500">Alternate Friday payroll periods and payment tracking.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-900"
+                        onClick={() => setPayrollSettingsEditOpen((open) => !open)}
+                      >
+                        {payrollSettingsEditOpen ? "Close" : "Edit"}
+                      </button>
+                    </div>
+                    {payrollSettingsError ? (
+                      <div className="rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-[13px] font-semibold text-amber-900">
+                        {payrollSettingsError}
+                      </div>
+                    ) : null}
+                    {payrollSettingsEditOpen ? (
+                      <form onSubmit={handleSavePayrollSettings} className="space-y-3">
+                        <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                          Payroll frequency
+                          <select
+                            className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px] font-semibold text-slate-900"
+                            value={payrollSettingsDraft.frequency}
+                            onChange={(e) =>
+                              setPayrollSettingsDraft((draft) => ({
+                                ...draft,
+                                frequency: e.target.value,
+                              }))
+                            }
+                          >
+                            {PAYROLL_FREQUENCY_OPTIONS.map((option) => (
+                              <option key={option.id} value={option.id}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                          Anchor Friday
+                          <input
+                            type="date"
+                            className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px] font-semibold text-slate-900"
+                            value={payrollSettingsDraft.anchorDate}
+                            onChange={(e) =>
+                              setPayrollSettingsDraft((draft) => ({
+                                ...draft,
+                                anchorDate: e.target.value,
+                                payrollDay: payrollDayValueFromAnchor(e.target.value, companyTimeZone),
+                              }))
+                            }
+                          />
+                        </label>
+                        <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] font-semibold text-slate-700 space-y-1">
+                          <div className="flex items-center justify-between gap-3">
+                            <span>Payroll day</span>
+                            <span className="font-black text-slate-900 capitalize">
+                              {payrollDayValueFromAnchor(payrollSettingsDraft.anchorDate, companyTimeZone) || "friday"}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
+                            <span>Preview</span>
+                            <span className="font-black text-slate-900">{payrollFrequencyLabel(payrollSettingsDraft.frequency)}</span>
+                          </div>
+                          <p className="text-[12px] font-semibold leading-snug text-slate-500">
+                            Choose the first payroll Friday. Biweekly periods repeat every 14 days from that anchor.
+                          </p>
+                        </div>
+                        {payrollSettingsMessage ? (
+                          <div
+                            className={`rounded-2xl border p-3 text-[13px] font-semibold ${
+                              payrollSettingsMessage.toLowerCase().includes("saved")
+                                ? "border-emerald-100 bg-emerald-50 text-emerald-800"
+                                : "border-red-100 bg-red-50 text-red-700"
+                            }`}
+                          >
+                            {payrollSettingsMessage}
+                          </div>
+                        ) : null}
+                        <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={payrollSettingsSaving}>
+                          {payrollSettingsSaving ? "Saving..." : "Save Payroll Settings"}
+                        </Button>
+                      </form>
+                    ) : (
+                      <div className="rounded-[16px] bg-slate-50 border border-slate-100 p-3 space-y-2">
+                        {payrollSettingsLoading ? (
+                          <p className="text-[13px] font-semibold text-slate-500">Loading payroll settings...</p>
+                        ) : payrollSettings ? (
+                          <>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-[14px] font-semibold text-slate-500">Frequency</span>
+                              <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                                {payrollFrequencyLabel(payrollSettings.frequency)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-[14px] font-semibold text-slate-500">Payroll day</span>
+                              <span className="text-[15px] font-bold text-slate-900 text-right break-words capitalize">
+                                {(payrollSettings.payroll_day || "friday").toLowerCase()}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-[14px] font-semibold text-slate-500">Anchor Friday</span>
+                              <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                                {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-[14px] font-semibold text-slate-500">Current pay date</span>
+                              <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                                {payrollCurrentPeriod?.payDateKey
+                                  ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
+                                  : "—"}
+                              </span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="space-y-2">
+                            <p className="text-[13px] font-semibold text-slate-600">
+                              Set an anchor Friday to start payroll tracking and payment history.
+                            </p>
+                            <Button
+                              type="button"
+                              className="w-full rounded-2xl h-11 text-[14px] font-bold"
+                              onClick={() => setPayrollSettingsEditOpen(true)}
+                            >
+                              Set up payroll
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
                 <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -27341,6 +30073,8 @@ const handlePhotoQuickUpload = async (event) => {
             </div>
           </div>
         )}
+
+        {renderPayrollPanel()}
 
         <BottomNav
           isAdmin={isAdmin}

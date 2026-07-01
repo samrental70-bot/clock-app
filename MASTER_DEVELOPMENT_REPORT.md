@@ -2198,6 +2198,107 @@ Safety:
 - No push to main was performed.
 - No destructive commands were run.
 
+Chat list UX follow-up:
+- Mobile-safe list title input and placeholder-only composer landed on develop.
+- Optimistic add/done interactions and completed-item visibility toggle landed on develop.
+- Development alias refreshed again after the final code tweak.
+- Browser screenshot QA was attempted but interrupted by the desktop automation session, so screenshots still need a clean retry.
+- Advisor review returned "needs_changes" until clean mobile screenshots and manual phone interaction QA are captured.
+
+Chat list placement follow-up:
+- Chat lists now render as inline thread cards instead of only a top modal.
+- Pinned shortcuts remain in the ribbon as jump links only.
+- Tapping a pinned shortcut scrolls to the matching list card in the thread.
+- `verify:release` passed after the placement update.
+- Development deployment was refreshed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment: `https://project-rui1d-iul14iqnm-samrental70-7859s-projects.vercel.app`.
+- Browser screenshot QA was still interrupted before a clean retry, so that remains the last follow-up check.
+
+2026-07-01 env separation hardening:
+- Added a client-side Supabase project-ref guard in `src/lib/supabaseClient.js`.
+- Development-like builds now fail closed if they point at the production Supabase project ref.
+- Added a full-screen environment gate in `src/App.jsx` so a bad env cannot silently load the app against the wrong database.
+- Verified Vercel env separation via CLI:
+  - Preview: `jvlx...wbut`
+  - Production: `vunw...hyjm`
+- Re-ran `npm.cmd run verify:release` after the guard; it passed.
+- This keeps login-email overlap from ever becoming a cross-environment database leak.
+
+## 2026-07-01 - Chat QA + Pinned Lists + Timesheet Breaks + Cross-Device Session
+
+Development-only changes:
+- Added additive migration `supabase/migrations/20260630123000_chat_lists_and_timesheet_breaks.sql`.
+- Added `chat_lists` and `chat_list_items` for pinned shared chat lists.
+- Added timesheet break fields:
+  - `break_start_at`
+  - `break_end_at`
+  - `break_minutes`
+  - `break_note`
+- Added requested break fields to `timesheet_change_requests`.
+- Added chat list API actions:
+  - `create_list`
+  - `add_list_item`
+  - `update_list_item`
+  - `toggle_list_item`
+  - `delete_list_item`
+  - `archive_list`
+- Added chat pinned-list UI:
+  - list icon near photo composer action
+  - Create list modal
+  - pinned list card at top of thread
+  - list detail modal
+  - add/edit/delete/check/uncheck item controls
+  - stable item numbering after item delete
+- Updated timesheet calculations so break time is excluded from worked time, labour, daily reports, and auto-clockout calculations.
+- Updated timesheet edit/approval flow to carry break start/stop/minutes.
+- Updated active shift task/break persistence so active DB row remains the source of truth across reload/device changes.
+
+Development database:
+- Migration applied to development Supabase only.
+- Development Supabase ref verified as masked `...jjwbut`.
+- Production database was not touched.
+
+QA evidence:
+- Chat QA screenshots saved in `docs/qa/chat/`.
+- QA reports created:
+  - `docs/qa/CHAT_QA_REPORT.md`
+  - `docs/qa/CHAT_TIMESHEET_CLOCK_QA_REPORT.md`
+- Pinned list stable numbering verified through development API:
+  - item #2 deleted
+  - remaining item numbers: `[1, 3, 4]`
+  - open count: `2`
+  - total count: `3`
+
+Advisor review:
+- Advisor review completed with usable screenshots and sanitized implementation notes.
+- Advisor final decision: blocked for production promotion.
+- Main remaining blockers:
+  - destructive chat flows need reliable browser/mobile QA
+  - authenticated chat list/item RLS role matrix needed
+  - actual timesheet break-record display/edit/report QA needed
+  - manual two-device cross-device clock session QA needed
+  - duplicate active shift race protection should be reviewed before production
+
+Verification:
+- `npm.cmd run verify:migrations`: pass.
+- `npm.cmd run verify:b2-dev`: pass.
+- `npm.cmd run lint`: pass with existing warnings only.
+- `npm.cmd run build`: pass.
+- `npm.cmd run verify:release`: pass.
+
+Deployment:
+- Development preview deployment completed.
+- Development alias updated:
+  - `https://project-rui1d-development.vercel.app`
+- Production deployment was not performed.
+
+Safety:
+- No production SQL run.
+- No production deployment.
+- No push to main.
+- No production database touched.
+- No Supabase Storage production changes.
+
 ## B.2 Dev Migration Retry Fix — June 26, 2026
 
 Context:
@@ -2819,3 +2920,31 @@ Safety:
 - Production deployment was not performed.
 - No push to main was performed.
 - No destructive commands were run.
+
+
+- Chat/list WhatsApp-style UX refinement completed on develop.
+- Company name limited to Home header only.
+- Non-Home global header compacted to user-only branding.
+- Pinned list shortcuts compacted.
+- Lists now open into a full-page detail view with back arrow.
+- List editing stays inside the list card/detail view.
+- Delete actions converted to minus/icon controls.
+- Chat sending made optimistic with composer focus preserved.
+- verify:release passed after the refactor.
+- Development deployment refreshed and aliased to https://project-rui1d-development.vercel.app.
+- Advisor re-review completed; remaining ask is phone/screenshot QA.
+
+- Payroll settings and payroll tracker work completed on develop.
+- Added alternate Friday payroll schedule settings with anchor Friday control in Settings.
+- Added Timesheets Payroll button and payroll tracker overlay with range filters, employee filter, period balances, and payment tracking.
+- Payroll schema migration `20260701110000_create_payroll_tracking.sql` applied to the development database only.
+- Payroll settings now persist in the dev app and the tracker opens without schema errors.
+- Advisor UI/QC review completed; tracker is mobile-readable, with remaining polish suggestions noted for future refinement.
+- Development build and lint remained clean for the payroll change set.
+- No production deployment, no production SQL, and no push to main were performed in this payroll pass.
+
+- Final payroll verification completed after report update.
+- Development deployment refreshed to `https://project-rui1d-development.vercel.app`.
+- Dev smoke check confirmed payroll settings load, alternate Friday anchor saves, payroll tracker opens, filters render, and payment tracking/balance UI remains available.
+- Break exclusion and worked-vs-paid balance behavior remain in place on the deployed development app.
+- Production deploy was not performed and production DB was not touched.
