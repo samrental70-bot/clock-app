@@ -151,7 +151,17 @@ function workedMinutes(row, now = new Date()) {
   const start = new Date(row?.clock_in).getTime();
   const end = row?.clock_out ? new Date(row.clock_out).getTime() : now.getTime();
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
-  return Math.max(0, Math.round((end - start) / 60000));
+  let total = Math.max(0, Math.round((end - start) / 60000));
+  const breakStart = new Date(row?.break_start_at || row?.break_start || "").getTime();
+  const breakEnd = new Date(row?.break_end_at || row?.break_end || "").getTime();
+  if (Number.isFinite(breakStart) && Number.isFinite(breakEnd) && breakEnd > breakStart) {
+    const clippedStart = Math.max(start, breakStart);
+    const clippedEnd = Math.min(end, breakEnd);
+    if (clippedEnd > clippedStart) total -= Math.round((clippedEnd - clippedStart) / 60000);
+  } else {
+    total -= Math.max(0, Number(row?.break_minutes || 0));
+  }
+  return Math.max(0, total);
 }
 
 function labourCost(row, minutes) {
@@ -264,7 +274,7 @@ export async function buildDailyReport(supabase, { companyId, reportDate, origin
     () =>
       supabase
         .from("timesheets")
-        .select("id, company_id, user_id, employee_name, employee_email, project_name, cost_centre, clock_in, clock_out, hourly_rate, labour_cost, status, updated_at")
+        .select("id, company_id, user_id, employee_name, employee_email, project_name, cost_centre, clock_in, clock_out, hourly_rate, labour_cost, status, updated_at, break_start_at, break_end_at, break_minutes")
         .eq("company_id", companyId)
         .gte("clock_in", startIso)
         .lte("clock_in", endIso)

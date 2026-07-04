@@ -25,6 +25,7 @@ api/_lib/
 api/daily-supervisor-report-cron.js
 api/diagnostics.js
 api/render-video.js
+api/send-push.js
 api/send-daily-timesheet-email.js
 api/send-daily-timesheet-whatsapp.js
 scripts/apply-auracut-schema.js

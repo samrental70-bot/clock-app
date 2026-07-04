@@ -92,6 +92,22 @@ textarea {
   font: inherit;
 }
 
+.opera-date-input {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.opera-date-input::-webkit-calendar-picker-indicator {
+  display: none;
+  opacity: 0;
+}
+
+.opera-date-input::-webkit-inner-spin-button,
+.opera-date-input::-webkit-clear-button {
+  display: none;
+  -webkit-appearance: none;
+}
+
 .opera-shell {
   -webkit-tap-highlight-color: transparent;
   background: var(--opera-bg);

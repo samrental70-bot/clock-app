@@ -15,6 +15,7 @@ export default defineConfig([
     'worker',
     'tools',
     'bridge',
+    '.vercel/output',
     'MCP/**',
     'quickbooks-mcp/**',
     'docs/AURACUT_*.md',

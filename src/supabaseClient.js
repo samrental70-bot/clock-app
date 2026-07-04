@@ -1,1 +1,14 @@
-export { hasSupabaseEnv, supabase, supabaseAnonKey, supabaseUrl } from "./lib/supabaseClient";
+export {
+  hasSupabaseEnv,
+  hasSupabaseProjectRef,
+  supabase,
+  supabaseAppMode,
+  supabaseAnonKey,
+  supabaseClientReady,
+  supabaseConfigIssue,
+  supabaseExpectedProjectRef,
+  supabaseExpectedProjectRefMasked,
+  supabaseProjectRef,
+  supabaseProjectRefMasked,
+  supabaseUrl,
+} from "./lib/supabaseClient";

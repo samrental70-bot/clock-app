@@ -73,6 +73,32 @@ const results = [];
 try {
   await expectTableReadable(supabase, "employee_pay_rates", "id, company_id, employee_id, hourly_rate, effective_date");
   results.push("employee_pay_rates readable");
+  await expectTableReadable(supabase, "payroll_settings", "id, company_id, frequency, payroll_day, anchor_date");
+  results.push("payroll_settings readable");
+  await expectTableReadable(
+    supabase,
+    "payroll_payments",
+    "id, company_id, employee_id, period_start, period_end, paid_amount, paid_date, note, deleted_at"
+  );
+  results.push("payroll_payments readable");
+  await expectTableReadable(
+    supabase,
+    "payroll_balance_adjustments",
+    "id, company_id, employee_id, adjustment_type, amount, effective_date, note, deleted_at"
+  );
+  results.push("payroll_balance_adjustments readable");
+  await expectTableReadable(
+    supabase,
+    "employee_loan_transactions",
+    "id, company_id, employee_id, transaction_type, amount, transaction_date, note, deleted_at"
+  );
+  results.push("employee_loan_transactions readable");
+  await expectTableReadable(
+    supabase,
+    "employee_vacation_periods",
+    "id, company_id, employee_id, start_date, end_date, reason, created_by, updated_by"
+  );
+  results.push("employee_vacation_periods readable");
   await expectTableReadable(supabase, "daily_report_logs", "id, company_id, report_date, channel, status");
   results.push("daily_report_logs readable");
   await expectTableReadable(supabase, "chat_conversations", "id, company_id, type, name, is_default");
@@ -81,6 +107,18 @@ try {
   results.push("chat_conversation_members readable");
   await expectTableReadable(supabase, "chat_messages", "id, company_id, conversation_id, sender_user_id, body");
   results.push("chat_messages readable");
+  await expectTableReadable(supabase, "chat_message_attachments", "id, company_id, conversation_id, message_id, storage_path");
+  results.push("chat_message_attachments readable");
+  await expectTableReadable(supabase, "chat_message_checklist_items", "id, company_id, conversation_id, message_id, text, is_checked");
+  results.push("chat_message_checklist_items readable");
+  await expectTableReadable(supabase, "chat_pins", "id, company_id, conversation_id, user_id, pin_type");
+  results.push("chat_pins readable");
+  await expectTableReadable(supabase, "chat_lists", "id, company_id, conversation_id, title, pinned");
+  results.push("chat_lists readable");
+  await expectTableReadable(supabase, "chat_list_items", "id, company_id, conversation_id, list_id, item_number, text, is_done");
+  results.push("chat_list_items readable");
+  await expectTableReadable(supabase, "timesheets", "id, company_id, user_id, break_start_at, break_end_at, break_minutes");
+  results.push("timesheets break columns readable");
   await expectTableReadable(supabase, "live_locations", "id, company_id, employee_id, timesheet_id, latitude, longitude, status");
   results.push("live_locations readable");
   await expectTableReadable(

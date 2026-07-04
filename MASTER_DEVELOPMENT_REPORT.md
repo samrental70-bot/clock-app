@@ -2954,3 +2954,76 @@ Safety:
 - Payroll tracker now includes a Payroll period filter alongside time range and employee filters.
 - Payroll summary was compacted into a single slim row for hours, worked, paid, and balance.
 - Development deployment refreshed again after the payroll UI refinement.
+
+- Payroll dummy data and ledger expansion completed on develop.
+- Added dev-only payroll balance brought forward table and employee loan transactions table via additive migration `20260701123000_payroll_balance_forward_and_loans.sql`.
+- Added editable payroll payment row handling plus compact balance-forward and loan ledger entry cards in the payroll tracker.
+- Added a dev-only payroll seeding helper that populates QA payroll periods, payments, brought-forward balances, and employee loan rows without touching production.
+- Dev Supabase `jvlxahskximvbajjwbut` was verified, migration pushed, QA payroll seed rows inserted, and payroll totals now reflect balance forward plus loan adjustments.
+- Final checks passed on develop: verify:migrations, verify:b2-dev, verify:release, lint, and build.
+- Development deployment was refreshed and aliased to `https://project-rui1d-development.vercel.app`.
+- No production deployment, no production SQL, and no push to main were performed in this payroll dummy-data pass.
+
+- Payroll UI refinement pass completed on develop.
+- Payroll tracker now shows compact numeric payroll periods like `06/13/2026 - 06/26/2026`.
+- Payroll period selector keeps grouped pay-period options while the collapsed field shows the compact range only.
+- Payroll payment chooser now opens a `Pay salary` / `Pay loan` menu from the plus action.
+- Salary forms now use `Salary amount` and payment date + payroll period; loan forms now use payment date + loan direction.
+- Duplicate mobile date icons were removed so the date inputs read more cleanly.
+- Advisor final QA approved the mobile payroll UI for dev release after the compact period, salary, and loan flows were verified.
+
+- Vacation periods were added to the timesheet and payroll UX on develop.
+- Timesheets now include an `Add vacation` action that captures start date, end date, and reason.
+- Vacation rows render as slim chronological lines in Timesheets and Payroll so managers can see time off inside the relevant period flow.
+- Clock-in is blocked when an active vacation overlaps the current date range.
+- Vacation tracking also excludes vacation time from worked-hours and labour calculations.
+- A new additive migration `20260702120000_create_employee_vacation_periods.sql` was added, and the build/lint checks passed after the UI update.
+- `verify:migrations` passed, but `verify:b2-dev` and the release gate are still blocked until the shared `bridge-app-dev` database receives the new `employee_vacation_periods` table.
+- Development browser QA confirmed the Add vacation modal opens and the vacation line appears in both Timesheets and Payroll on the current dev session via local fallback.
+
+- Employee auto payroll settings were added on develop.
+- The employee editor now includes an Auto payroll toggle, payroll-start-period dropdown, and payroll amount field for each employee.
+- Auto payroll settings are stored company-specifically and the payroll tracker now prompts managers before auto-creating payroll payments on due pay dates.
+- A new additive migration `20260703120000_add_employee_auto_payroll_fields.sql` was added for company-member auto payroll fields.
+- Build and lint passed after the auto payroll update; no production deployment or production DB change was performed.
+
+- Payroll pay date offset now defaults to 10 days after the payroll period end and can be edited in Payroll Settings.
+- Added additive migration `20260703133000_add_payroll_settings_pay_date_offset.sql` to persist the pay date offset.
+- Employee payroll balance reminder popup now checks the next day after each completed payroll period and warns employees to clear a negative balance within 3 days before salary delay messaging appears.
+- Employee payroll reminder now loads from the employee's own payroll state in the app so it can work locally without depending on a fresh Vercel function deploy.
+
+- Final develop QA and deployment check completed for the payroll/chat/clock release candidate.
+- Dev Supabase migration set was applied to `bridge-app-dev` / ref `jvlxahskximvbajjwbut`.
+- `verify:migrations`, `verify:b2-dev`, `verify:release`, lint, and build all passed on develop.
+- Development deployment was refreshed and the stable alias now points to `https://project-rui1d-development.vercel.app`.
+- Mobile smoke screenshots were captured for Home, Clock, Timesheets, and Chat to support QA review.
+- Advisor review completed but did not give production green light yet; additional production-style QA evidence is still needed for payroll tracker, chat/list, and break handling.
+- QA report saved to `docs/qa/PAYROLL_CHAT_CLOCK_FINAL_QA_REPORT.md`.
+- Development deployment succeeded by using a temporary packaging exclude list to stay within the Vercel Hobby function limit; the excluded non-core routes were `api/analyze-video.js`, `api/render-video.js`, `api/daily-supervisor-report-cron.js`, `api/diagnostics.js`, and `api/send-push.js`.
+
+- Final production-readiness QA pass completed on develop for the payroll/chat/clock release candidate.
+- Dev Supabase migration set was fully applied to `bridge-app-dev` / ref `jvlxahskximvbajjwbut`.
+- Final development verification passed: `verify:migrations`, `verify:b2-dev`, `verify:release`, lint, and build.
+- Development deployment remains live at `https://project-rui1d-development.vercel.app`.
+- Mobile screenshots were regenerated as readable JPEG copies for Home, Clock, Timesheets, Chat, and Payroll tracker evidence.
+- Advisor re-review status improved from blocked evidence to YELLOW review-candidate, but production deployment approval is still not granted.
+- Main remaining review gaps are production-style RLS / rollback proof and fuller documented end-to-end payroll, chat/list, and break QA.
+- QA report remains saved at `docs/qa/PAYROLL_CHAT_CLOCK_FINAL_QA_REPORT.md`.
+- Production SQL bundle prepared for the new payroll/chat/clock migrations only: `PRODUCTION_SQL_BUNDLE_PAYROLL_CHAT_CLOCK.sql`.
+- No production deployment, no production SQL run, and no push to main were performed in this final QA pass.
+- Live dev browser QA now includes:
+  - payroll tracker employee drill-down with current period, payment rows, loan rows, and balance-forward display
+  - chat optimistic send with the composer remaining open after send
+  - own-message delete confirmation and delete-to-`Message deleted` behavior
+  - pinned list shortcut jumping from the ribbon to the underlying list card
+  - list detail add-item, tap-to-edit, and completed-item visibility controls
+- QA report updated with expected-vs-actual tables for payroll, chat/lists, RLS, timesheet breaks, cross-device clock, and production SQL review.
+- Fresh readable viewport screenshots were captured for Clock, Timesheets, Payroll, and Chat after the earlier blank image artifacts were replaced.
+- A single montage QA image was created so the refreshed evidence can be reviewed without the earlier blank screenshot problem.
+- The latest Vercel preview deploy was restored by temporarily excluding `api/send-push.js` so the deployment stayed within the Hobby 12-function limit.
+- The stable development alias was updated to the fresh preview deployment after the successful redeploy.
+- The preview env mismatch was fixed by aligning the build to the dev Supabase project ref `jvlxahskximvbajjwbut`, which cleared the login/API-key blocker.
+- The latest develop alias now loads the live Home dashboard instead of the environment guard page.
+- Post-fix smoke QA confirmed Clock, Timesheets, Chat, and the Payroll tracker dialog all open correctly from the live develop alias.
+- Advisor re-review returned GREEN for the develop release blocker state after the env/deploy fix.
+- Current preview deployment ID for the green state: `dpl_6oLANCLWCbxmsfcZ1qMjTq4FXpZS`

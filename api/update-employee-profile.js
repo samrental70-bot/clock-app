@@ -61,6 +61,94 @@ async function recordEmployeePayRate(supabase, { companyId, employeeId, hourlyRa
   return { saved: true };
 }
 
+function isMissingPayrollBalanceAdjustmentsTableError(error) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || msg.includes("payroll_balance_adjustments") || (msg.includes("relation") && msg.includes("does not exist"));
+}
+
+function isMissingAutoPayrollCompanyMemberColumnsError(error) {
+  const msg = String(error?.message || error?.details || error?.hint || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return (
+    code === "42703" ||
+    (msg.includes("column") && msg.includes("auto_payroll_")) ||
+    (msg.includes("relation") && msg.includes("does not exist"))
+  );
+}
+
+async function recordPayrollOpeningBalance(supabase, { companyId, employeeId, openingBalance, effectiveDate, createdBy }) {
+  const hasOpeningBalance = openingBalance != null && String(openingBalance).trim() !== "";
+  const hasEffectiveDate = effectiveDate != null && String(effectiveDate).trim() !== "";
+  const { data: existingRow, error: existingErr } = await supabase
+    .from("payroll_balance_adjustments")
+    .select("id, amount, effective_date")
+    .eq("company_id", companyId)
+    .eq("employee_id", employeeId)
+    .eq("adjustment_type", "brought_forward")
+    .is("deleted_at", null)
+    .maybeSingle();
+  if (existingErr) {
+    if (isMissingPayrollBalanceAdjustmentsTableError(existingErr)) {
+      console.warn("[PAYROLL] payroll_balance_adjustments table not installed; opening balance skipped.");
+      return { skipped: "missing_table" };
+    }
+    throw existingErr;
+  }
+
+  const nextAmount = hasOpeningBalance ? Number(openingBalance) || 0 : Number(existingRow?.amount ?? 0);
+  const nextDate = hasEffectiveDate
+    ? String(effectiveDate).trim().slice(0, 10)
+    : String(existingRow?.effective_date || "").slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const payload = {
+    company_id: companyId,
+    employee_id: employeeId,
+    adjustment_type: "brought_forward",
+    amount: nextAmount,
+    effective_date: nextDate,
+    note: "employee start balance",
+    updated_by: createdBy || null,
+    updated_at: new Date().toISOString(),
+  };
+
+  if (existingRow?.id) {
+    const { error } = await supabase.from("payroll_balance_adjustments").update(payload).eq("id", existingRow.id);
+    if (error) throw error;
+    return { saved: true, updated: true };
+  }
+
+  const { error } = await supabase.from("payroll_balance_adjustments").insert({
+    ...payload,
+    created_by: createdBy || null,
+  });
+  if (error) throw error;
+  return { saved: true, created: true };
+}
+
+async function recordAutoPayrollSettings(
+  supabase,
+  { companyId, employeeId, enabled, startPeriodKey, amount, createdBy }
+) {
+  const payload = {
+    auto_payroll_enabled: Boolean(enabled),
+    auto_payroll_start_date: enabled ? (String(startPeriodKey || "").trim().slice(0, 10) || null) : null,
+    auto_payroll_amount: enabled ? (Number.isFinite(Number(amount)) ? Number(amount) : 0) : 0,
+  };
+  const { error } = await supabase
+    .from("company_members")
+    .update(payload)
+    .eq("company_id", companyId)
+    .eq("user_id", employeeId);
+  if (error) {
+    if (isMissingAutoPayrollCompanyMemberColumnsError(error)) {
+      console.warn("[PAYROLL] auto payroll columns not installed; settings skipped.");
+      return { skipped: "missing_table_or_columns" };
+    }
+    throw error;
+  }
+  return { saved: true, enabled: Boolean(enabled), updated_by: createdBy || null };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method not allowed" });
@@ -98,6 +186,11 @@ export default async function handler(req, res) {
   const employment_status = cleanStatus(body.employment_status);
   const pay_rate_effective_date = cleanDate(body.pay_rate_effective_date);
   const joining_date = cleanDate(body.joining_date);
+  const payroll_start_date = cleanDate(body.payroll_start_date);
+  const payroll_start_balance_raw = body.payroll_start_balance;
+  const auto_payroll_enabled_raw = body.auto_payroll_enabled;
+  const auto_payroll_start_period_key_raw = body.auto_payroll_start_period_key;
+  const auto_payroll_amount_raw = body.auto_payroll_amount;
   const hourlyRaw = body.hourly_rate;
   const hourly_rate = typeof hourlyRaw === "number" ? hourlyRaw : Number(String(hourlyRaw ?? "0").replace(",", "."));
 
@@ -176,6 +269,12 @@ export default async function handler(req, res) {
   }
 
   const finalRole = targetIsOwner ? "owner" : requestedRole === "supervisor" ? "supervisor" : "employee";
+  const auto_payroll_enabled =
+    auto_payroll_enabled_raw === true ||
+    String(auto_payroll_enabled_raw).trim().toLowerCase() === "true" ||
+    String(auto_payroll_enabled_raw).trim() === "1";
+  const auto_payroll_start_period_key = cleanDate(auto_payroll_start_period_key_raw);
+  const auto_payroll_amount = Number.isFinite(Number(auto_payroll_amount_raw)) ? Number(auto_payroll_amount_raw) : 0;
 
   if (!targetIsOwner && finalRole !== targetRole) {
     const { error: roleErr } = await supabase
@@ -225,6 +324,31 @@ export default async function handler(req, res) {
     effectiveDate: pay_rate_effective_date || joining_date,
     createdBy: callerId,
   });
+
+  try {
+    await recordPayrollOpeningBalance(supabase, {
+      companyId: company_id,
+      employeeId: target_user_id,
+      openingBalance: Number.isFinite(Number(payroll_start_balance_raw)) ? Number(payroll_start_balance_raw) : undefined,
+      effectiveDate: payroll_start_date || joining_date || pay_rate_effective_date,
+      createdBy: callerId,
+    });
+  } catch (openingBalanceErr) {
+    console.warn("[PAYROLL] opening balance save failed", openingBalanceErr);
+  }
+
+  try {
+    await recordAutoPayrollSettings(supabase, {
+      companyId: company_id,
+      employeeId: target_user_id,
+      enabled: auto_payroll_enabled,
+      startPeriodKey: auto_payroll_start_period_key || payroll_start_date || joining_date || pay_rate_effective_date,
+      amount: auto_payroll_amount,
+      createdBy: callerId,
+    });
+  } catch (autoPayrollErr) {
+    console.warn("[PAYROLL] auto payroll save failed", autoPayrollErr);
+  }
 
   res.status(200).json({
     success: true,

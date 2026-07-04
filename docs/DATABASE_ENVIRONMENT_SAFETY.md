@@ -243,3 +243,14 @@ Rules:
 - Do not use the production database password for development verification.
 - Do not run production SQL until a separate production backup/checkpoint and controller approval exist.
 - If `verify:b2-dev` fails, do not merge to production.
+
+## Client-Side Supabase Ref Guard
+
+The browser client now fails closed if the active Supabase project ref does not match the expected environment.
+
+Rules:
+
+- Development-like builds must only use the development Supabase project ref.
+- Production-like builds must only use the production Supabase project ref.
+- If the detected ref does not match the expected environment, the app shows a blocked environment screen and does not create a Supabase client.
+- This guard is additive to the Vercel environment separation and should remain in place even if login credentials overlap between environments.

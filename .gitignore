@@ -41,6 +41,7 @@ MCP/*.enc.json
 rent_receipts_output/
 *.tmp
 *.cache
+backups/
 supabase/.temp/
 supabase/dev-only/
 

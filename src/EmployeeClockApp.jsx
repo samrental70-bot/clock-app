@@ -285,13 +285,13 @@ const DateInputField = ({ label, value, disabled, onChange }) => (
   <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
     {label}
     <span className="relative block">
-      <input
-        type="date"
-        className="h-12 w-full min-w-0 appearance-none rounded-[13px] border border-[#CBD5E1] bg-white px-3 pr-9 text-[13px] font-black text-[#061426] outline-none [color-scheme:light] focus:border-[#061426] disabled:border-[#E2E8F0] disabled:bg-white disabled:text-[#061426]"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      />
+        <input
+          type="date"
+          className="opera-date-input h-12 w-full min-w-0 appearance-none rounded-[13px] border border-[#CBD5E1] bg-white px-3 pr-9 text-[13px] font-black text-[#061426] outline-none [color-scheme:light] focus:border-[#061426] disabled:border-[#E2E8F0] disabled:bg-white disabled:text-[#061426]"
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
       <span className="pointer-events-none absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center text-[#061426]">
         <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M7 3v4M17 3v4" />
@@ -705,6 +705,11 @@ const TEAM_ADD_INITIAL_DRAFT = {
   hourlyRate: "",
   payRateEffectiveDate: "",
   joiningDate: "",
+  payrollStartDate: "",
+  payrollOpeningBalance: "",
+  autoPayrollEnabled: false,
+  autoPayrollStartPeriodKey: "",
+  autoPayrollAmount: "",
 };
 
 function generateTemporaryPassword() {
@@ -729,7 +734,17 @@ function buildTeamAddDraftDefaults(timeZone) {
     password: generateTemporaryPassword(),
     payRateEffectiveDate: todayKey,
     joiningDate: todayKey,
+    payrollStartDate: todayKey,
+    payrollOpeningBalance: "0.00",
+    autoPayrollEnabled: false,
+    autoPayrollStartPeriodKey: "",
+    autoPayrollAmount: "",
   };
+}
+
+function parsePayrollAmount(value) {
+  const amount = Number(String(value ?? "").replace(",", "."));
+  return Number.isFinite(amount) ? amount : 0;
 }
 
 function getOperaAppShareUrl(email = "") {
@@ -946,7 +961,11 @@ function resolveTimesheetEmployeeTitle(record, { profileFullName, authUser, team
   const mail =
     (record.employeeEmail || "").trim() ||
     (record.profileEmailForRow || "").trim();
-  if (mail) return mail;
+  if (mail) {
+    const localPart = mail.split("@")[0].trim();
+    if (localPart) return localPart;
+    return mail;
+  }
 
   return shortUserLabel(uid) || "Employee";
 }
@@ -1144,6 +1163,14 @@ function addWallDaysInTimeZone(dateKey, deltaDays, timeZone) {
   if (!iso) return "";
   const t = new Date(iso).getTime() + Number(deltaDays) * 86400000;
   return calendarDateKeyInTimeZone(new Date(t), tz);
+}
+
+function diffDaysInTimeZone(laterKey, earlierKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const laterIso = wallDateTimeToUtcIso(laterKey, "12:00:00", tz);
+  const earlierIso = wallDateTimeToUtcIso(earlierKey, "12:00:00", tz);
+  if (!laterIso || !earlierIso) return 0;
+  return Math.floor((new Date(laterIso).getTime() - new Date(earlierIso).getTime()) / 86400000);
 }
 
 /** Inclusive list of YYYY-MM-DD keys from startKey through endKey (wall calendar in `timeZone`). */
@@ -1439,7 +1466,14 @@ function payrollSettingsDefaults(timeZone, now = new Date()) {
     frequency: "alternate_friday",
     payrollDay: payrollDayValueFromAnchor(anchorDate, tz),
     anchorDate,
+    payDateOffsetDays: 10,
   };
+}
+
+function payrollPayDateOffsetDaysValue(settings) {
+  const raw = Number(settings?.payDateOffsetDays ?? settings?.pay_date_offset_days ?? 10);
+  if (!Number.isFinite(raw)) return 10;
+  return Math.max(1, Math.trunc(raw));
 }
 
 function payrollDayValueFromAnchor(anchorDate, timeZone) {
@@ -1476,10 +1510,24 @@ function formatPayrollDateKeyShort(dateKey, timeZone, { includeYear = false } = 
   return fmt.format(new Date(iso));
 }
 
+function formatPayrollDateKeyNumeric(dateKey, timeZone, { includeYear = true } = {}) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const key = String(dateKey || "").trim();
+  if (!key) return "—";
+  const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
+  if (!iso) return key;
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    month: "2-digit",
+    day: "2-digit",
+    ...(includeYear ? { year: "numeric" } : {}),
+  }).format(new Date(iso));
+}
+
 function formatPayrollPeriodLabel(startKey, endKey, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
-  const start = formatPayrollDateKeyShort(startKey, tz);
-  const end = formatPayrollDateKeyShort(endKey, tz);
+  const start = formatPayrollDateKeyNumeric(startKey, tz);
+  const end = formatPayrollDateKeyNumeric(endKey, tz);
   if (start && end) return `${start} - ${end}`;
   return "Payroll period";
 }
@@ -1488,6 +1536,7 @@ function getPayrollPeriodWindowForDateKey(dateKey, settings, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const anchorDate = String(settings?.anchorDate || settings?.anchor_date || "").trim();
   const frequency = String(settings?.frequency || "").trim().toLowerCase() || "alternate_friday";
+  const payDateOffsetDays = payrollPayDateOffsetDaysValue(settings);
   const normalizedDateKey = String(dateKey || "").trim();
   if (!normalizedDateKey) return null;
 
@@ -1501,7 +1550,7 @@ function getPayrollPeriodWindowForDateKey(dateKey, settings, timeZone) {
     return {
       startKey,
       endKey,
-      payDateKey: endKey,
+      payDateKey: addWallDaysInTimeZone(endKey, payDateOffsetDays, tz) || endKey,
       label: formatPayrollPeriodLabel(startKey, endKey, tz),
       frequency,
     };
@@ -1537,7 +1586,7 @@ function getPayrollPeriodWindowForDateKey(dateKey, settings, timeZone) {
   return {
     startKey,
     endKey,
-    payDateKey: endKey,
+    payDateKey: addWallDaysInTimeZone(endKey, payDateOffsetDays, tz) || endKey,
     label: formatPayrollPeriodLabel(startKey, endKey, tz),
     frequency,
   };
@@ -1596,6 +1645,23 @@ function formatPayrollPeriodLabelLong(startKey, endKey, timeZone) {
   return "Payroll period";
 }
 
+function formatPayrollSignedMoney(value) {
+  const amount = Number(value) || 0;
+  const prefix = amount > 0 ? "+" : amount < 0 ? "-" : "";
+  return `${prefix}${formatMoney(Math.abs(amount))}`;
+}
+
+function formatPayrollAbsoluteMoney(value) {
+  return formatMoney(Math.abs(Number(value) || 0));
+}
+
+function payrollOpeningBalanceMeaning(value) {
+  const amount = Number(value) || 0;
+  if (amount > 0) return "Employer owes employee";
+  if (amount < 0) return "Employee owes company";
+  return "Settled";
+}
+
 function payrollPeriodOptionKey(startKey, endKey) {
   return `${String(startKey || "").trim()}__${String(endKey || "").trim()}`;
 }
@@ -1632,7 +1698,7 @@ function payrollPeriodOptionsForRange(settings, rangeFrom, rangeTo, timeZone) {
         startKey,
         endKey,
         payDateKey: String(period.payDateKey || endKey).trim() || endKey,
-        label: `${formatPayrollPeriodLabelLong(startKey, endKey, tz)} • Pay ${formatPayrollDateLong(period.payDateKey || endKey, tz)}`,
+        label: `${formatPayrollPeriodLabel(startKey, endKey, tz)} • Pay ${formatPayrollDateKeyNumeric(period.payDateKey || endKey, tz)}`,
       });
     }
     const prevDate = addWallDaysInTimeZone(startKey, -1, tz);
@@ -2087,6 +2153,7 @@ function isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZon
 /** Live dashboard: row is an active shift if clock_out is empty/null OR status is active (existing fields only). */
 function isTimesheetRowActiveForLiveDashboard(record) {
   if (record == null) return false;
+  if (String(record?.recordType || "").trim().toLowerCase() === "vacation") return false;
   const out = record.clockOut;
   const hasClockOut = out != null && String(out).trim() !== "";
   if (!hasClockOut) return true;
@@ -2351,6 +2418,12 @@ function isMissingPayRatesTableError(error) {
   return code === "42p01" || m.includes("employee_pay_rates") || (m.includes("relation") && m.includes("does not exist"));
 }
 
+function isMissingVacationPeriodsTableError(error) {
+  const m = String(error?.message || error?.details || error?.hint || error || "").toLowerCase();
+  const code = String(error?.code || "").toLowerCase();
+  return code === "42p01" || m.includes("employee_vacation_periods") || (m.includes("relation") && m.includes("does not exist"));
+}
+
 async function getEffectiveHourlyRate(supabaseClient, { companyId, employeeId, shiftDate, timeZone, fallbackRate = 0 }) {
   const fallback = hourlyRateFromProfileValue(fallbackRate);
   if (!supabaseClient || !employeeId) return fallback;
@@ -2582,6 +2655,69 @@ function mapTimesheetRowFromSupabase(row) {
     profileDisplayName: "",
     profileEmailForRow: "",
   };
+}
+
+function mapVacationPeriodRowFromSupabase(row) {
+  const startDate = String(row?.start_date || "").trim();
+  const endDate = String(row?.end_date || startDate || "").trim();
+  const reason = String(row?.reason || "").trim();
+  if (!startDate || !endDate) return null;
+  return {
+    id: String(row?.id || "").trim(),
+    supabaseVacationId: String(row?.id || "").trim(),
+    recordType: "vacation",
+    userId: row?.employee_id || null,
+    employeeId: row?.employee_id || null,
+    employee: row?.employee_name || "",
+    employeeName: row?.employee_name || "",
+    employeeEmail: row?.employee_email || null,
+    companyId: row?.company_id || null,
+    companyName: row?.company_name || null,
+    projectId: null,
+    project: "Vacation",
+    costCenter: reason || "Vacation",
+    hourlyRate: 0,
+    clockIn: `${startDate}T00:00:00`,
+    clockOut: `${endDate}T23:59:59.999`,
+    updatedAt: row?.updated_at || row?.created_at || null,
+    status: "Vacation",
+    labour_cost: 0,
+    breakStart: null,
+    breakEnd: null,
+    breakMinutes: 0,
+    breakNote: "",
+    projectFolder: "Vacation",
+    clockInLocation: null,
+    clockOutLocation: null,
+    profileDisplayName: "",
+    profileEmailForRow: "",
+    vacationStartDate: startDate,
+    vacationEndDate: endDate,
+    vacationReason: reason,
+    vacationCreatedAt: row?.created_at || null,
+  };
+}
+
+function isVacationTimesheetRecord(record) {
+  return String(record?.recordType || "").trim().toLowerCase() === "vacation";
+}
+
+function vacationPeriodOverlapsRange(period, fromKey, toKey) {
+  const startKey = String(period?.vacationStartDate || period?.start_date || period?.startDate || "").trim();
+  const endKey = String(period?.vacationEndDate || period?.end_date || period?.endDate || "").trim();
+  const from = String(fromKey || "").trim();
+  const to = String(toKey || "").trim();
+  if (!startKey || !endKey || !from || !to) return false;
+  return !(endKey < from || startKey > to);
+}
+
+function formatVacationRangeLabel(period, timeZone) {
+  const startKey = String(period?.vacationStartDate || period?.start_date || period?.startDate || "").trim();
+  const endKey = String(period?.vacationEndDate || period?.end_date || period?.endDate || "").trim();
+  const startLabel = formatPayrollDateKeyShort(startKey, timeZone || DEFAULT_COMPANY_TIME_ZONE, { includeYear: true });
+  const endLabel = formatPayrollDateKeyShort(endKey, timeZone || DEFAULT_COMPANY_TIME_ZONE, { includeYear: true });
+  if (startLabel && endLabel) return `${startLabel} - ${endLabel}`;
+  return "Vacation";
 }
 
 function dedupeTimesheetRowsByStableId(rows = []) {
@@ -4513,9 +4649,9 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                       type="button"
                       className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black leading-none text-[#DC2626]"
                       onClick={() => void deleteChatListItem(item)}
-                      aria-label={`Delete item ${item.item_number}`}
+                      aria-label={`Remove item ${item.item_number}`}
                     >
-                      ?
+                      −
                     </button>
                   </div>
                 </div>
@@ -5205,8 +5341,18 @@ export default function EmployeeClockApp() {
   const [currentShift, setCurrentShift] = useState(() => safeRead("orp_current_shift", null));
   const [records, setRecords] = useState(() => []);
   const localTimesheetBackupRef = useRef(normalizeArray(safeRead("orp_timesheet_records", sampleRecords)));
+  const localVacationBackupRef = useRef(normalizeArray(safeRead("orp_vacation_periods", [])));
   const [timesheetsLoading, setTimesheetsLoading] = useState(false);
   const [timesheetsError, setTimesheetsError] = useState("");
+  const [vacationPeriods, setVacationPeriods] = useState(() => normalizeArray(safeRead("orp_vacation_periods", [])));
+  const vacationPeriodsLoadedRef = useRef(false);
+  const [vacationModalOpen, setVacationModalOpen] = useState(false);
+  const [vacationSaving, setVacationSaving] = useState(false);
+  const [vacationEmployeeId, setVacationEmployeeId] = useState("");
+  const [vacationStartDate, setVacationStartDate] = useState("");
+  const [vacationEndDate, setVacationEndDate] = useState("");
+  const [vacationReason, setVacationReason] = useState("");
+  const [vacationMessage, setVacationMessage] = useState("");
   const [projectPhotos, setProjectPhotos] = useState(() => normalizeMediaBuckets(safeRead("orp_project_photos", {})));
   const [projectReceipts, setProjectReceipts] = useState(() => normalizeMediaBuckets(safeRead("orp_project_receipts", {})));
   const [now, setNow] = useState(new Date());
@@ -5281,20 +5427,35 @@ export default function EmployeeClockApp() {
   const [payrollSettingsSaving, setPayrollSettingsSaving] = useState(false);
   const [payrollSettingsMessage, setPayrollSettingsMessage] = useState("");
   const [payrollPayments, setPayrollPayments] = useState([]);
+  const [payrollLoanTransactions, setPayrollLoanTransactions] = useState([]);
+  const [payrollEmployeeMetaById, setPayrollEmployeeMetaById] = useState({});
   const [payrollPaymentsLoading, setPayrollPaymentsLoading] = useState(false);
   const [payrollPaymentsError, setPayrollPaymentsError] = useState("");
+  const [payrollLoanTransactionsLoading, setPayrollLoanTransactionsLoading] = useState(false);
+  const [payrollLoanTransactionsError, setPayrollLoanTransactionsError] = useState("");
+  const [payrollAddPaymentMenuOpen, setPayrollAddPaymentMenuOpen] = useState(false);
+  const [payrollAddPaymentMenuContext, setPayrollAddPaymentMenuContext] = useState(null);
+  const [payrollAutoPayrollPromptOpen, setPayrollAutoPayrollPromptOpen] = useState(false);
+  const [payrollAutoPayrollPromptDismissedPeriodKey, setPayrollAutoPayrollPromptDismissedPeriodKey] = useState("");
+  const [payrollAutoPayrollProcessing, setPayrollAutoPayrollProcessing] = useState(false);
+  const [payrollAutoPayrollMessage, setPayrollAutoPayrollMessage] = useState("");
+  const [payrollReminderPrompt, setPayrollReminderPrompt] = useState(null);
   const [payrollPaymentFormOpen, setPayrollPaymentFormOpen] = useState(false);
   const [payrollPaymentSaving, setPayrollPaymentSaving] = useState(false);
   const [payrollPaymentDraft, setPayrollPaymentDraft] = useState(() => ({
     id: "",
+    paymentKind: "salary",
     employeeId: "all",
     periodStart: "",
     periodEnd: "",
+    periodKey: "all",
     paidAmount: "",
     paidDate: "",
+    loanDirection: "loan_given",
     note: "",
   }));
   const [payrollPaymentMessage, setPayrollPaymentMessage] = useState("");
+  const payrollReminderLastFetchKeyRef = useRef("");
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
@@ -5928,10 +6089,19 @@ export default function EmployeeClockApp() {
     if (!companyChecked) return;
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
     if (!todayKey) return;
+    if (isEmployeeRole) {
+      const seedRangeFrom = addWallMonthsSafe(todayKey, -3, companyTimeZone) || todayKey;
+      setTimesheetViewMode((prev) => (prev === "day" ? "range" : prev));
+      setTimesheetRangePreset((prev) => (prev === "today" ? "custom" : prev));
+      setTimesheetDateKey((prev) => prev || todayKey);
+      setTimesheetDateFrom((prev) => prev || seedRangeFrom);
+      setTimesheetDateTo((prev) => prev || todayKey);
+      return;
+    }
     setTimesheetDateKey((prev) => prev || todayKey);
     setTimesheetDateFrom((prev) => prev || todayKey);
     setTimesheetDateTo((prev) => prev || todayKey);
-  }, [companyChecked, companyTimeZone]);
+  }, [companyChecked, companyTimeZone, isEmployeeRole]);
 
   useEffect(() => {
     if (!companyChecked) return;
@@ -6038,14 +6208,30 @@ export default function EmployeeClockApp() {
     setTeamSchemaWarning("");
     (async () => {
       try {
-        const { data: members, error: mErr } = await supabase
+        const memberSelect =
+          "id, user_id, role, created_at, auto_payroll_enabled, auto_payroll_start_date, auto_payroll_amount";
+        let members = [];
+        const { data: membersData, error: mErr } = await supabase
           .from("company_members")
-          .select("id, user_id, role, created_at")
+          .select(memberSelect)
           .eq("company_id", userCompany.id)
           .order("created_at", { ascending: true });
-        if (mErr) throw mErr;
-        const list = members || [];
-        const ids = [...new Set(list.map((m) => m.user_id).filter(Boolean))];
+        if (mErr) {
+          if (isMissingDbColumnError(mErr)) {
+            const fallbackMembers = await supabase
+              .from("company_members")
+              .select("id, user_id, role, created_at")
+              .eq("company_id", userCompany.id)
+              .order("created_at", { ascending: true });
+            if (fallbackMembers.error) throw fallbackMembers.error;
+            members = fallbackMembers.data || [];
+          } else {
+            throw mErr;
+          }
+        } else {
+          members = membersData || [];
+        }
+        const ids = [...new Set(members.map((m) => m.user_id).filter(Boolean))];
         const profilesMap = {};
         if (ids.length > 0) {
           const extendedSelect =
@@ -6078,9 +6264,24 @@ export default function EmployeeClockApp() {
           userIds: ids,
           timeZone: companyTimeZone,
         });
-        const rows = list.map((m) => {
+        const { data: payrollAdjustments, error: adjErr } = await supabase
+          .from("payroll_balance_adjustments")
+          .select("employee_id, amount, effective_date, adjustment_type, deleted_at")
+          .eq("company_id", userCompany.id)
+          .eq("adjustment_type", "brought_forward")
+          .is("deleted_at", null)
+          .in("employee_id", ids);
+        if (adjErr) throw adjErr;
+        const payrollAdjustmentByUserId = {};
+        (payrollAdjustments || []).forEach((adj) => {
+          const employeeId = String(adj.employee_id || "").trim();
+          if (!employeeId) return;
+          payrollAdjustmentByUserId[employeeId] = adj;
+        });
+        const rows = members.map((m) => {
           const p = profilesMap[m.user_id] || {};
           const currentPay = currentPayByUserId[String(m.user_id)] || null;
+          const payrollAdjustment = payrollAdjustmentByUserId[String(m.user_id)] || null;
           const profileFull = (p.full_name && String(p.full_name).trim()) || "";
           const profileEmailRaw = (p.email && String(p.email).trim()) || "";
           const displayName = profileFull || profileEmailRaw || shortUserLabel(m.user_id);
@@ -6106,6 +6307,14 @@ export default function EmployeeClockApp() {
             payRateEffectiveDate: currentPay?.effectiveDate ?? p.pay_rate_effective_date ?? null,
             employmentStatus,
             joiningDate,
+            payrollStartDate:
+              (payrollAdjustment?.effective_date && String(payrollAdjustment.effective_date).trim().slice(0, 10)) ||
+              joiningDate ||
+              null,
+            payrollOpeningBalance: parsePayrollAmount(payrollAdjustment?.amount ?? 0),
+            autoPayrollEnabled: Boolean(m.auto_payroll_enabled),
+            autoPayrollStartDate: String(m.auto_payroll_start_date || "").trim() || null,
+            autoPayrollAmount: parsePayrollAmount(m.auto_payroll_amount || 0),
           };
         });
 
@@ -7029,6 +7238,65 @@ export default function EmployeeClockApp() {
     }
   }, [authUser, profileFullName, userCompany?.id, userCompanyRole, isEmployeeRole]);
 
+  const fetchVacationPeriodsFromSupabase = useCallback(async () => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return [];
+
+    try {
+      let query = supabase
+        .from("employee_vacation_periods")
+        .select("id, company_id, employee_id, start_date, end_date, reason, created_at, updated_at, created_by, updated_by")
+        .eq("company_id", userCompany.id)
+        .order("start_date", { ascending: false })
+        .order("end_date", { ascending: false });
+
+      if (isEmployeeRole) {
+        query = query.eq("employee_id", authUser.id);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        if (!isMissingVacationPeriodsTableError(error)) {
+          console.warn("[VACATION] load failed", error);
+        }
+        const fallback = normalizeArray(localVacationBackupRef.current);
+        setVacationPeriods(fallback);
+        vacationPeriodsLoadedRef.current = true;
+        return fallback;
+      }
+
+      const employeeIds = [...new Set(normalizeArray(data).map((row) => String(row?.employee_id || "").trim()).filter(Boolean))];
+      const profileMap = await fetchProfilesByTimesheetUserIds(supabase, employeeIds);
+      const mapped = normalizeArray(data)
+        .map((row) => mapVacationPeriodRowFromSupabase(row))
+        .filter(Boolean)
+        .map((row) => {
+          const profile = profileMap[row.employeeId || row.userId] || {};
+          const employeeName = String(profile?.full_name || row.employeeName || row.employee || "").trim();
+          const employeeEmail = String(profile?.email || row.employeeEmail || "").trim();
+          return {
+            ...row,
+            employeeName,
+            employee: employeeName,
+            employeeEmail,
+            profileDisplayName: employeeName,
+            profileEmailForRow: employeeEmail,
+          };
+        });
+      setVacationPeriods(mapped);
+      localVacationBackupRef.current = mapped;
+      vacationPeriodsLoadedRef.current = true;
+      return mapped;
+    } catch (err) {
+      if (!isMissingVacationPeriodsTableError(err)) {
+        console.warn("[VACATION] load exception", err);
+      }
+      const fallback = normalizeArray(localVacationBackupRef.current);
+      setVacationPeriods(fallback);
+      vacationPeriodsLoadedRef.current = true;
+      return fallback;
+    }
+  }, [authUser?.id, isEmployeeRole, supabase, userCompany?.id, userCompanyRole]);
+
   const fetchTimesheetChangeRequests = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     setTimesheetRequestsLoading(true);
@@ -7054,23 +7322,114 @@ export default function EmployeeClockApp() {
 
   const fetchPayrollData = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
-    if (!isAdmin) {
-      setPayrollSettings(null);
-      setPayrollPayments([]);
-      setPayrollSettingsError("");
-      setPayrollPaymentsError("");
-      setPayrollSettingsLoading(false);
-      setPayrollPaymentsLoading(false);
-      return;
-    }
     setPayrollSettingsLoading(true);
     setPayrollPaymentsLoading(true);
+    setPayrollLoanTransactionsLoading(true);
     setPayrollSettingsError("");
     setPayrollPaymentsError("");
+    setPayrollLoanTransactionsError("");
     try {
+      if (!isAdmin) {
+        const settingsPromise = supabase
+          .from("payroll_settings")
+          .select("id, company_id, frequency, payroll_day, anchor_date, pay_date_offset_days, created_at, updated_at, updated_by")
+          .eq("company_id", userCompany.id)
+          .maybeSingle();
+        const paymentsPromise = supabase
+          .from("payroll_payments")
+          .select(
+            "id, company_id, employee_id, period_start, period_end, paid_amount, paid_date, note, created_by, created_at, updated_at, updated_by, deleted_at, deleted_by"
+          )
+          .eq("company_id", userCompany.id)
+          .eq("employee_id", authUser.id)
+          .order("paid_date", { ascending: false })
+          .order("created_at", { ascending: false });
+        const loansPromise = supabase
+          .from("employee_loan_transactions")
+          .select(
+            "id, company_id, employee_id, transaction_type, amount, transaction_date, note, created_by, created_at, updated_at, updated_by, deleted_at, deleted_by"
+          )
+          .eq("company_id", userCompany.id)
+          .eq("employee_id", authUser.id)
+          .order("transaction_date", { ascending: false })
+          .order("created_at", { ascending: false });
+        const memberPromise = supabase
+          .from("company_members")
+          .select("id, user_id, role, created_at, auto_payroll_enabled, auto_payroll_start_date, auto_payroll_amount")
+          .eq("company_id", userCompany.id)
+          .eq("user_id", authUser.id)
+          .maybeSingle();
+        let [settingsRes, paymentsRes, loansRes, memberRes] = await Promise.all([settingsPromise, paymentsPromise, loansPromise, memberPromise]);
+        if (settingsRes.error && isMissingDbColumnError(settingsRes.error)) {
+          const fallbackSettingsRes = await supabase
+            .from("payroll_settings")
+            .select("id, company_id, frequency, payroll_day, anchor_date, created_at, updated_at, updated_by")
+            .eq("company_id", userCompany.id)
+            .maybeSingle();
+          if (fallbackSettingsRes.error) throw fallbackSettingsRes.error;
+          settingsRes = fallbackSettingsRes;
+        }
+        if (settingsRes.error) throw settingsRes.error;
+        if (paymentsRes.error) throw paymentsRes.error;
+        if (loansRes.error) {
+          console.warn("[PAYROLL] loan load failed", loansRes.error);
+          setPayrollLoanTransactionsError(getErrorMessage(loansRes.error));
+          setPayrollLoanTransactions([]);
+        }
+        let memberRow = memberRes.data || null;
+        if (memberRes.error) {
+          if (isMissingDbColumnError(memberRes.error)) {
+            const fallbackMemberRes = await supabase
+              .from("company_members")
+              .select("id, user_id, role, created_at")
+              .eq("company_id", userCompany.id)
+              .eq("user_id", authUser.id)
+              .maybeSingle();
+            if (fallbackMemberRes.error) throw fallbackMemberRes.error;
+            memberRow = fallbackMemberRes.data || null;
+          } else {
+            throw memberRes.error;
+          }
+        }
+        const profileRes = await supabase
+          .from("profiles")
+          .select("id, full_name, email, joining_date, employment_status")
+          .eq("id", authUser.id)
+          .maybeSingle();
+        if (profileRes.error) throw profileRes.error;
+        const adjustmentRes = await supabase
+          .from("payroll_balance_adjustments")
+          .select("employee_id, amount, effective_date, adjustment_type, deleted_at")
+          .eq("company_id", userCompany.id)
+          .eq("adjustment_type", "brought_forward")
+          .is("deleted_at", null)
+          .eq("employee_id", authUser.id)
+          .maybeSingle();
+        if (adjustmentRes.error && !isMissingDbColumnError(adjustmentRes.error)) throw adjustmentRes.error;
+        const profile = profileRes.data || {};
+        const adjustment = adjustmentRes.data || null;
+        const payrollMeta = {};
+        payrollMeta[authUser.id] = {
+          employeeId: authUser.id,
+          fullName: String(profile?.full_name || "").trim() || String(profile?.email || "").trim() || shortUserLabel(authUser.id),
+          email: String(profile?.email || "").trim(),
+          joiningDate: String(profile?.joining_date || "").trim() || null,
+          payrollStartDate: String(adjustment?.effective_date || profile?.joining_date || "").trim() || null,
+          openingBalance: parsePayrollAmount(adjustment?.amount ?? 0),
+          role: String(memberRow?.role || "employee").trim(),
+          autoPayrollEnabled: Boolean(memberRow?.auto_payroll_enabled),
+          autoPayrollStartDate: String(memberRow?.auto_payroll_start_date || "").trim() || null,
+          autoPayrollAmount: parsePayrollAmount(memberRow?.auto_payroll_amount || 0),
+        };
+        setPayrollSettings(settingsRes.data || null);
+        setPayrollPayments(Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
+        setPayrollLoanTransactions(Array.isArray(loansRes.data) ? loansRes.data : []);
+        setPayrollEmployeeMetaById(payrollMeta);
+        return;
+      }
       const settingsPromise = supabase
         .from("payroll_settings")
-        .select("id, company_id, frequency, payroll_day, anchor_date, created_at, updated_at, updated_by")
+        .select("id, company_id, frequency, payroll_day, anchor_date, pay_date_offset_days, created_at, updated_at, updated_by")
         .eq("company_id", userCompany.id)
         .maybeSingle();
       const paymentsPromise = supabase
@@ -7081,21 +7440,123 @@ export default function EmployeeClockApp() {
         .eq("company_id", userCompany.id)
         .order("paid_date", { ascending: false })
         .order("created_at", { ascending: false });
-      const [settingsRes, paymentsRes] = await Promise.all([settingsPromise, paymentsPromise]);
+      const loansPromise = supabase
+        .from("employee_loan_transactions")
+        .select(
+          "id, company_id, employee_id, transaction_type, amount, transaction_date, note, created_by, created_at, updated_at, updated_by, deleted_at, deleted_by"
+        )
+        .eq("company_id", userCompany.id)
+        .order("transaction_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      const membersPromise = supabase
+        .from("company_members")
+        .select("id, user_id, role, created_at, auto_payroll_enabled, auto_payroll_start_date, auto_payroll_amount")
+        .eq("company_id", userCompany.id)
+        .order("created_at", { ascending: true });
+      let [settingsRes, paymentsRes, loansRes, membersRes] = await Promise.all([
+        settingsPromise,
+        paymentsPromise,
+        loansPromise,
+        membersPromise,
+      ]);
+      if (settingsRes.error && isMissingDbColumnError(settingsRes.error)) {
+        const fallbackSettingsRes = await supabase
+          .from("payroll_settings")
+          .select("id, company_id, frequency, payroll_day, anchor_date, created_at, updated_at, updated_by")
+          .eq("company_id", userCompany.id)
+          .maybeSingle();
+        if (fallbackSettingsRes.error) throw fallbackSettingsRes.error;
+        settingsRes = fallbackSettingsRes;
+      }
       if (settingsRes.error) throw settingsRes.error;
       if (paymentsRes.error) throw paymentsRes.error;
+      if (loansRes.error) {
+        console.warn("[PAYROLL] loan load failed", loansRes.error);
+        setPayrollLoanTransactionsError(getErrorMessage(loansRes.error));
+        setPayrollLoanTransactions([]);
+      }
+      let memberRows = Array.isArray(membersRes.data) ? membersRes.data : [];
+      if (membersRes.error) {
+        if (isMissingDbColumnError(membersRes.error)) {
+          const fallbackMembersRes = await supabase
+            .from("company_members")
+            .select("id, user_id, role, created_at")
+            .eq("company_id", userCompany.id)
+            .order("created_at", { ascending: true });
+          if (fallbackMembersRes.error) throw fallbackMembersRes.error;
+          memberRows = Array.isArray(fallbackMembersRes.data) ? fallbackMembersRes.data : [];
+        } else {
+          throw membersRes.error;
+        }
+      }
+      const employeeIds = [...new Set(memberRows.map((row) => String(row?.user_id || "").trim()).filter(Boolean))];
+      let profileRows = [];
+      if (employeeIds.length > 0) {
+        const { data: profilesData, error: profilesErr } = await supabase
+          .from("profiles")
+          .select("id, full_name, email, joining_date, employment_status")
+          .in("id", employeeIds);
+        if (profilesErr) throw profilesErr;
+        profileRows = Array.isArray(profilesData) ? profilesData : [];
+      }
+      let adjustmentRows = [];
+      if (employeeIds.length > 0) {
+        const { data: adjustmentsData, error: adjustmentsErr } = await supabase
+          .from("payroll_balance_adjustments")
+          .select("employee_id, amount, effective_date, adjustment_type, deleted_at")
+          .eq("company_id", userCompany.id)
+          .eq("adjustment_type", "brought_forward")
+          .is("deleted_at", null)
+          .in("employee_id", employeeIds);
+        if (adjustmentsErr) throw adjustmentsErr;
+        adjustmentRows = Array.isArray(adjustmentsData) ? adjustmentsData : [];
+      }
+      const profilesById = new Map(profileRows.map((row) => [String(row?.id || "").trim(), row]));
+      const adjustmentsById = new Map(
+        adjustmentRows.map((row) => [String(row?.employee_id || "").trim(), row]).filter(([key]) => Boolean(key))
+      );
+      const payrollMeta = {};
+      for (const member of memberRows) {
+        const employeeId = String(member?.user_id || "").trim();
+        if (!employeeId) continue;
+        const profile = profilesById.get(employeeId) || {};
+        const adjustment = adjustmentsById.get(employeeId) || null;
+        const fullName = String(profile?.full_name || "").trim();
+        const email = String(profile?.email || "").trim();
+        const joiningDate = String(profile?.joining_date || "").trim() || null;
+        const payrollStartDate = String(adjustment?.effective_date || joiningDate || "").trim() || null;
+        const openingBalance = parsePayrollAmount(adjustment?.amount ?? 0);
+        payrollMeta[employeeId] = {
+          employeeId,
+          fullName: fullName || email || shortUserLabel(employeeId),
+          email,
+          joiningDate,
+          payrollStartDate,
+          openingBalance,
+          role: String(member?.role || "employee").trim(),
+          autoPayrollEnabled: Boolean(member?.auto_payroll_enabled),
+          autoPayrollStartDate: String(member?.auto_payroll_start_date || "").trim() || null,
+          autoPayrollAmount: parsePayrollAmount(member?.auto_payroll_amount || 0),
+        };
+      }
       setPayrollSettings(settingsRes.data || null);
       setPayrollPayments(Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
+      setPayrollLoanTransactions(Array.isArray(loansRes.data) ? loansRes.data : []);
+      setPayrollEmployeeMetaById(payrollMeta);
     } catch (err) {
       const msg = getErrorMessage(err);
       console.warn("[PAYROLL] load failed", err);
       setPayrollSettingsError(msg);
       setPayrollPaymentsError(msg);
+      setPayrollLoanTransactionsError(msg);
       setPayrollSettings(null);
       setPayrollPayments([]);
+      setPayrollLoanTransactions([]);
+      setPayrollEmployeeMetaById({});
     } finally {
       setPayrollSettingsLoading(false);
       setPayrollPaymentsLoading(false);
+      setPayrollLoanTransactionsLoading(false);
     }
   }, [authUser?.id, isAdmin, userCompany?.id, userCompanyRole]);
 
@@ -7103,6 +7564,11 @@ export default function EmployeeClockApp() {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     fetchTimesheetsFromSupabase();
   }, [authUser?.id, userCompany?.id, userCompanyRole, fetchTimesheetsFromSupabase]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    void fetchVacationPeriodsFromSupabase();
+  }, [authUser?.id, fetchVacationPeriodsFromSupabase, userCompany?.id, userCompanyRole]);
 
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
@@ -7123,6 +7589,7 @@ export default function EmployeeClockApp() {
           frequency: payrollSettings.frequency || "alternate_friday",
           payrollDay: payrollSettings.payroll_day || "friday",
           anchorDate: String(payrollSettings.anchor_date || "").trim() || payrollSettingsDefaults(companyTimeZone).anchorDate,
+          payDateOffsetDays: payrollPayDateOffsetDaysValue(payrollSettings),
         }
       : payrollSettingsDefaults(companyTimeZone);
     setPayrollSettingsDraft(next);
@@ -7651,6 +8118,7 @@ export default function EmployeeClockApp() {
 
   const getWorkedMinutes = (record) => {
     if (record == null) return 0;
+    if (isVacationTimesheetRecord(record)) return 0;
     let clockOut = record.clockOut || null;
     if (!clockOut) {
       const dueIso = autoClockOutIsoForShift(record.clockIn, companyTimeZone, companyAutoClockOutTime);
@@ -7668,6 +8136,7 @@ export default function EmployeeClockApp() {
 
   const getLabourCost = (record) => {
     if (record == null) return 0;
+    if (isVacationTimesheetRecord(record)) return 0;
     const rate = hourlyRateFromProfileValue(record.hourlyRate ?? 0);
     const minutes = getWorkedMinutes(record);
     const calculated = (minutes / 60) * rate;
@@ -7681,6 +8150,7 @@ export default function EmployeeClockApp() {
 
   const isCompletedReportTimesheet = (record) => {
     if (!record?.clockIn || !record?.clockOut) return false;
+    if (isVacationTimesheetRecord(record)) return false;
     const t0 = parseStoredInstant(record.clockIn).getTime();
     const t1 = parseStoredInstant(record.clockOut).getTime();
     return Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0;
@@ -7688,6 +8158,7 @@ export default function EmployeeClockApp() {
 
   const getReportWorkedMinutes = (record) => {
     if (!isCompletedReportTimesheet(record)) return 0;
+    if (isVacationTimesheetRecord(record)) return 0;
     const total = minutesBetween(record.clockIn, record.clockOut);
     const breakTotal =
       record.breakStart && record.breakEnd
@@ -7698,6 +8169,7 @@ export default function EmployeeClockApp() {
 
   const getReportLabourCost = (record) => {
     if (!isCompletedReportTimesheet(record)) return 0;
+    if (isVacationTimesheetRecord(record)) return 0;
     if (record.labour_cost != null && record.labour_cost !== "") {
       const stored = Number(record.labour_cost);
       if (Number.isFinite(stored)) return stored;
@@ -8399,10 +8871,21 @@ export default function EmployeeClockApp() {
       });
       people.set(uid, name || shortUserLabel(uid));
     }
+    for (const record of normalizeArray(vacationPeriods)) {
+      const uid = String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "");
+      if (!uid) continue;
+      const name =
+        String(record?.employeeName || resolveTimesheetEmployeeTitle(record, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        }) || shortUserLabel(uid)).trim() || shortUserLabel(uid);
+      if (!people.has(uid)) people.set(uid, name);
+    }
     return [...people.entries()]
       .map(([id, name]) => ({ id, name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [authUser, profileFullName, teamProfileFullNameByUserId, visibleRecords]);
+  }, [authUser, profileFullName, teamProfileFullNameByUserId, vacationPeriods, visibleRecords]);
 
   const timesheetProjectOptions = useMemo(() => {
     const projects = new Map();
@@ -8421,44 +8904,83 @@ export default function EmployeeClockApp() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [visibleRecords]);
 
-  const visibleTimesheetRecords = useMemo(() => {
-    const rows = Array.isArray(visibleRecords) ? visibleRecords : [];
+  const vacationEmployeeOptions = useMemo(() => {
+    const people = new Map();
+    for (const row of normalizeArray(displayedTeamRows)) {
+      const id = String(row?.userId ?? row?.user_id ?? row?.id ?? "").trim();
+      if (!id) continue;
+      const label =
+        String(row?.displayName || row?.fullName || row?.profileFullName || row?.email || shortUserLabel(id)).trim() ||
+        shortUserLabel(id);
+      people.set(id, label);
+    }
+    if (authUser?.id && !people.has(String(authUser.id))) {
+      people.set(String(authUser.id), String(profileFullName || authUser.email || shortUserLabel(authUser.id)).trim() || shortUserLabel(authUser.id));
+    }
+    return [...people.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [authUser?.email, authUser?.id, displayedTeamRows, profileFullName]);
+
+  const visibleVacationTimesheetRecords = useMemo(() => {
+    const rows = normalizeArray(vacationPeriods);
     const from = timesheetRangeBounds.from;
     const to = timesheetRangeBounds.to;
     if (!from || !to || from > to) return [];
-    return rows.filter((record) => {
-      if (timesheetEmployeeFilter !== "all") {
-        const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "");
-        if (uid !== String(timesheetEmployeeFilter)) return false;
-      }
-      if (timesheetProjectFilter !== "all") {
-        const projectIdRaw = record?.projectId ?? record?.project_id;
-        const projectIdKey = projectIdRaw != null && projectIdRaw !== "" ? String(projectIdRaw) : "";
-        const projectNameKey = String(record?.project || record?.project_name || "").trim();
-        if (String(timesheetProjectFilter) !== projectIdKey && String(timesheetProjectFilter) !== projectNameKey) {
-          return false;
-        }
-      }
-      const key = calendarDateKeyInTimeZone(record?.clockIn, companyTimeZone);
-      if (!key || key < from || key > to) return false;
-      if (!timesheetCompletedOnly) return true;
-      if (!isCompletedReportTimesheet(record)) return false;
-      const outKey = calendarDateKeyInTimeZone(record?.clockOut, companyTimeZone);
-      return outKey && outKey >= from && outKey <= to;
-    });
+    return rows
+      .filter((record) => {
+        const employeeId = String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "").trim();
+        if (timesheetEmployeeFilter !== "all" && employeeId !== String(timesheetEmployeeFilter)) return false;
+        return vacationPeriodOverlapsRange(record, from, to);
+      })
+      .map((record) => {
+        const employeeName =
+          record?.employeeName ||
+          resolveTimesheetEmployeeTitle(record, {
+            profileFullName,
+            authUser,
+            teamProfileFullNameByUserId,
+          }) ||
+          shortUserLabel(String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? ""));
+        return {
+          ...record,
+          employeeName,
+          employee: employeeName,
+          profileDisplayName: employeeName,
+        };
+      })
+      .sort((a, b) => {
+        const aKey = String(a?.vacationStartDate || a?.start_date || a?.clockIn || "");
+        const bKey = String(b?.vacationStartDate || b?.start_date || b?.clockIn || "");
+        return bKey.localeCompare(aKey);
+      });
   }, [
-    visibleRecords,
+    authUser,
+    profileFullName,
+    teamProfileFullNameByUserId,
+    timesheetEmployeeFilter,
     timesheetRangeBounds.from,
     timesheetRangeBounds.to,
-    companyTimeZone,
-    timesheetCompletedOnly,
-    timesheetEmployeeFilter,
-    timesheetProjectFilter,
+    vacationPeriods,
   ]);
+
+  const visibleTimesheetRecords = useMemo(() => {
+    const normalRows = normalizeArray(visibleRecords).filter((record) => !isVacationTimesheetRecord(record));
+    const merged = [...normalRows, ...visibleVacationTimesheetRecords];
+    merged.sort((a, b) => {
+      const aKey = parseStoredInstant(a?.clockIn || a?.vacationStartDate || "").getTime();
+      const bKey = parseStoredInstant(b?.clockIn || b?.vacationStartDate || "").getTime();
+      const safeA = Number.isFinite(aKey) ? aKey : 0;
+      const safeB = Number.isFinite(bKey) ? bKey : 0;
+      return safeB - safeA;
+    });
+    return merged;
+  }, [visibleRecords, visibleVacationTimesheetRecords]);
 
   const visibleTimesheetSummary = useMemo(() => {
     return visibleTimesheetRecords.reduce(
       (summary, record) => {
+        if (isVacationTimesheetRecord(record)) return summary;
         summary.minutes += getWorkedMinutes(record);
         summary.labour += getLabourCost(record);
         return summary;
@@ -8469,7 +8991,7 @@ export default function EmployeeClockApp() {
 
   const timesheetSanityChecks = useMemo(() => {
     if (!isAdmin) return [];
-    return buildTimesheetSanityChecks(visibleTimesheetRecords);
+    return buildTimesheetSanityChecks(visibleTimesheetRecords.filter((record) => !isVacationTimesheetRecord(record)));
   }, [isAdmin, visibleTimesheetRecords]);
 
   const visibleTimesheetSanityIssues = useMemo(() => {
@@ -8483,6 +9005,7 @@ export default function EmployeeClockApp() {
         payrollDay: payrollSettings.payroll_day || "friday",
         anchorDate:
           String(payrollSettings.anchor_date || "").trim() || payrollSettingsDefaults(companyTimeZone).anchorDate,
+        payDateOffsetDays: payrollPayDateOffsetDaysValue(payrollSettings),
       };
     }
     return payrollSettingsDefaults(companyTimeZone);
@@ -8496,6 +9019,22 @@ export default function EmployeeClockApp() {
     () => payrollPeriodOptionsForRange(payrollEffectiveSettings, payrollDateBounds.from, payrollDateBounds.to, companyTimeZone),
     [companyTimeZone, payrollDateBounds.from, payrollDateBounds.to, payrollEffectiveSettings]
   );
+  const payrollPaymentEmployeeStartDate = useMemo(() => {
+    const employeeId = String(payrollPaymentDraft.employeeId || "").trim();
+    if (!employeeId || employeeId === "all") return "";
+    return String(payrollEmployeeMetaById?.[employeeId]?.payrollStartDate || payrollEmployeeMetaById?.[employeeId]?.joiningDate || "").trim();
+  }, [payrollEmployeeMetaById, payrollPaymentDraft.employeeId]);
+  const payrollPaymentPeriodOptions = useMemo(() => {
+    if (!payrollPaymentEmployeeStartDate) return payrollPeriodOptions;
+    return payrollPeriodOptions.filter((period) => String(period?.endKey || "").trim() >= payrollPaymentEmployeeStartDate);
+  }, [payrollPaymentEmployeeStartDate, payrollPeriodOptions]);
+  const payrollAutoPayrollPeriodOptions = useMemo(() => {
+    const currentPeriod = getPayrollPeriodWindowForDateKey(calendarDateKeyInTimeZone(now, companyTimeZone), payrollEffectiveSettings, companyTimeZone);
+    const startKey = String(currentPeriod?.startKey || payrollDateBounds.from || calendarDateKeyInTimeZone(now, companyTimeZone) || "").trim();
+    if (!startKey) return payrollPeriodOptions;
+    const rangeTo = addWallMonthsSafe(startKey, 12, companyTimeZone) || payrollDateBounds.to || startKey;
+    return payrollPeriodOptionsForRange(payrollEffectiveSettings, startKey, rangeTo, companyTimeZone).filter((period) => String(period?.startKey || "").trim() >= startKey);
+  }, [companyTimeZone, now, payrollDateBounds.from, payrollDateBounds.to, payrollEffectiveSettings, payrollPeriodOptions]);
   useEffect(() => {
     if (payrollPeriodFilter === "all") return;
     if (payrollPeriodOptions.some((option) => option.id === payrollPeriodFilter)) return;
@@ -8504,6 +9043,10 @@ export default function EmployeeClockApp() {
 
   const payrollEmployeeLabelById = useMemo(() => {
     const out = {};
+    for (const [employeeId, meta] of Object.entries(payrollEmployeeMetaById || {})) {
+      const label = String(meta?.fullName || meta?.email || "").trim();
+      if (employeeId && label) out[employeeId] = label;
+    }
     for (const record of normalizeArray(visibleRecords)) {
       const uid = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
       if (!uid || out[uid]) continue;
@@ -8516,13 +9059,18 @@ export default function EmployeeClockApp() {
       out[uid] = String(name || "").trim() || shortUserLabel(uid);
     }
     return out;
-  }, [authUser, profileFullName, teamProfileFullNameByUserId, visibleRecords]);
+  }, [authUser, payrollEmployeeMetaById, profileFullName, teamProfileFullNameByUserId, visibleRecords]);
 
   const payrollEmployeeOptions = useMemo(() => {
-    const options = Object.entries(payrollEmployeeLabelById).map(([id, name]) => ({ id, name }));
+    const options = Object.entries(payrollEmployeeLabelById).map(([id, name]) => ({
+      id,
+      name,
+      payrollStartDate: String(payrollEmployeeMetaById?.[id]?.payrollStartDate || "").trim(),
+      openingBalance: parsePayrollAmount(payrollEmployeeMetaById?.[id]?.openingBalance || 0),
+    }));
     options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
     return options;
-  }, [payrollEmployeeLabelById]);
+  }, [payrollEmployeeLabelById, payrollEmployeeMetaById]);
 
   const payrollBaseRecords = useMemo(() => {
     return normalizeArray(visibleRecords)
@@ -8531,29 +9079,60 @@ export default function EmployeeClockApp() {
         const employeeId = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
         if (!employeeId) return false;
         if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) return false;
+        const payrollStartDate =
+          String(payrollEmployeeMetaById?.[employeeId]?.payrollStartDate || payrollEmployeeMetaById?.[employeeId]?.joiningDate || "").trim();
         const clockKey = calendarDateKeyInTimeZone(record?.clockOut || record?.clockIn, companyTimeZone);
         if (!clockKey) return false;
-        if (payrollDateBounds.from && clockKey < payrollDateBounds.from) return false;
-        if (payrollDateBounds.to && clockKey > payrollDateBounds.to) return false;
-        if (payrollPeriodFilter !== "all") {
-          const period = getPayrollPeriodWindowForDateKey(clockKey, payrollEffectiveSettings, companyTimeZone);
-          if (!period || payrollPeriodOptionKey(period.startKey, period.endKey) !== payrollPeriodFilter) return false;
-        }
+        if (payrollStartDate && clockKey < payrollStartDate) return false;
         return true;
       });
   }, [
     companyTimeZone,
-    payrollDateBounds.from,
-    payrollDateBounds.to,
     payrollEffectiveSettings,
     payrollEmployeeFilter,
-    payrollPeriodFilter,
+    payrollEmployeeMetaById,
     visibleRecords,
+  ]);
+
+  const payrollVacationRecords = useMemo(() => {
+    return normalizeArray(vacationPeriods)
+      .filter((record) => {
+        const employeeId = String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "").trim();
+        if (!employeeId) return false;
+        if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) return false;
+        const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+        const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
+        const startKey = String(record?.vacationStartDate || record?.start_date || "").trim();
+        const endKey = String(record?.vacationEndDate || record?.end_date || "").trim();
+        if (!startKey || !endKey) return false;
+        if (payrollStartDate && endKey < payrollStartDate) return false;
+        if (payrollDateBounds.from && endKey < payrollDateBounds.from) return false;
+        if (payrollDateBounds.to && startKey > payrollDateBounds.to) return false;
+        return true;
+      })
+      .map((record) => ({
+        ...record,
+        employeeName:
+          record?.employeeName ||
+          payrollEmployeeLabelById[String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "")] ||
+          shortUserLabel(String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "")),
+      }));
+  }, [
+    payrollDateBounds.from,
+    payrollDateBounds.to,
+    payrollEmployeeFilter,
+    payrollEmployeeLabelById,
+    payrollEmployeeMetaById,
+    vacationPeriods,
   ]);
 
   const payrollPaymentsActive = useMemo(() => {
     return normalizeArray(payrollPayments).filter((row) => !row?.deleted_at);
   }, [payrollPayments]);
+
+  const payrollLoanTransactionsActive = useMemo(() => {
+    return normalizeArray(payrollLoanTransactions).filter((row) => !row?.deleted_at);
+  }, [payrollLoanTransactions]);
 
   const payrollPeriodRows = useMemo(() => {
     const groups = new Map();
@@ -8575,6 +9154,7 @@ export default function EmployeeClockApp() {
           balance: 0,
           payments: [],
           records: [],
+          vacations: [],
         });
       }
       return groups.get(key);
@@ -8583,8 +9163,11 @@ export default function EmployeeClockApp() {
     for (const record of payrollBaseRecords) {
       const employeeId = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
       if (!employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
       const clockKey = calendarDateKeyInTimeZone(record?.clockOut || record?.clockIn, companyTimeZone);
       if (!clockKey) continue;
+      if (payrollStartDate && clockKey < payrollStartDate) continue;
       const period = getPayrollPeriodWindowForDateKey(clockKey, payrollEffectiveSettings, companyTimeZone);
       if (!period || !payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
       const employeeName =
@@ -8607,10 +9190,12 @@ export default function EmployeeClockApp() {
       const employeeId = String(payment?.employee_id ?? payment?.employeeId ?? "").trim();
       if (!employeeId) continue;
       if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
       const startKey = String(payment?.period_start ?? "").trim();
       const endKey = String(payment?.period_end ?? "").trim();
       if (!startKey || !endKey) continue;
-      if (payrollPeriodFilter !== "all" && payrollPeriodOptionKey(startKey, endKey) !== payrollPeriodFilter) continue;
+      if (payrollStartDate && endKey < payrollStartDate) continue;
       const period = {
         startKey,
         endKey,
@@ -8618,7 +9203,6 @@ export default function EmployeeClockApp() {
         label: formatPayrollPeriodLabel(startKey, endKey, companyTimeZone),
         frequency: payrollEffectiveSettings.frequency,
       };
-      if (!payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
       const employeeName =
         payrollEmployeeLabelById[employeeId] ||
         shortUserLabel(employeeId);
@@ -8628,17 +9212,78 @@ export default function EmployeeClockApp() {
       group.payments.push(payment);
     }
 
-    const rows = [...groups.values()].map((row) => ({
-      ...row,
-      balance: row.workedAmount - row.paidAmount,
-      payments: [...row.payments].sort((a, b) => String(b?.paid_date || b?.created_at || "").localeCompare(String(a?.paid_date || a?.created_at || ""))),
-    }));
-    rows.sort((a, b) => {
+    for (const vacation of payrollVacationRecords) {
+      const employeeId = String(vacation?.employeeId ?? vacation?.userId ?? vacation?.employee_id ?? "").trim();
+      if (!employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
+      const employeeName =
+        payrollEmployeeLabelById[employeeId] ||
+        vacation.employeeName ||
+        shortUserLabel(employeeId);
+      const vacationRange = {
+        startKey: String(vacation?.vacationStartDate || vacation?.start_date || "").trim(),
+        endKey: String(vacation?.vacationEndDate || vacation?.end_date || "").trim(),
+        payDateKey: String(vacation?.vacationEndDate || vacation?.end_date || "").trim(),
+      };
+      if (!vacationRange.startKey || !vacationRange.endKey) continue;
+      if (payrollStartDate && vacationRange.endKey < payrollStartDate) continue;
+      for (const period of payrollPeriodOptions) {
+        if (!payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
+        if (!vacationPeriodOverlapsRange(vacation, period.startKey, period.endKey)) continue;
+        const group = ensureGroup(employeeId, employeeName, period);
+        group.vacations.push({
+          ...vacation,
+          employeeName,
+          periodStart: period.startKey,
+          periodEnd: period.endKey,
+        });
+      }
+    }
+
+    const rows = [...groups.values()].map((row) => {
+      const openingBalance = parsePayrollAmount(payrollEmployeeMetaById?.[row.employeeId]?.openingBalance || 0);
+      return {
+        ...row,
+        openingBalance,
+        payrollStartDate:
+          String(payrollEmployeeMetaById?.[row.employeeId]?.payrollStartDate || payrollEmployeeMetaById?.[row.employeeId]?.joiningDate || "").trim() ||
+          "",
+        balance: openingBalance,
+        payments: [...row.payments].sort((a, b) =>
+          String(b?.paid_date || b?.created_at || "").localeCompare(String(a?.paid_date || a?.created_at || ""))
+        ),
+      };
+    });
+    const rowsByEmployee = new Map();
+    for (const row of rows) {
+      if (!rowsByEmployee.has(row.employeeId)) rowsByEmployee.set(row.employeeId, []);
+      rowsByEmployee.get(row.employeeId).push(row);
+    }
+    for (const [employeeId, employeeRows] of rowsByEmployee.entries()) {
+      let runningBalance = parsePayrollAmount(payrollEmployeeMetaById?.[employeeId]?.openingBalance || 0);
+      const ascending = [...employeeRows].sort((a, b) => {
+        const startCmp = String(a.periodStart || "").localeCompare(String(b.periodStart || ""));
+        if (startCmp !== 0) return startCmp;
+        return String(a.periodEnd || "").localeCompare(String(b.periodEnd || ""));
+      });
+      for (const row of ascending) {
+        runningBalance += (Number(row.workedAmount) || 0) - (Number(row.paidAmount) || 0);
+        row.balance = runningBalance;
+      }
+    }
+    const visibleRows = rows.filter((row) => {
+      const period = { startKey: row.periodStart, endKey: row.periodEnd };
+      if (!payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) return false;
+      if (payrollPeriodFilter !== "all" && payrollPeriodOptionKey(row.periodStart, row.periodEnd) !== payrollPeriodFilter) return false;
+      return true;
+    });
+    visibleRows.sort((a, b) => {
       const nameCmp = String(a.employeeName || "").localeCompare(String(b.employeeName || ""));
       if (nameCmp !== 0) return nameCmp;
       return String(b.periodEnd || "").localeCompare(String(a.periodEnd || ""));
     });
-    return rows;
+    return visibleRows;
   }, [
     authUser,
     companyTimeZone,
@@ -8650,14 +9295,31 @@ export default function EmployeeClockApp() {
     payrollEffectiveSettings,
     payrollEmployeeFilter,
     payrollEmployeeLabelById,
+    payrollEmployeeMetaById,
     payrollPaymentsActive,
     payrollPeriodFilter,
     profileFullName,
+    payrollPeriodOptions,
+    payrollVacationRecords,
     teamProfileFullNameByUserId,
   ]);
 
   const payrollEmployeeGroups = useMemo(() => {
     const grouped = new Map();
+    for (const [employeeId, meta] of Object.entries(payrollEmployeeMetaById || {})) {
+      const openingBalance = parsePayrollAmount(meta?.openingBalance || 0);
+      if (!employeeId) continue;
+      grouped.set(employeeId, {
+        employeeId,
+        employeeName: String(meta?.fullName || meta?.email || shortUserLabel(employeeId)).trim() || shortUserLabel(employeeId),
+        periods: [],
+        workedMinutes: 0,
+        workedAmount: 0,
+        paidAmount: 0,
+        openingBalance,
+        payrollStartDate: String(meta?.payrollStartDate || meta?.joiningDate || "").trim() || "",
+      });
+    }
     for (const row of payrollPeriodRows) {
       const key = String(row.employeeId || "");
       if (!key) continue;
@@ -8669,6 +9331,9 @@ export default function EmployeeClockApp() {
           workedMinutes: 0,
           workedAmount: 0,
           paidAmount: 0,
+          openingBalance: parsePayrollAmount(payrollEmployeeMetaById?.[key]?.openingBalance || 0),
+          payrollStartDate:
+            String(payrollEmployeeMetaById?.[key]?.payrollStartDate || payrollEmployeeMetaById?.[key]?.joiningDate || "").trim() || "",
         });
       }
       const bucket = grouped.get(key);
@@ -8679,12 +9344,59 @@ export default function EmployeeClockApp() {
     }
     const out = [...grouped.values()].map((row) => ({
       ...row,
-      balance: row.workedAmount - row.paidAmount,
+      balance:
+        row.periods.length > 0
+          ? Number(row.periods[0]?.balance ?? row.openingBalance ?? 0)
+          : Number(row.openingBalance ?? 0),
       periods: [...row.periods].sort((a, b) => String(b.periodEnd || "").localeCompare(String(a.periodEnd || ""))),
     }));
-    out.sort((a, b) => String(a.employeeName || "").localeCompare(String(b.employeeName || "")));
+    out.sort((a, b) => {
+      const latestA = String(a.periods?.[0]?.periodEnd || a.periodEnd || "");
+      const latestB = String(b.periods?.[0]?.periodEnd || b.periodEnd || "");
+      const periodCmp = latestB.localeCompare(latestA);
+      if (periodCmp !== 0) return periodCmp;
+      return String(a.employeeName || "").localeCompare(String(b.employeeName || ""));
+    });
     return out;
-  }, [payrollPeriodRows]);
+  }, [payrollEmployeeMetaById, payrollPeriodRows]);
+
+  const payrollLoanRowsByEmployee = useMemo(() => {
+    const grouped = new Map();
+    for (const transaction of payrollLoanTransactionsActive) {
+      const employeeId = String(transaction?.employee_id ?? transaction?.employeeId ?? "").trim();
+      if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
+      const transactionDate = String(transaction?.transaction_date || "").trim();
+      if (!transactionDate) continue;
+      if (payrollStartDate && transactionDate < payrollStartDate) continue;
+      if (payrollDateBounds.from && transactionDate < payrollDateBounds.from) continue;
+      if (payrollDateBounds.to && transactionDate > payrollDateBounds.to) continue;
+      if (payrollPeriodFilter !== "all") {
+        const period = getPayrollPeriodWindowForDateKey(transactionDate, payrollEffectiveSettings, companyTimeZone);
+        if (!period || payrollPeriodOptionKey(period.startKey, period.endKey) !== payrollPeriodFilter) continue;
+      }
+      if (!grouped.has(employeeId)) grouped.set(employeeId, []);
+      grouped.get(employeeId).push(transaction);
+    }
+    const out = {};
+    for (const [employeeId, rows] of grouped.entries()) {
+      out[employeeId] = [...rows].sort((a, b) =>
+        String(b?.transaction_date || b?.created_at || "").localeCompare(String(a?.transaction_date || a?.created_at || ""))
+      );
+    }
+    return out;
+  }, [
+    companyTimeZone,
+    payrollDateBounds.from,
+    payrollDateBounds.to,
+    payrollEmployeeFilter,
+    payrollEffectiveSettings,
+    payrollEmployeeMetaById,
+    payrollLoanTransactionsActive,
+    payrollPeriodFilter,
+  ]);
 
   const payrollSummary = useMemo(() => {
     const summary = payrollPeriodRows.reduce(
@@ -8696,16 +9408,226 @@ export default function EmployeeClockApp() {
       },
       { workedMinutes: 0, workedAmount: 0, paidAmount: 0 }
     );
+    const openingBalance =
+      payrollEmployeeFilter !== "all"
+        ? parsePayrollAmount(payrollEmployeeMetaById?.[String(payrollEmployeeFilter)]?.openingBalance || 0)
+        : 0;
     return {
       ...summary,
-      balance: summary.workedAmount - summary.paidAmount,
+      openingBalance,
+      balance: openingBalance + summary.workedAmount - summary.paidAmount,
     };
-  }, [payrollPeriodRows]);
+  }, [payrollEmployeeFilter, payrollEmployeeMetaById, payrollPeriodRows]);
 
   const payrollCurrentPeriod = useMemo(
     () => getPayrollPeriodWindowForDateKey(calendarDateKeyInTimeZone(now, companyTimeZone), payrollEffectiveSettings, companyTimeZone),
     [companyTimeZone, now, payrollEffectiveSettings]
   );
+  const payrollReminderTodayKey = useMemo(() => calendarDateKeyInTimeZone(now, companyTimeZone), [companyTimeZone, now]);
+
+  const payrollAutoPayrollCandidates = useMemo(() => {
+    if (!isAdmin || !payrollCurrentPeriod || !payrollEmployeeMetaById) return [];
+    const todayKey = calendarDateKeyInTimeZone(now, companyTimeZone);
+    if (!todayKey || String(payrollCurrentPeriod.payDateKey || "") > todayKey) return [];
+    const existingPaymentKeys = new Set(
+      payrollPaymentsActive
+        .map((payment) =>
+          `${String(payment?.employee_id || payment?.employeeId || "").trim()}::${String(payment?.period_start || payment?.periodStart || "").trim()}::${String(payment?.period_end || payment?.periodEnd || "").trim()}`
+        )
+        .filter((key) => !key.startsWith("::"))
+    );
+    return Object.values(payrollEmployeeMetaById)
+      .filter((meta) => Boolean(meta?.autoPayrollEnabled))
+      .filter((meta) => parsePayrollAmount(meta?.autoPayrollAmount || 0) > 0)
+      .filter((meta) => {
+        const startPeriodKey = String(meta?.autoPayrollStartDate || meta?.payrollStartDate || meta?.joiningDate || "").trim();
+        return !startPeriodKey || startPeriodKey <= payrollCurrentPeriod.startKey;
+      })
+      .filter((meta) => {
+        const employeeId = String(meta?.employeeId || "").trim();
+        if (!employeeId) return false;
+        return !existingPaymentKeys.has(`${employeeId}::${payrollCurrentPeriod.startKey}::${payrollCurrentPeriod.endKey}`);
+      })
+      .map((meta) => ({
+        employeeId: String(meta?.employeeId || "").trim(),
+        employeeName: String(meta?.fullName || meta?.email || shortUserLabel(meta?.employeeId || "")).trim() || shortUserLabel(meta?.employeeId || ""),
+        amount: parsePayrollAmount(meta?.autoPayrollAmount || 0),
+        periodStart: payrollCurrentPeriod.startKey,
+        periodEnd: payrollCurrentPeriod.endKey,
+        payDate: payrollCurrentPeriod.payDateKey,
+        periodLabel: formatPayrollPeriodLabel(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone),
+        startPeriodKey: String(meta?.autoPayrollStartDate || meta?.payrollStartDate || meta?.joiningDate || "").trim(),
+      }));
+  }, [companyTimeZone, isAdmin, now, payrollCurrentPeriod, payrollEmployeeMetaById, payrollPaymentsActive]);
+
+  useEffect(() => {
+    if (!isAdmin || !payrollPanelOpen || !payrollCurrentPeriod?.endKey) {
+      setPayrollAutoPayrollPromptOpen(false);
+      return;
+    }
+    if (payrollAutoPayrollPromptDismissedPeriodKey === payrollCurrentPeriod.endKey) {
+      setPayrollAutoPayrollPromptOpen(false);
+      return;
+    }
+    setPayrollAutoPayrollPromptOpen(payrollAutoPayrollCandidates.length > 0);
+  }, [
+    isAdmin,
+    payrollAutoPayrollCandidates.length,
+    payrollAutoPayrollPromptDismissedPeriodKey,
+    payrollCurrentPeriod?.endKey,
+    payrollPanelOpen,
+  ]);
+
+  useEffect(() => {
+    if (payrollAutoPayrollPromptOpen) {
+      setPayrollAutoPayrollMessage("");
+    }
+  }, [payrollAutoPayrollPromptOpen]);
+
+  const refreshPayrollBalanceReminder = useCallback(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked || isAdmin || !isEmployeeRole) return;
+    const employeeId = String(authUser.id || "").trim();
+    const payrollMeta = payrollEmployeeMetaById?.[employeeId] || null;
+    if (!payrollSettings || !payrollMeta) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    const latestCompletedPeriod = getPayrollPeriodWindowForDateKey(
+      addWallDaysInTimeZone(payrollReminderTodayKey, -1, companyTimeZone),
+      payrollEffectiveSettings,
+      companyTimeZone
+    );
+    if (!latestCompletedPeriod?.endKey) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    const daysSinceEnd = diffDaysInTimeZone(payrollReminderTodayKey, latestCompletedPeriod.endKey, companyTimeZone);
+    if (daysSinceEnd < 1) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    const payrollStartDate = String(payrollMeta.payrollStartDate || payrollMeta.joiningDate || "").trim();
+    if (payrollStartDate && payrollStartDate > latestCompletedPeriod.endKey) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    let workedAmount = 0;
+    for (const row of payrollBaseRecords || []) {
+      const rowEmployeeId = String(row?.userId ?? row?.user_id ?? row?.employeeId ?? "").trim();
+      if (!rowEmployeeId || rowEmployeeId !== employeeId) continue;
+      const rowDateKey = calendarDateKeyInTimeZone(row?.clockOut || row?.clockIn, companyTimeZone);
+      if (!rowDateKey || rowDateKey < (payrollStartDate || latestCompletedPeriod.startKey) || rowDateKey > latestCompletedPeriod.endKey) continue;
+      const computedAmount = Number(getReportLabourCost(row));
+      if (Number.isFinite(computedAmount)) workedAmount += computedAmount;
+    }
+
+    let paidAmount = 0;
+    for (const row of payrollPaymentsActive || []) {
+      const rowEmployeeId = String(row?.employee_id ?? row?.employeeId ?? "").trim();
+      if (!rowEmployeeId || rowEmployeeId !== employeeId) continue;
+      const paidDate = String(row?.paid_date || "").trim();
+      if (!paidDate || paidDate < (payrollStartDate || latestCompletedPeriod.startKey) || paidDate > latestCompletedPeriod.endKey) continue;
+      paidAmount += Number(row?.paid_amount || 0) || 0;
+    }
+
+    let loanNet = 0;
+    for (const row of payrollLoanTransactionsActive || []) {
+      const rowEmployeeId = String(row?.employee_id ?? row?.employeeId ?? "").trim();
+      if (!rowEmployeeId || rowEmployeeId !== employeeId) continue;
+      const transactionDate = String(row?.transaction_date || "").trim();
+      if (!transactionDate || transactionDate < (payrollStartDate || latestCompletedPeriod.startKey) || transactionDate > latestCompletedPeriod.endKey) continue;
+      const amount = Number(row?.amount || 0) || 0;
+      const direction = String(row?.transaction_type || "").trim().toLowerCase();
+      if (direction === "loan_returned") loanNet += amount;
+      else loanNet -= amount;
+    }
+
+    const openingBalance = Number(payrollMeta.openingBalance || 0) || 0;
+    const balance = openingBalance + workedAmount - paidAmount + loanNet;
+    if (!(balance < 0)) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    const stage = daysSinceEnd <= 3 ? "due" : "overdue";
+    const periodLabel = formatPayrollPeriodLabel(latestCompletedPeriod.startKey, latestCompletedPeriod.endKey, companyTimeZone);
+    const dismissKey = `orp_payroll_reminder_dismissed_${userCompany.id}_${authUser.id}_${String(stage || "due")}_${String(latestCompletedPeriod.endKey || "")}_${payrollReminderTodayKey}`;
+    if (safeRead(dismissKey, false)) {
+      setPayrollReminderPrompt(null);
+      return;
+    }
+
+    setPayrollReminderPrompt({
+      employeeId,
+      companyId: userCompany.id,
+      stage,
+      balance,
+      balanceAbs: Math.abs(balance),
+      periodStart: latestCompletedPeriod.startKey,
+      periodEnd: latestCompletedPeriod.endKey,
+      periodLabel,
+      payDate:
+        latestCompletedPeriod.payDateKey ||
+        addWallDaysInTimeZone(latestCompletedPeriod.endKey, payrollPayDateOffsetDaysValue(payrollEffectiveSettings), companyTimeZone),
+      dueDate: addWallDaysInTimeZone(latestCompletedPeriod.endKey, 1, companyTimeZone),
+      warningDate: addWallDaysInTimeZone(latestCompletedPeriod.endKey, 4, companyTimeZone),
+      message:
+        stage === "overdue"
+          ? `Your balance of ${formatMoney(Math.abs(balance))} from ${periodLabel} is overdue. Your salary will be delayed if it is not cleared by today.`
+          : `You owe ${formatMoney(Math.abs(balance))} from ${periodLabel}. Please clear it within 3 days.`,
+      title: stage === "overdue" ? "Salary delay warning" : "Payroll balance reminder",
+      dismissKey,
+    });
+  }, [
+    authUser?.id,
+    companyChecked,
+    companyTimeZone,
+    getReportLabourCost,
+    isAdmin,
+    isEmployeeRole,
+    payrollBaseRecords,
+    payrollEffectiveSettings,
+    payrollEmployeeMetaById,
+    payrollLoanTransactionsActive,
+    payrollPaymentsActive,
+    payrollReminderTodayKey,
+    payrollSettings,
+    userCompany?.id,
+  ]);
+
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked || !isEmployeeRole || isAdmin) {
+      setPayrollReminderPrompt(null);
+      payrollReminderLastFetchKeyRef.current = "";
+      return;
+    }
+    void refreshPayrollBalanceReminder();
+    const interval = setInterval(() => void refreshPayrollBalanceReminder(), 10 * 60 * 1000);
+    const onFocus = () => void refreshPayrollBalanceReminder();
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void refreshPayrollBalanceReminder();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [
+    authUser?.id,
+    companyChecked,
+    isAdmin,
+    isEmployeeRole,
+    refreshPayrollBalanceReminder,
+    userCompany?.id,
+  ]);
 
   const buildTimesheetShareText = useCallback(() => {
     const rangeLabel =
@@ -8735,6 +9657,17 @@ export default function EmployeeClockApp() {
       return lines.join("\n");
     }
     for (const record of visibleTimesheetRecords) {
+      if (isVacationTimesheetRecord(record)) {
+        const vacationEmployee = resolveTimesheetEmployeeTitle(record, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        });
+        const vacationLabel = formatVacationRangeLabel(record, companyTimeZone);
+        const vacationReason = String(record?.vacationReason || record?.costCenter || "Vacation").trim() || "Vacation";
+        lines.push([vacationEmployee || "Employee", `${vacationLabel} - Vacation`, vacationReason].join(" | "));
+        continue;
+      }
       const employee = resolveTimesheetEmployeeTitle(record, {
         profileFullName,
         authUser,
@@ -9934,6 +10867,10 @@ export default function EmployeeClockApp() {
   }, [records]);
 
   useEffect(() => {
+    safeWrite("orp_vacation_periods", vacationPeriods);
+  }, [vacationPeriods]);
+
+  useEffect(() => {
     safeWrite("orp_project_photos", projectPhotos);
   }, [projectPhotos]);
 
@@ -9943,6 +10880,10 @@ export default function EmployeeClockApp() {
 
   useEffect(() => {
     projectMediaLocalSyncAttemptedRef.current = false;
+  }, [authUser?.id, userCompany?.id]);
+
+  useEffect(() => {
+    vacationPeriodsLoadedRef.current = false;
   }, [authUser?.id, userCompany?.id]);
 
   useEffect(() => {
@@ -12103,6 +13044,18 @@ const handleClockIn = async () => {
       return;
     }
 
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    const vacationSource = vacationPeriodsLoadedRef.current ? normalizeArray(vacationPeriods) : await fetchVacationPeriodsFromSupabase();
+    const onVacation = normalizeArray(vacationSource).some((period) => {
+      const employeeId = String(period?.employeeId ?? period?.userId ?? period?.employee_id ?? "").trim();
+      if (employeeId !== String(authUser.id)) return false;
+      return vacationPeriodOverlapsRange(period, todayKey, todayKey);
+    });
+    if (onVacation) {
+      setLocationStatus("Vacation is active for this period. Clock in is blocked.");
+      return;
+    }
+
     if (clockLocationEnabled || clockLocationPermissionState === "granted") {
       setLocationStatus("Getting location...");
     }
@@ -13904,6 +14857,177 @@ const handlePhotoQuickUpload = async (event) => {
     const centres = costCentresForEditProject(nextProjectId);
     setManualTimeCostCentre((prev) => (prev && centres.includes(prev) ? prev : centres[0] || ""));
     setManualTimeOpen(true);
+  };
+
+  const openVacationForm = () => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    const fallbackEmployeeId = isAdmin
+      ? String(timesheetEmployeeFilter !== "all" ? timesheetEmployeeFilter : authUser?.id || "").trim()
+      : String(authUser?.id || "").trim();
+    setVacationEmployeeId((prev) => prev || fallbackEmployeeId);
+    setVacationStartDate((prev) => prev || todayKey);
+    setVacationEndDate((prev) => prev || todayKey);
+    setVacationReason((prev) => prev || "");
+    setVacationMessage("");
+    setVacationModalOpen(true);
+  };
+
+  const submitVacationForm = async (event) => {
+    event?.preventDefault?.();
+    if (vacationSaving) return;
+    if (!authUser?.id || !userCompany?.id) return;
+    const employeeId = String(isAdmin ? vacationEmployeeId || authUser.id : authUser.id).trim();
+    const startDate = String(vacationStartDate || "").trim();
+    const endDate = String(vacationEndDate || "").trim();
+    const reason = String(vacationReason || "").trim();
+    if (!employeeId) {
+      setVacationMessage("Choose an employee.");
+      return;
+    }
+    if (!startDate || !endDate) {
+      setVacationMessage("Choose both start and end dates.");
+      return;
+    }
+    if (endDate < startDate) {
+      setVacationMessage("Vacation end date must be on or after the start date.");
+      return;
+    }
+    if (!reason) {
+      setVacationMessage("Add a short reason for the vacation.");
+      return;
+    }
+
+    setVacationSaving(true);
+    setVacationMessage("");
+    try {
+      const payload = {
+        company_id: userCompany.id,
+        employee_id: employeeId,
+        start_date: startDate,
+        end_date: endDate,
+        reason,
+        created_by: authUser.id,
+        updated_by: authUser.id,
+      };
+      const { data, error } = await supabase
+        .from("employee_vacation_periods")
+        .insert([payload])
+        .select("id, company_id, employee_id, start_date, end_date, reason, created_at, updated_at, created_by, updated_by");
+      if (error) throw error;
+      const inserted = normalizeArray(data)
+        .map((row) => mapVacationPeriodRowFromSupabase(row))
+        .filter(Boolean)
+        .map((row) => {
+          const employeeName =
+            vacationEmployeeOptions.find((option) => String(option.id) === String(row.employeeId))?.name ||
+            row.employeeName ||
+            shortUserLabel(row.employeeId);
+          return {
+            ...row,
+            employeeName,
+            employee: employeeName,
+          };
+        });
+      const nextVacation = inserted[0] || {
+        id: `${employeeId}-${startDate}-${endDate}-${Date.now()}`,
+        supabaseVacationId: `${employeeId}-${startDate}-${endDate}-${Date.now()}`,
+        recordType: "vacation",
+        userId: employeeId,
+        employeeId,
+        employeeName:
+          vacationEmployeeOptions.find((option) => String(option.id) === String(employeeId))?.name ||
+          shortUserLabel(employeeId),
+        employee: vacationEmployeeOptions.find((option) => String(option.id) === String(employeeId))?.name || shortUserLabel(employeeId),
+        employeeEmail: "",
+        companyId: userCompany.id,
+        companyName: userCompany.name || "",
+        projectId: null,
+        project: "Vacation",
+        costCenter: reason,
+        hourlyRate: 0,
+        clockIn: `${startDate}T00:00:00`,
+        clockOut: `${endDate}T23:59:59.999`,
+        updatedAt: new Date().toISOString(),
+        status: "Vacation",
+        labour_cost: 0,
+        breakStart: null,
+        breakEnd: null,
+        breakMinutes: 0,
+        breakNote: "",
+        projectFolder: "Vacation",
+        clockInLocation: null,
+        clockOutLocation: null,
+        profileDisplayName: "",
+        profileEmailForRow: "",
+        vacationStartDate: startDate,
+        vacationEndDate: endDate,
+        vacationReason: reason,
+        vacationCreatedAt: new Date().toISOString(),
+      };
+      const combined = dedupeTimesheetRowsByStableId([nextVacation, ...normalizeArray(vacationPeriods)]);
+      combined.sort((a, b) => String(b.vacationStartDate || b.start_date || b.clockIn || "").localeCompare(String(a.vacationStartDate || a.start_date || a.clockIn || "")));
+      setVacationPeriods(combined);
+      localVacationBackupRef.current = combined;
+      vacationPeriodsLoadedRef.current = true;
+      setVacationModalOpen(false);
+      setVacationReason("");
+      setVacationMessage("Vacation saved.");
+      void fetchVacationPeriodsFromSupabase();
+    } catch (err) {
+      if (!isMissingVacationPeriodsTableError(err)) {
+        setVacationMessage(getErrorMessage(err));
+        return;
+      }
+      const fallbackVacation = {
+        id: `${employeeId}-${startDate}-${endDate}-${Date.now()}`,
+        supabaseVacationId: `${employeeId}-${startDate}-${endDate}-${Date.now()}`,
+        recordType: "vacation",
+        userId: employeeId,
+        employeeId,
+        employeeName:
+          vacationEmployeeOptions.find((option) => String(option.id) === String(employeeId))?.name ||
+          shortUserLabel(employeeId),
+        employee:
+          vacationEmployeeOptions.find((option) => String(option.id) === String(employeeId))?.name ||
+          shortUserLabel(employeeId),
+        employeeEmail: "",
+        companyId: userCompany.id,
+        companyName: userCompany.name || "",
+        projectId: null,
+        project: "Vacation",
+        costCenter: reason,
+        hourlyRate: 0,
+        clockIn: `${startDate}T00:00:00`,
+        clockOut: `${endDate}T23:59:59.999`,
+        updatedAt: new Date().toISOString(),
+        status: "Vacation",
+        labour_cost: 0,
+        breakStart: null,
+        breakEnd: null,
+        breakMinutes: 0,
+        breakNote: "",
+        projectFolder: "Vacation",
+        clockInLocation: null,
+        clockOutLocation: null,
+        profileDisplayName: "",
+        profileEmailForRow: "",
+        vacationStartDate: startDate,
+        vacationEndDate: endDate,
+        vacationReason: reason,
+        vacationCreatedAt: new Date().toISOString(),
+      };
+      const combined = dedupeTimesheetRowsByStableId([fallbackVacation, ...normalizeArray(vacationPeriods)]);
+      combined.sort((a, b) => String(b.vacationStartDate || b.start_date || b.clockIn || "").localeCompare(String(a.vacationStartDate || a.start_date || a.clockIn || "")));
+      setVacationPeriods(combined);
+      localVacationBackupRef.current = combined;
+      vacationPeriodsLoadedRef.current = true;
+      setVacationModalOpen(false);
+      setVacationReason("");
+      setVacationMessage("Vacation saved locally until the vacation table is available.");
+      void fetchVacationPeriodsFromSupabase();
+    } finally {
+      setVacationSaving(false);
+    }
   };
 
   const submitManualTimeRequest = async (event) => {
@@ -16608,6 +17732,19 @@ const handlePhotoQuickUpload = async (event) => {
       setTeamAddError("Enter a valid pay rate.");
       return;
     }
+    const autoPayrollEnabled = Boolean(teamAddDraft.autoPayrollEnabled);
+    const autoPayrollStartPeriodKey = String(teamAddDraft.autoPayrollStartPeriodKey || "").trim();
+    const autoPayrollAmount = parsePayrollAmount(teamAddDraft.autoPayrollAmount || 0);
+    if (autoPayrollEnabled) {
+      if (!autoPayrollStartPeriodKey) {
+        setTeamAddError("Choose an auto payroll start period.");
+        return;
+      }
+      if (!Number.isFinite(autoPayrollAmount) || autoPayrollAmount <= 0) {
+        setTeamAddError("Enter a valid auto payroll amount.");
+        return;
+      }
+    }
     const role = teamAddDraft.role === "supervisor" ? "supervisor" : "employee";
     const todayKey = calendarDateKeyInTimeZone(
       new Date(),
@@ -16639,6 +17776,11 @@ const handlePhotoQuickUpload = async (event) => {
           hourly_rate: hourlyNum,
           pay_rate_effective_date: eff,
           joining_date,
+          payroll_start_date: String(teamAddDraft.payrollStartDate || "").trim() || joining_date,
+          payroll_start_balance: parsePayrollAmount(teamAddDraft.payrollOpeningBalance || 0),
+          auto_payroll_enabled: autoPayrollEnabled,
+          auto_payroll_start_period_key: autoPayrollEnabled ? autoPayrollStartPeriodKey : "",
+          auto_payroll_amount: autoPayrollEnabled ? autoPayrollAmount : 0,
           employment_status: "active",
         }),
       });
@@ -16659,6 +17801,7 @@ const handlePhotoQuickUpload = async (event) => {
       setTeamAddDraft(buildTeamAddDraftDefaults(companyTimeZone));
       setTeamAddFormOpen(false);
       setTeamRefreshKey((k) => k + 1);
+      void fetchPayrollData();
       setTeamAddShareInfo(shareInfo);
       setTeamAddShareMessage("");
       setTeamRoleFeedback({ type: "success", text: "Employee added. Share login details below." });
@@ -16686,6 +17829,16 @@ const handlePhotoQuickUpload = async (event) => {
       row.joiningDate != null && row.joiningDate !== ""
         ? String(row.joiningDate).slice(0, 10)
         : "";
+    const payrollStartDate =
+      row.payrollStartDate != null && row.payrollStartDate !== ""
+        ? String(row.payrollStartDate).slice(0, 10)
+        : joinEff;
+    const payrollOpeningBalance = Number.isFinite(Number(row.payrollOpeningBalance))
+      ? Number(row.payrollOpeningBalance)
+      : 0;
+    const autoPayrollEnabled = Boolean(row.autoPayrollEnabled);
+    const autoPayrollStartPeriodKey = String(row.autoPayrollStartPeriodKey || payrollAutoPayrollPeriodOptions[0]?.startKey || "").trim();
+    const autoPayrollAmount = Number.isFinite(Number(row.autoPayrollAmount)) ? Number(row.autoPayrollAmount) : 0;
     setTeamEditDraft({
       fullName: (row.fullName && String(row.fullName).trim()) || "",
       email: (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "",
@@ -16699,6 +17852,11 @@ const handlePhotoQuickUpload = async (event) => {
       hourlyRate: row.hourlyRate != null ? String(row.hourlyRate) : "",
       payRateEffectiveDate: eff,
       joiningDate: joinEff,
+      payrollStartDate,
+      payrollOpeningBalance: String(payrollOpeningBalance.toFixed(2)),
+      autoPayrollEnabled,
+      autoPayrollStartPeriodKey,
+      autoPayrollAmount: autoPayrollEnabled ? String(autoPayrollAmount.toFixed(2)) : "",
       employmentStatus: row.employmentStatus === "archived" ? "archived" : "active",
     });
   };
@@ -16757,6 +17915,24 @@ const handlePhotoQuickUpload = async (event) => {
     if (pay_date === "") pay_date = null;
     let join_date = teamEditDraft.joiningDate?.trim() || null;
     if (join_date === "") join_date = null;
+    let payroll_start_date = teamEditDraft.payrollStartDate?.trim() || null;
+    if (payroll_start_date === "") payroll_start_date = null;
+    const payroll_start_balance = parsePayrollAmount(teamEditDraft.payrollOpeningBalance || 0);
+    const autoPayrollEnabled = Boolean(teamEditDraft.autoPayrollEnabled);
+    const autoPayrollStartPeriodKey = String(teamEditDraft.autoPayrollStartPeriodKey || "").trim();
+    const autoPayrollAmount = parsePayrollAmount(teamEditDraft.autoPayrollAmount || 0);
+    if (autoPayrollEnabled) {
+      if (!autoPayrollStartPeriodKey) {
+        setTeamEditInlineError("Choose an auto payroll start period.");
+        setTeamSavingMemberRowId(null);
+        return;
+      }
+      if (!Number.isFinite(autoPayrollAmount) || autoPayrollAmount <= 0) {
+        setTeamEditInlineError("Enter a valid auto payroll amount.");
+        setTeamSavingMemberRowId(null);
+        return;
+      }
+    }
 
     let newCompanyRole = normalizeMemberRole(row.role);
     if (!isOwner) {
@@ -16814,6 +17990,11 @@ const handlePhotoQuickUpload = async (event) => {
           pay_rate_effective_date: pay_date,
           joining_date: join_date,
           employment_status: isOwner ? "active" : teamEditDraft.employmentStatus,
+          payroll_start_date,
+          payroll_start_balance,
+          auto_payroll_enabled: autoPayrollEnabled,
+          auto_payroll_start_period_key: autoPayrollEnabled ? autoPayrollStartPeriodKey : "",
+          auto_payroll_amount: autoPayrollEnabled ? autoPayrollAmount : 0,
         }),
       });
       const profileJson = await profileRes.json().catch(() => ({}));
@@ -16844,12 +18025,18 @@ const handlePhotoQuickUpload = async (event) => {
                 hourlyRate: hourly_rate,
                 payRateEffectiveDate: pay_date,
                 joiningDate: join_date,
+                payrollStartDate: payroll_start_date,
+                payrollOpeningBalance: payroll_start_balance,
+                autoPayrollEnabled,
+                autoPayrollStartPeriodKey: autoPayrollEnabled ? autoPayrollStartPeriodKey : "",
+                autoPayrollAmount: autoPayrollEnabled ? autoPayrollAmount : 0,
                 employmentStatus: teamEditDraft.employmentStatus,
               }
             : r
         )
       );
       setTeamRefreshKey((k) => k + 1);
+      void fetchPayrollData();
       setTeamRoleFeedback({
         type: "success",
         text: loginFieldsDirty ? "Member saved (including login details)." : "Member saved.",
@@ -16968,11 +18155,18 @@ const handlePhotoQuickUpload = async (event) => {
     setPayrollSettingsSaving(true);
     setPayrollSettingsMessage("");
     try {
+      const rawPayDateOffsetDays = Number(payrollSettingsDraft.payDateOffsetDays);
+      if (!Number.isFinite(rawPayDateOffsetDays) || rawPayDateOffsetDays < 1) {
+        setPayrollSettingsMessage("Enter a pay date offset of at least 1 day.");
+        setPayrollSettingsSaving(false);
+        return;
+      }
       const payload = {
         company_id: userCompany.id,
         frequency,
         payroll_day: payrollDayValueFromAnchor(anchorDate, companyTimeZone),
         anchor_date: anchorDate,
+        pay_date_offset_days: Math.max(1, Math.trunc(rawPayDateOffsetDays)),
         updated_by: authUser.id,
         updated_at: new Date().toISOString(),
       };
@@ -16991,102 +18185,224 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const openPayrollPaymentForm = (row = null, defaults = {}) => {
+    const rowTransactionType = String(row?.transaction_type || "").trim().toLowerCase();
+    const paymentKind =
+      String(defaults.paymentKind || row?.payment_kind || row?.paymentKind || (rowTransactionType ? "loan" : "salary") || "salary").trim().toLowerCase() === "loan"
+        ? "loan"
+        : "salary";
     const periodStart = String(defaults.periodStart || row?.periodStart || row?.period_start || "").trim();
     const periodEnd = String(defaults.periodEnd || row?.periodEnd || row?.period_end || "").trim();
+    const periodKey = periodStart && periodEnd ? payrollPeriodOptionKey(periodStart, periodEnd) : "all";
     const employeeId =
       String(defaults.employeeId || row?.employeeId || row?.employee_id || (payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : "") || "").trim() ||
       "all";
     setPayrollPaymentDraft({
       id: row?.id ? String(row.id) : "",
+      paymentKind,
       employeeId,
       periodStart,
       periodEnd,
+      periodKey,
       paidAmount:
         defaults.paidAmount != null
           ? String(defaults.paidAmount)
           : row?.paid_amount != null
             ? String(row.paid_amount)
+            : row?.amount != null
+              ? String(row.amount)
             : "",
-      paidDate: String(defaults.paidDate || row?.paid_date || calendarDateKeyInTimeZone(new Date(), companyTimeZone) || "").trim(),
+      paidDate: String(defaults.paidDate || row?.paid_date || row?.transaction_date || calendarDateKeyInTimeZone(new Date(), companyTimeZone) || "").trim(),
+      loanDirection:
+        String(defaults.loanDirection || row?.transaction_type || "loan_given").trim().toLowerCase() === "loan_returned"
+          ? "loan_returned"
+          : "loan_given",
       note: String(defaults.note || row?.note || "").trim(),
     });
     setPayrollPaymentMessage("");
     setPayrollPaymentFormOpen(true);
   };
 
+  const openPayrollPaymentMenu = (context = {}) => {
+    const employeeId = String(context.employeeId || "").trim();
+    if (!employeeId) return;
+    setPayrollAddPaymentMenuContext({
+      employeeId,
+      employeeName: String(context.employeeName || "").trim() || payrollEmployeeLabelById[employeeId] || shortUserLabel(employeeId),
+      periodStart: String(context.periodStart || "").trim(),
+      periodEnd: String(context.periodEnd || "").trim(),
+      periodLabel: String(context.periodLabel || "").trim(),
+      payDate: String(context.payDate || "").trim(),
+    });
+    setPayrollAddPaymentMenuOpen(true);
+  };
+
   const handleSavePayrollPayment = async (event) => {
     event.preventDefault();
     if (!isAdmin || !userCompany?.id || !authUser?.id) return;
+    const paymentKind = String(payrollPaymentDraft.paymentKind || "salary").trim().toLowerCase() === "loan" ? "loan" : "salary";
     const employeeId = String(payrollPaymentDraft.employeeId || "").trim();
     const periodStart = String(payrollPaymentDraft.periodStart || "").trim();
     const periodEnd = String(payrollPaymentDraft.periodEnd || "").trim();
-    const paidAmount = Number(String(payrollPaymentDraft.paidAmount || "").replace(",", "."));
+    const rawPaidAmount = Number(String(payrollPaymentDraft.paidAmount || "").replace(",", "."));
     const paidDate = String(payrollPaymentDraft.paidDate || "").trim();
     if (!employeeId || employeeId === "all") {
       setPayrollPaymentMessage("Choose an employee.");
       return;
     }
-    if (!periodStart || !periodEnd) {
-      setPayrollPaymentMessage("Choose a payroll period.");
-      return;
-    }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
-      setPayrollPaymentMessage("Enter a valid payroll period.");
-      return;
-    }
-    if (!Number.isFinite(paidAmount) || paidAmount < 0) {
+    if (!Number.isFinite(rawPaidAmount) || rawPaidAmount === 0) {
       setPayrollPaymentMessage("Enter a valid paid amount.");
       return;
     }
-    if (!paidDate) {
-      setPayrollPaymentMessage("Choose a paid date.");
+    if (paymentKind === "salary" && rawPaidAmount < 0) {
+      setPayrollPaymentMessage("Salary amounts must be positive.");
+      return;
+    }
+    if (paymentKind === "salary") {
+      if (!periodStart || !periodEnd) {
+        setPayrollPaymentMessage("Choose a payroll period.");
+        return;
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+        setPayrollPaymentMessage("Enter a valid payroll period.");
+        return;
+      }
+      const payrollStartDate = String(
+        payrollEmployeeMetaById?.[employeeId]?.payrollStartDate || payrollEmployeeMetaById?.[employeeId]?.joiningDate || ""
+      ).trim();
+      if (payrollStartDate && periodEnd < payrollStartDate) {
+        setPayrollPaymentMessage("Choose a payroll period on or after the employee payroll start date.");
+        return;
+      }
+      if (!paidDate) {
+        setPayrollPaymentMessage("Choose a paid date.");
+        return;
+      }
+    } else {
+      const payrollStartDate = String(
+        payrollEmployeeMetaById?.[employeeId]?.payrollStartDate || payrollEmployeeMetaById?.[employeeId]?.joiningDate || ""
+      ).trim();
+      if (payrollStartDate && paidDate && paidDate < payrollStartDate) {
+        setPayrollPaymentMessage("Choose a payment date on or after the employee payroll start date.");
+        return;
+      }
+    }
+    if (paymentKind !== "salary" && !paidDate) {
+      setPayrollPaymentMessage("Choose a payment date.");
       return;
     }
     setPayrollPaymentSaving(true);
     setPayrollPaymentMessage("");
     try {
       const nowIso = new Date().toISOString();
-      const basePayload = {
-        company_id: userCompany.id,
-        employee_id: employeeId,
-        period_start: periodStart,
-        period_end: periodEnd,
-        paid_amount: paidAmount,
-        paid_date: paidDate,
-        note: String(payrollPaymentDraft.note || "").trim() || null,
-        updated_by: authUser.id,
-        updated_at: nowIso,
-      };
-      let error = null;
-      if (payrollPaymentDraft.id) {
-        ({ error } = await supabase.from("payroll_payments").update(basePayload).eq("id", payrollPaymentDraft.id));
+      const note = String(payrollPaymentDraft.note || "").trim() || null;
+      let message = payrollPaymentDraft.id ? "Payment updated." : "Payment added.";
+      if (paymentKind === "salary") {
+        const basePayload = {
+          company_id: userCompany.id,
+          employee_id: employeeId,
+          period_start: periodStart,
+          period_end: periodEnd,
+          paid_amount: Math.abs(rawPaidAmount),
+          paid_date: paidDate,
+          note,
+          updated_by: authUser.id,
+          updated_at: nowIso,
+        };
+        let error = null;
+        if (payrollPaymentDraft.id) {
+          ({ error } = await supabase.from("payroll_payments").update(basePayload).eq("id", payrollPaymentDraft.id));
+        } else {
+          ({ error } = await supabase
+            .from("payroll_payments")
+            .insert([
+              {
+                ...basePayload,
+                created_by: authUser.id,
+              },
+            ]));
+        }
+        if (error) throw error;
       } else {
-        ({ error } = await supabase
-          .from("payroll_payments")
-          .insert([
-            {
-              ...basePayload,
-              created_by: authUser.id,
-            },
-          ]));
+        const transactionType = String(payrollPaymentDraft.loanDirection || "loan_given") === "loan_returned" ? "loan_returned" : "loan_given";
+        const basePayload = {
+          company_id: userCompany.id,
+          employee_id: employeeId,
+          transaction_type: transactionType,
+          amount: Math.abs(rawPaidAmount),
+          transaction_date: paidDate,
+          note,
+          updated_by: authUser.id,
+          updated_at: nowIso,
+        };
+        let error = null;
+        if (payrollPaymentDraft.id) {
+          ({ error } = await supabase.from("employee_loan_transactions").update(basePayload).eq("id", payrollPaymentDraft.id));
+        } else {
+          ({ error } = await supabase
+            .from("employee_loan_transactions")
+            .insert([
+              {
+                ...basePayload,
+                created_by: authUser.id,
+              },
+            ]));
+        }
+        if (error) throw error;
+        message = payrollPaymentDraft.id ? "Loan updated." : "Loan added.";
       }
-      if (error) throw error;
       setPayrollPaymentFormOpen(false);
       setPayrollPaymentDraft({
         id: "",
+        paymentKind: "salary",
         employeeId: "all",
         periodStart: "",
         periodEnd: "",
+        periodKey: "all",
         paidAmount: "",
         paidDate: "",
+        loanDirection: "loan_given",
         note: "",
       });
-      setPayrollPaymentMessage(payrollPaymentDraft.id ? "Payment updated." : "Payment added.");
+      setPayrollPaymentMessage(message);
       await fetchPayrollData();
     } catch (err) {
       setPayrollPaymentMessage(getErrorMessage(err));
     } finally {
       setPayrollPaymentSaving(false);
+    }
+  };
+
+  const handleProcessAutoPayrollCandidates = async () => {
+    if (!isAdmin || !userCompany?.id || !authUser?.id || !payrollCurrentPeriod || payrollAutoPayrollCandidates.length === 0) {
+      return;
+    }
+    setPayrollAutoPayrollProcessing(true);
+    setPayrollAutoPayrollMessage("");
+    try {
+      const nowIso = new Date().toISOString();
+      const paidDate = payrollCurrentPeriod.payDateKey || calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+      const rows = payrollAutoPayrollCandidates.map((candidate) => ({
+        company_id: userCompany.id,
+        employee_id: candidate.employeeId,
+        period_start: payrollCurrentPeriod.startKey,
+        period_end: payrollCurrentPeriod.endKey,
+        paid_amount: Math.abs(parsePayrollAmount(candidate.amount)),
+        paid_date: paidDate,
+        note: `Auto payroll ${candidate.periodLabel}`,
+        created_by: authUser.id,
+        updated_by: authUser.id,
+        updated_at: nowIso,
+      }));
+      const { error } = await supabase.from("payroll_payments").insert(rows);
+      if (error) throw error;
+      setPayrollAutoPayrollPromptOpen(false);
+      setPayrollAutoPayrollPromptDismissedPeriodKey(payrollCurrentPeriod.endKey);
+      setPayrollAutoPayrollMessage(`Auto payroll added for ${rows.length} employee${rows.length === 1 ? "" : "s"}.`);
+      await fetchPayrollData();
+    } catch (err) {
+      setPayrollAutoPayrollMessage(getErrorMessage(err));
+    } finally {
+      setPayrollAutoPayrollProcessing(false);
     }
   };
 
@@ -17463,7 +18779,7 @@ const handlePhotoQuickUpload = async (event) => {
     );
   };
 
-  const renderRoyalNavyFilterSelect = ({ label, icon = "folder", value, onChange, children }) => (
+  const renderRoyalNavyFilterSelect = ({ label, icon = "folder", value, onChange, children, displayValue = "" }) => (
     <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
       {label}
       <span className="relative block">
@@ -17471,12 +18787,19 @@ const handlePhotoQuickUpload = async (event) => {
           {renderTimesheetUiIcon(icon, "h-4 w-4")}
         </span>
         <select
-          className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+          className={`h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black outline-none focus:border-[#94A3B8] ${
+            displayValue ? "opacity-0 text-transparent caret-transparent" : "text-[#061426]"
+          }`}
           value={value}
           onChange={onChange}
         >
           {children}
         </select>
+        {displayValue ? (
+          <span className="pointer-events-none absolute left-10 right-9 top-1/2 -translate-y-1/2 truncate text-[14px] font-black text-[#061426]">
+            {displayValue}
+          </span>
+        ) : null}
         <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
           <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m6 9 6 6 6-6" />
@@ -17487,6 +18810,29 @@ const handlePhotoQuickUpload = async (event) => {
   );
 
   const renderTimesheetCard = (record, allowEdit = true) => {
+    if (isVacationTimesheetRecord(record)) {
+      const vacationEmployee = resolveTimesheetEmployeeTitle(record, {
+        profileFullName,
+        authUser,
+        teamProfileFullNameByUserId,
+      });
+      const rangeLabel = formatVacationRangeLabel(record, companyTimeZone);
+      const reasonLabel = String(record?.vacationReason || record?.costCenter || record?.cost_centre || "Vacation").trim() || "Vacation";
+      return (
+        <div key={record.id} className="rounded-[14px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-[0_8px_22px_rgba(6,20,38,0.05)]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[14px] font-black leading-snug text-[#061426]">{vacationEmployee || "Vacation"}</p>
+              <p className="mt-0.5 truncate text-[11px] font-bold text-[#64748B]">{rangeLabel} - Vacation</p>
+            </div>
+            <span className="shrink-0 rounded-full border border-[#BBF7D0] bg-[#ECFDF5] px-2 py-0.5 text-[9px] font-black text-[#15803D]">
+              Vacation
+            </span>
+          </div>
+          <p className="mt-2 text-[12px] font-semibold leading-snug text-[#64748B]">{reasonLabel}</p>
+        </div>
+      );
+    }
     const st = normalizeStatus(record.status);
     const autoTimedOut = isAutoTimedOutStatus(record.status);
     const statusBadgeLabel =
@@ -17756,6 +19102,11 @@ const handlePhotoQuickUpload = async (event) => {
             </p>
           )}
           {showBreakLine ? (
+            <p className="mt-1 text-[11px] font-semibold text-[#64748B]">
+              Break time: {breakDurationText}
+            </p>
+          ) : null}
+          {showBreakLine ? (
             <div className="mt-2 grid grid-cols-3 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
               <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
                 <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break start</p>
@@ -17852,81 +19203,81 @@ const handlePhotoQuickUpload = async (event) => {
         ? "All employees"
         : payrollEmployeeOptions.find((employee) => String(employee.id) === String(payrollEmployeeFilter))?.name || "Selected employee";
     const currentPayrollPeriodLabel = payrollCurrentPeriod
-      ? formatPayrollPeriodLabelLong(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
+      ? formatPayrollPeriodLabel(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
       : "—";
     const currentPayDateLabel = payrollCurrentPeriod?.payDateKey
       ? formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)
       : "—";
+    const payrollShowEmployeeList = isAdmin && payrollEmployeeFilter === "all";
+    const payrollDetailEmployeeId = payrollShowEmployeeList
+      ? ""
+      : String(payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : payrollEmployeeOptions[0]?.id || "").trim();
+    const payrollDetailEmployeeName = payrollDetailEmployeeId
+      ? payrollEmployeeLabelById?.[payrollDetailEmployeeId] || "Selected employee"
+      : "";
+    const payrollDetailEmployeeMeta = payrollDetailEmployeeId ? payrollEmployeeMetaById?.[payrollDetailEmployeeId] || null : null;
+    const payrollDetailEmployeeGroup = payrollDetailEmployeeId
+      ? payrollEmployeeGroups.find((group) => String(group.employeeId) === String(payrollDetailEmployeeId)) || null
+      : null;
 
     return (
       <>
-        <div
-          className="fixed inset-0 z-[86] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
-          role="dialog"
-          aria-modal="true"
-          onClick={() => {
-            setPayrollPanelOpen(false);
-            setPayrollPaymentFormOpen(false);
-          }}
-        >
-          <div
-            className="flex max-h-[92vh] w-full max-w-sm flex-col overflow-hidden rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
-            <div className="flex items-start justify-between gap-3 px-4 pt-1">
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
-                <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Payroll tracker</h3>
-                <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
-                  Pay periods, hours, payments, and balances.
-                </p>
-                <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                  Range: {rangeLabel} • Employee: {employeeLabel}
-                </p>
-              </div>
-                <button
-                  type="button"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+        <div className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]" role="dialog" aria-modal="true">
+          <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-[#F4F7FB]/95 px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-3 backdrop-blur-sm shadow-[0_8px_24px_rgba(6,20,38,0.05)]">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
                 onClick={() => {
+                  if (payrollShowEmployeeList) {
+                    setPayrollPanelOpen(false);
+                    setPayrollPaymentFormOpen(false);
+                    setPayrollAddPaymentMenuOpen(false);
+                    setPayrollAddPaymentMenuContext(null);
+                    return;
+                  }
+                  if (isAdmin && payrollEmployeeFilter !== "all") {
+                    setPayrollEmployeeFilter("all");
+                    setPayrollPaymentFormOpen(false);
+                    setPayrollAddPaymentMenuOpen(false);
+                    setPayrollAddPaymentMenuContext(null);
+                    return;
+                  }
                   setPayrollPanelOpen(false);
                   setPayrollPaymentFormOpen(false);
+                  setPayrollAddPaymentMenuOpen(false);
+                  setPayrollAddPaymentMenuContext(null);
                 }}
-                aria-label="Close payroll"
+                aria-label={payrollShowEmployeeList ? "Close payroll tracker" : isAdmin ? "Back to all employees" : "Close payroll tracker"}
               >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 6 6 18M6 6l12 12" />
+                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m15 18-6-6 6-6" />
                 </svg>
               </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">
+                  {payrollShowEmployeeList ? "Payroll tracker" : payrollDetailEmployeeName}
+                </h3>
+                {!payrollShowEmployeeList && payrollDetailEmployeeMeta ? (
+                  <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                    Start {payrollDetailEmployeeMeta.payrollStartDate ? formatPayrollDateKeyShort(payrollDetailEmployeeMeta.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"} • Opening {formatPayrollAbsoluteMoney(payrollDetailEmployeeMeta.openingBalance || 0)} • {payrollOpeningBalanceMeaning(payrollDetailEmployeeMeta.openingBalance || 0)}
+                  </p>
+                ) : null}
+              </div>
             </div>
+          </div>
 
-            <div className="mt-4 px-4">
+          <div className="mt-4 px-4">
               <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
                 {payrollSettingsLoading ? (
                   <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
                 ) : payrollSettings ? (
                   <div className="space-y-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current schedule</p>
-                        <p className="mt-1 text-[15px] font-black text-[#061426]">{payrollFrequencyLabel(payrollSettings.frequency)}</p>
-                      </div>
-                      <span className="shrink-0 rounded-full bg-[#061426] px-2.5 py-1 text-[10px] font-black text-white">
-                        {currentPayDateLabel}
-                      </span>
-                    </div>
                     <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3">
                       <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current payroll period</p>
                       <p className="mt-1 text-[14px] font-black text-[#061426]">{currentPayrollPeriodLabel}</p>
                       <p className="mt-1 text-[12px] font-semibold text-[#64748B]">Pay date: {currentPayDateLabel}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
-                          Payroll day: {(payrollSettings.payroll_day || "friday").toLowerCase()}
-                        </span>
-                        <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
-                          Anchor: {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 ) : (
@@ -17993,53 +19344,97 @@ const handlePhotoQuickUpload = async (event) => {
                   </>
                 ),
               })}
-              {renderRoyalNavyFilterSelect({
-                label: "Employee",
-                icon: "user",
-                value: payrollEmployeeFilter,
-                onChange: (event) => setPayrollEmployeeFilter(event.target.value),
-                children: (
-                  <>
-                    <option value="all">All employees</option>
-                    {payrollEmployeeOptions.map((employee) => (
-                      <option key={employee.id} value={employee.id}>
-                        {employee.name}
-                      </option>
-                    ))}
-                  </>
-                ),
-              })}
+              {payrollShowEmployeeList
+                ? renderRoyalNavyFilterSelect({
+                    label: "Employee",
+                    icon: "user",
+                    value: payrollEmployeeFilter,
+                    onChange: (event) => setPayrollEmployeeFilter(event.target.value),
+                    children: (
+                      <>
+                        <option value="all">All employees</option>
+                        {payrollEmployeeOptions.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.name}
+                          </option>
+                        ))}
+                      </>
+                    ),
+                  })
+                : null}
             </div>
 
             <div className="px-4 pt-3">
-              <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-semibold text-[#64748B]">
-                  <div className="flex items-baseline gap-1">
-                    <span>Hours:</span>
-                    <span className="font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</span>
+              {payrollShowEmployeeList ? (
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Employees</p>
+                      <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Tap an employee to open their payroll detail.</p>
+                    </div>
+                    <span className="shrink-0 rounded-full border border-[#CBD5E1] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                      {payrollEmployeeGroups.length} employees
+                    </span>
                   </div>
-                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                  <div className="flex items-baseline gap-1">
-                    <span>Worked:</span>
-                    <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</span>
-                  </div>
-                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                  <div className="flex items-baseline gap-1">
-                    <span>Paid:</span>
-                    <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</span>
-                  </div>
-                  <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                  <div className={`flex items-baseline gap-1 rounded-full border px-2.5 py-1 ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
-                    <span>Balance:</span>
-                    <span className="font-black tabular-nums">{formatMoney(payrollSummary.balance)}</span>
+                  <div className="mt-3 space-y-2">
+                    {payrollEmployeeGroups.map((group) => (
+                      <button
+                        key={group.employeeId}
+                        type="button"
+                        className="w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-left shadow-[0_10px_26px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC]"
+                        onClick={() => setPayrollEmployeeFilter(group.employeeId)}
+                        aria-label={`Open payroll detail for ${group.employeeName}`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-[14px] font-black leading-tight text-[#061426]">{group.employeeName}</p>
+                            <p className="mt-0.5 text-[11px] font-semibold text-[#64748B]">
+                              {group.periods.length} period{group.periods.length === 1 ? "" : "s"} • {formatHoursMinutes(group.workedMinutes)} worked • {formatMoney(group.workedAmount)} earned
+                            </p>
+                          </div>
+                          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
+                            {formatMoney(group.balance)}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 </div>
-              </div>
+                ) : (
+                  <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-semibold text-[#64748B]">
+                    <div className="flex items-baseline gap-1">
+                      <span>Hours:</span>
+                      <span className="font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</span>
+                    </div>
+                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                    <div className="flex items-baseline gap-1">
+                      <span>Worked:</span>
+                      <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</span>
+                    </div>
+                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                    <div className="flex items-baseline gap-1">
+                      <span>Paid:</span>
+                      <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</span>
+                    </div>
+                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
+                    <div className={`flex items-baseline gap-1 rounded-full border px-2.5 py-1 ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
+                      <span>Balance:</span>
+                      <span className="font-black tabular-nums">{formatMoney(payrollSummary.balance)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-3">
+            <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-3">
               <div className="space-y-3">
-                {payrollPaymentsLoading ? (
+                {payrollPaymentsError || payrollLoanTransactionsError ? (
+                  <p className="rounded-[16px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] font-semibold text-[#DC2626]">
+                    {payrollPaymentsError || payrollLoanTransactionsError}
+                  </p>
+                ) : null}
+                {payrollPaymentsLoading || payrollLoanTransactionsLoading ? (
                   <p className="rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 py-3 text-[13px] font-semibold text-[#64748B]">
                     Loading payroll tracker...
                   </p>
@@ -18054,13 +19449,16 @@ const handlePhotoQuickUpload = async (event) => {
                     </p>
                   </div>
                 ) : (
-                  payrollEmployeeGroups.map((group) => (
+                  (payrollDetailEmployeeGroup ? [payrollDetailEmployeeGroup] : []).map((group) => (
                     <div key={group.employeeId} className="rounded-[20px] border border-[#E2E8F0] bg-white p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate text-[16px] font-black leading-tight text-[#061426]">{group.employeeName}</p>
                           <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
                             {group.periods.length} period{group.periods.length === 1 ? "" : "s"} • {formatHoursMinutes(group.workedMinutes)} worked • {formatMoney(group.workedAmount)} earned
+                          </p>
+                          <p className="mt-0.5 text-[11px] font-semibold text-[#64748B]">
+                            Payroll start {group.payrollStartDate ? formatPayrollDateKeyShort(group.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"} • Opening {formatPayrollAbsoluteMoney(group.openingBalance || 0)} • {payrollOpeningBalanceMeaning(group.openingBalance || 0)}
                           </p>
                         </div>
                         <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
@@ -18069,51 +19467,94 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
 
                       <div className="mt-3 space-y-3">
+                        {group.periods.length === 0 ? (
+                          <p className="rounded-[16px] border border-dashed border-[#CBD5E1] bg-white px-3 py-3 text-[12px] font-semibold text-[#64748B]">
+                            No payroll periods yet. Hours and payments will appear after this employee&apos;s payroll start date.
+                          </p>
+                        ) : null}
                         {group.periods.map((period) => (
-                          <div key={period.id} className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                          <div key={period.id} className="rounded-[24px] border border-[#E2E8F0] bg-[#F8FAFC] p-4 shadow-[0_8px_22px_rgba(6,20,38,0.05)]">
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="truncate text-[15px] font-black leading-tight text-[#061426]">{period.periodLabel}</p>
-                                <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
+                                <p className="truncate text-[22px] font-black leading-tight text-[#061426]">{period.periodLabel}</p>
+                                <p className="mt-1.5 text-[14px] font-semibold text-[#64748B]">
                                   Pay date {formatPayrollDateKeyShort(period.payDate, companyTimeZone, { includeYear: true })}
+                                </p>
+                                <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
+                                  Balance after this period {formatMoney(period.balance)}
                                 </p>
                               </div>
                               <button
                                 type="button"
-                                className="shrink-0 rounded-full border border-[#CBD5E1] bg-white px-3 py-2 text-[11px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[22px] font-black leading-none text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
                                 onClick={() =>
-                                  openPayrollPaymentForm(period, {
+                                  openPayrollPaymentMenu({
                                     employeeId: period.employeeId,
+                                    employeeName: group.employeeName,
                                     periodStart: period.periodStart,
                                     periodEnd: period.periodEnd,
+                                    periodLabel: period.periodLabel,
+                                    payDate: period.payDate,
                                   })
                                 }
+                                aria-label="Add payment"
                               >
-                                Add Payment
+                                +
                               </button>
                             </div>
 
-                            <div className="mt-3 grid grid-cols-2 gap-2">
-                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
-                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatHoursMinutes(period.workedMinutes)}</p>
+                            <div className="mt-4 grid grid-cols-2 gap-3">
+                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
+                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                                  {formatHoursMinutes(period.workedMinutes)}
+                                </p>
                               </div>
-                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
-                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatMoney(period.workedAmount)}</p>
+                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
+                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                                  {formatMoney(period.workedAmount)}
+                                </p>
                               </div>
-                              <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
-                                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
-                                <p className="mt-1 text-[13px] font-black text-[#061426] tabular-nums">{formatMoney(period.paidAmount)}</p>
+                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
+                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                                  {formatMoney(period.paidAmount)}
+                                </p>
                               </div>
-                              <div className={`rounded-[14px] border px-3 py-2 ${payrollBalanceBadgeClass(period.balance)}`}>
-                                <p className="text-[9px] font-black uppercase tracking-[0.08em]">Balance</p>
-                                <p className="mt-1 text-[13px] font-black tabular-nums">{formatMoney(period.balance)}</p>
+                              <div className={`rounded-[20px] border p-3 ${payrollBalanceBadgeClass(period.balance)}`}>
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em]">Balance</p>
+                                <p className="mt-2 text-[16px] font-black leading-none tabular-nums">
+                                  {formatMoney(period.balance)}
+                                </p>
                               </div>
                             </div>
 
+                            {Array.isArray(period.vacations) && period.vacations.length > 0 ? (
+                              <div className="mt-4 space-y-2">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Vacation</p>
+                                {period.vacations
+                                  .slice()
+                                  .sort((a, b) =>
+                                    String(b?.vacationStartDate || b?.start_date || b?.clockIn || "").localeCompare(
+                                      String(a?.vacationStartDate || a?.start_date || a?.clockIn || "")
+                                    )
+                                  )
+                                  .map((vacation) => (
+                                    <div key={vacation.id} className="rounded-[14px] border border-[#E2E8F0] bg-[#FBF8F1] px-3 py-2">
+                                      <p className="text-[13px] font-black text-[#061426]">
+                                        {formatVacationRangeLabel(vacation, companyTimeZone)} - Vacation
+                                      </p>
+                                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                                        {String(vacation?.vacationReason || vacation?.reason || vacation?.costCenter || "Vacation").trim() || "Vacation"}
+                                      </p>
+                                    </div>
+                                  ))}
+                              </div>
+                            ) : null}
+
                             {period.payments.length > 0 ? (
-                              <div className="mt-3 space-y-2">
+                              <div className="mt-4 space-y-2">
                                 <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Payments</p>
                                 {period.payments.map((payment) => (
                                   <div key={payment.id} className="rounded-[14px] border border-[#E2E8F0] bg-white p-3">
@@ -18123,7 +19564,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           {formatMoney(Number(payment.paid_amount || 0))}
                                         </p>
                                         <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
-                                          {formatPayrollDateKeyShort(payment.paid_date, companyTimeZone, { includeYear: true })}
+                                          {formatPayrollDateKeyShort(payment.paid_date, companyTimeZone, { includeYear: true })} • Balance {formatMoney(period.balance)}
                                         </p>
                                         {String(payment.note || "").trim() ? (
                                           <p className="mt-1 text-[12px] font-semibold leading-snug text-[#061426]">{payment.note}</p>
@@ -18150,10 +19591,46 @@ const handlePhotoQuickUpload = async (event) => {
                                 ))}
                               </div>
                             ) : (
-                              <p className="mt-3 rounded-[14px] border border-dashed border-[#CBD5E1] bg-white px-3 py-2 text-[12px] font-semibold text-[#64748B]">
+                              <p className="mt-4 rounded-[14px] border border-dashed border-[#CBD5E1] bg-white px-3 py-2 text-[12px] font-semibold text-[#64748B]">
                                 No payments recorded yet.
                               </p>
                             )}
+
+                            {payrollLoanRowsByEmployee[period.employeeId]?.length ? (
+                              <div className="mt-4 space-y-2">
+                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Loan transactions</p>
+                                {payrollLoanRowsByEmployee[period.employeeId].map((loan) => {
+                                  const loanAmount = Number(loan?.amount || 0);
+                                  const loanSignedAmount = String(loan?.transaction_type || "") === "loan_returned" ? loanAmount : -loanAmount;
+                                  return (
+                                    <div key={loan.id} className="rounded-[14px] border border-[#E2E8F0] bg-white p-3">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <p className="text-[14px] font-black text-[#061426] tabular-nums">
+                                            {formatPayrollSignedMoney(loanSignedAmount)}
+                                          </p>
+                                          <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
+                                            {formatPayrollDateKeyShort(loan.transaction_date, companyTimeZone, { includeYear: true })} • Balance {formatMoney(period.balance)}
+                                          </p>
+                                          {String(loan.note || "").trim() ? (
+                                            <p className="mt-1 text-[12px] font-semibold leading-snug text-[#061426]">{loan.note}</p>
+                                          ) : null}
+                                        </div>
+                                        <span
+                                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${
+                                            String(loan?.transaction_type || "") === "loan_returned"
+                                              ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+                                              : "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]"
+                                          }`}
+                                        >
+                                          {String(loan?.transaction_type || "") === "loan_returned" ? "Money received" : "Money given"}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
                           </div>
                         ))}
                       </div>
@@ -18163,8 +19640,177 @@ const handlePhotoQuickUpload = async (event) => {
               </div>
             </div>
           </div>
-        </div>
-
+        {payrollAutoPayrollPromptOpen && payrollAutoPayrollCandidates.length > 0 ? (
+          <div
+            className="fixed inset-0 z-[87] flex items-end justify-center bg-[#061426]/55 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              setPayrollAutoPayrollPromptOpen(false);
+              setPayrollAutoPayrollPromptDismissedPeriodKey(payrollCurrentPeriod?.endKey || "");
+            }}
+          >
+            <div
+              className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                  <h3 className="mt-1 text-[22px] font-black leading-tight text-[#061426]">Auto payroll due</h3>
+                  <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                    {payrollAutoPayrollCandidates.length} employee{payrollAutoPayrollCandidates.length === 1 ? "" : "s"} are scheduled for this pay date.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setPayrollAutoPayrollPromptOpen(false);
+                    setPayrollAutoPayrollPromptDismissedPeriodKey(payrollCurrentPeriod?.endKey || "");
+                  }}
+                  aria-label="Close auto payroll prompt"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {payrollAutoPayrollCandidates.map((candidate) => (
+                  <div key={candidate.employeeId} className="rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-[14px] font-black leading-tight text-[#061426]">{candidate.employeeName}</p>
+                        <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
+                          {candidate.periodLabel} • {formatPayrollAbsoluteMoney(candidate.amount)}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full border border-[#BBF7D0] bg-[#ECFDF5] px-2.5 py-1 text-[10px] font-black text-[#15803D]">
+                        Auto
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {payrollAutoPayrollMessage ? (
+                <p className="mt-3 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[12px] font-semibold text-[#64748B]">
+                  {payrollAutoPayrollMessage}
+                </p>
+              ) : (
+                <p className="mt-3 rounded-[14px] border border-[#E2E8F0] bg-[#FBF8F1] px-3 py-2 text-[12px] font-semibold text-[#9A6B12]">
+                  Review this auto payroll before it is added to the tracker.
+                </p>
+              )}
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[14px] font-black text-[#061426]"
+                  onClick={() => {
+                    setPayrollAutoPayrollPromptOpen(false);
+                    setPayrollAutoPayrollPromptDismissedPeriodKey(payrollCurrentPeriod?.endKey || "");
+                  }}
+                >
+                  No
+                </button>
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] bg-[#061426] px-3 text-[14px] font-black text-white disabled:bg-[#CBD5E1]"
+                  disabled={payrollAutoPayrollProcessing}
+                  onClick={() => void handleProcessAutoPayrollCandidates()}
+                >
+                  {payrollAutoPayrollProcessing ? "Processing..." : "Yes, proceed"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {payrollAddPaymentMenuOpen && payrollAddPaymentMenuContext ? (
+          <div
+            className="fixed inset-0 z-[87] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              setPayrollAddPaymentMenuOpen(false);
+              setPayrollAddPaymentMenuContext(null);
+            }}
+          >
+            <div
+              className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                  <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Add payment</h3>
+                  <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                    {payrollAddPaymentMenuContext.employeeName}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setPayrollAddPaymentMenuOpen(false);
+                    setPayrollAddPaymentMenuContext(null);
+                  }}
+                  aria-label="Close add payment menu"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2">
+                <button
+                  type="button"
+                  className="flex items-center justify-between rounded-[16px] border border-[#CBD5E1] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setPayrollAddPaymentMenuOpen(false);
+                    openPayrollPaymentForm(null, {
+                      paymentKind: "salary",
+                      employeeId: payrollAddPaymentMenuContext.employeeId,
+                      periodStart: payrollAddPaymentMenuContext.periodStart,
+                      periodEnd: payrollAddPaymentMenuContext.periodEnd,
+                      paidDate: payrollAddPaymentMenuContext.payDate || calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                    });
+                    setPayrollAddPaymentMenuContext(null);
+                  }}
+                >
+                  <span>
+                    <span className="block text-[15px] font-black text-[#061426]">Pay salary</span>
+                  </span>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F8FAFC] text-[20px] font-black leading-none text-[#061426]">
+                    +
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="flex items-center justify-between rounded-[16px] border border-[#CBD5E1] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setPayrollAddPaymentMenuOpen(false);
+                    openPayrollPaymentForm(null, {
+                      paymentKind: "loan",
+                      employeeId: payrollAddPaymentMenuContext.employeeId,
+                      paidDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                      loanDirection: "loan_given",
+                    });
+                    setPayrollAddPaymentMenuContext(null);
+                  }}
+                >
+                  <span>
+                    <span className="block text-[15px] font-black text-[#061426]">Pay loan</span>
+                  </span>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F8FAFC] text-[20px] font-black leading-none text-[#061426]">
+                    +
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {payrollPaymentFormOpen ? (
           <div
             className="fixed inset-0 z-[87] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
@@ -18181,11 +19827,24 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="min-w-0">
                   <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
                   <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">
-                    {payrollPaymentDraft.id ? "Edit payment" : "Add payment"}
+                    {payrollPaymentDraft.id
+                      ? payrollPaymentDraft.paymentKind === "loan"
+                        ? "Edit loan"
+                        : "Edit payment"
+                      : payrollPaymentDraft.paymentKind === "loan"
+                        ? "Add loan"
+                        : "Add payment"}
                   </h3>
-                  <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
-                    Record a payment for a payroll period.
-                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                      {payrollPaymentDraft.paymentKind === "loan" ? "Loan" : "Salary"}
+                    </span>
+                    {payrollPaymentDraft.paymentKind === "loan" ? (
+                      <span className="rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                        {payrollPaymentDraft.loanDirection === "loan_returned" ? "Money received" : "Money given"}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <button
                   type="button"
@@ -18220,34 +19879,82 @@ const handlePhotoQuickUpload = async (event) => {
                     </>
                   ),
                 })}
-                <div className="grid grid-cols-2 gap-2">
-                  <DateInputField
-                    label="Period start"
-                    value={payrollPaymentDraft.periodStart}
-                    onChange={(value) =>
-                      setPayrollPaymentDraft((draft) => ({
-                        ...draft,
-                        periodStart: value,
-                      }))
-                    }
-                  />
-                  <DateInputField
-                    label="Period end"
-                    value={payrollPaymentDraft.periodEnd}
-                    onChange={(value) =>
-                      setPayrollPaymentDraft((draft) => ({
-                        ...draft,
-                        periodEnd: value,
-                      }))
-                    }
-                  />
-                </div>
+                {payrollPaymentDraft.paymentKind === "salary" ? (
+                  <>
+                    {renderRoyalNavyFilterSelect({
+                      label: "Payroll period",
+                      icon: "calendar",
+                      value: payrollPaymentDraft.periodKey,
+                      displayValue:
+                        payrollPaymentDraft.periodStart && payrollPaymentDraft.periodEnd
+                          ? formatPayrollPeriodLabel(payrollPaymentDraft.periodStart, payrollPaymentDraft.periodEnd, companyTimeZone)
+                          : "Choose payroll period",
+                      onChange: (event) => {
+                        const next = payrollPeriodOptions.find((option) => option.id === event.target.value);
+                        setPayrollPaymentDraft((draft) => ({
+                          ...draft,
+                          periodKey: event.target.value,
+                          periodStart: next?.startKey || "",
+                          periodEnd: next?.endKey || "",
+                        }));
+                      },
+                      children: (
+                        <>
+                          <option value="all">Choose payroll period</option>
+                          {payrollPaymentPeriodOptions.map((period) => (
+                            <option key={period.id} value={period.id}>
+                              {period.label}
+                            </option>
+                          ))}
+                        </>
+                      ),
+                    })}
+                    <DateInputField
+                      label="Paid date"
+                      value={payrollPaymentDraft.paidDate}
+                      onChange={(value) =>
+                        setPayrollPaymentDraft((draft) => ({
+                          ...draft,
+                          paidDate: value,
+                        }))
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <DateInputField
+                      label="Payment date"
+                      value={payrollPaymentDraft.paidDate}
+                      onChange={(value) =>
+                        setPayrollPaymentDraft((draft) => ({
+                          ...draft,
+                          paidDate: value,
+                        }))
+                      }
+                    />
+                    {renderRoyalNavyFilterSelect({
+                      label: "Loan direction",
+                      icon: "wallet",
+                      value: payrollPaymentDraft.loanDirection,
+                      onChange: (event) =>
+                        setPayrollPaymentDraft((draft) => ({
+                          ...draft,
+                          loanDirection: event.target.value,
+                        })),
+                      children: (
+                        <>
+                          <option value="loan_given">Money given to employee</option>
+                          <option value="loan_returned">Money received from employee</option>
+                        </>
+                      ),
+                    })}
+                  </>
+                )}
                 <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
-                  Amount paid
+                  {payrollPaymentDraft.paymentKind === "loan" ? "Amount" : "Salary amount"}
                   <input
                     type="number"
                     step="0.01"
-                    min="0"
                     className="h-12 w-full rounded-[13px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-black text-[#061426] outline-none focus:border-[#061426]"
                     value={payrollPaymentDraft.paidAmount}
                     onChange={(event) =>
@@ -18257,18 +19964,9 @@ const handlePhotoQuickUpload = async (event) => {
                       }))
                     }
                     placeholder="0.00"
+                    min={payrollPaymentDraft.paymentKind === "salary" ? "0" : undefined}
                   />
                 </label>
-                <DateInputField
-                  label="Paid date"
-                  value={payrollPaymentDraft.paidDate}
-                  onChange={(value) =>
-                    setPayrollPaymentDraft((draft) => ({
-                      ...draft,
-                      paidDate: value,
-                    }))
-                  }
-                />
                 <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
                   Note / reference
                   <textarea
@@ -18309,7 +20007,15 @@ const handlePhotoQuickUpload = async (event) => {
                     className="h-12 rounded-[14px] bg-[#061426] px-4 text-[15px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
                     disabled={payrollPaymentSaving}
                   >
-                    {payrollPaymentSaving ? "Saving..." : payrollPaymentDraft.id ? "Update payment" : "Save payment"}
+                    {payrollPaymentSaving
+                      ? "Saving..."
+                      : payrollPaymentDraft.id
+                        ? payrollPaymentDraft.paymentKind === "loan"
+                          ? "Update loan"
+                          : "Update payment"
+                        : payrollPaymentDraft.paymentKind === "loan"
+                          ? "Save loan payment"
+                          : "Save payment"}
                   </Button>
                 </div>
               </form>
@@ -19516,32 +21222,6 @@ const handlePhotoQuickUpload = async (event) => {
     );
   };
 
-  const renderClockPendingListButton = () => {
-    const pendingCount = clockListContextReady ? getClockProjectListItems("task", false).length : 0;
-    return (
-      <button
-        type="button"
-        className="flex h-10 w-full items-center justify-between gap-3 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-left text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
-        onClick={() => openClockProjectList("task")}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#FBF8F1] text-[#C9A227]" aria-hidden="true">
-            {renderClockActionIcon("lists")}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-[13px] font-black leading-tight">Pending list</span>
-            <span className="block truncate text-[11px] font-semibold leading-tight text-[#64748B]">
-              {clockListContextReady ? `${pendingCount} open` : "Select a project"}
-            </span>
-          </span>
-        </span>
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#061426] text-[18px] font-black leading-none text-white" aria-hidden="true">
-          +
-        </span>
-      </button>
-    );
-  };
-
   const listProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter(
     (project) => project?.id != null || String(project?.name || "").trim()
   );
@@ -20392,6 +22072,10 @@ const handlePhotoQuickUpload = async (event) => {
   const appHeaderMetaSeparator = "\u2022";
   const appHeaderMetaLabel = appHeaderUserName;
   const isHomeTab = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
+  const showFullScreenShellHeader = ["clock", "chat", "timesheet"].includes(activeTab);
+  const fullScreenShellTitle =
+    activeTab === "chat" ? "Chat" : activeTab === "timesheet" ? "Timesheets" : "Clock";
+  const homeTabForRole = isAdmin ? "dashboard" : "clock";
   const homeTodayLabel = `Today ${appHeaderMetaSeparator} ${appHeaderDateLabel}`;
   const homeFirstName = appHeaderUserName.split(/\s+/).filter(Boolean)[0] || appHeaderUserName;
   const homeGreetingLabel = (() => {
@@ -20548,15 +22232,67 @@ const handlePhotoQuickUpload = async (event) => {
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
         <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
-          <AppHeader
-            companyName={userCompany?.name || "Company"}
-            metaLabel={appHeaderMetaLabel}
-            iconSrc={OPERA_APP_ICON}
-            isDevelopment={IS_OPERA_DEVELOPMENT_APP}
-            showCompanyName={isHomeTab}
-            unreadCount={inAppNotifUnread}
-            onNotifications={() => setActiveTab("notifications")}
-          />
+          {isHomeTab ? (
+            <AppHeader
+              companyName={userCompany?.name || "Company"}
+              metaLabel={appHeaderMetaLabel}
+              iconSrc={OPERA_APP_ICON}
+              isDevelopment={IS_OPERA_DEVELOPMENT_APP}
+              showCompanyName={true}
+              unreadCount={inAppNotifUnread}
+              onNotifications={() => setActiveTab("notifications")}
+            />
+          ) : showFullScreenShellHeader ? (
+            <div className="flex items-center gap-3 rounded-[20px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
+              <button
+                type="button"
+                onClick={() => setActiveTab(homeTabForRole)}
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-sm active:bg-white"
+                aria-label="Back to home"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1 text-center">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Back</p>
+                <h1 className="truncate text-[18px] font-black leading-tight text-[#061426]">{fullScreenShellTitle}</h1>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab("notifications")}
+                className="opera-header-icon-button relative shrink-0"
+                aria-label="Notifications"
+              >
+                <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                  <path d="M10 21h4" />
+                </svg>
+                {inAppNotifUnread > 0 ? (
+                  <span className="opera-notification-badge">{inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}</span>
+                ) : null}
+              </button>
+            </div>
+          ) : (
+            <AppHeader
+              companyName={userCompany?.name || "Company"}
+              metaLabel={appHeaderMetaLabel}
+              iconSrc={OPERA_APP_ICON}
+              isDevelopment={IS_OPERA_DEVELOPMENT_APP}
+              showCompanyName={false}
+              unreadCount={inAppNotifUnread}
+              onNotifications={() => setActiveTab("notifications")}
+            />
+          )}
 
           {!isAdmin && activeAssignNotif ? (
             <div className="fixed inset-0 z-[72] bg-[#0B1F33]/40 px-3 py-6" role="dialog" aria-modal="true">
@@ -20595,6 +22331,82 @@ const handlePhotoQuickUpload = async (event) => {
                     <p className="text-[11px] text-slate-500 leading-snug">
                       “OK” confirms you saw the assignment. Accept/decline is separate inside Schedule.
                     </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {!isAdmin && !activeAssignNotif && payrollReminderPrompt ? (
+            <div
+              className={`fixed inset-0 z-[73] px-3 py-6 ${payrollReminderPrompt.stage === "overdue" ? "bg-[#DC2626]/35" : "bg-[#C9A227]/20"}`}
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="mx-auto flex h-full w-full max-w-md items-end justify-center">
+                <div className="w-full overflow-hidden rounded-[28px] border border-[#E2E8F0] bg-white shadow-[0_24px_80px_rgba(6,20,38,0.28)]">
+                  <div className={`px-4 py-3 ${payrollReminderPrompt.stage === "overdue" ? "bg-[#FEF2F2]" : "bg-[#FBF8F1]"}`}>
+                    <p className={`text-[10px] font-black uppercase tracking-[0.12em] ${payrollReminderPrompt.stage === "overdue" ? "text-[#DC2626]" : "text-[#9A6B12]"}`}>
+                      {payrollReminderPrompt.stage === "overdue" ? "Salary delay warning" : "Payroll balance reminder"}
+                    </p>
+                    <div className="mt-1 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="text-[22px] font-black leading-tight text-[#061426]">
+                          {payrollReminderPrompt.stage === "overdue" ? "Your salary may be delayed" : "Please clear your balance"}
+                        </h3>
+                        <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
+                          {formatPayrollPeriodLabel(payrollReminderPrompt.periodStart, payrollReminderPrompt.periodEnd, companyTimeZone)}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full border px-3 py-1.5 text-[13px] font-black ${
+                          payrollReminderPrompt.stage === "overdue"
+                            ? "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]"
+                            : "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]"
+                        }`}
+                      >
+                        {formatMoney(Math.abs(Number(payrollReminderPrompt.balance) || 0))}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-3 p-4">
+                    <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-3">
+                      <p className="text-[13px] font-semibold leading-snug text-[#061426] whitespace-pre-wrap break-words">
+                        {payrollReminderPrompt.message}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[12px] font-semibold text-[#64748B]">
+                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                        <p className="uppercase tracking-[0.08em]">Due date</p>
+                        <p className="mt-1 font-black text-[#061426]">
+                          {formatPayrollDateKeyShort(payrollReminderPrompt.dueDate, companyTimeZone, { includeYear: true })}
+                        </p>
+                      </div>
+                      <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                        <p className="uppercase tracking-[0.08em]">Clear by</p>
+                        <p className="mt-1 font-black text-[#061426]">
+                          {formatPayrollDateKeyShort(payrollReminderPrompt.warningDate, companyTimeZone, { includeYear: true })}
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[11px] font-semibold leading-snug text-[#64748B]">
+                      This reminder stays local to your device for today, then checks again tomorrow if the balance is still open.
+                    </p>
+                    <button
+                      type="button"
+                      className={`h-12 w-full rounded-[14px] px-4 text-[14px] font-black text-white ${
+                        payrollReminderPrompt.stage === "overdue" ? "bg-[#DC2626]" : "bg-[#061426]"
+                      }`}
+                      onClick={() => {
+                        if (payrollReminderPrompt?.dismissKey) {
+                          safeWrite(payrollReminderPrompt.dismissKey, true);
+                        }
+                        setPayrollReminderPrompt(null);
+                      }}
+                    >
+                      {payrollReminderPrompt.stage === "overdue" ? "I understand" : "I'll settle this"}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -20964,7 +22776,6 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className="block leading-tight">Start Break</span>
                     </button>
                   </div>
-                  {renderClockPendingListButton()}
 
                   {photoCameraError ? (
                     <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[15px] font-semibold text-amber-900 leading-snug">
@@ -21374,7 +23185,6 @@ const handlePhotoQuickUpload = async (event) => {
                           </span>
                         </button>
                       </div>
-                      {renderClockPendingListButton()}
 
                       <input
                         ref={photoFallbackCameraInputRef}
@@ -21672,11 +23482,14 @@ const handlePhotoQuickUpload = async (event) => {
                     Share report
                   </button>
                   {isAdmin ? (
-                    <button
-                      type="button"
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
-                      onClick={() => setPayrollPanelOpen(true)}
-                    >
+                  <button
+                    type="button"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                    onClick={() => {
+                      setPayrollEmployeeFilter("all");
+                      setPayrollPanelOpen(true);
+                    }}
+                  >
                       <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
                       <span className="truncate">Payroll</span>
                     </button>
@@ -21693,6 +23506,14 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                   )}
                 </div>
+                <button
+                  type="button"
+                  className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                  onClick={openVacationForm}
+                >
+                  <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                  <span className="truncate">Add vacation</span>
+                </button>
                 {manualTimeOpen && !isAdmin ? (
                   <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
                     <p className="text-[15px] font-black text-slate-950">Manual time request</p>
@@ -21896,6 +23717,119 @@ const handlePhotoQuickUpload = async (event) => {
                   )}
                   {visibleTimesheetRecords.map((record) => renderTimesheetCard(record, true))}
                 </div>
+                {vacationModalOpen ? (
+                  <div
+                    className="fixed inset-0 z-[80] flex items-end justify-center bg-[#061426]/45 p-3 backdrop-blur-[2px]"
+                    role="dialog"
+                    aria-modal="true"
+                    onClick={() => !vacationSaving && setVacationModalOpen(false)}
+                  >
+                    <form
+                      className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+                      onClick={(event) => event.stopPropagation()}
+                      onSubmit={(event) => void submitVacationForm(event)}
+                    >
+                      <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Timesheets</p>
+                          <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Add vacation</h3>
+                        </div>
+                        <button
+                          type="button"
+                          className="flex h-10 w-10 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[18px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]"
+                          onClick={() => !vacationSaving && setVacationModalOpen(false)}
+                          aria-label="Close vacation form"
+                        >
+                          x
+                        </button>
+                      </div>
+                      <div className="mt-4 space-y-3">
+                        {isAdmin ? (
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                            Employee
+                            <span className="relative block">
+                              <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+                                {renderTimesheetUiIcon("user", "h-4 w-4")}
+                              </span>
+                              <select
+                                className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                                value={vacationEmployeeId}
+                                onChange={(event) => setVacationEmployeeId(event.target.value)}
+                              >
+                                <option value="">Select employee</option>
+                                {vacationEmployeeOptions.map((employee) => (
+                                  <option key={employee.id} value={employee.id}>
+                                    {employee.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+                                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="m6 9 6 6 6-6" />
+                                </svg>
+                              </span>
+                            </span>
+                          </label>
+                        ) : null}
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                            Start date
+                            <input
+                              type="date"
+                              className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                              value={vacationStartDate}
+                              onChange={(event) => setVacationStartDate(event.target.value)}
+                              required
+                            />
+                          </label>
+                          <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                            End date
+                            <input
+                              type="date"
+                              className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                              value={vacationEndDate}
+                              onChange={(event) => setVacationEndDate(event.target.value)}
+                              required
+                            />
+                          </label>
+                        </div>
+                        <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                          Reason
+                          <textarea
+                            className="min-h-[92px] w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-3 text-[14px] font-semibold leading-snug text-[#061426] outline-none focus:border-[#94A3B8]"
+                            value={vacationReason}
+                            onChange={(event) => setVacationReason(event.target.value)}
+                            placeholder="Vacation reason"
+                            maxLength={500}
+                            required
+                          />
+                        </label>
+                        {vacationMessage ? (
+                          <p className={`rounded-[14px] px-3 py-2 text-[13px] font-semibold ${vacationSaving ? "border border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]" : "border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]"}`}>
+                            {vacationMessage}
+                          </p>
+                        ) : null}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[14px] font-black text-[#061426]"
+                            onClick={() => !vacationSaving && setVacationModalOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            className="h-12 rounded-[14px] bg-[#061426] px-3 text-[14px] font-black text-white disabled:bg-[#CBD5E1]"
+                            disabled={vacationSaving}
+                          >
+                            {vacationSaving ? "Saving..." : "Save"}
+                          </button>
+                        </div>
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
                 {timesheetFilterSheetOpen ? (
                   <div
                     className="fixed inset-0 z-[70] flex items-end justify-center bg-[#061426]/45 p-3 backdrop-blur-[2px]"
@@ -28306,9 +30240,103 @@ const handlePhotoQuickUpload = async (event) => {
                                 ...d,
                                 joiningDate: e.target.value,
                                 payRateEffectiveDate: e.target.value,
+                                payrollStartDate: e.target.value,
                               }))
                             }
                           />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-payroll-start-date">
+                            Payroll start date
+                          </label>
+                          <input
+                            id="team-add-payroll-start-date"
+                            type="date"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.payrollStartDate}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, payrollStartDate: e.target.value }))}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="team-add-payroll-balance">
+                            Payroll opening balance ($)
+                          </label>
+                          <input
+                            id="team-add-payroll-balance"
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={teamAddDraft.payrollOpeningBalance}
+                            disabled={teamAddSubmitting}
+                            onChange={(e) => setTeamAddDraft((d) => ({ ...d, payrollOpeningBalance: e.target.value }))}
+                          />
+                          <p className="text-[10px] font-semibold text-slate-500">
+                            Positive means employer owes employee. Negative means employee owes company.
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Auto payroll</p>
+                              <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                                Schedule payroll for this employee on each pay date.
+                              </p>
+                            </div>
+                            <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(teamAddDraft.autoPayrollEnabled)}
+                                onChange={(e) =>
+                                  setTeamAddDraft((d) => {
+                                    const enabled = e.target.checked;
+                                    const fallbackStart = payrollAutoPayrollPeriodOptions[0]?.startKey || d.autoPayrollStartPeriodKey || "";
+                                    return {
+                                      ...d,
+                                      autoPayrollEnabled: enabled,
+                                      autoPayrollStartPeriodKey: enabled ? String(d.autoPayrollStartPeriodKey || fallbackStart || "").trim() : "",
+                                      autoPayrollAmount: enabled ? String(d.autoPayrollAmount || "") : "",
+                                    };
+                                  })
+                                }
+                              />
+                              Enable
+                            </label>
+                          </div>
+                          {teamAddDraft.autoPayrollEnabled ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                              Payroll start date
+                                <select
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={teamAddDraft.autoPayrollStartPeriodKey || payrollAutoPayrollPeriodOptions[0]?.startKey || ""}
+                                  onChange={(e) =>
+                                    setTeamAddDraft((d) => (d ? { ...d, autoPayrollStartPeriodKey: e.target.value } : d))
+                                  }
+                                >
+                                  <option value="">Select payroll period</option>
+                                  {payrollAutoPayrollPeriodOptions.map((period) => (
+                                    <option key={period.id} value={period.startKey}>
+                                      {period.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                                Payroll amount ($)
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  step="0.01"
+                                  min={0}
+                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                  value={teamAddDraft.autoPayrollAmount}
+                                  onChange={(e) => setTeamAddDraft((d) => (d ? { ...d, autoPayrollAmount: e.target.value } : d))}
+                                />
+                              </label>
+                            </div>
+                          ) : null}
                         </div>
                         {teamAddSubmitting && (
                           <p className="text-xs text-slate-600">Creating employee...</p>
@@ -28424,6 +30452,20 @@ const handlePhotoQuickUpload = async (event) => {
                               >
                                 {emailLine}
                               </p>
+                              <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                                Payroll start{" "}
+                                {row.payrollStartDate
+                                  ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true })
+                                  : "—"}{" "}
+                                • Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))} •{" "}
+                                {payrollOpeningBalanceMeaning(Number(row.payrollOpeningBalance || 0))}
+                              </p>
+                              {row.autoPayrollEnabled ? (
+                                <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">
+                                  Auto payroll {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} •{" "}
+                                  {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
+                                </p>
+                              ) : null}
                               {!isEditing ? (
                                 <p className="mt-1 truncate text-[12px] font-bold text-slate-700" title={teamDefaultAssignmentLine}>
                                   Default: {teamDefaultAssignmentLine}
@@ -28637,6 +30679,115 @@ const handlePhotoQuickUpload = async (event) => {
                                   setTeamEditDraft((d) => (d ? { ...d, joiningDate: e.target.value } : d))
                                 }
                               />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                className="text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-payroll-start-${row.memberRowId}`}
+                              >
+                                Payroll start date
+                              </label>
+                              <input
+                                id={`team-payroll-start-${row.memberRowId}`}
+                                type="date"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.payrollStartDate ?? ""}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, payrollStartDate: e.target.value } : d))
+                                }
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label
+                                className="text-[11px] font-medium text-slate-600"
+                                htmlFor={`team-payroll-balance-${row.memberRowId}`}
+                              >
+                                Payroll opening balance ($)
+                              </label>
+                              <input
+                                id={`team-payroll-balance-${row.memberRowId}`}
+                                type="number"
+                                inputMode="decimal"
+                                step="0.01"
+                                className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                value={teamEditDraft.payrollOpeningBalance ?? ""}
+                                disabled={Boolean(teamSavingMemberRowId)}
+                                onChange={(e) =>
+                                  setTeamEditDraft((d) => (d ? { ...d, payrollOpeningBalance: e.target.value } : d))
+                                }
+                              />
+                              <p className="text-[10px] font-semibold text-slate-500">
+                                Positive means employer owes employee. Negative means employee owes company.
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">Auto payroll</p>
+                                  <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                                    Schedule payroll for this employee on each pay date.
+                                  </p>
+                                </div>
+                                <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(teamEditDraft.autoPayrollEnabled)}
+                                    disabled={Boolean(teamSavingMemberRowId)}
+                                    onChange={(e) =>
+                                      setTeamEditDraft((d) => {
+                                        if (!d) return d;
+                                        const enabled = e.target.checked;
+                                        const fallbackStart = payrollAutoPayrollPeriodOptions[0]?.startKey || d.autoPayrollStartPeriodKey || "";
+                                        return {
+                                          ...d,
+                                          autoPayrollEnabled: enabled,
+                                          autoPayrollStartPeriodKey: enabled ? String(d.autoPayrollStartPeriodKey || fallbackStart || "").trim() : "",
+                                          autoPayrollAmount: enabled ? String(d.autoPayrollAmount || "") : "",
+                                        };
+                                      })
+                                    }
+                                  />
+                                  Enable
+                                </label>
+                              </div>
+                              {teamEditDraft.autoPayrollEnabled ? (
+                                <div className="grid gap-3 sm:grid-cols-2">
+                                  <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                                    Payroll start date
+                                    <select
+                                      className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                      value={teamEditDraft.autoPayrollStartPeriodKey || payrollAutoPayrollPeriodOptions[0]?.startKey || ""}
+                                      disabled={Boolean(teamSavingMemberRowId)}
+                                      onChange={(e) =>
+                                        setTeamEditDraft((d) => (d ? { ...d, autoPayrollStartPeriodKey: e.target.value } : d))
+                                      }
+                                    >
+                                      <option value="">Select payroll period</option>
+                                      {payrollAutoPayrollPeriodOptions.map((period) => (
+                                        <option key={period.id} value={period.startKey}>
+                                          {period.label}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                                    Payroll amount ($)
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      step="0.01"
+                                      min={0}
+                                      className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                                      value={teamEditDraft.autoPayrollAmount}
+                                      disabled={Boolean(teamSavingMemberRowId)}
+                                      onChange={(e) =>
+                                        setTeamEditDraft((d) => (d ? { ...d, autoPayrollAmount: e.target.value } : d))
+                                      }
+                                    />
+                                  </label>
+                                </div>
+                              ) : null}
                             </div>
                             <div className="flex gap-2 pt-1">
                               <Button
@@ -28926,21 +31077,13 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3">
                           <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Current payroll period</p>
                           <p className="mt-1 text-[14px] font-black text-slate-900">
-                            {formatPayrollPeriodLabelLong(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
+                            {formatPayrollPeriodLabel(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
                           </p>
                           <p className="mt-1 text-[12px] font-semibold text-slate-600">
                             Pay date: {formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)}
                           </p>
                         </div>
                       ) : null}
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-800">
-                          Payroll day: {(payrollSettings?.payroll_day || "friday").toLowerCase()}
-                        </span>
-                        <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-black text-slate-800">
-                          Anchor: {payrollSettings?.anchor_date ? formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true }) : "â€”"}
-                        </span>
-                      </div>
                       {isAdmin ? (
                         <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
                           <span className="text-[14px] font-semibold text-slate-500">Company code</span>
@@ -29024,6 +31167,23 @@ const handlePhotoQuickUpload = async (event) => {
                             }
                           />
                         </label>
+                        <label className="block space-y-1 text-[14px] font-semibold text-slate-700">
+                          Pay date offset (days)
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            step={1}
+                            className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px] font-semibold text-slate-900"
+                            value={payrollSettingsDraft.payDateOffsetDays}
+                            onChange={(e) =>
+                              setPayrollSettingsDraft((draft) => ({
+                                ...draft,
+                                payDateOffsetDays: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
                         <div className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] font-semibold text-slate-700 space-y-1">
                           <div className="flex items-center justify-between gap-3">
                             <span>Payroll day</span>
@@ -29032,11 +31192,17 @@ const handlePhotoQuickUpload = async (event) => {
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-3">
+                            <span>Pay date offset</span>
+                            <span className="font-black text-slate-900">
+                              {Math.max(1, Math.trunc(Number(payrollSettingsDraft.payDateOffsetDays) || 10))} days
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3">
                             <span>Preview</span>
                             <span className="font-black text-slate-900">{payrollFrequencyLabel(payrollSettingsDraft.frequency)}</span>
                           </div>
                           <p className="text-[12px] font-semibold leading-snug text-slate-500">
-                            Choose the first payroll Friday. Biweekly periods repeat every 14 days from that anchor.
+                            Choose the first payroll Friday. Pay date becomes the period end plus the offset days.
                           </p>
                         </div>
                         {payrollSettingsMessage ? (
@@ -29076,6 +31242,12 @@ const handlePhotoQuickUpload = async (event) => {
                               <span className="text-[14px] font-semibold text-slate-500">Anchor Friday</span>
                               <span className="text-[15px] font-bold text-slate-900 text-right break-words">
                                 {formatPayrollDateKeyShort(payrollSettings.anchor_date, companyTimeZone, { includeYear: true })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between gap-3">
+                              <span className="text-[14px] font-semibold text-slate-500">Pay date offset</span>
+                              <span className="text-[15px] font-bold text-slate-900 text-right break-words">
+                                {payrollPayDateOffsetDaysValue(payrollSettings)} days
                               </span>
                             </div>
                             <div className="flex justify-between gap-3">
@@ -30230,4 +32402,3 @@ const handlePhotoQuickUpload = async (event) => {
     </div>
   );
 }
-

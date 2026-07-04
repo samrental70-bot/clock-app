@@ -59,7 +59,12 @@ function isMissingOptionalAccuracyColumnError(error) {
   const m = String(error?.message || "").toLowerCase();
   return (
     m.includes("column") &&
-    (m.includes("accuracy") || m.includes("clock_in_accuracy") || m.includes("clock_out_accuracy"))
+    (m.includes("accuracy") ||
+      m.includes("clock_in_accuracy") ||
+      m.includes("clock_out_accuracy") ||
+      m.includes("break_minutes") ||
+      m.includes("break_start_at") ||
+      m.includes("break_end_at"))
   );
 }
 
@@ -164,8 +169,8 @@ function computeWorkedHours(row, clockOutIso) {
   const t1 = new Date(clockOutIso).getTime();
   if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
   let workedMs = t1 - t0;
-  const breakStart = row?.break_start || row?.breakStart;
-  const breakEnd = row?.break_end || row?.breakEnd;
+  const breakStart = row?.break_start_at || row?.break_start || row?.breakStart;
+  const breakEnd = row?.break_end_at || row?.break_end || row?.breakEnd;
   const tb0 = new Date(breakStart).getTime();
   const tb1 = new Date(breakEnd).getTime();
   if (Number.isFinite(tb0) && Number.isFinite(tb1) && tb1 > tb0) {
@@ -263,10 +268,15 @@ async function updateTimesheetAutoClockOut(supabase, row, hourlyRate, settings) 
     return { data: [], error: new Error("Invalid clock_in") };
   }
   const labourCost = computeLabourCost(row, clockOutIso, hourlyRate);
+  const rawBreakMinutes =
+    row?.break_start_at && row?.break_end_at
+      ? Math.round((new Date(row.break_end_at).getTime() - new Date(row.break_start_at).getTime()) / 60000)
+      : Number(row?.break_minutes || 0) || 0;
   const payload = {
     clock_out: clockOutIso,
     status: AUTO_TIMED_OUT_STATUS,
     labour_cost: labourCost,
+    break_minutes: Number.isFinite(rawBreakMinutes) ? Math.max(0, rawBreakMinutes) : 0,
     clock_out_latitude: null,
     clock_out_longitude: null,
     clock_out_accuracy: null,
@@ -285,12 +295,16 @@ async function updateTimesheetAutoClockOut(supabase, row, hourlyRate, settings) 
   if (
     error &&
     isMissingOptionalAccuracyColumnError(error) &&
-    ("clock_out_accuracy" in payload || "clock_out_latitude" in payload || "clock_out_longitude" in payload)
+    ("clock_out_accuracy" in payload ||
+      "clock_out_latitude" in payload ||
+      "clock_out_longitude" in payload ||
+      "break_minutes" in payload)
   ) {
     const rest = { ...payload };
     delete rest.clock_out_accuracy;
     delete rest.clock_out_latitude;
     delete rest.clock_out_longitude;
+    delete rest.break_minutes;
     ({ data, error } = await supabase
       .from("timesheets")
       .update(rest)
