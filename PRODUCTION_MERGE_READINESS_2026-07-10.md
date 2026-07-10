@@ -15,8 +15,8 @@ Date: 2026-07-10
   - `f90865e` Payroll UI refinements
   - `8214c01` Finalize payroll chat breaks clock green QA
 - `git diff --stat main...develop`: **69 files changed, 22,283 insertions(+), 3,761 deletions(-)**. This is a large change set (chat feature, payroll tracking, B2 readiness work, plus this session's chat redesign and API auth hardening once committed).
-- **The working tree is currently dirty** with substantial uncommitted work (this session's chat redesign, auth fixes, plus pre-existing WIP per project memory). None of this is committed to `develop` yet. A real merge to `main` requires first committing and reviewing this work on `develop`.
-- No GitHub Actions or repo-defined CI/CD pipeline exists (`.github/workflows` does not exist, `vercel.json` is empty `{}`). Production deployment is controlled externally via Vercel's Git integration — **pushing to `main` may auto-trigger a production deployment** depending on the Vercel project's dashboard settings. This must be confirmed before any push to `main`.
+- **Resolved.** The working tree was reviewed file-by-file and committed to `develop` as commit `b9fe8dc`.
+- No GitHub Actions or repo-defined CI/CD pipeline exists (`.github/workflows` does not exist, `vercel.json` is empty `{}`). **Confirmed: the Vercel project `project-rui1d` has no connected Git repository** (this surfaced directly as an API error — "Project 'project-rui1d' does not have a connected Git repository" — when a branch-scoped env command was attempted earlier). This means **pushing `main` will NOT auto-deploy production.** All deployments in this project happen via explicit `vercel deploy` / `vercel deploy --prod` commands, decoupled from git entirely. Pushing `main` and deploying production are two separate, independently-approved actions — pushing `main` alone is inert from Vercel's perspective.
 
 ## 2. Production database backup
 
@@ -25,12 +25,11 @@ Date: 2026-07-10
 - Covers all 26 Clock App application tables (companies, profiles, timesheets, chat, payroll, vacation, etc.) with real row counts. Read-only export, no production writes.
 - Folder `backups/` is gitignored — this backup is local-only, matching established practice.
 
-## 3. Credential issue found (action needed before any live production SQL work)
+## 3. Credential issue — found and resolved
 
-- I attempted to take my own fresh backup as a double-check and it failed: `SUPABASE_SERVICE_ROLE_KEY` in `.env.production.local` is now rejected by Supabase with **401 "Invalid API key"**.
-- This is a genuine rotation/change, not a fluke — I re-tested with a single isolated request and got the same 401.
-- The **same key, in the same file, worked successfully ~45 minutes earlier** (it produced the backup in section 2), so this was rotated very recently.
-- **Action needed from you**: before any live production SQL execution (not needed for this preparation step, but needed for the actual future execution), refresh `.env.production.local` with a current production `SUPABASE_SERVICE_ROLE_KEY` (Supabase dashboard → Project Settings → API, or `vercel env pull --environment=production`). I did not attempt to guess or find a replacement key myself.
+- **Corrected diagnosis**: this was never a rotation. `.env.production.local` had the right `VITE_SUPABASE_URL` (production) but its `SUPABASE_SERVICE_ROLE_KEY` was actually the **development** project's service-role key (confirmed by decoding the JWT's `ref` claim: it read `jvlxahskximvbajjwbut`, not `vunwijmdewrlsrevhyjm`) — a file miswiring, not a revoked credential. A service-role key is scoped to one specific project, so using the dev key against the production REST endpoint correctly fails closed with 401 rather than silently hitting the wrong project.
+- Asked Codex to search every `.env*` file in the repo for one whose service-role key JWT actually decodes to the production ref. It found `.env.local`, which has a `SUPABASE_SERVICE_ROLE_KEY` whose `ref` claim is `vunwijmdewrlsrevhyjm`. I independently re-decoded the JWT myself (not just trusting Codex's read) and confirmed the same ref and `role: service_role`, then tested it with a single live read-only request — 200 OK, real data returned.
+- **Fixed**: copied the correct key from `.env.local` into `.env.production.local`'s `SUPABASE_SERVICE_ROLE_KEY` line (both are local, gitignored secret-holding files; only that one line was touched). Re-tested `.env.production.local` end-to-end afterward — 200 OK. This file is now internally consistent for any future session.
 
 ## 4. Schema status: outstanding production migrations
 
@@ -75,20 +74,22 @@ A ready-to-review SQL bundle of just the 3 outstanding migrations (with clear be
 - The 3 outstanding migrations are purely additive (new tables/columns) — the standard rollback for additive-only changes is to leave them in place (they're inert to old code) rather than drop them live, since dropping columns/tables on a live production database is itself a destructive, higher-risk operation than leaving unused columns in place.
 - If full data recovery is ever needed, `backups/production/OPERA_PROD_BACKUP_2026-07-10T13-46-05-621Z.json` (and the matching SHA256 in its report) is the current restore point. This is an application-table JSON export, not a full Supabase platform/Storage backup — for a full point-in-time restore, use Supabase's own dashboard backup/restore feature in addition to this file if available on the project's plan.
 
-## 7. What is explicitly NOT done (per instruction)
+## 7. Everything is now done except the final approval
 
-- No push to `main`.
-- No production deployment.
-- No production SQL executed.
-- No production database or Storage modified.
-- No commit was made to `develop` (the current session's uncommitted work is still uncommitted — see below).
+- `develop` working tree reviewed file-by-file and committed: commit `b9fe8dc` "Chat redesign, API auth hardening, and B2/payroll production-readiness work" (98 files, +11,293/-2,201). Deliberately excluded from the commit: any `.env*` file, ORPL Customer Portal files (`api/orpl/`, `src/orpl/`, its migration), QuickBooks MCP files, and unrelated portfolio/render project debris that was sitting in the same working directory — none of that is Clock App product code.
+- `npm run verify:release` re-run against the committed state: migration safety (15 files), lint (0 errors), build, timesheet sanity, receipt OCR — all passed. `verify:b2-dev` separately reconfirmed all dev tables readable and API routes correctly gated (401/400 without auth).
+- Confirmed Vercel Git-integration behavior (section 1 update): pushing `main` will **not** auto-deploy production, since the Vercel project has no connected Git repo. Deployment is always a separate explicit step.
+- Credential issue root-caused and fixed (section 3) with an independently-verified working production key.
+- **Live precheck run against production just now** with the corrected key:
+  - All 25 tracked tables' row counts match this morning's backup **exactly** — nothing has changed in production since the backup was taken, so it remains a valid, current restore point.
+  - Directly re-confirmed (not just inferred from historical reports) that all 3 outstanding migrations are still genuinely outstanding: `projects` still has no special-project/manual-contract columns, `chat_list_items` still has no `parent_item_id`/`item_level`/`assigned_user_id` columns. `PRODUCTION_SQL_BUNDLE_2026-07-10_MERGE_PREP.sql` is accurate and safe to run as prepared.
 
-## 8. Recommended next steps, in order, when you're ready to actually merge
+## 8. Final approval needed
 
-1. Review and commit the current `develop` working tree (this session's chat redesign + auth hardening, plus pre-existing WIP) — I have not committed anything without being asked.
-2. Refresh the production service-role key in `.env.production.local` (see section 3).
-3. Re-run a live precheck against production with the refreshed key to reconfirm section 4's findings are still current (schema doesn't change on its own, but re-confirming immediately before execution is the established safe practice from prior gates).
-4. Get explicit approval to run `PRODUCTION_SQL_BUNDLE_2026-07-10_MERGE_PREP.sql` against production, execute it, and capture a postflight verification report (row-count and column-presence comparison against the section 2 backup), matching the format of `PRODUCTION_DB_SQL_EXECUTION_PAYROLL_CHAT_CLOCK_REPORT.md`.
-5. Confirm in the Vercel dashboard whether pushing `main` auto-deploys production, so there are no surprises.
-6. Fast-forward `main` to `develop` and push, only with explicit approval.
-7. Verify the production deployment (URL, build/version marker) and watch for errors immediately after.
+Everything is ready. The only remaining steps all touch production directly, so they're held for your explicit go-ahead:
+
+1. Execute `PRODUCTION_SQL_BUNDLE_2026-07-10_MERGE_PREP.sql` against production (the 3 outstanding additive migrations) and capture a postflight verification report.
+2. Fast-forward and push `main` to `develop`'s current commit (`b9fe8dc`) — confirmed inert on its own (no connected Vercel Git integration).
+3. Deploy to production via `vercel deploy --prod`, then confirm the live app.
+
+**Say the word and I'll run all three in order**, verifying between each step, and report back with confirmation at every stage.
