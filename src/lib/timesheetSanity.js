@@ -70,6 +70,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
     if (!Number.isFinite(startMs)) {
       issues.push({
         id: timesheetSanityIssueKey(record, index, "missing-in"),
+        recordId: record?.supabaseTimesheetId ?? record?.id ?? null,
+        recordIds: [record?.supabaseTimesheetId ?? record?.id ?? null].filter(Boolean),
         severity: "warning",
         title: "Missing clock-in time",
         detail: `${employee} has a timesheet row without a valid clock-in time.`,
@@ -79,6 +81,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
     if (!clockOutRaw || !Number.isFinite(endMs)) {
       issues.push({
         id: timesheetSanityIssueKey(record, index, "missing-out"),
+        recordId: record?.supabaseTimesheetId ?? record?.id ?? null,
+        recordIds: [record?.supabaseTimesheetId ?? record?.id ?? null].filter(Boolean),
         severity: "warning",
         title: "Missing clock-out time",
         detail: `${employee} may still be working or needs a clock-out review.`,
@@ -90,6 +94,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
       if (workedMinutes > longShiftMinutes) {
         issues.push({
           id: timesheetSanityIssueKey(record, index, "long-shift"),
+          recordId: record?.supabaseTimesheetId ?? record?.id ?? null,
+          recordIds: [record?.supabaseTimesheetId ?? record?.id ?? null].filter(Boolean),
           severity: "warning",
           title: "Long shift",
           detail: `${employee} has a ${formatHoursMinutes(workedMinutes)} entry. Review before payroll.`,
@@ -107,6 +113,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
     if (!project) {
       issues.push({
         id: timesheetSanityIssueKey(record, index, "missing-project"),
+        recordId: record?.supabaseTimesheetId ?? record?.id ?? null,
+        recordIds: [record?.supabaseTimesheetId ?? record?.id ?? null].filter(Boolean),
         severity: "info",
         title: "Missing job site",
         detail: `${employee} has a timesheet row without a project/job site.`,
@@ -116,6 +124,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
     if (!task) {
       issues.push({
         id: timesheetSanityIssueKey(record, index, "missing-task"),
+        recordId: record?.supabaseTimesheetId ?? record?.id ?? null,
+        recordIds: [record?.supabaseTimesheetId ?? record?.id ?? null].filter(Boolean),
         severity: "info",
         title: "Missing task",
         detail: `${employee} has a timesheet row without a task.`,
@@ -131,6 +141,8 @@ export function buildTimesheetSanityChecks(records, options = {}) {
       if (current.startMs < previous.endMs) {
         issues.push({
           id: `overlap-${current.id}-${previous.id}`,
+          recordId: current.id ?? previous.id ?? null,
+          recordIds: [current.id ?? null, previous.id ?? null].filter(Boolean),
           severity: "danger",
           title: "Overlapping time entries",
           detail: `${current.employee} has entries with overlapping times. Review before payroll.`,

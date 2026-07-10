@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 const MAX_MESSAGE_LENGTH = 2000;
 const MAX_GROUP_MEMBERS = 50;
@@ -112,10 +113,97 @@ function normalizeChecklistItems(value) {
 function normalizeChatListItems(value) {
   const rows = Array.isArray(value) ? value : [];
   return rows
-    .map((item) => (typeof item === "string" ? item : item?.text))
-    .map((text) => cleanText(text).replace(/\s+/g, " ").slice(0, 400))
+    .map((item, index) => {
+      const text = cleanText(typeof item === "string" ? item : item?.text).replace(/\s+/g, " ").slice(0, 400);
+      if (!text) return null;
+      const itemLevel = Number(item?.item_level ?? item?.itemLevel ?? 0) === 1 ? 1 : 0;
+      return {
+        text,
+        temp_key: cleanText(item?.temp_key || item?.tempKey || `item-${index + 1}`),
+        parent_temp_key: itemLevel === 1 ? cleanText(item?.parent_temp_key || item?.parentTempKey) : "",
+        item_level: itemLevel,
+      };
+    })
     .filter(Boolean)
     .slice(0, MAX_CHAT_LIST_ITEMS);
+}
+
+async function fetchActiveChatListItems(supabase, { companyId, listId }) {
+  const { data, error } = await supabase
+    .from("chat_list_items")
+    .select("id, list_id, item_number, text, is_done, completed_at, completed_by, created_by, created_at, updated_at, deleted_at, parent_item_id, item_level, child_order, sort_order, assigned_user_id")
+    .eq("company_id", companyId)
+    .eq("list_id", listId)
+    .is("deleted_at", null)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function reindexChatListHierarchy(supabase, { companyId, listId, callerId }) {
+  const rows = await fetchActiveChatListItems(supabase, { companyId, listId });
+  const topLevelIds = new Set(rows.filter((row) => Number(row?.item_level || 0) === 0 || !row?.parent_item_id).map((row) => String(row.id)));
+  const normalized = [];
+  let mainNumber = 0;
+  const childCountByParent = new Map();
+
+  for (const row of rows) {
+    const parentId = cleanText(row?.parent_item_id);
+    const isChild = parentId && topLevelIds.has(parentId) && Number(row?.item_level || 0) === 1;
+    if (!isChild) {
+      mainNumber += 1;
+      normalized.push({
+        id: row.id,
+        parent_item_id: null,
+        item_level: 0,
+        item_number: mainNumber,
+        child_order: 0,
+        sort_order: normalized.length + 1,
+      });
+      topLevelIds.add(String(row.id));
+      childCountByParent.set(String(row.id), 0);
+      continue;
+    }
+    const nextChildOrder = (childCountByParent.get(parentId) || 0) + 1;
+    childCountByParent.set(parentId, nextChildOrder);
+    const parentRow = normalized.find((item) => String(item.id) === parentId);
+    normalized.push({
+      id: row.id,
+      parent_item_id: parentId,
+      item_level: 1,
+      item_number: Number(parentRow?.item_number || mainNumber || 1),
+      child_order: nextChildOrder,
+      sort_order: normalized.length + 1,
+    });
+  }
+
+  for (const row of normalized) {
+    const { error } = await supabase
+      .from("chat_list_items")
+      .update({
+        parent_item_id: row.parent_item_id,
+        item_level: row.item_level,
+        item_number: row.item_number,
+        child_order: row.child_order,
+        sort_order: row.sort_order,
+        updated_at: new Date().toISOString(),
+        updated_by: callerId,
+      })
+      .eq("company_id", companyId)
+      .eq("id", row.id);
+    if (error) throw error;
+  }
+  return normalized;
+}
+
+function normalizeChatNotificationPreview(type, body, attachments) {
+  if (type === "photo") return "Sent a photo";
+  if (type === "checklist") return "Shared a checklist";
+  const text = cleanText(body).replace(/\s+/g, " ");
+  if (text) return text.slice(0, 240);
+  if (Array.isArray(attachments) && attachments.length > 0) return "Sent an attachment";
+  return "New message";
 }
 
 async function getAuthedUser(supabase, req) {
@@ -126,13 +214,13 @@ async function getAuthedUser(supabase, req) {
     error.status = 401;
     throw error;
   }
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user?.id) {
+  const { user, error } = await verifyUserToken(getSupabaseUrl(), token, { fallbackClient: supabase });
+  if (error || !user?.id) {
     const authError = new Error("Invalid or expired session");
     authError.status = 401;
     throw authError;
   }
-  return data.user;
+  return user;
 }
 
 async function getActiveMembership(supabase, companyId, userId) {
@@ -334,6 +422,19 @@ async function getConversationMembers(supabase, { companyId, conversationId }) {
   return data || [];
 }
 
+async function markConversationRead(supabase, { companyId, conversationId, userId }) {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("chat_conversation_members")
+    .update({ last_read_at: now })
+    .eq("company_id", companyId)
+    .eq("conversation_id", conversationId)
+    .eq("user_id", userId)
+    .is("left_at", null);
+  if (error) throw error;
+  return { last_read_at: now };
+}
+
 function canManageConversation(companyRole, conversationMember) {
   return isAdminRole(companyRole) || cleanText(conversationMember?.role).toLowerCase() === "owner";
 }
@@ -459,7 +560,7 @@ async function listMessages(supabase, { companyId, conversationId, callerId, cal
   const safeMessageLimit = safeLimit(limit);
   const { data: rows, error } = await supabase
     .from("chat_messages")
-    .select("id, sender_user_id, body, message_type, metadata, created_at, edited_at, deleted_at, deleted_by")
+    .select("id, client_id, sender_user_id, body, message_type, metadata, created_at, edited_at, deleted_at, deleted_by")
     .eq("company_id", companyId)
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: false })
@@ -475,6 +576,15 @@ async function listMessages(supabase, { companyId, conversationId, callerId, cal
     profiles = profileRows || [];
   }
   const profileById = Object.fromEntries(profiles.map((profile) => [String(profile.id), profile]));
+  const activeMembers = await fetchActiveCompanyMembers(supabase, companyId);
+  const { data: readRows, error: readError } = await supabase
+    .from("chat_conversation_members")
+    .select("user_id, role, last_read_at, joined_at, left_at")
+    .eq("company_id", companyId)
+    .eq("conversation_id", conversationId)
+    .is("left_at", null);
+  if (readError) throw readError;
+  const readById = Object.fromEntries((readRows || []).map((row) => [String(row.user_id), row]));
 
   let attachmentRows = [];
   let checklistRows = [];
@@ -538,25 +648,39 @@ async function listMessages(supabase, { companyId, conversationId, callerId, cal
     });
   }
   const pinByMessage = new Map(pinRows.map((pin) => [String(pin.message_id), pin]));
+  const conversationMembers = activeMembers.map((member) => {
+    const row = readById[String(member.user_id)] || {};
+    return {
+      user_id: member.user_id,
+      role: row.role || member.role || "member",
+      name: member.name || memberByIdSafe(activeMembers, member.user_id)?.name || "User",
+      email: member.email || memberByIdSafe(activeMembers, member.user_id)?.email || "",
+      last_read_at: row.last_read_at || null,
+    };
+  });
 
-  return messages.map((message) => ({
-    id: message.id,
-    sender_user_id: message.sender_user_id,
-    sender_name: maskName(profileById[String(message.sender_user_id)], "User"),
-    message_type: message.message_type || "text",
-    body: message.deleted_at ? "" : message.body,
-    deleted: Boolean(message.deleted_at),
-    metadata: message.deleted_at ? {} : normalizeMetadata(message.metadata),
-    attachments: message.deleted_at ? [] : attachmentsByMessage[String(message.id)] || [],
-    checklist_items: message.deleted_at ? [] : checklistByMessage[String(message.id)] || [],
-    pinned: pinByMessage.has(String(message.id)),
-    pinned_at: pinByMessage.get(String(message.id))?.created_at || null,
-    can_delete: !message.deleted_at && (String(message.sender_user_id) === String(callerId) || isAdminRole(callerRole)),
-    can_pin: !message.deleted_at,
-    created_at: message.created_at,
-    edited_at: message.edited_at,
-    deleted_by: message.deleted_by || null,
-  }));
+  return {
+    messages: messages.map((message) => ({
+      id: message.id,
+      client_id: message.client_id || null,
+      sender_user_id: message.sender_user_id,
+      sender_name: maskName(profileById[String(message.sender_user_id)], "User"),
+      message_type: message.message_type || "text",
+      body: message.deleted_at ? "" : message.body,
+      deleted: Boolean(message.deleted_at),
+      metadata: message.deleted_at ? {} : normalizeMetadata(message.metadata),
+      attachments: message.deleted_at ? [] : attachmentsByMessage[String(message.id)] || [],
+      checklist_items: message.deleted_at ? [] : checklistByMessage[String(message.id)] || [],
+      pinned: pinByMessage.has(String(message.id)),
+      pinned_at: pinByMessage.get(String(message.id))?.created_at || null,
+      can_delete: !message.deleted_at && (String(message.sender_user_id) === String(callerId) || isAdminRole(callerRole)),
+      can_pin: !message.deleted_at,
+      created_at: message.created_at,
+      edited_at: message.edited_at,
+      deleted_by: message.deleted_by || null,
+    })),
+    conversation_members: conversationMembers,
+  };
 }
 
 async function touchConversation(supabase, { companyId, conversationId }) {
@@ -576,8 +700,7 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
     .eq("company_id", companyId)
     .eq("conversation_id", conversationId)
     .is("archived_at", null)
-    .order("pinned", { ascending: false })
-    .order("updated_at", { ascending: false })
+    .order("created_at", { ascending: true })
     .limit(30);
   if (error) {
     if (isMissingRelationError(error)) return [];
@@ -587,17 +710,22 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
   const listIds = uniqueStrings(listRows.map((list) => list.id));
   let itemRows = [];
   if (listIds.length) {
-    const { data: items, error: itemError } = await supabase
-      .from("chat_list_items")
-      .select("id, list_id, item_number, text, is_done, completed_at, completed_by, created_by, created_at, updated_at, deleted_at")
-      .eq("company_id", companyId)
-      .in("list_id", listIds)
-      .is("deleted_at", null)
-      .order("item_number", { ascending: true });
-    if (itemError) {
+    try {
+      const { data: items, error: itemError } = await supabase
+        .from("chat_list_items")
+        .select("id, list_id, item_number, text, is_done, completed_at, completed_by, created_by, created_at, updated_at, deleted_at, parent_item_id, item_level, child_order, sort_order, assigned_user_id")
+        .eq("company_id", companyId)
+        .in("list_id", listIds)
+        .is("deleted_at", null)
+        .order("sort_order", { ascending: true })
+        .order("created_at", { ascending: true });
+      if (itemError) {
+        if (!isMissingRelationError(itemError)) throw itemError;
+      } else {
+        itemRows = items || [];
+      }
+    } catch (itemError) {
       if (!isMissingRelationError(itemError)) throw itemError;
-    } else {
-      itemRows = items || [];
     }
   }
   const itemsByList = {};
@@ -614,6 +742,11 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
       created_by: item.created_by,
       created_at: item.created_at,
       updated_at: item.updated_at,
+      parent_item_id: item.parent_item_id || null,
+      item_level: Number(item.item_level || 0),
+      child_order: Number(item.child_order || 0),
+      sort_order: Number(item.sort_order || item.item_number || 0),
+      assigned_user_id: item.assigned_user_id || null,
     });
   }
   return listRows.map((list) => {
@@ -677,29 +810,67 @@ async function createChatList(supabase, { companyId, conversationId, callerId, t
       title: cleanTitle,
       created_by: callerId,
       updated_by: callerId,
-      pinned: true,
+      pinned: false,
     })
     .select("id")
     .single();
   if (error) throw error;
   if (cleanItems.length) {
-    const rows = cleanItems.map((text, index) => ({
-      company_id: companyId,
-      conversation_id: convId,
-      list_id: list.id,
-      item_number: index + 1,
-      text,
-      created_by: callerId,
-      updated_by: callerId,
-    }));
-    const { error: itemError } = await supabase.from("chat_list_items").insert(rows);
-    if (itemError) throw itemError;
+    let mainNumber = 0;
+    let sortOrder = 0;
+    const mainIdByTempKey = new Map();
+    const childCountByParentId = new Map();
+    for (const item of cleanItems) {
+      sortOrder += 1;
+      const isChild = Number(item.item_level || 0) === 1 && item.parent_temp_key && mainIdByTempKey.has(item.parent_temp_key);
+      if (!isChild) {
+        mainNumber += 1;
+        const { data: insertedMain, error: mainError } = await supabase
+          .from("chat_list_items")
+          .insert({
+            company_id: companyId,
+            conversation_id: convId,
+            list_id: list.id,
+            item_number: mainNumber,
+            text: item.text,
+            created_by: callerId,
+            updated_by: callerId,
+            parent_item_id: null,
+            item_level: 0,
+            child_order: 0,
+            sort_order: sortOrder,
+          })
+          .select("id")
+          .single();
+        if (mainError) throw mainError;
+        mainIdByTempKey.set(item.temp_key, insertedMain.id);
+        childCountByParentId.set(insertedMain.id, 0);
+        continue;
+      }
+      const parentId = mainIdByTempKey.get(item.parent_temp_key);
+      const childOrder = (childCountByParentId.get(parentId) || 0) + 1;
+      childCountByParentId.set(parentId, childOrder);
+      const { error: childError } = await supabase.from("chat_list_items").insert({
+        company_id: companyId,
+        conversation_id: convId,
+        list_id: list.id,
+        item_number: mainNumber,
+        text: item.text,
+        created_by: callerId,
+        updated_by: callerId,
+        parent_item_id: parentId,
+        item_level: 1,
+        child_order: childOrder,
+        sort_order: sortOrder,
+      });
+      if (childError) throw childError;
+    }
   }
   await touchConversation(supabase, { companyId, conversationId: convId });
   return { id: list.id };
 }
 
-async function addChatListItem(supabase, { companyId, callerId, listId, text }) {
+async function addChatListItem(supabase, { companyId, callerId, listId, text, parentItemId, assignedUserId }) {
   const list = await getChatListForMember(supabase, { companyId, listId, callerId });
   const cleanItem = cleanText(text).replace(/\s+/g, " ").slice(0, 400);
   if (!cleanItem) {
@@ -707,15 +878,37 @@ async function addChatListItem(supabase, { companyId, callerId, listId, text }) 
     error.status = 400;
     throw error;
   }
-  const { data: latest, error: latestError } = await supabase
-    .from("chat_list_items")
-    .select("item_number")
-    .eq("company_id", companyId)
-    .eq("list_id", list.id)
-    .order("item_number", { ascending: false })
-    .limit(1);
-  if (latestError) throw latestError;
-  const nextNumber = Math.max(0, Number(latest?.[0]?.item_number || 0)) + 1;
+  const rows = await fetchActiveChatListItems(supabase, { companyId, listId: list.id });
+  const cleanParentId = cleanText(parentItemId);
+  let nextNumber = rows.filter((row) => Number(row?.item_level || 0) === 0 || !row?.parent_item_id).reduce((max, row) => Math.max(max, Number(row?.item_number || 0)), 0) + 1;
+  let itemLevel = 0;
+  let parentId = null;
+  let childOrder = 0;
+  let sortOrder = rows.reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), 0) + 1;
+  if (cleanParentId) {
+    const parentRow = rows.find((row) => String(row.id) === cleanParentId);
+    if (parentRow && (Number(parentRow?.item_level || 0) === 0 || !parentRow?.parent_item_id)) {
+      parentId = cleanParentId;
+      itemLevel = 1;
+      nextNumber = Number(parentRow.item_number || nextNumber);
+      const parentBranchRows = rows.filter(
+        (row) => String(row.id) === cleanParentId || String(row.parent_item_id || "") === cleanParentId
+      );
+      childOrder =
+        rows
+          .filter((row) => String(row.parent_item_id || "") === cleanParentId)
+          .reduce((max, row) => Math.max(max, Number(row?.child_order || 0)), 0) + 1;
+      sortOrder = parentBranchRows.reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), Number(parentRow?.sort_order || 0)) + 1;
+      for (const row of rows.filter((row) => Number(row?.sort_order || 0) >= sortOrder)) {
+        const { error: shiftError } = await supabase
+          .from("chat_list_items")
+          .update({ sort_order: Number(row.sort_order || 0) + 1, updated_at: new Date().toISOString(), updated_by: callerId })
+          .eq("company_id", companyId)
+          .eq("id", row.id);
+        if (shiftError) throw shiftError;
+      }
+    }
+  }
   const { data: item, error } = await supabase
     .from("chat_list_items")
     .insert({
@@ -726,17 +919,29 @@ async function addChatListItem(supabase, { companyId, callerId, listId, text }) 
       text: cleanItem,
       created_by: callerId,
       updated_by: callerId,
+      assigned_user_id: itemLevel === 0 ? cleanText(assignedUserId) || null : null,
+      parent_item_id: parentId,
+      item_level: itemLevel,
+      child_order: childOrder,
+      sort_order: sortOrder,
     })
-    .select("id")
+    .select("id, item_number, parent_item_id, item_level, child_order, sort_order, assigned_user_id")
     .single();
   if (error) throw error;
+  await reindexChatListHierarchy(supabase, { companyId, listId: list.id, callerId });
   await supabase
     .from("chat_lists")
     .update({ updated_at: new Date().toISOString(), updated_by: callerId })
     .eq("company_id", companyId)
     .eq("id", list.id);
   await touchConversation(supabase, { companyId, conversationId: list.conversation_id });
-  return { id: item.id, item_number: nextNumber };
+  return {
+    id: item.id,
+    item_number: item.item_number,
+    parent_item_id: item.parent_item_id || null,
+    item_level: item.item_level || 0,
+    assigned_user_id: item.assigned_user_id || null,
+  };
 }
 
 async function getChatListItemForMember(supabase, { companyId, itemId, callerId }) {
@@ -748,7 +953,7 @@ async function getChatListItemForMember(supabase, { companyId, itemId, callerId 
   }
   const { data: item, error } = await supabase
     .from("chat_list_items")
-    .select("id, company_id, conversation_id, list_id, text, is_done, deleted_at")
+    .select("id, company_id, conversation_id, list_id, text, is_done, deleted_at, parent_item_id, item_level, child_order, item_number, sort_order, assigned_user_id")
     .eq("company_id", companyId)
     .eq("id", id)
     .maybeSingle();
@@ -781,6 +986,46 @@ async function updateChatListItem(supabase, { companyId, callerId, itemId, text 
   return { id: item.id };
 }
 
+async function assignChatListItem(supabase, { companyId, callerId, itemId, assignedUserId }) {
+  const item = await getChatListItemForMember(supabase, { companyId, itemId, callerId });
+  if (Number(item.item_level || 0) === 1 || item.parent_item_id) {
+    const error = new Error("Only main checklist items can be assigned");
+    error.status = 400;
+    throw error;
+  }
+  const nextAssignedUserId = cleanText(assignedUserId);
+  if (nextAssignedUserId) {
+    const activeMembers = await fetchActiveCompanyMembers(supabase, companyId);
+    if (!activeMembers.some((member) => String(member.user_id) === nextAssignedUserId)) {
+      const error = new Error("Assigned employee must be active in this company");
+      error.status = 400;
+      throw error;
+    }
+    const conversationMembers = await getConversationMembers(supabase, {
+      companyId,
+      conversationId: item.conversation_id,
+    });
+    if (!conversationMembers.some((member) => String(member.user_id) === nextAssignedUserId)) {
+      const error = new Error("Assigned employee must be in this chat");
+      error.status = 400;
+      throw error;
+    }
+  }
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("chat_list_items")
+    .update({
+      assigned_user_id: nextAssignedUserId || null,
+      updated_at: now,
+      updated_by: callerId,
+    })
+    .eq("company_id", companyId)
+    .eq("id", item.id);
+  if (error) throw error;
+  await supabase.from("chat_lists").update({ updated_at: now, updated_by: callerId }).eq("company_id", companyId).eq("id", item.list_id);
+  return { id: item.id, assigned_user_id: nextAssignedUserId || null };
+}
+
 async function toggleChatListItem(supabase, { companyId, callerId, itemId, done }) {
   const item = await getChatListItemForMember(supabase, { companyId, itemId, callerId });
   const nextDone = done == null ? !item.is_done : Boolean(done);
@@ -797,6 +1042,21 @@ async function toggleChatListItem(supabase, { companyId, callerId, itemId, done 
     .eq("company_id", companyId)
     .eq("id", item.id);
   if (error) throw error;
+  if (nextDone && (Number(item.item_level || 0) === 0 || !item.parent_item_id) && item.id) {
+    const { error: childError } = await supabase
+      .from("chat_list_items")
+      .update({
+        is_done: true,
+        completed_at: now,
+        completed_by: callerId,
+        updated_at: now,
+        updated_by: callerId,
+      })
+      .eq("company_id", companyId)
+      .eq("parent_item_id", item.id)
+      .is("deleted_at", null);
+    if (childError) throw childError;
+  }
   await supabase.from("chat_lists").update({ updated_at: now, updated_by: callerId }).eq("company_id", companyId).eq("id", item.list_id);
   return { id: item.id, is_done: nextDone };
 }
@@ -810,8 +1070,54 @@ async function deleteChatListItem(supabase, { companyId, callerId, itemId }) {
     .eq("company_id", companyId)
     .eq("id", item.id);
   if (error) throw error;
+  if ((Number(item.item_level || 0) === 0 || !item.parent_item_id) && item.id) {
+    const { error: childDeleteError } = await supabase
+      .from("chat_list_items")
+      .update({ deleted_at: now, deleted_by: callerId, updated_at: now, updated_by: callerId })
+      .eq("company_id", companyId)
+      .eq("parent_item_id", item.id)
+      .is("deleted_at", null);
+    if (childDeleteError) throw childDeleteError;
+  }
+  await reindexChatListHierarchy(supabase, { companyId, listId: item.list_id, callerId });
   await supabase.from("chat_lists").update({ updated_at: now, updated_by: callerId }).eq("company_id", companyId).eq("id", item.list_id);
   return { id: item.id, deleted: true };
+}
+
+async function reparentChatListItem(supabase, { companyId, callerId, itemId, parentItemId }) {
+  const item = await getChatListItemForMember(supabase, { companyId, itemId, callerId });
+  const cleanParentId = cleanText(parentItemId);
+  let parentId = null;
+  let itemLevel = 0;
+  if (cleanParentId && cleanParentId !== String(item.id)) {
+    const parentItem = await getChatListItemForMember(supabase, { companyId, itemId: cleanParentId, callerId });
+    if (String(parentItem.list_id) !== String(item.list_id)) {
+      const error = new Error("Sub-point parent must be in the same list");
+      error.status = 400;
+      throw error;
+    }
+    if (Number(parentItem.item_level || 0) !== 0 && parentItem.parent_item_id) {
+      const error = new Error("Only one level of nesting is supported");
+      error.status = 400;
+      throw error;
+    }
+    parentId = cleanParentId;
+    itemLevel = 1;
+  }
+  const { error } = await supabase
+    .from("chat_list_items")
+    .update({
+      parent_item_id: parentId,
+      item_level: itemLevel,
+      updated_at: new Date().toISOString(),
+      updated_by: callerId,
+    })
+    .eq("company_id", companyId)
+    .eq("id", item.id);
+  if (error) throw error;
+  await reindexChatListHierarchy(supabase, { companyId, listId: item.list_id, callerId });
+  await supabase.from("chat_lists").update({ updated_at: new Date().toISOString(), updated_by: callerId }).eq("company_id", companyId).eq("id", item.list_id);
+  return { id: item.id, parent_item_id: parentId, item_level: itemLevel };
 }
 
 async function archiveChatList(supabase, { companyId, callerId, callerRole, listId }) {
@@ -922,7 +1228,64 @@ async function sendMessage(supabase, { companyId, conversationId, callerId, body
     .eq("company_id", companyId)
     .eq("id", conversationId);
 
-  return { id: data?.id, created_at: data?.created_at || now };
+  let notificationIds = [];
+  if (insertedNew && data?.id) {
+    const [conversation, activeMembers, conversationMembers] = await Promise.all([
+      getConversation(supabase, { companyId, conversationId }),
+      fetchActiveCompanyMembers(supabase, companyId),
+      getConversationMembers(supabase, { companyId, conversationId }),
+    ]);
+    const sender = memberByIdSafe(activeMembers, callerId);
+    const senderName = cleanText(sender?.name || sender?.email || "Team member") || "Team member";
+    const conversationName =
+      conversation?.type === "company"
+        ? "All employees"
+        : cleanText(conversation?.name || "") || "Chat";
+    const preview = normalizeChatNotificationPreview(type, cleanBody, attachmentRows);
+    const recipientIds = uniqueStrings(
+      conversationMembers
+        .map((member) => member?.user_id)
+        .filter((userId) => String(userId || "") !== String(callerId))
+    );
+    if (recipientIds.length) {
+      const rows = recipientIds.map((recipientUserId) => ({
+        company_id: companyId,
+        recipient_user_id: recipientUserId,
+        actor_user_id: callerId,
+        type: "chat_message",
+        title: senderName,
+        message: preview,
+        read_at: null,
+        is_read: false,
+        project_id: null,
+        project_name: conversationName,
+        cost_centre: null,
+        related_timesheet_id: null,
+        related_folder: `chat:${conversationId}`,
+        item_count: null,
+      }));
+      let notificationInsert = await supabase.from("notifications").insert(rows).select("id");
+      if (notificationInsert.error && String(notificationInsert.error.message || "").toLowerCase().includes("is_read")) {
+        const retryRows = rows.map((row) => {
+          const retryRow = { ...row };
+          delete retryRow.is_read;
+          return retryRow;
+        });
+        notificationInsert = await supabase.from("notifications").insert(retryRows).select("id");
+      }
+      if (notificationInsert.error) {
+        console.warn("[CHAT_API] notification insert failed", notificationInsert.error);
+      } else {
+        notificationIds = (notificationInsert.data || []).map((row) => row.id).filter(Boolean);
+      }
+    }
+  }
+
+  return {
+    id: data?.id,
+    created_at: data?.created_at || now,
+    notification_ids: notificationIds,
+  };
 }
 
 async function createDirectConversation(supabase, { companyId, callerId, targetUserId }) {
@@ -1306,7 +1669,7 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "Missing conversation_id" });
         return;
       }
-      const messages = await listMessages(supabase, {
+      const messagesResult = await listMessages(supabase, {
         companyId,
         conversationId,
         callerId: user.id,
@@ -1319,7 +1682,7 @@ export default async function handler(req, res) {
         callerId: user.id,
         callerRole,
       });
-      res.status(200).json({ ok: true, messages, lists });
+      res.status(200).json({ ok: true, ...messagesResult, lists });
       return;
     }
 
@@ -1340,7 +1703,7 @@ export default async function handler(req, res) {
         checklistItems: body.checklist_items || body.checklistItems,
         metadata: body.metadata,
       });
-      res.status(200).json({ ok: true, message: result });
+      res.status(200).json({ ok: true, message: result, notification_ids: result.notification_ids || [] });
       return;
     }
 
@@ -1405,6 +1768,8 @@ export default async function handler(req, res) {
         callerId: user.id,
         listId: body.list_id || body.listId,
         text: body.text,
+        parentItemId: body.parent_item_id || body.parentItemId,
+        assignedUserId: body.assigned_user_id || body.assignedUserId,
       });
       res.status(200).json({ ok: true, item: result });
       return;
@@ -1432,11 +1797,33 @@ export default async function handler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && action === "assign_list_item") {
+      const result = await assignChatListItem(supabase, {
+        companyId,
+        callerId: user.id,
+        itemId: body.item_id || body.itemId,
+        assignedUserId: body.assigned_user_id || body.assignedUserId,
+      });
+      res.status(200).json({ ok: true, item: result });
+      return;
+    }
+
     if (req.method === "POST" && action === "delete_list_item") {
       const result = await deleteChatListItem(supabase, {
         companyId,
         callerId: user.id,
         itemId: body.item_id || body.itemId,
+      });
+      res.status(200).json({ ok: true, item: result });
+      return;
+    }
+
+    if (req.method === "POST" && action === "reparent_list_item") {
+      const result = await reparentChatListItem(supabase, {
+        companyId,
+        callerId: user.id,
+        itemId: body.item_id || body.itemId,
+        parentItemId: body.parent_item_id || body.parentItemId,
       });
       res.status(200).json({ ok: true, item: result });
       return;
@@ -1460,6 +1847,18 @@ export default async function handler(req, res) {
         conversationId: body.conversation_id || body.conversationId,
         messageId: body.message_id || body.messageId,
       });
+      res.status(200).json({ ok: true, ...result });
+      return;
+    }
+
+    if (req.method === "POST" && action === "mark_read") {
+      const conversationId = cleanText(body.conversation_id || body.conversationId);
+      if (!conversationId) {
+        res.status(400).json({ error: "Missing conversation_id" });
+        return;
+      }
+      await assertConversationMembership(supabase, { companyId, conversationId, userId: user.id });
+      const result = await markConversationRead(supabase, { companyId, conversationId, userId: user.id });
       res.status(200).json({ ok: true, ...result });
       return;
     }

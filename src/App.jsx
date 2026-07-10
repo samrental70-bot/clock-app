@@ -88,7 +88,7 @@ class AppErrorBoundary extends Component {
       const code = errorCodeFor(this.state.error);
       const message = this.state.error?.message || "Unknown render error";
       return (
-        <div className="min-h-screen bg-[#F4F7FB] flex items-center justify-center p-4 text-slate-900">
+        <div className="flex min-h-screen items-center justify-center bg-[#F4F7FB] p-4 text-slate-900">
           <div className="w-full max-w-sm rounded-[20px] border border-slate-200 bg-white p-5 text-center shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
             <h1 className="text-xl font-black">Something went wrong</h1>
             <p className="mt-2 text-sm font-semibold text-slate-600">Please reload {OPERA_APP_NAME}.</p>

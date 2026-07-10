@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -334,7 +335,7 @@ async function callerHasActiveProjectAssignment(supabase, { companyId, projectId
   return Boolean(data?.id);
 }
 
-async function createProject(supabase, { companyId, callerId, callerRole, settings, name }) {
+async function createProject(supabase, { companyId, callerId, callerRole, settings, name, specialProject = null }) {
   const existing = await findActiveProjectByName(supabase, companyId, name);
   if (existing?.id) {
     if (!isAdminRole(callerRole) && !settings.assignAllProjects) {
@@ -357,8 +358,11 @@ async function createProject(supabase, { companyId, callerId, callerRole, settin
       name,
       status: "active",
       created_by: callerId,
+      special_project_active: Boolean(specialProject?.active),
+      special_hourly_rate: Number(specialProject?.specialHourlyRate ?? specialProject?.special_hourly_rate ?? 0) || 0,
+      special_project_notes: String(specialProject?.notes ?? specialProject?.special_project_notes ?? "").trim(),
     })
-    .select("id, name")
+    .select("id, name, status, special_project_active, special_hourly_rate, special_project_notes")
     .single();
   if (projectError) throw projectError;
 
@@ -405,7 +409,7 @@ async function createProject(supabase, { companyId, callerId, callerRole, settin
   };
 }
 
-async function createTask(supabase, { companyId, callerId, callerRole, settings, projectId, name }) {
+async function createTask(supabase, { companyId, callerId, callerRole, settings, projectId, name, manualContract = null }) {
   let targetProjectIds;
   if (settings.assignAllTasks) {
     const { data: projects, error } = await supabase
@@ -461,6 +465,13 @@ async function createTask(supabase, { companyId, callerId, callerRole, settings,
       status: "active",
       display_order: 1000 + index,
       created_by: callerId,
+      manual_contract_active:
+        Boolean(manualContract?.active ?? manualContract?.manual_contract_active ?? false) ||
+        Number(manualContract?.fixedAmount ?? manualContract?.fixed_amount ?? 0) > 0,
+      manual_contract_fixed_amount: Number(manualContract?.fixedAmount ?? manualContract?.fixed_amount ?? 0) || 0,
+      manual_contract_notes: String(manualContract?.notes ?? manualContract?.manual_contract_notes ?? "").trim(),
+      manual_contract_start_date: String(manualContract?.startDate ?? manualContract?.manual_contract_start_date ?? "").trim() || null,
+      manual_contract_end_date: String(manualContract?.endDate ?? manualContract?.manual_contract_end_date ?? "").trim() || null,
     }));
 
   let insertedTasks = [];
@@ -532,8 +543,7 @@ export default async function handler(req, res) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: userData, error: userError } = await supabase.auth.getUser(token);
-  const caller = userData?.user;
+  const { user: caller, error: userError } = await verifyUserToken(url, token, { fallbackClient: supabase });
   if (userError || !caller?.id) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
@@ -595,6 +605,7 @@ export default async function handler(req, res) {
         callerRole,
         settings,
         name,
+        specialProject: body.special_project || body.specialProject || null,
       });
       if (!result.existed) {
         await insertSupervisorNotifications(supabase, {
@@ -627,6 +638,7 @@ export default async function handler(req, res) {
       settings,
       projectId,
       name,
+      manualContract: body.manual_contract || body.manualContract || null,
     });
     if (!result.existed) {
       await insertSupervisorNotifications(supabase, {

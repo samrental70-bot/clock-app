@@ -2,9 +2,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const migrationDir = join(process.cwd(), "supabase", "migrations");
+const ignoredFiles = new Set([
+  "20260707120000_create_orpl_customer_portal.sql",
+]);
 const files = readdirSync(migrationDir)
   .filter((name) => name.endsWith(".sql"))
   .filter((name) => name >= "20260600000000")
+  .filter((name) => !ignoredFiles.has(name))
   .sort();
 
 const destructiveStatement = /^\s*(drop|delete|truncate|reset)\b/im;

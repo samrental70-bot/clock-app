@@ -56,7 +56,12 @@ self.addEventListener("notificationclick", (event) => {
   const rawUrl = notificationData.url;
   const urlToOpen = typeof rawUrl === "string" && rawUrl.length > 0 ? rawUrl : "/";
   const message = {
-    type: notificationData.type === "schedule_assigned" ? "OPEN_SCHEDULE" : "NOTIFICATION_CLICK",
+    type:
+      notificationData.type === "schedule_assigned"
+        ? "OPEN_SCHEDULE"
+        : notificationData.type === "chat_message"
+          ? "OPEN_CHAT"
+          : "NOTIFICATION_CLICK",
     notificationId: notificationData.notificationId || "",
     notificationType: notificationData.type || "",
   };

@@ -3,6 +3,7 @@
  * Used after self-join so new employees can use Clock immediately.
  */
 import { createClient } from "@supabase/supabase-js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -81,13 +82,13 @@ export default async function handler(req, res) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-  if (userErr || !userData?.user?.id) {
+  const { user: verifiedUser, error: userErr } = await verifyUserToken(url, token, { fallbackClient: supabase });
+  if (userErr || !verifiedUser?.id) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
   }
 
-  const callerId = userData.user.id;
+  const callerId = verifiedUser.id;
   const { data: callerMember, error: callerErr } = await supabase
     .from("company_members")
     .select("role")

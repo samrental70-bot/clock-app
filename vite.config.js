@@ -24,6 +24,15 @@ export default defineConfig(({ command, mode }) => {
       "import.meta.env.VITE_OPERA_APP_CHANNEL": JSON.stringify(channel),
       "import.meta.env.VITE_OPERA_APP_NAME": JSON.stringify(appName),
     },
+    server: {
+      proxy: {
+        // Local API harness (scripts/dev-api-server.mjs); dev-serve only, ignored by builds.
+        "/api": {
+          target: `http://localhost:${process.env.OPERA_DEV_API_PORT || 5999}`,
+          changeOrigin: true,
+        },
+      },
+    },
     plugins: [
       react(),
       tailwindcss(),

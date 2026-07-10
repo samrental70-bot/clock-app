@@ -33,6 +33,26 @@ function buildPushPayload(notification) {
       tag: `schedule-assigned-${notification.id}`,
     };
   }
+  if (type === "chat_message") {
+    const relatedFolder = String(notification.related_folder || "");
+    const conversationId = relatedFolder.startsWith("chat:") ? relatedFolder.slice(5) : "";
+    const conversationName = String(notification.project_name || "").trim();
+    const bodyPrefix =
+      conversationName && conversationName.toLowerCase() !== "all employees"
+        ? `${conversationName}: `
+        : "";
+    return {
+      title: notification.title || "New message",
+      body: `${bodyPrefix}${notification.message || "Open the app to read your message."}`.trim(),
+      id: notification.id,
+      notificationId: notification.id,
+      type,
+      url: conversationId
+        ? `/?tab=chat&conversationId=${encodeURIComponent(conversationId)}&notificationId=${encodeURIComponent(notification.id)}`
+        : "/?tab=chat",
+      tag: `chat-message-${notification.id}`,
+    };
+  }
   return {
     title: notification.title || "Clock App",
     body: notification.message || "",
@@ -82,7 +102,7 @@ export default async function handler(req, res) {
 
   const { data: notifications, error: nErr } = await supabase
     .from("notifications")
-    .select("id, recipient_user_id, title, message, type")
+    .select("id, recipient_user_id, title, message, type, project_name, related_folder")
     .in("id", notificationIds);
 
   if (nErr) {

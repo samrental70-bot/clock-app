@@ -1,0 +1,220 @@
+{
+  "checkedAt": "2026-06-30T03:48:25.884Z",
+  "productionRef": "...evhyjm",
+  "developmentRef": "...jjwbut",
+  "targetConfirmed": true,
+  "rowCounts": [
+    {
+      "table": "companies",
+      "expected": 4,
+      "actual": 4,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "company_members",
+      "expected": 22,
+      "actual": 22,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "profiles",
+      "expected": 24,
+      "actual": 24,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "projects",
+      "expected": 12,
+      "actual": 12,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "cost_centres",
+      "expected": 91,
+      "actual": 91,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "timesheets",
+      "expected": 260,
+      "actual": 260,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "project_media",
+      "expected": 553,
+      "actual": 553,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "notifications",
+      "expected": 772,
+      "actual": 772,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    },
+    {
+      "table": "live_locations",
+      "expected": 11,
+      "actual": 11,
+      "exists": true,
+      "matches": true,
+      "status": 206
+    }
+  ],
+  "newTables": [
+    {
+      "table": "employee_pay_rates",
+      "exists": true,
+      "rows": 0,
+      "status": 200
+    },
+    {
+      "table": "daily_report_logs",
+      "exists": true,
+      "rows": 0,
+      "status": 200
+    },
+    {
+      "table": "chat_conversations",
+      "exists": true,
+      "rows": 0,
+      "status": 200
+    },
+    {
+      "table": "chat_messages",
+      "exists": true,
+      "rows": 0,
+      "status": 200
+    },
+    {
+      "table": "chat_conversation_members",
+      "exists": true,
+      "rows": 0,
+      "status": 200
+    }
+  ],
+  "columnChecks": [
+    {
+      "table": "project_media",
+      "columns": [
+        "ai_extracted_json",
+        "ai_tags",
+        "ai_category",
+        "ai_summary",
+        "ai_review_status",
+        "ai_processed_at",
+        "ai_confidence",
+        "ai_error"
+      ],
+      "ok": true,
+      "status": 200,
+      "error": ""
+    },
+    {
+      "table": "project_media",
+      "columns": [
+        "receipt_supplier",
+        "receipt_date",
+        "receipt_subtotal",
+        "receipt_hst",
+        "receipt_total",
+        "receipt_currency",
+        "receipt_material_category",
+        "receipt_material_type",
+        "receipt_ocr_status",
+        "receipt_ocr_confidence",
+        "receipt_reviewed_at",
+        "receipt_reviewed_by",
+        "receipt_source"
+      ],
+      "ok": true,
+      "status": 200,
+      "error": ""
+    },
+    {
+      "table": "notifications",
+      "columns": [
+        "body",
+        "entity_type",
+        "entity_id"
+      ],
+      "ok": true,
+      "status": 200,
+      "error": ""
+    },
+    {
+      "table": "live_locations",
+      "columns": [
+        "timesheet_id",
+        "created_at"
+      ],
+      "ok": true,
+      "status": 200,
+      "error": ""
+    }
+  ],
+  "rlsPolicies": {
+    "directPgPoliciesReadable": false,
+    "pgPoliciesStatus": 404,
+    "anonSmoke": [
+      {
+        "table": "daily_report_logs",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      },
+      {
+        "table": "chat_conversations",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      },
+      {
+        "table": "chat_messages",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      },
+      {
+        "table": "chat_conversation_members",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      },
+      {
+        "table": "employee_pay_rates",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      },
+      {
+        "table": "live_locations",
+        "status": 200,
+        "ok": true,
+        "detail": "anon read allowed or RLS-filtered with 200"
+      }
+    ]
+  },
+  "summary": {
+    "allCountsMatch": true,
+    "allNewTables": true,
+    "allColumns": true,
+    "postflightPassed": true
+  }
+}

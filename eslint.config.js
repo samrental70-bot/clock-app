@@ -15,6 +15,8 @@ export default defineConfig([
     'worker',
     'tools',
     'bridge',
+    'api-legacy/**',
+    'api/orpl/**',
     '.vercel/output',
     'MCP/**',
     'quickbooks-mcp/**',
@@ -27,6 +29,7 @@ export default defineConfig([
     '.codex_pdf_deps',
     '.tmp-chrome-*',
     '.tmp-edge-*',
+    'src/orpl/**',
   ]),
   {
     files: ['**/*.{js,jsx}'],
@@ -41,7 +44,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['api/**/*.js', 'api-shared/**/*.js'],
+    files: ['api/**/*.js', 'api-handlers/**/*.js', 'api-shared/**/*.js'],
     languageOptions: {
       globals: globals.node,
     },

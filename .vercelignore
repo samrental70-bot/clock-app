@@ -12,6 +12,27 @@ screenshots/
 bridge/
 supabase/dev-only/
 
+# Local analysis/report artifacts that must never upload with a deployment.
+final_portfolio_render/
+final_project_sheets/
+outputs/
+portfolio_sheets/
+portfolio_sheets_labeled/
+render_review/
+render_tmp/
+rendered_final_only/
+source_contact_sheets/
+tmp-*.docx
+tmp-*.pdf
+PRODUCTION_SQL_BUNDLE_*.sql
+PRODUCTION_DB_*.md
+PRODUCTION_DB_*.json
+_columns.sql
+_columns2.sql
+_counts.sql
+_policies.sql
+.codex/
+
 # These paths are from other local experiments and must not ship with the clock app.
 census-tenant-form-2026/
 charts/
@@ -19,15 +40,10 @@ public/audio/
 server/
 tools/
 worker/
+api-legacy/
+api/orpl/
 docs/AURACUT_*.md
-api/analyze-video.js
 api/_lib/
-api/daily-supervisor-report-cron.js
-api/diagnostics.js
-api/render-video.js
-api/send-push.js
-api/send-daily-timesheet-email.js
-api/send-daily-timesheet-whatsapp.js
 scripts/apply-auracut-schema.js
 scripts/ensure-auracut-storage.js
 scripts/install-ffmpeg.ps1

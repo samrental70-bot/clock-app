@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { normalizeReceiptJson } from "../api/ai-field-docs.js";
+import { normalizeReceiptJson } from "../api-handlers/ai-field-docs.js";
 
 const homeDepot = normalizeReceiptJson({
   store: "Home Depot",

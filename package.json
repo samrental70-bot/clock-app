@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test:timesheet-sanity": "node scripts/test-timesheet-sanity.js",
+    "test:timesheet-filters": "node scripts/test-timesheet-filter-date-range.js",
     "test:receipt-ocr": "node scripts/test-receipt-ocr-normalization.js",
     "seed:payroll-dev": "node scripts/seed-payroll-dev.js",
     "verify:migrations": "node scripts/verify-b2-migration-safety.js",

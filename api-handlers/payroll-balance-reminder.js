@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { DEFAULT_TIME_ZONE, calendarDateKeyInTimeZone } from "../api-shared/dailyReport.js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -170,13 +171,13 @@ async function getAuthedUser(supabase, req) {
     error.status = 401;
     throw error;
   }
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user?.id) {
+  const { user, error } = await verifyUserToken(getSupabaseUrl(), token, { fallbackClient: supabase });
+  if (error || !user?.id) {
     const authError = new Error("Invalid or expired session");
     authError.status = 401;
     throw authError;
   }
-  return data.user;
+  return user;
 }
 
 function normalizeMembershipRole(value) {

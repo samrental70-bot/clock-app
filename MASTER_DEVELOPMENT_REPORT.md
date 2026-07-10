@@ -3027,3 +3027,73 @@ Safety:
 - Post-fix smoke QA confirmed Clock, Timesheets, Chat, and the Payroll tracker dialog all open correctly from the live develop alias.
 - Advisor re-review returned GREEN for the develop release blocker state after the env/deploy fix.
 - Current preview deployment ID for the green state: `dpl_6oLANCLWCbxmsfcZ1qMjTq4FXpZS`
+
+- Development-only feature pass for special projects, manual contract tasks, payroll detail drill-down, timesheet filters, and sanity navigation was added on `develop`.
+- Payroll now supports special project hourly rates and fixed manual contract pay in the dev release.
+- Special Projects settings UI was added for manager/admin control of special rates.
+- Manual contract task creation/editing was added in the Projects area for manager/admin use.
+- Dev migration `20260704160000_add_special_projects_and_manual_contracts.sql` was linked to `bridge-app-dev` (`jvlxahskximvbajjwbut`) and pushed successfully.
+- Post-migration browser smoke check on the development app confirmed Timesheets task filtering, Payroll detail drill-down/back navigation, and the main Home dashboard still loaded correctly.
+
+## 2026-07-05 Development Chat Timeline + Cache QA
+
+- Development-only chat timeline/cache stabilization was refreshed on `develop`.
+- Chat timeline now keeps checklist cards and messages in one ascending chronological thread.
+- New messages append at the bottom and pinned lists remain inside the thread while the pinned ribbon stays shortcut-only.
+- Cached thread hydration now runs before quiet background sync so existing chat data opens without a blocking loading takeover.
+- Optimistic message dedupe now prefers `client_id`, and optimistic checklist item merges now use a stable semantic merge key to prevent duplicate rows after sync.
+- Checklist item edit/add flows were tightened for mobile: 16px inputs, placeholder-only title, stable numbering, tap-to-edit, icon-only delete, and focus restoration after add.
+- QA report refreshed at `docs/qa/CHAT_QA_REPORT.md`.
+- Final checks passed on develop: `verify:migrations`, `verify:b2-dev`, `verify:release`, `npm.cmd run lint`, and `npm.cmd run build`.
+- Development deployment refreshed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment URL: `https://project-rui1d-27id2ua2d-samrental70-7859s-projects.vercel.app`
+- Advisor review was attempted multiple times for the refreshed chat QA packet, but the `chatgpt-advisor` MCP transport closed before returning a verdict.
+- No production deployment, no production SQL, no push to main, and no production DB changes were performed.
+
+## 2026-07-06 Payroll Balance Calculation Fix + Previous Balance UI
+
+- Development-only payroll balance audit completed in `src/EmployeeClockApp.jsx`.
+- Payroll running balance now uses: Previous Balance + Worked Amount - Salary Paid - Loan Given + Loan Returned.
+- Loan totals are now grouped by payroll period and included in both period math and employee summary math.
+- Payroll UI now shows Previous Balance, Loans, and Balance more clearly in employee summary and period cards.
+- Payment and loan cards remain tap-to-edit for admin/owner flows, with no visible Edit/Void buttons on the cards themselves.
+- Added dev-only test helper `scripts/test-payroll-balance-calculation.js` to verify controller cases A-F plus running-balance handoff between periods.
+- Verification passed on develop: `npm.cmd run verify:migrations`, `npm.cmd run verify:b2-dev`, `npm.cmd run verify:release`, `npm run lint`, `npm run build`, and `node scripts/test-payroll-balance-calculation.js`.
+- No schema changes or new migrations were required for this fix.
+- No production deployment, no production SQL, no push to main, and no production DB changes were performed.
+
+## 2026-07-09 All-Areas Improvement Pass (Performance, Chat, Timesheets, API Auth)
+
+- Local-first cache-first hydration was added to the Dashboard, Team, and Schedule loaders in `src/EmployeeClockApp.jsx`, matching the existing Timesheets/Chat/Payroll pattern: cached data renders immediately, the loading state only shows when no cache exists, and a background refresh rewrites the cache on success. Cached data is kept on fetch errors instead of being cleared.
+- A Supabase realtime subscription was added for the open chat conversation (`chat_messages` postgres_changes) so incoming messages appear immediately; the existing 9-second silent polling remains as a fallback and behavior is unchanged if realtime is not enabled on the project.
+- Timesheet standard date-range presets are now clamped so the range never extends into future dates (the weekly preset previously ran Monday through a future Sunday); the rolling one-month window behavior is preserved.
+- API auth hardening: a shared `api-handlers/_verifyUserToken.js` helper now validates user JWTs with the anon/public Supabase client instead of the service-role client, per the standing rule. All ten user-authenticated handlers were switched over (assign-default-projects, create-employee, update-project, update-employee-profile, update-employee-login, project-media, create-project-task, ai-field-docs, chat, payroll-balance-reminder) plus `api/orpl/customers.js`. The service-role client is now used only for server-side DB reads/writes, with a safe fallback if no anon key env is configured.
+- `.vercelignore` was extended so local analysis artifacts (portfolio render folders, tmp docx/pdf files, production DB report/SQL bundle files, `.codex/`) never upload with a deployment.
+- Build code fallback bumped to `D20260709-allareas-dev` for phone-side version verification.
+- Verification passed on develop: `verify:migrations` (15 files), `verify:b2-dev` (dev Supabase `...jjwbut`), `verify:release`, lint (0 errors), build, timesheet sanity, timesheet filter, receipt OCR, and payroll balance tests.
+- Development deployment refreshed and aliased to `https://project-rui1d-development.vercel.app`.
+- Preview deployment: `https://project-rui1d-pp7aqkw5l-samrental70-7859s-projects.vercel.app` (ID `dpl_5P67rRyqaa4AGqKabZMGqywBEDxD`), asset `assets/index-dEuJlg7y.js`, build code `D20260709-allareas-dev` confirmed in the served bundle.
+- Post-deploy API smoke: `/api/chat` and `/api/project-media` return 401 without a token; unknown routes return 404 from the consolidated `api/[...path].js` router.
+- Environment guard fix: the first deploy of this pass showed the "Supabase project mismatch / Missing Supabase public environment variables" guard page because the Vercel **Preview** environment had `VITE_SUPABASE_URL` but no `VITE_SUPABASE_ANON_KEY` (the key existed only in Production). The dev anon key (verified to decode to project ref `jvlxahskximvbajjwbut`, role `anon`) was added to the Preview environment as both `VITE_SUPABASE_ANON_KEY` and `SUPABASE_ANON_KEY` via the Vercel API, since branch-scoped `vercel env add` is unavailable without a connected Git repo.
+- Redeployed and re-aliased: preview `https://project-rui1d-4q1xpmjpp-samrental70-7859s-projects.vercel.app`, asset `assets/index-D675tMjd.js`, build code `D20260709-allareas-dev`. Bundle verified to contain the dev Supabase URL and anon key, and no production ref. `/api/chat` still gates with 401.
+- No production deployment, no production SQL, no push to main, no production DB changes, and no destructive operations were performed. Production env vars were not modified.
+
+## 2026-07-10 Chat Redesign Round 2 + Production Merge Preparation
+
+- Composer/list/keyboard follow-up fixes on develop: mobile keyboard no longer hides the chat-list item area (added a `useVisualViewportHeight` hook driving explicit inline heights on the immersive chat containers, replacing reliance on CSS `dvh` alone; also added `interactive-widget=resizes-content` to the viewport meta tag).
+- Fixed a visible layout jump while typing in the chat composer: the auto-resize textarea logic was running in `useEffect` (post-paint) with a redundant duplicate call and a fixed-height pill wrapper that could not actually grow; switched to `useLayoutEffect`, removed the duplicate call, and changed the pill wrapper from a fixed `h-11` to `min-h-11` so multi-line messages grow the pill instead of clipping against it.
+- Removed the non-functional video-call button and menu entry from the chat header (no video calling feature exists).
+- Chat lists no longer render as large inline cards in the message thread; they now show as a compact horizontal ribbon of chips (icon, title, open-count) directly below the thread header, freeing the thread for messages only.
+- Fixed a real duplicate-title bug on the Timesheets tab: the shared app shell header already renders "Timesheets" with back/notification navigation, but the Timesheets screen was also rendering its own large "Timesheets" heading directly underneath it. Removed the redundant inner heading block.
+- Styled the shared `EmptyState` component, which had no CSS at all (raw unstyled `<p>` tags) despite being used across Chat, Timesheets, and other screens.
+- Discovered and fixed a global CSS bug: `opera-hide-scrollbar`, used throughout the chat UI to hide scrollbars on horizontal chip rows and the message thread, was never actually defined anywhere in `index.css` — added the real implementation, fixing every usage at once.
+- Fixed a cross-feature bug in chat: a single shared `sending` boolean was gating both the message-send flow and unrelated chat-list actions (add/edit/reparent/assign item, create list), so sending a message could silently block list actions with no error shown. Split into independent `sending` and `listBusy` state.
+- An independent Chrome-based reviewer agent (once the extension reconnected) tested the redesigned chat live end-to-end — sent a real message, added a real checklist item — and confirmed the redesign reads as professional/enterprise rather than a consumer chat clone; it also caught a genuine desktop-only layout bug (chat's `md:` two-pane breakpoint fired based on real browser width even though the whole app shell is capped at a 384px phone-frame at all viewport sizes, causing severe overflow/clipping on desktop). Fixed by making chat consistently single-pane like every other screen in the app, matching the existing design.
+- Verification passed on develop: `verify:migrations` (15 files, ORPL correctly excluded), lint (0 errors), build, timesheet sanity, receipt OCR tests.
+- Development deployment refreshed and aliased to `https://project-rui1d-development.vercel.app` across several redeploys through this pass.
+- Consulted Codex (read-only) for production merge context: `main` is at `0a84637` and is exactly 5 commits / 0a846375e484c71d68ef7edd6b53c2142d4cb380 behind `develop` (clean fast-forward, no divergence), 69 files / +22,283 -3,761 lines different. No repo-defined CI/CD exists; Vercel's Git integration (external dashboard config) controls whether pushing `main` auto-deploys production.
+- Took a full read-only production database backup (`backups/production/OPERA_PROD_BACKUP_2026-07-10T13-46-05-621Z.json`, 26 tables, SHA256 recorded in `PRODUCTION_DB_BACKUP_2026-07-10T13-46-05-621Z_REPORT.md`).
+- Cross-referenced migration history against prior execution reports and live column presence in the fresh backup: confirmed 22 of 25 Clock App migrations are already applied to production; exactly 3 are outstanding (`20260704160000_add_special_projects_and_manual_contracts.sql`, `20260707103000_add_chat_list_hierarchy.sql`, `20260707143000_add_chat_list_assignments.sql`), all verified additive-only. Prepared (not executed) `PRODUCTION_SQL_BUNDLE_2026-07-10_MERGE_PREP.sql` containing just those three. `20260707120000_create_orpl_customer_portal.sql` was explicitly excluded (separate product; the repo's own migration-safety script already excludes it too).
+- Found that the local production service-role key (`.env.production.local`) is now rejected by Supabase (401 Invalid API key) despite having worked ~45 minutes earlier for the backup above — flagged for the Controller to refresh before any live production SQL execution; not needed for this preparation pass since a valid recent backup already existed.
+- Wrote a full rollback plan (app-level via Vercel deployment promotion, git-level via clean fast-forward revert, DB-level via the backup file) in `PRODUCTION_MERGE_READINESS_2026-07-10.md`.
+- No production deployment, no production SQL executed, no push to main, no production DB or Storage modified, and no commit was made to develop in this pass — all working-tree changes remain uncommitted pending review, per instruction to prepare only.

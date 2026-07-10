@@ -1,9 +1,23 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./supabaseClient";
 import { buildTimesheetSanityChecks, getVisibleTimesheetSanityIssues } from "./lib/timesheetSanity";
+import { timesheetRecordMatchesFilters } from "./lib/timesheetFilters";
+import { applyRunningPayrollBalances, summarizePayrollPeriods } from "./lib/payrollBalance";
+import {
+  buildLocalFirstCacheKey,
+  buildLocalFirstQueueKey,
+  enqueueLocalFirstQueueItem,
+  isLocalFirstCacheStale,
+  readLocalFirstCacheEnvelope,
+  readLocalFirstQueue,
+  removeLocalFirstQueueItem,
+  replaceLocalFirstQueueItem,
+  writeLocalFirstCache,
+} from "./lib/localFirstCache";
 
 const OPERA_APP_NAME = import.meta.env.VITE_OPERA_APP_NAME || "OPERA.AI";
 const OPERA_APP_CHANNEL = import.meta.env.VITE_OPERA_APP_CHANNEL || "production";
+const OPERA_APP_BUILD_CODE = import.meta.env.VITE_OPERA_BUILD_CODE || "D20260709-allareas-dev";
 const OPERA_APP_HOSTNAME = typeof window !== "undefined" ? window.location.hostname : "";
 const IS_OPERA_DEVELOPMENT_APP =
   OPERA_APP_CHANNEL !== "production" ||
@@ -26,8 +40,8 @@ const Button = ({ children, className, ...props }) => (
   </button>
 );
 
-const PageCard = ({ children, className = "" }) => (
-  <div className={`opera-page-card ${className}`}>{children}</div>
+const PageCard = ({ children, className = "", style }) => (
+  <div className={`opera-page-card ${className}`} style={style}>{children}</div>
 );
 
 const SectionCard = ({ children, className = "" }) => (
@@ -60,9 +74,9 @@ const DangerAction = ({ children, className = "", ...props }) => (
 );
 
 const EmptyState = ({ title, body, action, className = "" }) => (
-  <div className={`opera-empty-state ${className}`}>
-    <p className="opera-empty-title">{title}</p>
-    {body ? <p className="opera-empty-body">{body}</p> : null}
+  <div className={`flex flex-col items-center px-6 py-8 text-center ${className}`}>
+    <p className="text-[14px] font-bold text-[#061426]">{title}</p>
+    {body ? <p className="mt-1 text-[13px] font-medium text-[#64748B]">{body}</p> : null}
     {action ? <div className="mt-3">{action}</div> : null}
   </div>
 );
@@ -89,6 +103,7 @@ const ActivityRow = ({ initial = "A", title, detail, time, tone = "", className 
 const AppHeader = ({
   companyName,
   metaLabel,
+  buildLabel,
   iconSrc,
   isDevelopment,
   showCompanyName = true,
@@ -98,30 +113,47 @@ const AppHeader = ({
   const userLabel = String(metaLabel || "").trim().split(/\s+/).slice(0, 2).join(" ");
   const headerTitle = showCompanyName ? companyName : metaLabel;
   return (
-    <div className="opera-app-header">
-      <div className="flex min-h-[48px] items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-          <span className="opera-header-logo-wrap">
-            <img src={iconSrc} alt="" className="h-full w-full rounded-[10px]" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="opera-header-title-row">
-              <h1 className="opera-header-company">{headerTitle || "Company"}</h1>
-              {isDevelopment ? (
-                <span className="opera-dev-chip">Dev</span>
-              ) : null}
-            </div>
-            {showCompanyName && userLabel ? <p className="opera-header-brand-line">{userLabel}</p> : null}
+    <div className="rounded-[20px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
+      <div className="grid min-h-[48px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-[14px] border border-slate-200 bg-[#0B1F33] shadow-sm">
+            <img src={iconSrc} alt="" className="h-full w-full object-cover rounded-[10px]" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="min-w-0 flex-1 truncate text-[15px] font-bold leading-tight text-[#061426] sm:text-[16px]">
+                {headerTitle || "Company"}
+            </h1>
+            {isDevelopment ? (
+              <span className="shrink-0 rounded-full border border-[#C9A227]/45 bg-[#FFF7E6] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+                Dev
+              </span>
+            ) : null}
           </div>
+          {showCompanyName && userLabel ? (
+            <p className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-500">{userLabel}</p>
+          ) : null}
+          {showCompanyName && buildLabel ? (
+            <p className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-slate-400">{buildLabel}</p>
+          ) : null}
+          {!showCompanyName && buildLabel ? (
+            <p className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-slate-400">{buildLabel}</p>
+          ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button type="button" onClick={onNotifications} className="opera-header-icon-button relative shrink-0" aria-label="Notifications">
+        <div className="flex shrink-0 items-center justify-end">
+          <button
+            type="button"
+            onClick={onNotifications}
+            className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-sm transition active:scale-[0.98] active:bg-white"
+            aria-label="Notifications"
+          >
             <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
               <path d="M10 21h4" />
             </svg>
             {unreadCount > 0 ? (
-              <span className="opera-notification-badge">{unreadCount > 99 ? "99+" : unreadCount}</span>
+              <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#DC2626] px-1 text-[10px] font-black leading-none text-white shadow-sm">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
             ) : null}
           </button>
         </div>
@@ -460,12 +492,347 @@ function safeWrite(key, value) {
   }
 }
 
+function isSupabaseAuthTokenError(err) {
+  const message = String(err?.message || err || "").toLowerCase();
+  return (
+    message.includes("invalid refresh token") ||
+    message.includes("refresh token not found") ||
+    message.includes("refresh token") ||
+    message.includes("session not found")
+  );
+}
+
+async function safeGetSession() {
+  try {
+    return await supabase.auth.getSession();
+  } catch (err) {
+    if (isSupabaseAuthTokenError(err)) {
+      try {
+        if (typeof window !== "undefined" && window.localStorage) {
+          const keys = Object.keys(window.localStorage);
+          for (const key of keys) {
+            if (key.startsWith("sb-") || key.includes("auth-token")) {
+              window.localStorage.removeItem(key);
+            }
+          }
+        }
+      } catch (storageErr) {
+        console.warn("[AUTH_RECOVERY] local storage clear failed", storageErr);
+      }
+      try {
+        await supabase.auth.signOut({ scope: "local" });
+      } catch (signOutErr) {
+        console.warn("[AUTH_RECOVERY] local signOut failed", signOutErr);
+      }
+      return { data: { session: null }, error: null };
+    }
+    throw err;
+  }
+}
+
+async function getFreshAccessToken({ forceRefresh = false } = {}) {
+  try {
+    let result;
+    if (forceRefresh) {
+      result = await supabase.auth.refreshSession();
+    } else {
+      result = await safeGetSession();
+      const currentSession = result?.data?.session || null;
+      const expiresAtMs = Number(currentSession?.expires_at || 0) * 1000;
+      if (
+        currentSession?.access_token &&
+        Number.isFinite(expiresAtMs) &&
+        expiresAtMs > 0 &&
+        expiresAtMs <= Date.now() + 60_000
+      ) {
+        return await getFreshAccessToken({ forceRefresh: true });
+      }
+    }
+
+    const session = result?.data?.session || null;
+    if (result?.error) throw result.error;
+    if (session?.access_token) return session.access_token;
+
+    if (!forceRefresh) {
+      return await getFreshAccessToken({ forceRefresh: true });
+    }
+    return null;
+  } catch (err) {
+    if (isSupabaseAuthTokenError(err)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+async function fetchAuthedApiJson(url, options = {}) {
+  const run = async (forceRefresh = false) => {
+    const token = await getFreshAccessToken({ forceRefresh });
+    if (!token) throw new Error("Sign in again before continuing.");
+    const headers = {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+      Authorization: `Bearer ${token}`,
+    };
+    const response = await fetch(url, {
+      ...options,
+      headers,
+    });
+    const json = await response.json().catch(() => ({}));
+    return { response, json };
+  };
+
+  let result = await run(false);
+  if (result.response.status === 401) {
+    result = await run(true);
+  }
+  return result;
+}
+
+function makeAppCacheKey(...parts) {
+  return buildLocalFirstCacheKey("clock-app", OPERA_APP_CHANNEL, ...parts);
+}
+
+function makeAppQueueKey(...parts) {
+  return buildLocalFirstQueueKey("clock-app", OPERA_APP_CHANNEL, ...parts);
+}
+
 function normalizeArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
 function normalizeObject(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function compareChatCreatedAtAscending(a, b) {
+  const left = String(a || "");
+  const right = String(b || "");
+  if (left === right) return 0;
+  return left.localeCompare(right);
+}
+
+function buildChatMessageMergeKey(message) {
+  const clientId = String(message?.client_id || message?.clientId || "").trim();
+  if (clientId) return `client:${clientId}`;
+  const serverId = String(message?.id || "").trim();
+  if (serverId && !serverId.startsWith("temp-")) return `id:${serverId}`;
+  return `fallback:${String(message?.sender_user_id || "")}:${String(message?.created_at || "")}:${String(message?.body || "")}`;
+}
+
+function normalizeChatListItemDraftText(value) {
+  return String(value || "").replace(/^\s*\d+[)\].:-]?\s+/, "").trim();
+}
+
+function splitChatListItemLines(value) {
+  return String(value || "")
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => (index === 0 ? normalizeChatListItemDraftText(line) : line));
+}
+
+function parseChatListComposerItems(value) {
+  const lines = String(value || "").split(/\r?\n/);
+  const items = [];
+  let parentTempKey = "";
+  let mainCount = 0;
+  for (const rawLine of lines) {
+    const line = String(rawLine || "").replace(/\t/g, "  ");
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const isIndented = /^\s{2,}/.test(line);
+    const text = normalizeChatListItemDraftText(trimmed.replace(/^[-*•]\s+/, ""));
+    if (!text) continue;
+    if (!isIndented || !parentTempKey) {
+      mainCount += 1;
+      parentTempKey = `main-${mainCount}`;
+      items.push({
+        text,
+        temp_key: parentTempKey,
+        item_level: 0,
+      });
+    } else {
+      items.push({
+        text,
+        temp_key: `${parentTempKey}-child-${items.length + 1}`,
+        parent_temp_key: parentTempKey,
+        item_level: 1,
+      });
+    }
+  }
+  return items;
+}
+
+function getChatListItemTextParts(item) {
+  const parts = splitChatListItemLines(item?.text || "");
+  return {
+    headline: parts[0] || normalizeChatListItemDraftText(item?.text || ""),
+    legacySubitems: parts.slice(1),
+  };
+}
+
+function buildChatListHierarchy(items, { showCompleted = false } = {}) {
+  const rows = Array.isArray(items) ? [...items] : [];
+  const byId = new Map(rows.map((row) => [String(row?.id || ""), row]));
+  const mains = [];
+  const mainById = new Map();
+  for (const row of rows) {
+    const id = String(row?.id || "");
+    const parentId = String(row?.parent_item_id || "");
+    const isChild = parentId && byId.has(parentId) && Number(row?.item_level || 0) === 1;
+    if (!isChild) {
+      const { headline, legacySubitems } = getChatListItemTextParts(row);
+      const mainNode = {
+        ...row,
+        text: headline,
+        legacySubitems,
+        children: [],
+      };
+      mains.push(mainNode);
+      if (id) mainById.set(id, mainNode);
+      continue;
+    }
+    const parentNode = mainById.get(parentId);
+    const childNode = {
+      ...row,
+      text: normalizeChatListItemDraftText(row?.text || ""),
+      legacySubitems: [],
+      children: [],
+    };
+    if (!parentNode) {
+      mains.push(childNode);
+      continue;
+    }
+    parentNode.children.push(childNode);
+  }
+  const visibleMains = mains
+    .map((main) => {
+      const visibleChildren = showCompleted ? main.children : main.children.filter((child) => !child.is_done);
+      if (!showCompleted && main.is_done) return null;
+      return {
+        ...main,
+        children: visibleChildren,
+      };
+    })
+    .filter(Boolean);
+  return visibleMains;
+}
+
+function buildChatListItemMergeKey(item) {
+  const persistedId = String(item?.id || "").trim();
+  if (persistedId && !persistedId.startsWith("temp-")) return `id:${persistedId}`;
+  return [
+    "fallback",
+    Number(item?.item_level || 0),
+    String(item?.parent_item_id || ""),
+    Number(item?.item_number || 0),
+    Number(item?.child_order || 0),
+    Number(item?.sort_order || 0),
+    normalizeChatListItemDraftText(item?.text || ""),
+    item?.is_done ? "1" : "0",
+  ].join(":");
+}
+
+function buildChatListItemFallbackKey(item) {
+  return [
+    "fallback",
+    Number(item?.item_level || 0),
+    String(item?.parent_item_id || ""),
+    Number(item?.item_number || 0),
+    Number(item?.child_order || 0),
+    Number(item?.sort_order || 0),
+    normalizeChatListItemDraftText(item?.text || ""),
+    item?.is_done ? "1" : "0",
+  ].join(":");
+}
+
+function synthesizeQueuedChatMessage(queueItem, senderName) {
+  const createdAt = String(queueItem?.created_at || queueItem?.queued_at || new Date().toISOString());
+  const clientId = String(queueItem?.client_id || queueItem?.clientId || queueItem?.id || `queued-${createdAt}`).trim();
+  return {
+    id: clientId || `queued-${createdAt}`,
+    client_id: clientId || null,
+    sender_user_id: String(queueItem?.sender_user_id || queueItem?.senderUserId || ""),
+    sender_name: senderName || "User",
+    body: String(queueItem?.body || ""),
+    message_type: String(queueItem?.message_type || queueItem?.messageType || "text"),
+    metadata: normalizeObject(queueItem?.metadata),
+    attachments: Array.isArray(queueItem?.attachments) ? queueItem.attachments : [],
+    checklist_items: Array.isArray(queueItem?.checklist_items || queueItem?.checklistItems)
+      ? queueItem.checklist_items || queueItem.checklistItems
+      : [],
+    deleted: false,
+    pinned: false,
+    can_delete: true,
+    can_pin: false,
+    created_at: createdAt,
+    __optimistic: true,
+    __sync_state: String(queueItem?.failed_at ? "queued" : queueItem?.__sync_state || "sending"),
+  };
+}
+
+function mergeChatMessageCollections({ remoteMessages, localMessages, queuedMessages }) {
+  const merged = new Map();
+
+  for (const message of Array.isArray(remoteMessages) ? remoteMessages : []) {
+    merged.set(buildChatMessageMergeKey(message), message);
+  }
+
+  for (const message of Array.isArray(localMessages) ? localMessages : []) {
+    if (!message?.__optimistic) continue;
+    const key = buildChatMessageMergeKey(message);
+    if (!merged.has(key)) merged.set(key, message);
+  }
+
+  for (const message of Array.isArray(queuedMessages) ? queuedMessages : []) {
+    const key = buildChatMessageMergeKey(message);
+    if (!merged.has(key)) merged.set(key, message);
+  }
+
+  return [...merged.values()].sort((a, b) => {
+    const createdAtCompare = compareChatCreatedAtAscending(a?.created_at, b?.created_at);
+    if (createdAtCompare !== 0) return createdAtCompare;
+    const aOptimistic = Boolean(a?.__optimistic);
+    const bOptimistic = Boolean(b?.__optimistic);
+    if (aOptimistic !== bOptimistic) return aOptimistic ? 1 : -1;
+    return String(a?.id || a?.client_id || "").localeCompare(String(b?.id || b?.client_id || ""));
+  });
+}
+
+function buildChatTimelineRows(messages, lists) {
+  const messageRows = (Array.isArray(messages) ? messages : []).map((message) => ({
+    id: `message:${String(message?.id || message?.client_id || "")}`,
+    kind: "message",
+    created_at: String(message?.created_at || ""),
+    row: message,
+  }));
+  const listRows = (Array.isArray(lists) ? lists : []).map((list) => ({
+    id: `list:${String(list?.id || "")}`,
+    kind: "list",
+    created_at: String(list?.created_at || ""),
+    row: list,
+  }));
+  return [...messageRows, ...listRows].sort((a, b) => {
+    const createdAtCompare = compareChatCreatedAtAscending(a?.created_at, b?.created_at);
+    if (createdAtCompare !== 0) return createdAtCompare;
+    if (a.kind !== b.kind) return a.kind === "list" ? -1 : 1;
+    return String(a?.id || "").localeCompare(String(b?.id || ""));
+  });
+}
+
+function formatChatTimelineLabel(dayKey, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
+  const todayKey = calendarDateKeyInTimeZone(new Date(), timeZone);
+  if (dayKey === todayKey) return "Today";
+  if (dayKey === addWallDaysInTimeZone(todayKey, -1, timeZone)) return "Yesterday";
+  const source = parseStoredInstant(`${dayKey}T12:00:00`);
+  if (Number.isNaN(source.getTime())) return dayKey || "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(source);
 }
 
 function normalizeMediaBuckets(value) {
@@ -622,7 +989,7 @@ const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
 
-/** Single canonical role from company_members / local state. Unknown → employee (safe). admin → owner. */
+/** Single canonical role from company_members / local state. Unknown â†’ employee (safe). admin â†’ owner. */
 function normalizeCompanyMemberRole(role) {
   const r = normalizeMemberRole(role);
   if (r === "owner" || r === "admin") return "owner";
@@ -630,7 +997,7 @@ function normalizeCompanyMemberRole(role) {
   return "employee";
 }
 
-/** profiles.employment_status → "active" | "archived" */
+/** profiles.employment_status â†’ "active" | "archived" */
 function normalizeEmploymentStatus(raw) {
   const s = raw != null ? String(raw).trim().toLowerCase() : "active";
   return s === "archived" ? "archived" : "active";
@@ -834,7 +1201,7 @@ const SCHEDULE_GRID_TOTAL_MINUTES = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR
 const SCHEDULE_GRID_PX_PER_HOUR = 46;
 const SCHEDULE_MONTH_CHIP_MAX = 1;
 
-/** Ignore taps meant for chips/cards/dialogs—not empty calendar background. Handles non-Element targets safely. */
+/** Ignore taps meant for chips/cards/dialogsâ€”not empty calendar background. Handles non-Element targets safely. */
 function isAdminScheduleCalendarBackgroundIgnored(ev) {
   const te = ev?.target;
   const el =
@@ -909,7 +1276,7 @@ function looksLikeUuidOrIdLike(value) {
   if (!s) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
   if (/^[0-9a-f]{32}$/i.test(s)) return true;
-  if (/^[0-9a-f]{6}…[0-9a-f]{4}$/i.test(s)) return true;
+  if (/^[0-9a-f]{6}â€¦[0-9a-f]{4}$/i.test(s)) return true;
   return false;
 }
 
@@ -925,10 +1292,10 @@ function pickGoodFreeformEmployeeName(record) {
 }
 
 function shortUserLabel(userId) {
-  if (userId == null || userId === "") return "—";
+  if (userId == null || userId === "") return "â€”";
   const s = String(userId);
   if (s.length <= 12) return s;
-  return `${s.slice(0, 6)}…${s.slice(-4)}`;
+  return `${s.slice(0, 6)}â€¦${s.slice(-4)}`;
 }
 
 function timesheetRecordBelongsToUser(record, authUser) {
@@ -1092,10 +1459,10 @@ function formatClockScheduledTaskOptionLabel(task, timeZone) {
   if (dk === todayKey) dayPart = "Today";
   else if (dk === nextKey) dayPart = "Tomorrow";
   const tm = formatTime(st, tz);
-  return `${title} · ${dayPart} · ${tm}`;
+  return `${title} Â· ${dayPart} Â· ${tm}`;
 }
 
-/** Wall date YYYY-MM-DD + time HH:mm in `timeZone` → UTC ISO string. */
+/** Wall date YYYY-MM-DD + time HH:mm in `timeZone` â†’ UTC ISO string. */
 /** Normalize user time input (e.g. "9:00" or "09:00") to HH:mm:ss for wall clock helpers. */
 function normalizeTimeInputForWallClock(timeInput) {
   const s = String(timeInput ?? "").trim();
@@ -1249,7 +1616,7 @@ function scheduleTaskDurationMinutes(task, timeZone) {
   return 60;
 }
 
-/** Move/reschedule: only start_time, end_time, duration_minutes — preserves wall duration or uses duration_minutes / 60. */
+/** Move/reschedule: only start_time, end_time, duration_minutes â€” preserves wall duration or uses duration_minutes / 60. */
 function buildScheduledTaskClockMovePayload(task, newStartIso, companyTimeZone) {
   const tz = companyTimeZone || DEFAULT_COMPANY_TIME_ZONE;
   const oldStartMs = parseStoredInstant(task?.start_time).getTime();
@@ -1305,7 +1672,7 @@ function addWallMonthsSafe(dateKey, deltaMonths, timeZone) {
   return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-/** Sunday-first month grid: 6 rows × 7 cols; cells may be outside anchor month (greyed). */
+/** Sunday-first month grid: 6 rows Ã— 7 cols; cells may be outside anchor month (greyed). */
 function buildMonthGridCells(anchorKey, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const seg = String(anchorKey || "").split("-");
@@ -1374,7 +1741,7 @@ function lastWallDayOfMonthInTimeZone(year, month1to12, timeZone) {
   }
 }
 
-/** Reports quick ranges: wall dates in `timeZone` (Monday–Sunday week). */
+/** Reports quick ranges: wall dates in `timeZone` (Mondayâ€“Sunday week). */
 function computeReportsQuickRange(preset, now, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const todayKey = calendarDateKeyInTimeZone(now, tz);
@@ -1414,10 +1781,19 @@ function computeStandardDateRange(preset, now, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const todayKey = calendarDateKeyInTimeZone(now, tz);
   if (!todayKey) return { from: "", to: "" };
+  if (preset === "monthly") {
+    // Month means a rolling one-month window ending today, not the calendar month.
+    return { from: addWallMonthsSafe(todayKey, -1, tz) || todayKey, to: todayKey };
+  }
   if (preset === "last_365") {
     return { from: addWallDaysInTimeZone(todayKey, -365, tz) || todayKey, to: todayKey };
   }
-  return computeReportsQuickRange(preset, now, tz);
+  const range = computeReportsQuickRange(preset, now, tz);
+  // Timesheet standard ranges never extend into future dates.
+  if (range.to && range.to > todayKey) {
+    return { from: range.from > todayKey ? todayKey : range.from, to: todayKey };
+  }
+  return range;
 }
 
 function standardDateRangePresetLabel(preset) {
@@ -1498,7 +1874,7 @@ function previousWeekdayKeyInTimeZone(dateKey, weekdayLong, timeZone) {
 function formatPayrollDateKeyShort(dateKey, timeZone, { includeYear = false } = {}) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const key = String(dateKey || "").trim();
-  if (!key) return "—";
+  if (!key) return "-";
   const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
   if (!iso) return key;
   const fmt = new Intl.DateTimeFormat("en-US", {
@@ -1513,7 +1889,7 @@ function formatPayrollDateKeyShort(dateKey, timeZone, { includeYear = false } = 
 function formatPayrollDateKeyNumeric(dateKey, timeZone, { includeYear = true } = {}) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const key = String(dateKey || "").trim();
-  if (!key) return "—";
+  if (!key) return "-";
   const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
   if (!iso) return key;
   return new Intl.DateTimeFormat("en-US", {
@@ -1625,7 +2001,7 @@ function payrollRangePresetLabel(value) {
 function formatPayrollDateLong(dateKey, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const key = String(dateKey || "").trim();
-  if (!key) return "â€”";
+  if (!key) return "-";
   const iso = wallDateTimeToUtcIso(key, "12:00:00", tz);
   if (!iso) return key;
   return new Intl.DateTimeFormat("en-US", {
@@ -1643,6 +2019,21 @@ function formatPayrollPeriodLabelLong(startKey, endKey, timeZone) {
   const end = formatPayrollDateKeyShort(endKey, tz, { includeYear: true });
   if (start && end) return `${start} - ${end}`;
   return "Payroll period";
+}
+
+function formatPayrollPeriodLabelCompact(startKey, endKey, timeZone) {
+  const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
+  const startShort = formatPayrollDateKeyShort(startKey, tz);
+  const endShort = formatPayrollDateKeyShort(endKey, tz);
+  const startLong = formatPayrollDateKeyShort(startKey, tz, { includeYear: true });
+  const endLong = formatPayrollDateKeyShort(endKey, tz, { includeYear: true });
+  if (!startShort || !endShort) return "Payroll period";
+  const startYear = startLong.split(", ").pop();
+  const endYear = endLong.split(", ").pop();
+  if (startYear && endYear && startYear === endYear) {
+    return `${startShort} - ${endShort}, ${endYear}`;
+  }
+  return `${startLong} - ${endLong}`;
 }
 
 function formatPayrollSignedMoney(value) {
@@ -1698,7 +2089,7 @@ function payrollPeriodOptionsForRange(settings, rangeFrom, rangeTo, timeZone) {
         startKey,
         endKey,
         payDateKey: String(period.payDateKey || endKey).trim() || endKey,
-        label: `${formatPayrollPeriodLabel(startKey, endKey, tz)} • Pay ${formatPayrollDateKeyNumeric(period.payDateKey || endKey, tz)}`,
+        label: `${formatPayrollPeriodLabel(startKey, endKey, tz)} â€¢ Pay ${formatPayrollDateKeyNumeric(period.payDateKey || endKey, tz)}`,
       });
     }
     const prevDate = addWallDaysInTimeZone(startKey, -1, tz);
@@ -1718,7 +2109,7 @@ function payrollBalanceBadgeClass(balance) {
 }
 
 function reportsCostCentreKeyFromRow(row) {
-  return String(row?.costCenter ?? "").trim() || "—";
+  return String(row?.costCenter ?? "").trim() || "â€”";
 }
 
 function reportDimensionLabel(value) {
@@ -2252,14 +2643,14 @@ function teamAttendanceStatusForRecord(record, ctx) {
 
 /** Dashboard row: aggregate display for all timesheets that day for one employee (multiple shifts). */
 function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, getWorkedMinutes, getLabourCost) {
-  const projectDisp = rep?.project ? String(rep.project) : "—";
-  const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
+  const projectDisp = rep?.project ? String(rep.project) : "â€”";
+  const costDisp = rep?.costCenter ? String(rep.costCenter) : "â€”";
   if (!userDayRows?.length) {
     return {
-      inDisp: "—",
-      outDisp: "—",
-      totalDisp: "—",
-      labourDisp: "—",
+      inDisp: "â€”",
+      outDisp: "â€”",
+      totalDisp: "â€”",
+      labourDisp: "â€”",
       totalMinutes: 0,
       labourCost: 0,
       projectDisp,
@@ -2269,7 +2660,7 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
   const byInAsc = [...userDayRows].sort(
     (a, b) => parseStoredInstant(a.clockIn).getTime() - parseStoredInstant(b.clockIn).getTime()
   );
-  const inDisp = byInAsc[0]?.clockIn ? formatTime(byInAsc[0].clockIn, companyTimeZone) : "—";
+  const inDisp = byInAsc[0]?.clockIn ? formatTime(byInAsc[0].clockIn, companyTimeZone) : "â€”";
   const outsDesc = [...userDayRows]
     .filter((r) => r.clockOut)
     .sort((a, b) => parseStoredInstant(b.clockOut).getTime() - parseStoredInstant(a.clockOut).getTime());
@@ -2277,7 +2668,7 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
     (r) => normalizeStatus(r.status) === "active" && !r.clockOut
   );
   const outDisp =
-    anyOpenNoOut || !outsDesc.length ? "—" : formatTime(outsDesc[0].clockOut, companyTimeZone);
+    anyOpenNoOut || !outsDesc.length ? "â€”" : formatTime(outsDesc[0].clockOut, companyTimeZone);
   let sumMin = 0;
   let sumLab = 0;
   for (const ts of userDayRows) {
@@ -2310,7 +2701,7 @@ const COMPANY_TIME_ZONE_OPTIONS = [
 function formatDate(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "â€”";
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     weekday: "short",
@@ -2323,7 +2714,7 @@ function formatDate(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 function formatDateParts(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const d = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
-  if (Number.isNaN(d.getTime())) return { day: "—", fullDate: "—" };
+  if (Number.isNaN(d.getTime())) return { day: "â€”", fullDate: "â€”" };
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
   const fullDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -2337,7 +2728,7 @@ function formatDateParts(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 function formatTime(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
-  if (Number.isNaN(date.getTime())) return "—";
+  if (Number.isNaN(date.getTime())) return "â€”";
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     hour: "numeric",
@@ -2404,7 +2795,7 @@ function getProjectFolderName(projectName) {
   return projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-/** Normalize profiles.hourly_rate for inserts (missing / invalid → 0). */
+/** Normalize profiles.hourly_rate for inserts (missing / invalid â†’ 0). */
 function hourlyRateFromProfileValue(hr) {
   if (hr == null || hr === "") return 0;
   const n = typeof hr === "number" ? hr : Number(String(hr).replace(",", "."));
@@ -2599,7 +2990,7 @@ async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZ
   };
 }
 
-/** Map Supabase `timesheets` row → UI record shape used by Timesheet tab / reports */
+/** Map Supabase `timesheets` row â†’ UI record shape used by Timesheet tab / reports */
 function mapTimesheetRowFromSupabase(row) {
   const projectName = row.project_name || "";
   const empName = row.employee_name || "";
@@ -2748,6 +3139,25 @@ function makeCurrentShiftFromActiveTimesheetRecord(record, { fallbackName = "", 
   const existingId = existingShift?.supabaseTimesheetId ?? existingShift?.id;
   const recordId = record.supabaseTimesheetId ?? record.id;
   const sameExistingShift = existingId != null && recordId != null && String(existingId) === String(recordId);
+  const resolvedProject =
+    String(
+      record.project ||
+        record.projectName ||
+        record.project_name ||
+        (sameExistingShift ? existingShift?.project || existingShift?.projectName || existingShift?.project_name : "") ||
+        ""
+    ).trim();
+  const resolvedCostCenter =
+    String(
+      record.costCenter ||
+        record.costCentre ||
+        record.cost_centre ||
+        record.task ||
+        (sameExistingShift
+          ? existingShift?.costCenter || existingShift?.costCentre || existingShift?.cost_centre || existingShift?.task
+          : "") ||
+        ""
+    ).trim();
   return {
     ...(sameExistingShift ? existingShift : {}),
     userId: record.userId || record.user_id || record.employeeId || null,
@@ -2759,9 +3169,13 @@ function makeCurrentShiftFromActiveTimesheetRecord(record, { fallbackName = "", 
     companyId: record.companyId ?? null,
     companyName: record.companyName ?? null,
     hourlyRate: Number.isFinite(Number(record.hourlyRate)) ? Number(record.hourlyRate) : 0,
-    project: record.project || "",
-    projectId: record.projectId ?? null,
-    costCenter: record.costCenter || "",
+    project: resolvedProject,
+    projectName: resolvedProject,
+    project_name: resolvedProject,
+    projectId: record.projectId ?? existingShift?.projectId ?? null,
+    costCenter: resolvedCostCenter,
+    costCentre: resolvedCostCenter,
+    cost_centre: resolvedCostCenter,
     date: record.clockIn,
     clockIn: record.clockIn,
     clockInLocation: record.clockInLocation || null,
@@ -2775,7 +3189,7 @@ function makeCurrentShiftFromActiveTimesheetRecord(record, { fallbackName = "", 
     ),
     lastPhotoAt: sameExistingShift ? existingShift?.lastPhotoAt || null : null,
     employeeId: record.userId || record.user_id || record.employeeId || null,
-    projectFolder: record.projectFolder || (record.project ? getProjectFolderName(record.project) : ""),
+    projectFolder: record.projectFolder || (resolvedProject ? getProjectFolderName(resolvedProject) : ""),
     liveLocation: sameExistingShift ? existingShift?.liveLocation || null : null,
     locationTrail: sameExistingShift ? existingShift?.locationTrail || [] : [],
     supabaseTimesheetId: recordId ?? null,
@@ -3154,16 +3568,16 @@ function withTimeout(promise, ms = 10000, message = "Operation timed out") {
 
 /**
  * Notification recipients by actor role (company_members in same company; actor always excluded).
- * - employee → all owner + supervisor user_ids
- * - supervisor → owner user_ids only
- * - owner → none (no notifications for own actions)
+ * - employee â†’ all owner + supervisor user_ids
+ * - supervisor â†’ owner user_ids only
+ * - owner â†’ none (no notifications for own actions)
  */
 async function getNotificationRecipients(supabase, companyId, actorUserId, actorRole) {
   const ar = normalizeMemberRole(actorRole);
   console.log("[NOTIFY] actor role", ar, "actorUserId", actorUserId, "companyId", companyId);
   if (!companyId || !actorUserId) return [];
   if (ar === "owner") {
-    console.log("[NOTIFY] recipients (owner actor) → []");
+    console.log("[NOTIFY] recipients (owner actor) â†’ []");
     return [];
   }
   const { data, error } = await supabase.from("company_members").select("user_id, role").eq("company_id", companyId);
@@ -3234,29 +3648,60 @@ async function requestSendPushForNotificationIds(ids) {
   }
 }
 
-/** Browser/PWA Notification API for clock_in / clock_out only; never throws. */
+function notificationNavigationUrl(notificationRow) {
+  const type = String(notificationRow?.type || "").trim().toLowerCase();
+  if (type === "schedule_assigned" || type === "scheduled_task_assigned" || type === "task_assigned") {
+    const id = String(notificationRow?.id || "").trim();
+    return id ? `/?tab=schedule&notificationId=${encodeURIComponent(id)}` : "/?tab=schedule";
+  }
+  if (type === "chat_message") {
+    const id = String(notificationRow?.id || "").trim();
+    const relatedFolder = String(notificationRow?.related_folder || notificationRow?.relatedFolder || "").trim();
+    const conversationId = relatedFolder.startsWith("chat:") ? relatedFolder.slice(5) : "";
+    if (!conversationId) return "/?tab=chat";
+    const params = new URLSearchParams({ tab: "chat", conversationId });
+    if (id) params.set("notificationId", id);
+    return `/?${params.toString()}`;
+  }
+  return "/";
+}
+
+/** Browser/PWA Notification API for supported app notifications; never throws. */
 function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   const id = String(notificationRow?.id ?? "");
   if (!id || shownIdsRef.current.has(id)) return;
   const t = String(notificationRow?.type || "").trim();
-  if (t !== "clock_in" && t !== "clock_out") return;
+  if (t !== "clock_in" && t !== "clock_out" && t !== "chat_message") return;
   if (typeof window === "undefined" || !window.Notification) return;
   if (window.Notification.permission !== "granted") return;
   try {
     shownIdsRef.current.add(id);
-    new window.Notification(String(notificationRow.title || "OPERA.AI"), {
+    const notification = new window.Notification(String(notificationRow.title || "OPERA.AI"), {
       body: String(notificationRow.message || ""),
       icon: OPERA_APP_ICON,
       badge: OPERA_APP_ICON,
       tag: id,
     });
+    const targetUrl = notificationNavigationUrl(notificationRow);
+    notification.onclick = () => {
+      try {
+        window.focus?.();
+        if (targetUrl && targetUrl !== "/") {
+          window.location.assign(targetUrl);
+        }
+      } catch (error) {
+        console.warn("[NOTIFY] notification click failed", error);
+      } finally {
+        notification.close?.();
+      }
+    };
   } catch (e) {
     console.warn("[NOTIFY] system Notification failed", e);
     shownIdsRef.current.delete(id);
   }
 }
 
-/** Insert one in-app row per recipient. Failures are logged only — never throws. */
+/** Insert one in-app row per recipient. Failures are logged only â€” never throws. */
 function scheduleAssignmentMessageSignature(row) {
   const title = String(row?.title ?? "").trim();
   const message = String(row?.message ?? "").trim();
@@ -3578,7 +4023,31 @@ function PublicPhotoShareView({ share, index, setIndex }) {
   );
 }
 
-function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
+function useVisualViewportHeight() {
+  const [height, setHeight] = useState(() =>
+    typeof window !== "undefined" ? window.visualViewport?.height || window.innerHeight : 0
+  );
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const viewport = window.visualViewport;
+    const updateHeight = () => setHeight(viewport?.height || window.innerHeight);
+    updateHeight();
+    if (viewport) {
+      viewport.addEventListener("resize", updateHeight);
+      viewport.addEventListener("scroll", updateHeight);
+      return () => {
+        viewport.removeEventListener("resize", updateHeight);
+        viewport.removeEventListener("scroll", updateHeight);
+      };
+    }
+    window.addEventListener("resize", updateHeight);
+    return () => window.removeEventListener("resize", updateHeight);
+  }, []);
+  return height;
+}
+
+function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNotifications, onViewModeChange, onBack }) {
+  const chatViewportHeight = useVisualViewportHeight();
   const [conversations, setConversations] = useState([]);
   const [members, setMembers] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
@@ -3588,6 +4057,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   const [error, setError] = useState("");
   const [messageDraft, setMessageDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
   const [composerOpen, setComposerOpen] = useState(null);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIds, setGroupMemberIds] = useState([]);
@@ -3599,21 +4069,69 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   const [listTitle, setListTitle] = useState("");
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
+  const [subItemDraft, setSubItemDraft] = useState("");
+  const [addingSubItemParentId, setAddingSubItemParentId] = useState("");
   const [editingListItemId, setEditingListItemId] = useState("");
   const [editingListItemText, setEditingListItemText] = useState("");
   const [selectedChatListShowCompleted, setSelectedChatListShowCompleted] = useState(false);
+  const [selectedChatListSnapshot, setSelectedChatListSnapshot] = useState(null);
+  const [chatListFocusRestoreTick, setChatListFocusRestoreTick] = useState(0);
+  const [assigningListItemId, setAssigningListItemId] = useState("");
   const [manageOpen, setManageOpen] = useState(false);
   const [chatSearch, setChatSearch] = useState("");
   const [chatFilter, setChatFilter] = useState("all");
   const [chatPane, setChatPane] = useState("list");
+  const [chatUtilityMenuOpen, setChatUtilityMenuOpen] = useState(false);
+  const [conversationMembers, setConversationMembers] = useState([]);
+  const [chatReplyTarget, setChatReplyTarget] = useState(null);
+  const [chatActiveMessage, setChatActiveMessage] = useState(null);
+  const [chatForwardMessage, setChatForwardMessage] = useState(null);
+  const [chatImageViewer, setChatImageViewer] = useState(null);
+  const [chatForwardSearch, setChatForwardSearch] = useState("");
   const chatImageInputRef = useRef(null);
   const chatMessageInputRef = useRef(null);
   const chatListTitleInputRef = useRef(null);
   const chatListItemInputRef = useRef(null);
-  const chatListCardRefs = useRef({});
+  const chatSubItemInputRef = useRef(null);
+  const chatListEditInputRef = useRef(null);
+  const chatListInputPointerAtRef = useRef(0);
+  const chatSubItemInputPointerAtRef = useRef(0);
+  const chatListSwipeStateRef = useRef({});
+  const chatThreadScrollRef = useRef(null);
+  const chatMessagePressTimerRef = useRef(null);
+  const chatMessagePressTargetRef = useRef(null);
+  const chatForwardSearchRef = useRef(null);
+  const messagesRef = useRef([]);
+  const chatListsRef = useRef([]);
+  const conversationMembersRef = useRef([]);
+  const [threadCacheHydrated, setThreadCacheHydrated] = useState(false);
+  const isImmersivePane = chatPane !== "list";
 
   const companyId = userCompany?.id || "";
   const currentUserId = authUser?.id || "";
+  const currentUserDisplayName = useMemo(
+    () =>
+      String(
+        authUser?.user_metadata?.full_name ||
+          authUser?.user_metadata?.name ||
+          authUser?.user_metadata?.user_name ||
+          authUser?.email ||
+          "User"
+      ).trim() || "User",
+    [authUser]
+  );
+  const chatConversationsCacheKey = useMemo(
+    () => makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "conversations"),
+    [companyId, currentUserId]
+  );
+  const chatMessagesCacheKey = useMemo(
+    () => (selectedConversationId ? makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", selectedConversationId) : ""),
+    [companyId, currentUserId, selectedConversationId]
+  );
+  const chatPendingQueueKey = useMemo(
+    () => makeAppQueueKey("chat", companyId || "company", currentUserId || "user", "pending_messages"),
+    [companyId, currentUserId]
+  );
   const chatErrorMessage = useCallback((err) => {
     const message = getErrorMessage(err);
     return /failed to fetch/i.test(message)
@@ -3634,6 +4152,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       const aCompany = a?.type === "company" && a?.is_default;
       const bCompany = b?.type === "company" && b?.is_default;
       if (aCompany !== bCompany) return aCompany ? -1 : 1;
+      if (Boolean(a?.pinned) !== Boolean(b?.pinned)) return a?.pinned ? -1 : 1;
       return String(b?.last_message_at || "").localeCompare(String(a?.last_message_at || ""));
     });
     const hasCompanyChat = rows.some((conversation) => conversation?.type === "company" && conversation?.is_default);
@@ -3660,11 +4179,13 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   );
   const selectedConversationMembers = useMemo(
     () =>
-      (selectedConversation?.member_user_ids || []).map((userId) => ({
-        user_id: userId,
-        ...(memberById[String(userId)] || {}),
-      })),
-    [memberById, selectedConversation]
+      (conversationMembers.length
+        ? conversationMembers
+        : (selectedConversation?.member_user_ids || []).map((userId) => ({
+            user_id: userId,
+            ...(memberById[String(userId)] || {}),
+          }))),
+    [conversationMembers, memberById, selectedConversation]
   );
   const selectedCanManage = Boolean(selectedConversation?.can_manage);
   const selectedCanLeave = Boolean(selectedConversation?.can_leave);
@@ -3673,34 +4194,190 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     () => chatLists.find((list) => String(list.id) === String(selectedChatListId)) || null,
     [chatLists, selectedChatListId]
   );
+  const selectedChatListResolved = selectedChatList || selectedChatListSnapshot || null;
   const selectedChatListItems = useMemo(() => {
-    const rows = Array.isArray(selectedChatList?.items) ? [...selectedChatList.items] : [];
-    rows.sort((a, b) => Number(a.item_number || 0) - Number(b.item_number || 0));
-    return selectedChatListShowCompleted ? rows : rows.filter((item) => !item.is_done);
-  }, [selectedChatList, selectedChatListShowCompleted]);
+    const rows = Array.isArray(selectedChatListResolved?.items) ? [...selectedChatListResolved.items] : [];
+    rows.sort((a, b) => {
+      const sortDiff = Number(a?.sort_order || 0) - Number(b?.sort_order || 0);
+      if (sortDiff !== 0) return sortDiff;
+      const levelDiff = Number(a?.item_level || 0) - Number(b?.item_level || 0);
+      if (levelDiff !== 0) return levelDiff;
+      const childDiff = Number(a?.child_order || 0) - Number(b?.child_order || 0);
+      if (childDiff !== 0) return childDiff;
+      return String(a?.created_at || "").localeCompare(String(b?.created_at || ""));
+    });
+    return rows;
+  }, [selectedChatListResolved, selectedChatListShowCompleted]);
+  const selectedChatListHierarchy = useMemo(
+    () => buildChatListHierarchy(selectedChatListItems, { showCompleted: selectedChatListShowCompleted }),
+    [selectedChatListItems, selectedChatListShowCompleted]
+  );
+  const selectedChatAssignableMembers = useMemo(
+    () =>
+      (selectedConversationMembers.length ? selectedConversationMembers : members)
+        .filter((member) => member?.user_id)
+        .map((member) => ({
+          user_id: String(member.user_id),
+          name: String(member.name || member.email || "User").trim() || "User",
+          email: String(member.email || "").trim(),
+        })),
+    [members, selectedConversationMembers]
+  );
+  const chatAssigneeById = useMemo(
+    () => Object.fromEntries(selectedChatAssignableMembers.map((member) => [String(member.user_id), member])),
+    [selectedChatAssignableMembers]
+  );
+  const getChatListAssigneeMeta = useCallback(
+    (item) => {
+      const assignedUserId = String(item?.assigned_user_id || "").trim();
+      if (!assignedUserId) return null;
+      const member = chatAssigneeById[assignedUserId] || memberById[assignedUserId] || null;
+      if (!member) return { user_id: assignedUserId, name: "Assigned", initial: "A" };
+      const label = String(member.name || member.email || "Assigned").trim() || "Assigned";
+      return {
+        user_id: assignedUserId,
+        name: label,
+        initial: label.slice(0, 1).toUpperCase(),
+      };
+    },
+    [chatAssigneeById, memberById]
+  );
+  const chatTimelineRows = useMemo(() => buildChatTimelineRows(messages, []), [messages]);
+  const chatTimelineGroups = useMemo(() => {
+    const groups = [];
+    for (const entry of chatTimelineRows) {
+      const dayKey = calendarDateKeyInTimeZone(entry?.created_at || new Date(), companyTimeZone);
+      const lastGroup = groups[groups.length - 1];
+      if (!lastGroup || lastGroup.dayKey !== dayKey) {
+        groups.push({
+          dayKey,
+          label: formatChatTimelineLabel(dayKey, companyTimeZone),
+          rows: [entry],
+        });
+      } else {
+        lastGroup.rows.push(entry);
+      }
+    }
+    return groups;
+  }, [chatTimelineRows, companyTimeZone]);
+  const selectedConversationSubtitle = useMemo(() => {
+    if (!selectedConversation) return "";
+    if (selectedConversation.pendingSetup) return "Setting up company chat";
+    const memberNames = selectedConversationMembers
+      .map((member) => {
+        if (!member?.user_id) return "";
+        if (String(member.user_id) === String(currentUserId)) return "You";
+        return member.name || member.email || "User";
+      })
+      .filter(Boolean);
+    if (selectedConversation.type === "direct") {
+      return memberNames.find((name) => name !== "You") || "Direct message";
+    }
+    if (!memberNames.length) {
+      return selectedConversation.type === "company" ? "Company-wide chat" : "Group chat";
+    }
+    if (memberNames.length <= 3) return memberNames.join(", ");
+    return `${memberNames.slice(0, 3).join(", ")} +${memberNames.length - 3}`;
+  }, [currentUserId, selectedConversation, selectedConversationMembers]);
+
+  const resizeChatComposer = useCallback(() => {
+    const input = chatMessageInputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    const nextHeight = Math.min(Math.max(input.scrollHeight, 20), 112);
+    const nextHeightPx = `${nextHeight}px`;
+    if (input.style.height !== nextHeightPx) input.style.height = nextHeightPx;
+    input.style.overflowY = input.scrollHeight > nextHeight ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => {
+    messagesRef.current = Array.isArray(messages) ? messages : [];
+  }, [messages]);
+
+  useEffect(() => {
+    chatListsRef.current = Array.isArray(chatLists) ? chatLists : [];
+  }, [chatLists]);
+
+  useEffect(() => {
+    conversationMembersRef.current = Array.isArray(conversationMembers) ? conversationMembers : [];
+  }, [conversationMembers]);
+
+  useEffect(() => {
+    setChatUtilityMenuOpen(false);
+  }, [chatPane, selectedConversationId]);
+
+  useEffect(() => {
+    if (typeof onViewModeChange !== "function") return undefined;
+    onViewModeChange(chatPane);
+  }, [chatPane, onViewModeChange]);
+
+  useEffect(() => {
+    if (typeof onViewModeChange !== "function") return undefined;
+    return () => onViewModeChange("list");
+  }, [onViewModeChange]);
+
+  useLayoutEffect(() => {
+    resizeChatComposer();
+  }, [messageDraft, resizeChatComposer, selectedConversationId]);
 
   const openChatListDetail = useCallback((listId) => {
     setSelectedChatListId(String(listId || ""));
     setEditingListItemId("");
     setEditingListItemText("");
+    setAssigningListItemId("");
     setListItemDraft("");
     setSelectedChatListShowCompleted(false);
     setChatPane("list-detail");
   }, []);
 
-  const jumpToChatListCard = useCallback((listId) => {
-    setSelectedChatListId(String(listId || ""));
-    setEditingListItemId("");
-    setEditingListItemText("");
-    setListItemDraft("");
-    setSelectedChatListShowCompleted(false);
-    setChatPane("thread");
-  }, []);
-
   const summarizeChatListItems = useCallback((items) => {
     const rows = Array.isArray(items) ? [...items] : [];
-    rows.sort((a, b) => Number(a.item_number || 0) - Number(b.item_number || 0));
-    return rows;
+    rows.sort((left, right) => {
+      const sortDiff = Number(left?.sort_order || 0) - Number(right?.sort_order || 0);
+      if (sortDiff !== 0) return sortDiff;
+      const levelDiff = Number(left?.item_level || 0) - Number(right?.item_level || 0);
+      if (levelDiff !== 0) return levelDiff;
+      const itemNumberDiff = Number(left?.item_number || 0) - Number(right?.item_number || 0);
+      if (itemNumberDiff !== 0) return itemNumberDiff;
+      const childOrderDiff = Number(left?.child_order || 0) - Number(right?.child_order || 0);
+      if (childOrderDiff !== 0) return childOrderDiff;
+      return String(left?.created_at || "").localeCompare(String(right?.created_at || ""));
+    });
+    const deduped = [];
+    const byId = new Map();
+    const byFallback = new Map();
+    for (const row of rows) {
+      const persistedId = String(row?.id || "").trim();
+      const hasPersistedId = Boolean(persistedId && !persistedId.startsWith("temp-"));
+      const fallbackKey = buildChatListItemFallbackKey(row);
+      const existingIndex =
+        (hasPersistedId && byId.has(persistedId) ? byId.get(persistedId) : null) ??
+        (byFallback.has(fallbackKey) ? byFallback.get(fallbackKey) : null);
+      if (existingIndex == null) {
+        const nextIndex = deduped.push(row) - 1;
+        if (hasPersistedId) byId.set(persistedId, nextIndex);
+        byFallback.set(fallbackKey, nextIndex);
+        continue;
+      }
+      const existing = deduped[existingIndex];
+      const existingPersistedId = String(existing?.id || "").trim();
+      const existingHasPersistedId = Boolean(existingPersistedId && !existingPersistedId.startsWith("temp-"));
+      const preferredRow =
+        hasPersistedId && !existingHasPersistedId
+          ? { ...existing, ...row, __optimistic: false }
+          : !hasPersistedId && existingHasPersistedId
+            ? existing
+            : row?.__optimistic && !existing?.__optimistic
+              ? existing
+              : { ...existing, ...row };
+      deduped[existingIndex] = preferredRow;
+      const preferredPersistedId = String(preferredRow?.id || "").trim();
+      if (preferredPersistedId && !preferredPersistedId.startsWith("temp-")) {
+        byId.set(preferredPersistedId, existingIndex);
+      }
+      byFallback.set(buildChatListItemFallbackKey(preferredRow), existingIndex);
+    }
+    return deduped;
   }, []);
 
   const summarizeChatListRow = useCallback(
@@ -3708,6 +4385,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       const rows = summarizeChatListItems(items);
       return {
         ...list,
+        pinned: false,
         items: rows,
         open_count: rows.filter((item) => !item.is_done).length,
         total_count: rows.length,
@@ -3716,6 +4394,109 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     [summarizeChatListItems]
   );
 
+  const buildQueuedConversationMessages = useCallback(
+    (conversationId) =>
+      readLocalFirstQueue(chatPendingQueueKey, [])
+        .filter((item) => String(item?.conversation_id || item?.conversationId || "") === String(conversationId || ""))
+        .map((item) =>
+          synthesizeQueuedChatMessage(
+            {
+              ...item,
+              sender_user_id: item?.sender_user_id || item?.senderUserId || currentUserId,
+            },
+            currentUserDisplayName
+          )
+        ),
+    [chatPendingQueueKey, currentUserDisplayName, currentUserId]
+  );
+
+  const mergeChatListsWithLocalState = useCallback(
+    (remoteLists, localLists = chatListsRef.current) => {
+      const remoteById = new Map((Array.isArray(remoteLists) ? remoteLists : []).map((list) => [String(list?.id || ""), list]));
+      const localById = new Map((Array.isArray(localLists) ? localLists : []).map((list) => [String(list?.id || ""), list]));
+      const mergedIds = new Set([...remoteById.keys(), ...localById.keys()].filter(Boolean));
+      return [...mergedIds]
+        .map((listId) => {
+          const remoteList = remoteById.get(listId) || null;
+          const localList = localById.get(listId) || null;
+          const baseList = remoteList || localList;
+          if (!baseList) return null;
+          const remoteItems = Array.isArray(remoteList?.items) ? remoteList.items : [];
+          const localItems = Array.isArray(localList?.items) ? localList.items : [];
+          const mergedItems = [...remoteItems];
+          const knownItemKeys = new Set(remoteItems.map((item) => buildChatListItemMergeKey(item)));
+          for (const item of localItems) {
+            const itemKey = buildChatListItemMergeKey(item);
+            if (item?.__optimistic && !knownItemKeys.has(itemKey)) {
+              mergedItems.push(item);
+              knownItemKeys.add(itemKey);
+            }
+          }
+          return summarizeChatListRow(
+            {
+              ...baseList,
+              pinned: false,
+            },
+            mergedItems
+          );
+        })
+        .filter(Boolean)
+        .sort((a, b) => compareChatCreatedAtAscending(a?.created_at, b?.created_at));
+    },
+    [summarizeChatListRow]
+  );
+
+  const mergeChatMessagesWithLocalState = useCallback(
+    (remoteMessages, conversationId, localMessages = messagesRef.current) =>
+      mergeChatMessageCollections({
+        remoteMessages,
+        localMessages,
+        queuedMessages: buildQueuedConversationMessages(conversationId),
+      }),
+    [buildQueuedConversationMessages]
+  );
+
+  const scrollChatThreadToBottom = useCallback((behavior = "auto") => {
+    const node = chatThreadScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
+  }, []);
+
+  const restoreChatListInputFocus = useCallback(() => {
+    const focusInput = () => {
+      const input = chatListItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    focusInput();
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => focusInput());
+      window.setTimeout(() => focusInput(), 80);
+      window.setTimeout(() => focusInput(), 220);
+    }
+    setChatListFocusRestoreTick((tick) => tick + 1);
+  }, []);
+
+  const restoreChatSubItemInputFocus = useCallback(() => {
+    const focusInput = () => {
+      const input = chatSubItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    focusInput();
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => focusInput());
+      window.setTimeout(() => focusInput(), 80);
+      window.setTimeout(() => focusInput(), 220);
+    }
+  }, []);
+
+  const shouldPreserveTouchedInputFocus = useCallback((lastPointerAt) => Date.now() - Number(lastPointerAt || 0) < 500, []);
+
   const updateSelectedChatListRows = useCallback(
     (updater) => {
       setChatLists((previous) =>
@@ -3723,38 +4504,224 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           if (String(list.id) !== String(selectedChatListId)) return list;
           const currentRows = Array.isArray(list.items) ? list.items : [];
           const nextRows = updater(currentRows, list) || currentRows;
-          return summarizeChatListRow(list, nextRows);
+          const nextList = summarizeChatListRow(list, nextRows);
+          setSelectedChatListSnapshot(nextList);
+          return nextList;
         })
       );
     },
     [selectedChatListId, summarizeChatListRow]
   );
 
+  const cacheChatConversationState = useCallback(
+    (payload, meta = {}) => {
+      if (!chatConversationsCacheKey) return payload;
+      return writeLocalFirstCache(chatConversationsCacheKey, payload, {
+        ...meta,
+        companyId,
+        userId: currentUserId,
+        scope: "chat_conversations",
+      });
+    },
+    [chatConversationsCacheKey, companyId, currentUserId]
+  );
+
+  const cacheChatMessageState = useCallback(
+    (conversationId, payload, meta = {}) => {
+      if (!conversationId) return payload;
+      const key =
+        String(conversationId) === String(selectedConversationId) && chatMessagesCacheKey
+          ? chatMessagesCacheKey
+          : makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", conversationId);
+      return writeLocalFirstCache(key, payload, {
+        ...meta,
+        companyId,
+        conversationId,
+        userId: currentUserId,
+        scope: "chat_messages",
+      });
+    },
+    [chatMessagesCacheKey, companyId, currentUserId, selectedConversationId]
+  );
+
+  const readCachedChatMessages = useCallback(
+    (conversationId) => {
+      if (!conversationId) return null;
+      const key =
+        String(conversationId) === String(selectedConversationId) && chatMessagesCacheKey
+          ? chatMessagesCacheKey
+          : makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", conversationId);
+      return readLocalFirstCacheEnvelope(key, null);
+    },
+    [chatMessagesCacheKey, companyId, currentUserId, selectedConversationId]
+  );
+
+  const hydrateCachedChatThread = useCallback(
+    (conversationId) => {
+      if (!conversationId || String(conversationId).startsWith("__company_")) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+        setThreadCacheHydrated(false);
+        return false;
+      }
+      const cached = readCachedChatMessages(conversationId);
+      const hasCachedThreadState = Boolean(cached?.savedAt || cached?.value);
+      setThreadCacheHydrated(hasCachedThreadState);
+      if (!cached?.value) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+        return false;
+      }
+      const cachedMessages = Array.isArray(cached.value.messages) ? cached.value.messages : [];
+      const cachedLists = Array.isArray(cached.value.lists) ? cached.value.lists : [];
+      setMessages(mergeChatMessagesWithLocalState(cachedMessages, conversationId, []));
+      setChatLists(mergeChatListsWithLocalState(cachedLists, []));
+      setConversationMembers(Array.isArray(cached.value.conversation_members) ? cached.value.conversation_members : []);
+      setMessagesLoading(false);
+      return true;
+    },
+    [mergeChatListsWithLocalState, mergeChatMessagesWithLocalState, readCachedChatMessages]
+  );
+
+  const openChatConversation = useCallback(
+    (conversationId) => {
+      setManageOpen(false);
+      setSelectedChatListId("");
+      setSelectedChatListSnapshot(null);
+      setEditingListItemId("");
+      setEditingListItemText("");
+      setListItemDraft("");
+      setSelectedChatListShowCompleted(false);
+      hydrateCachedChatThread(conversationId);
+      setSelectedConversationId(conversationId);
+      setChatPane("thread");
+    },
+    [hydrateCachedChatThread]
+  );
+
+  const markConversationRead = useCallback(
+    async (conversationId) => {
+      if (!conversationId || String(conversationId).startsWith("__company_") || selectedConversation?.pendingSetup) return;
+      try {
+        await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "mark_read",
+            company_id: companyId,
+            conversation_id: conversationId,
+          }),
+        });
+      } catch (err) {
+        console.warn("[CHAT] mark_read failed", err);
+      }
+    },
+    [companyId, selectedConversation?.pendingSetup]
+  );
+
+  const messageStatusForRow = useCallback(
+    (message) => {
+      if (!message) return "sent";
+      if (message.__optimistic) return String(message.__sync_state || "sending");
+      if (String(message.sender_user_id) !== String(currentUserId)) return "";
+      const readMembers = (conversationMembers || []).filter((member) => String(member.user_id) !== String(currentUserId));
+      const hasAnyoneRead = readMembers.some((member) => {
+        const readAt = String(member.last_read_at || member.lastReadAt || "").trim();
+        return Boolean(readAt) && new Date(readAt).getTime() >= new Date(message.created_at || 0).getTime();
+      });
+      return hasAnyoneRead ? "read" : "delivered";
+    },
+    [conversationMembers, currentUserId]
+  );
+
+  const clearChatMessagePressTimer = useCallback(() => {
+    if (chatMessagePressTimerRef.current && typeof window !== "undefined") {
+      window.clearTimeout(chatMessagePressTimerRef.current);
+    }
+    chatMessagePressTimerRef.current = null;
+    chatMessagePressTargetRef.current = null;
+  }, []);
+
+  const openChatMessageMenu = useCallback(
+    (message) => {
+      if (!message) return;
+      clearChatMessagePressTimer();
+      setChatActiveMessage(message);
+    },
+    [clearChatMessagePressTimer]
+  );
+
+  const beginChatMessagePress = useCallback(
+    (message) => {
+      if (!message) return;
+      clearChatMessagePressTimer();
+      chatMessagePressTargetRef.current = message;
+      chatMessagePressTimerRef.current = window.setTimeout(() => {
+        setChatActiveMessage(chatMessagePressTargetRef.current);
+        clearChatMessagePressTimer();
+      }, 450);
+    },
+    [clearChatMessagePressTimer]
+  );
+
+  const clearChatMessageActions = useCallback(() => {
+    setChatActiveMessage(null);
+  }, []);
+
+  const renderChatMessageStatus = useCallback(
+    (message) => {
+      const status = messageStatusForRow(message);
+      if (String(message?.sender_user_id || "") !== String(currentUserId)) return null;
+      const iconClass = status === "read" ? "text-[#F2C14E]" : "text-white/55";
+      if (status === "sending" || status === "queued") {
+        return (
+          <span className={`inline-flex items-center gap-[1px] ${iconClass}`} aria-label="Message sending">
+            <svg viewBox="0 0 18 18" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 9l3 3 9-9" />
+            </svg>
+          </span>
+        );
+      }
+      if (status === "delivered" || status === "read") {
+        return (
+          <span className={`inline-flex items-center gap-[1px] ${iconClass}`} aria-label={status === "read" ? "Read" : "Delivered"}>
+            <svg viewBox="0 0 18 18" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2.5 9.5 5.8 13 15 4" />
+            </svg>
+            <svg viewBox="0 0 18 18" className="h-3 w-3 -ml-[3px]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M6 9.5 9.3 13 18 4" />
+            </svg>
+          </span>
+        );
+      }
+      return null;
+    },
+    [currentUserId, messageStatusForRow]
+  );
+
   const getToken = useCallback(async () => {
-    const { data, error: sessionError } = await supabase.auth.getSession();
+    const { data, error: sessionError } = await safeGetSession();
     if (sessionError) throw sessionError;
     const token = data?.session?.access_token;
     if (!token) throw new Error("Sign in again to use chat.");
     return token;
   }, []);
 
-  const chatFetch = useCallback(
-    async (path, options = {}) => {
-      const token = await getToken();
-      const response = await fetch(getOperaApiUrl(path), {
-        ...options,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-          ...(options.headers || {}),
-        },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || "Chat request failed");
-      return data;
-    },
-    [getToken]
-  );
+  const chatFetch = async (path, options = {}) => {
+    const token = await getToken();
+    const response = await fetch(getOperaApiUrl(path), {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || "Chat request failed");
+    return data;
+  };
 
   const formatChatTime = useCallback(
     (value) => {
@@ -3788,12 +4755,21 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     const term = chatSearch.trim().toLowerCase();
     return conversationRows.filter((conversation) => {
       if (chatFilter === "pinned" && !conversation.pinned) return false;
+      if (chatFilter === "groups" && conversation.type !== "group") return false;
       if (!term) return true;
       const name = displayConversationName(conversation).toLowerCase();
       const preview = String(conversation.last_message || "").toLowerCase();
       return name.includes(term) || preview.includes(term);
     });
   }, [chatFilter, chatSearch, conversationRows, displayConversationName]);
+  const chatFilterCounts = useMemo(
+    () => ({
+      all: conversationRows.length,
+      pinned: conversationRows.filter((conversation) => Boolean(conversation?.pinned)).length,
+      groups: conversationRows.filter((conversation) => conversation?.type === "group").length,
+    }),
+    [conversationRows]
+  );
 
   const safeChatFileName = useCallback((file) => {
     const raw = String(file?.name || "chat-photo.jpg").toLowerCase();
@@ -3804,7 +4780,17 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   const loadConversations = useCallback(
     async ({ silent = false } = {}) => {
       if (!companyId || !currentUserId) return;
-      if (!silent) setLoading(true);
+      const cached = readLocalFirstCacheEnvelope(chatConversationsCacheKey, null);
+      if (cached?.value) {
+        const cachedConversations = Array.isArray(cached.value.conversations) ? cached.value.conversations : [];
+        const cachedMembers = Array.isArray(cached.value.members) ? cached.value.members : [];
+        setConversations(cachedConversations);
+        setMembers(cachedMembers);
+        if (cachedConversations.length) {
+          setSelectedConversationId((previous) => previous || cachedConversations[0]?.id || "");
+        }
+      }
+      if (!silent && !cached?.savedAt) setLoading(true);
       setError("");
       try {
         const query = new URLSearchParams({ action: "list", company_id: companyId });
@@ -3812,6 +4798,13 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         const nextConversations = data.conversations || [];
         setConversations(nextConversations);
         setMembers(data.members || []);
+        cacheChatConversationState(
+          {
+            conversations: nextConversations,
+            members: data.members || [],
+          },
+          { source: "remote" }
+        );
         setSelectedConversationId((previous) => {
           if (previous && nextConversations.some((conversation) => String(conversation.id) === String(previous))) {
             return previous;
@@ -3824,7 +4817,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         if (!silent) setLoading(false);
       }
     },
-    [chatErrorMessage, chatFetch, companyId, currentUserId]
+    [cacheChatConversationState, chatConversationsCacheKey, chatErrorMessage, companyId, currentUserId]
   );
 
   const loadMessages = useCallback(
@@ -3832,9 +4825,27 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       if (!companyId || !selectedConversationId || String(selectedConversationId).startsWith("__company_")) {
         setMessages([]);
         setChatLists([]);
+        setConversationMembers([]);
+        setThreadCacheHydrated(false);
         return;
       }
-      if (!silent) setMessagesLoading(true);
+      const cached = readCachedChatMessages(selectedConversationId);
+      const hasCachedThreadState = Boolean(cached?.savedAt || cached?.value);
+      setThreadCacheHydrated(hasCachedThreadState);
+      if (!cached?.value) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+      }
+      if (cached?.value) {
+        const cachedMessages = Array.isArray(cached.value.messages) ? cached.value.messages : [];
+        const cachedLists = Array.isArray(cached.value.lists) ? cached.value.lists : [];
+        setMessages(mergeChatMessagesWithLocalState(cachedMessages, selectedConversationId));
+        setChatLists(mergeChatListsWithLocalState(cachedLists, chatListsRef.current));
+        setConversationMembers(Array.isArray(cached.value.conversation_members) ? cached.value.conversation_members : []);
+        setMessagesLoading(false);
+      }
+      if (!silent && !hasCachedThreadState) setMessagesLoading(true);
       setError("");
       try {
         const query = new URLSearchParams({
@@ -3844,16 +4855,92 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           limit: "60",
         });
         const data = await chatFetch(`/api/chat?${query.toString()}`);
-        setMessages(data.messages || []);
-        setChatLists(data.lists || []);
+        const nextMessages = mergeChatMessagesWithLocalState(
+          data.messages || [],
+          selectedConversationId,
+          hasCachedThreadState ? messagesRef.current : []
+        );
+        const nextLists = mergeChatListsWithLocalState(data.lists || [], hasCachedThreadState ? chatListsRef.current : []);
+        const nextConversationMembers = Array.isArray(data.conversation_members) ? data.conversation_members : [];
+        setMessages(nextMessages);
+        setChatLists(nextLists);
+        setConversationMembers(nextConversationMembers);
+        cacheChatMessageState(
+          selectedConversationId,
+          {
+            messages: nextMessages,
+            lists: nextLists,
+            conversation_members: nextConversationMembers,
+          },
+          { source: "remote" }
+        );
+        void markConversationRead(selectedConversationId);
       } catch (err) {
         setError(chatErrorMessage(err));
       } finally {
         if (!silent) setMessagesLoading(false);
       }
     },
-    [chatErrorMessage, chatFetch, companyId, selectedConversationId]
+    [
+      cacheChatMessageState,
+      chatErrorMessage,
+      companyId,
+      markConversationRead,
+      mergeChatListsWithLocalState,
+      mergeChatMessagesWithLocalState,
+      readCachedChatMessages,
+      selectedConversationId,
+    ]
   );
+
+  const flushPendingChatQueue = useCallback(async () => {
+    if (!companyId || !currentUserId || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    const queued = readLocalFirstQueue(chatPendingQueueKey, []).filter(
+      (item) => String(item?.conversation_id || item?.conversationId || "") === String(selectedConversationId)
+    );
+    if (!queued.length) return;
+    let flushed = false;
+    for (const item of queued) {
+      try {
+        const data = await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send",
+            company_id: companyId,
+            conversation_id: selectedConversationId,
+            body: item.body,
+            client_id: item.client_id || item.clientId,
+            message_type: item.message_type || item.messageType || "text",
+            attachments: item.attachments || [],
+            checklist_items: item.checklist_items || item.checklistItems || [],
+            metadata: item.metadata || {},
+          }),
+        });
+        if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+          void requestSendPushForNotificationIds(data.notification_ids);
+        }
+        removeLocalFirstQueueItem(
+          chatPendingQueueKey,
+          (queueItem) => String(queueItem?.client_id || queueItem?.clientId || "") === String(item.client_id || item.clientId)
+        );
+        flushed = true;
+      } catch (err) {
+        console.warn("[CHAT] queued message retry failed", err);
+      }
+    }
+    if (flushed) {
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    }
+  }, [
+    chatPendingQueueKey,
+    companyId,
+    currentUserId,
+    loadConversations,
+    loadMessages,
+    selectedConversation?.pendingSetup,
+    selectedConversationId,
+  ]);
 
   useEffect(() => {
     if (!active) return;
@@ -3866,30 +4953,77 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
 
   useEffect(() => {
-    setManageOpen(false);
-    setSelectedChatListId("");
-    setEditingListItemId("");
-    setEditingListItemText("");
-    setListItemDraft("");
-  }, [selectedConversationId]);
+    hydrateCachedChatThread(selectedConversationId);
+  }, [hydrateCachedChatThread, selectedConversationId]);
+
+  useEffect(() => {
+    if (selectedChatList) {
+      setSelectedChatListSnapshot(selectedChatList);
+    } else if (!selectedChatListId) {
+      setSelectedChatListSnapshot(null);
+    }
+  }, [selectedChatList, selectedChatListId]);
 
   useEffect(() => {
     setSelectedChatListShowCompleted(false);
     setEditingListItemId("");
     setEditingListItemText("");
+    setAssigningListItemId("");
     setListItemDraft("");
   }, [selectedChatListId]);
 
   useEffect(() => {
+    if (!active || !companyId || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("tab") !== "chat") return;
+    const routeConversationId = String(params.get("conversationId") || "").trim();
+    if (
+      routeConversationId &&
+      routeConversationId !== String(selectedConversationId) &&
+      conversationRows.some((conversation) => String(conversation.id) === routeConversationId)
+    ) {
+      openChatConversation(routeConversationId);
+    }
+    const notificationId = String(params.get("notificationId") || "").trim();
+    if (!notificationId || !authUser?.id) return;
+    const ts = new Date().toISOString();
+    void supabase
+      .from("notifications")
+      .update({ read_at: ts, is_read: true })
+      .eq("id", notificationId)
+      .eq("recipient_user_id", authUser.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn("[CHAT] mark notification read failed", error);
+          return;
+        }
+        setInAppNotifications((prev) =>
+          (Array.isArray(prev) ? prev : []).map((row) =>
+            String(row?.id) === notificationId ? { ...row, read_at: ts, is_read: true } : row
+          )
+        );
+        params.delete("notificationId");
+        const nextQuery = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash || ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      });
+  }, [active, authUser?.id, companyId, conversationRows, selectedConversationId]);
+
+  useEffect(() => {
     if (!selectedChatListId || chatPane !== "thread") return;
     requestAnimationFrame(() => {
-      chatListCardRefs.current[String(selectedChatListId)]?.scrollIntoView?.({
-        behavior: "smooth",
-        block: "start",
-      });
       chatMessageInputRef.current?.focus?.();
     });
   }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (chatPane !== "thread") return;
+    const node = chatThreadScrollRef.current;
+    if (!node) return;
+    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (distanceFromBottom > 160 && chatTimelineRows.length > 1) return;
+    requestAnimationFrame(() => scrollChatThreadToBottom(chatTimelineRows.length > 1 ? "smooth" : "auto"));
+  }, [chatPane, chatTimelineRows.length, scrollChatThreadToBottom]);
 
   useEffect(() => {
     if (!selectedChatListId || chatPane !== "list-detail") return;
@@ -3897,6 +5031,31 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       chatListItemInputRef.current?.focus?.();
     });
   }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "list-detail" || chatListFocusRestoreTick <= 0 || typeof window === "undefined") {
+      return;
+    }
+    const focusInput = () => {
+      const input = chatListItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    requestAnimationFrame(() => focusInput());
+    const timeoutIds = [80, 220, 420].map((delay) => window.setTimeout(focusInput, delay));
+    return () => timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+  }, [chatListFocusRestoreTick, chatPane, selectedChatListId, selectedChatListResolved?.items?.length]);
+
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    void flushPendingChatQueue();
+    const intervalId = window.setInterval(() => {
+      void flushPendingChatQueue();
+    }, 12000);
+    return () => window.clearInterval(intervalId);
+  }, [active, flushPendingChatQueue, selectedConversation?.pendingSetup, selectedConversationId]);
 
   useEffect(() => {
     if (!listComposerOpen) return;
@@ -3909,6 +5068,21 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   }, [listComposerOpen]);
 
   useEffect(() => {
+    if (!editingListItemId) return;
+    const selectAll = () => {
+      const input = chatListEditInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(0, valueLength);
+    };
+    selectAll();
+    requestAnimationFrame(() => selectAll());
+    const timeoutId = window.setTimeout(() => selectAll(), 90);
+    return () => window.clearTimeout(timeoutId);
+  }, [editingListItemId]);
+
+  useEffect(() => {
     if (!active) return;
     const timer = window.setInterval(() => {
       void loadConversations({ silent: true });
@@ -3917,40 +5091,100 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     return () => window.clearInterval(timer);
   }, [active, loadConversations, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
 
-  const sendChatMessage = async () => {
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    let channel = null;
+    try {
+      channel = supabase
+        .channel(`opera-chat-live-${selectedConversationId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "chat_messages",
+            filter: `conversation_id=eq.${selectedConversationId}`,
+          },
+          () => {
+            void loadMessages({ silent: true });
+          }
+        )
+        .subscribe();
+    } catch {
+      channel = null;
+    }
+    return () => {
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    return () => clearChatMessagePressTimer();
+  }, [clearChatMessagePressTimer]);
+
+  async function sendChatMessage() {
     const body = messageDraft.trim();
-    if (!body || !selectedConversationId || selectedConversation?.pendingSetup || sending) return;
+    if (!body || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    const createdAt = new Date().toISOString();
     const clientId = `${currentUserId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyMetadata = chatReplyTarget
+      ? {
+          reply_to_message_id: chatReplyTarget.id || null,
+          reply_to_body: String(chatReplyTarget.body || "").slice(0, 300),
+          reply_to_sender_name: String(chatReplyTarget.sender_name || "").slice(0, 120),
+          reply_to_created_at: chatReplyTarget.created_at || null,
+        }
+      : {};
     const optimisticMessage = {
       id: clientId,
       client_id: clientId,
       sender_user_id: currentUserId,
-      sender_name: String(
-        authUser?.user_metadata?.full_name ||
-          authUser?.user_metadata?.name ||
-          authUser?.user_metadata?.user_name ||
-          authUser?.email ||
-          "User"
-      ).trim() || "User",
+      sender_name: currentUserDisplayName,
       body,
       message_type: "text",
-      metadata: {},
+      metadata: replyMetadata,
       attachments: [],
       checklist_items: [],
       deleted: false,
       pinned: false,
       can_delete: true,
       can_pin: false,
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
       __optimistic: true,
+      __sync_state: "sending",
     };
-    setMessages((current) => [...current, optimisticMessage]);
+    const optimisticMessages = [...messages, optimisticMessage];
+    setMessages(optimisticMessages);
+    cacheChatMessageState(
+      selectedConversationId,
+      {
+        messages: optimisticMessages,
+        lists: chatLists,
+        conversation_members: conversationMembers,
+      },
+      { source: "optimistic_send" }
+    );
+    enqueueLocalFirstQueueItem(
+      chatPendingQueueKey,
+      {
+        conversation_id: selectedConversationId,
+        company_id: companyId,
+        body,
+        client_id: clientId,
+        created_at: createdAt,
+        message_type: "text",
+        sender_user_id: currentUserId,
+        metadata: replyMetadata,
+      },
+      { dedupeKey: clientId }
+    );
     setMessageDraft("");
+    setChatReplyTarget(null);
     requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
     setSending(true);
     setError("");
     try {
-      await chatFetch("/api/chat", {
+      const data = await chatFetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({
           action: "send",
@@ -3958,19 +5192,128 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           conversation_id: selectedConversationId,
           body,
           client_id: clientId,
+          metadata: replyMetadata,
         }),
       });
-      await loadMessages({ silent: true });
-      await loadConversations({ silent: true });
+      if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+        void requestSendPushForNotificationIds(data.notification_ids);
+      }
+      setMessages((current) =>
+        current.map((message) =>
+          String(message.client_id || message.id) === String(clientId)
+            ? {
+                ...message,
+                id: data?.message?.id || data?.message?.created_at || message.id,
+                created_at: data?.message?.created_at || message.created_at,
+                __optimistic: false,
+                __sync_state: "delivered",
+              }
+            : message
+        )
+      );
+      removeLocalFirstQueueItem(chatPendingQueueKey, (item) => String(item?.client_id || item?.clientId || "") === String(clientId));
+      void loadMessages({ silent: true }).catch(() => {});
+      void loadConversations({ silent: true }).catch(() => {});
     } catch (err) {
-      setMessages((current) => current.filter((message) => String(message.client_id || message.id) !== clientId));
-      setMessageDraft(body);
-      setError(chatErrorMessage(err));
+      setMessages((current) =>
+        current.map((message) =>
+          String(message.client_id || message.id) === String(clientId)
+            ? { ...message, __optimistic: true, __sync_state: "queued" }
+            : message
+        )
+      );
+      replaceLocalFirstQueueItem(
+        chatPendingQueueKey,
+        (item) => String(item?.client_id || item?.clientId || "") === String(clientId),
+        {
+          failed_at: new Date().toISOString(),
+          error: chatErrorMessage(err),
+        }
+      );
+      setError("Message saved locally. It will retry in the background.");
     } finally {
       setSending(false);
       requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
     }
   };
+
+  const copyChatMessageText = useCallback(async (message) => {
+    const text = String(message?.body || "").trim();
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch (err) {
+      console.warn("[CHAT] copy failed", err);
+    }
+  }, []);
+
+  const saveChatMessageMedia = useCallback((message) => {
+    const url = message?.attachments?.[0]?.public_url;
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const openChatImageViewer = useCallback((attachment, message) => {
+    if (!attachment?.public_url) return;
+    setChatImageViewer({
+      attachment,
+      message,
+    });
+  }, []);
+
+  const startChatReply = useCallback((message) => {
+    if (!message) return;
+    setChatReplyTarget(message);
+    setChatActiveMessage(null);
+    requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
+  }, []);
+
+  const openChatForwardTarget = useCallback((message) => {
+    if (!message) return;
+    setChatForwardMessage(message);
+    setChatActiveMessage(null);
+    setChatForwardSearch("");
+    requestAnimationFrame(() => {
+      chatForwardSearchRef.current?.focus?.();
+    });
+  }, []);
+
+  const sendForwardedChatMessage = useCallback(
+    async (targetConversationId) => {
+      const targetId = String(targetConversationId || "").trim();
+      if (!chatForwardMessage || !targetId || targetId === String(selectedConversationId)) return;
+      const body = chatForwardMessage?.body || "";
+      const attachments = Array.isArray(chatForwardMessage?.attachments) ? chatForwardMessage.attachments : [];
+      try {
+        const data = await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send",
+            company_id: companyId,
+            conversation_id: targetId,
+            body: body || "Forwarded message",
+            message_type: attachments.length ? "photo" : "text",
+            attachments,
+            metadata: {
+              forwarded_from_conversation_id: selectedConversationId,
+              forwarded_from_message_id: chatForwardMessage?.id || null,
+              forwarded_body: body,
+            },
+          }),
+        });
+        if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+          void requestSendPushForNotificationIds(data.notification_ids);
+        }
+        setChatForwardMessage(null);
+        setChatForwardSearch("");
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      }
+    },
+    [chatErrorMessage, chatForwardMessage, companyId, selectedConversationId]
+  );
 
   const createDirectChat = async (targetUserId) => {
     setError("");
@@ -4032,6 +5375,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         method: "POST",
         body: JSON.stringify({ action: "delete_message", company_id: companyId, message_id: message.id }),
       });
+      clearChatMessageActions();
       await loadMessages({ silent: true });
       await loadConversations({ silent: true });
     } catch (err) {
@@ -4085,11 +5429,12 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           message_id: message.id,
         }),
       });
+      clearChatMessageActions();
       await loadMessages({ silent: true });
     } catch (err) {
       setError(chatErrorMessage(err));
     }
-  };
+  }
 
   const leaveSelectedConversation = async () => {
     if (!selectedCanLeave || !selectedConversationId) return;
@@ -4172,7 +5517,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       });
       if (upload.error) throw upload.error;
       const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
-      await chatFetch("/api/chat", {
+      const chatData = await chatFetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({
           action: "send",
@@ -4193,6 +5538,9 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           ],
         }),
       });
+      if (Array.isArray(chatData?.notification_ids) && chatData.notification_ids.length > 0) {
+        void requestSendPushForNotificationIds(chatData.notification_ids);
+      }
       setMessageDraft("");
       await loadMessages({ silent: true });
       await loadConversations({ silent: true });
@@ -4203,11 +5551,11 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     }
   };
 
-  const createPinnedChatList = async () => {
-    const items = listItemsText.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
+  const createChatList = async () => {
+    const items = parseChatListComposerItems(listItemsText);
     const title = listTitle.trim();
-    if (!selectedConversationId || selectedConversation?.pendingSetup || sending || !title) return;
-    setSending(true);
+    if (!selectedConversationId || selectedConversation?.pendingSetup || listBusy || !title) return;
+    setListBusy(true);
     setError("");
     try {
       const data = await chatFetch("/api/chat", {
@@ -4224,14 +5572,14 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       setListItemsText("");
       setListComposerOpen(false);
       setSelectedChatListId(data?.list?.id || "");
-      setChatPane("list-detail");
+      setChatPane("thread");
       setSelectedChatListShowCompleted(false);
-      await loadMessages({ silent: true });
-      await loadConversations({ silent: true });
+      void loadMessages({ silent: true }).catch(() => {});
+      void loadConversations({ silent: true }).catch(() => {});
     } catch (err) {
       setError(chatErrorMessage(err));
     } finally {
-      setSending(false);
+      setListBusy(false);
     }
   };
 
@@ -4240,30 +5588,60 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     await loadConversations({ silent: true });
   };
 
-  const addChatListItem = async () => {
-    const text = listItemDraft.trim();
-    if (!selectedChatList?.id || !text || sending) return;
+  const addChatListItem = async (parentItem = null) => {
+    const parentId = String(parentItem?.id || addingSubItemParentId || "");
+    const usingSubItemDraft = Boolean(parentId);
+    const sourceDraft = usingSubItemDraft ? subItemDraft : listItemDraft;
+    const text = normalizeChatListItemDraftText(sourceDraft);
+    if (!selectedChatListResolved?.id || !text || listBusy) return;
+    setListBusy(true);
     setError("");
-    const listId = String(selectedChatList.id);
+    const listId = String(selectedChatListResolved.id);
     const now = new Date().toISOString();
-    const rows = summarizeChatListItems(selectedChatList.items || []);
+    const rows = summarizeChatListItems(selectedChatListResolved.items || []);
     const nextNumber = rows.reduce((max, item) => Math.max(max, Number(item.item_number || 0)), 0) + 1;
+    const siblingChildren = parentId
+      ? rows.filter((row) => String(row?.parent_item_id || "") === parentId && Number(row?.item_level || 0) === 1)
+      : [];
+    const nextChildOrder = siblingChildren.reduce((max, item) => Math.max(max, Number(item?.child_order || 0)), 0) + 1;
+    const parentBranchMaxSort = parentId
+      ? rows
+          .filter((row) => String(row?.id || "") === parentId || String(row?.parent_item_id || "") === parentId)
+          .reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), Number(parentItem?.sort_order || 0))
+      : rows.reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), 0);
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const optimisticItem = {
       id: tempId,
-      item_number: nextNumber,
+      item_number: parentId ? Number(parentItem?.item_number || 0) : nextNumber,
       text,
+      parent_item_id: parentId || null,
+      item_level: parentId ? 1 : 0,
+      child_order: parentId ? nextChildOrder : 0,
+      sort_order: parentId ? parentBranchMaxSort + 1 : rows.length + 1,
       is_done: false,
       completed_at: null,
       completed_by: null,
+      assigned_user_id: null,
       created_by: currentUserId,
       created_at: now,
       updated_at: now,
       __optimistic: true,
     };
-    updateSelectedChatListRows((currentRows) => [...currentRows, optimisticItem]);
-    setListItemDraft("");
-    requestAnimationFrame(() => chatListItemInputRef.current?.focus?.());
+    updateSelectedChatListRows((currentRows) => {
+      if (!parentId) return [...currentRows, optimisticItem];
+      return [...currentRows]
+        .map((row) =>
+          Number(row?.sort_order || 0) >= optimisticItem.sort_order ? { ...row, sort_order: Number(row.sort_order || 0) + 1 } : row
+        )
+        .concat(optimisticItem);
+    });
+    if (usingSubItemDraft) {
+      setSubItemDraft("");
+      restoreChatSubItemInputFocus();
+    } else {
+      setListItemDraft("");
+      restoreChatListInputFocus();
+    }
     try {
       await chatFetch("/api/chat", {
         method: "POST",
@@ -4272,9 +5650,11 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           company_id: companyId,
           list_id: listId,
           text,
+          parent_item_id: parentId || null,
         }),
       });
       void refreshSelectedChatLists();
+      if (!usingSubItemDraft) restoreChatListInputFocus();
     } catch (err) {
       setChatLists((previous) =>
         previous.map((list) => {
@@ -4284,26 +5664,31 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         })
       );
       setError(chatErrorMessage(err));
+      if (usingSubItemDraft) restoreChatSubItemInputFocus();
+      if (!usingSubItemDraft) restoreChatListInputFocus();
+    } finally {
+      setListBusy(false);
     }
   };
 
   const toggleChatListItem = async (item) => {
     if (!item?.id) return;
     setError("");
-    const listId = String(selectedChatList?.id || "");
+    const listId = String(selectedChatListResolved?.id || "");
     const itemId = String(item.id);
-    const previousItem = { ...item };
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
     updateSelectedChatListRows((currentRows) =>
-      currentRows.map((row) =>
-        String(row.id) === itemId
-          ? {
-              ...row,
-              is_done: !row.is_done,
-              completed_at: !row.is_done ? new Date().toISOString() : null,
-              completed_by: !row.is_done ? currentUserId : null,
-            }
-          : row
-      )
+      currentRows.map((row) => {
+        const shouldToggle =
+          String(row.id) === itemId || (!item.is_done && String(row.parent_item_id || "") === itemId);
+        if (!shouldToggle) return row;
+        return {
+          ...row,
+          is_done: !item.is_done,
+          completed_at: !item.is_done ? new Date().toISOString() : null,
+          completed_by: !item.is_done ? currentUserId : null,
+        };
+      })
     );
     try {
       await chatFetch("/api/chat", {
@@ -4320,10 +5705,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       setChatLists((previous) =>
         previous.map((list) => {
           if (String(list.id) !== listId) return list;
-          const nextItems = (Array.isArray(list.items) ? list.items : []).map((row) =>
-            String(row.id) === itemId ? previousItem : row
-          );
-          return summarizeChatListRow(list, nextItems);
+          return summarizeChatListRow(list, previousRows);
         })
       );
       setError(chatErrorMessage(err));
@@ -4331,10 +5713,19 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
   };
 
   const saveChatListItemEdit = async (item) => {
-    const text = editingListItemText.trim();
-    if (!item?.id || !text || sending) return;
+    const liveInputValue = chatListEditInputRef.current?.value;
+    const text = normalizeChatListItemDraftText(
+      typeof liveInputValue === "string" && liveInputValue.length ? liveInputValue : editingListItemText
+    );
+    if (!item?.id || !text) return;
+    const originalText = normalizeChatListItemDraftText(item?.text || "");
+    if (text === originalText) {
+      setEditingListItemId("");
+      setEditingListItemText("");
+      return;
+    }
     setError("");
-    const listId = String(selectedChatList?.id || "");
+    const listId = String(selectedChatListResolved?.id || "");
     const itemId = String(item.id);
     const previousItem = { ...item };
     updateSelectedChatListRows((currentRows) =>
@@ -4372,6 +5763,18 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
     const ok = window.confirm("Delete this list item?");
     if (!ok) return;
     setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.filter(
+        (row) => String(row.id) !== itemId && String(row.parent_item_id || "") !== itemId
+      )
+    );
+    if (String(editingListItemId) === itemId) {
+      setEditingListItemId("");
+      setEditingListItemText("");
+    }
     try {
       await chatFetch("/api/chat", {
         method: "POST",
@@ -4379,117 +5782,332 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       });
       await refreshSelectedChatLists();
     } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
       setError(chatErrorMessage(err));
     }
   };
 
+  const reparentChatListItemAction = async (item, parentItemId) => {
+    if (!item?.id) return;
+    setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => {
+        if (String(row.id) !== itemId) return row;
+        return {
+          ...row,
+          parent_item_id: parentItemId || null,
+          item_level: parentItemId ? 1 : 0,
+        };
+      })
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "reparent_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          parent_item_id: parentItemId || null,
+        }),
+      });
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const assignChatListItem = async (item, assignedUserId) => {
+    if (!item?.id) return;
+    const nextAssignedUserId = String(assignedUserId || "").trim();
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    setError("");
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => (String(row.id) === itemId ? { ...row, assigned_user_id: nextAssignedUserId || null } : row))
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "assign_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          assigned_user_id: nextAssignedUserId || null,
+        }),
+      });
+      setAssigningListItemId("");
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const indentChatListItem = useCallback(
+    (item) => {
+      if (!item || Number(item?.item_level || 0) !== 0) return;
+      const currentIndex = selectedChatListHierarchy.findIndex((candidate) => String(candidate.id) === String(item.id));
+      if (currentIndex <= 0) return;
+      if (Array.isArray(item.children) && item.children.length) {
+        setError("Move or complete sub-items before indenting this main item.");
+        return;
+      }
+      const previousMain = [...selectedChatListHierarchy.slice(0, currentIndex)].reverse().find((candidate) => Number(candidate?.item_level || 0) === 0);
+      if (!previousMain?.id) return;
+      void reparentChatListItemAction(item, previousMain.id);
+    },
+    [reparentChatListItemAction, selectedChatListHierarchy]
+  );
+
+  const outdentChatListItem = useCallback(
+    (item) => {
+      if (!item || Number(item?.item_level || 0) !== 1) return;
+      void reparentChatListItemAction(item, "");
+    },
+    [reparentChatListItemAction]
+  );
+
+  const beginChatListSwipe = useCallback((itemId, x, y) => {
+    chatListSwipeStateRef.current[String(itemId)] = { startX: Number(x || 0), startY: Number(y || 0) };
+  }, []);
+
+  const endChatListSwipe = useCallback(
+    (item, x, y) => {
+      const key = String(item?.id || "");
+      const swipeState = chatListSwipeStateRef.current[key];
+      delete chatListSwipeStateRef.current[key];
+      if (!swipeState || !item?.id) return;
+      const deltaX = Number(x || 0) - Number(swipeState.startX || 0);
+      const deltaY = Math.abs(Number(y || 0) - Number(swipeState.startY || 0));
+      if (deltaY > 36 || Math.abs(deltaX) < 56) return;
+      if (deltaX > 0 && Number(item?.item_level || 0) === 0) {
+        indentChatListItem(item);
+      } else if (deltaX < 0 && Number(item?.item_level || 0) === 1) {
+        outdentChatListItem(item);
+      }
+    },
+    [indentChatListItem, outdentChatListItem]
+  );
+
   const archiveChatList = async () => {
-    if (!selectedChatList?.id || !selectedChatList.can_archive) return;
+    if (!selectedChatListResolved?.id || !selectedChatListResolved.can_archive) return;
     const ok = window.confirm("Archive this list?");
     if (!ok) return;
     setError("");
     try {
       await chatFetch("/api/chat", {
         method: "POST",
-        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: selectedChatList.id }),
+        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: selectedChatListResolved.id }),
       });
       setSelectedChatListId("");
+      setSelectedChatListSnapshot(null);
       await refreshSelectedChatLists();
     } catch (err) {
       setError(chatErrorMessage(err));
     }
   };
 
-  const renderChatListCard = (list) => {
-    const listId = String(list?.id || "");
-    const isSelected = String(selectedChatListId) === listId;
-    const rows = summarizeChatListItems(list?.items || []);
-    const previewItems = (rows.filter((item) => !item.is_done).length ? rows.filter((item) => !item.is_done) : rows).slice(0, 2);
+  const hasDraftMessage = Boolean(messageDraft.trim());
+
+  const renderChatMessageRow = (message) => {
+    const mine = String(message.sender_user_id) === String(currentUserId);
+    const replyBody = String(message?.metadata?.reply_to_body || "").trim();
+    const replySender = String(message?.metadata?.reply_to_sender_name || "").trim();
+    const replyCreatedAt = String(message?.metadata?.reply_to_created_at || "").trim();
+    const attachmentRows = Array.isArray(message.attachments) ? message.attachments : [];
+    const statusNode = renderChatMessageStatus(message);
+    const replyToMessage = replyBody
+      ? (messages || []).find((row) => String(row.id) === String(message?.metadata?.reply_to_message_id))
+      : null;
+    const messageBody = String(message.body || "").trim();
+    const hideBodyForPhoto = message.message_type === "photo" && (!messageBody || /^photo$/i.test(messageBody));
     return (
-      <button
-        key={listId}
-        id={`chat-list-${listId}`}
-        ref={(node) => {
-          if (node) {
-            chatListCardRefs.current[listId] = node;
-          } else {
-            delete chatListCardRefs.current[listId];
-          }
-        }}
-        type="button"
-        className={`mx-auto block w-full max-w-[84%] scroll-mt-4 rounded-[18px] border bg-white px-3 py-2.5 text-left shadow-sm ${
-          isSelected ? "border-[#C9A227] shadow-[0_12px_28px_rgba(6,20,38,0.12)]" : "border-[#E2E8F0]"
-        }`}
-        onClick={() => openChatListDetail(list.id)}
-      >
-        <div className="flex items-start gap-2">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M8 6h13M8 12h13M8 18h13" />
-              <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
-            </svg>
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">List</p>
-                <h3 className="truncate text-[15px] font-black text-[#061426]">{list.title}</h3>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
-                {list.pinned ? (
-                  <span className="rounded-full bg-[#FBF8F1] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
-                    Pinned
-                  </span>
-                ) : null}
-                <span className="rounded-full bg-[#F8FAFC] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
-                  {list.open_count} open
+      <div key={message.id || message.client_id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+        <div
+          className="max-w-[82%] md:max-w-[72%]"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openChatMessageMenu(message);
+          }}
+          onTouchStart={() => beginChatMessagePress(message)}
+          onTouchEnd={clearChatMessagePressTimer}
+          onTouchCancel={clearChatMessagePressTimer}
+        >
+          <div
+            className={`overflow-hidden rounded-[18px] border px-3 py-2.5 ${
+              mine
+                ? "rounded-br-[6px] border-[#0B1F33] bg-[#0B1F33] text-white shadow-[0_2px_6px_rgba(6,20,38,0.18)]"
+                : "rounded-bl-[6px] border-[#E6EAF1] bg-white text-[#061426] shadow-[0_1px_2px_rgba(6,20,38,0.06)]"
+            }`}
+          >
+            {!mine ? <p className="mb-1 text-[11px] font-black text-[#9A6B12]">{message.sender_name}</p> : null}
+            {replyBody ? (
+              <button
+                type="button"
+                className={`mb-2 block w-full rounded-[14px] border px-3 py-2 text-left ${
+                  mine ? "border-white/20 bg-white/10" : "border-[#E2E8F0] bg-[#F8FAFC]"
+                }`}
+                onClick={() => {
+                  if (replyToMessage) openChatMessageMenu(replyToMessage);
+                }}
+              >
+                <span className={`block text-[10px] font-black uppercase tracking-[0.08em] ${mine ? "text-[#F2C14E]" : "text-[#9A6B12]"}`}>
+                  Replying to {replySender || "message"}
                 </span>
-              </div>
-            </div>
-            <div className="mt-2 space-y-1">
-              {previewItems.length ? (
-                previewItems.map((item) => (
-                  <div
-                    key={item.id}
-                    className={`flex items-start gap-2 rounded-[12px] bg-[#F8FAFC] px-2 py-1.5 ${item.is_done ? "opacity-70" : ""}`}
-                  >
-                    <span
-                      className={`mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9px] font-black ${
-                        item.is_done ? "border-[#15803D] bg-[#15803D] text-white" : "border-[#CBD5E1] bg-white text-[#64748B]"
-                      }`}
-                    >
-                      {item.is_done ? "OK" : item.item_number}
-                    </span>
-                    <span className={`min-w-0 flex-1 text-[12px] font-semibold leading-snug text-[#061426] ${item.is_done ? "line-through" : ""}`}>
-                      {item.text}
-                    </span>
+                <span className={`mt-0.5 block truncate text-[12px] font-semibold ${mine ? "text-white/85" : "text-[#475569]"}`}>{replyBody}</span>
+                {replyCreatedAt ? (
+                  <span className={`mt-0.5 block text-[10px] font-bold ${mine ? "text-white/55" : "text-[#94A3B8]"}`}>{formatChatTime(replyCreatedAt)}</span>
+                ) : null}
+              </button>
+            ) : null}
+            {message.deleted ? (
+              <p className={`text-[13px] font-semibold italic ${mine ? "text-white/65" : "text-[#64748B]"}`}>Message deleted</p>
+            ) : (
+              <>
+                {message.message_type === "checklist" ? (
+                  <div className="space-y-2">
+                    <p className="whitespace-pre-wrap break-words text-[14px] font-black leading-snug">{messageBody}</p>
+                    <div className="space-y-1">
+                      {(message.checklist_items || []).map((item) => (
+                        <label key={item.id} className={`flex items-center gap-2.5 rounded-[12px] px-2.5 py-1.5 ${mine ? "bg-white/12" : "bg-[#F4F7FB]"}`}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item.is_checked)}
+                            onChange={() => void toggleChecklistItem(item)}
+                            className={`shrink-0 ${mine ? "accent-[#F2C14E]" : "accent-[#061426]"}`}
+                            style={{ width: 16, height: 16 }}
+                          />
+                          <span className={`min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug ${item.is_checked ? "line-through opacity-70" : ""}`}>
+                            {item.text}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
-                ))
-              ) : (
-                <div className="rounded-[12px] bg-[#F8FAFC] px-2 py-1.5 text-[12px] font-semibold text-[#64748B]">
-                  All items complete
-                </div>
-              )}
-              {list.total_count > previewItems.length ? (
-                <p className="px-0.5 text-[11px] font-semibold text-[#64748B]">
-                  +{list.total_count - previewItems.length} more item{list.total_count - previewItems.length === 1 ? "" : "s"}
-                </p>
-              ) : null}
-            </div>
-            <div className="mt-2 flex items-center justify-between gap-2 text-[10px] font-bold text-[#64748B]">
-              <span>Tap to open</span>
-              <span>{formatChatTime(list.updated_at || list.created_at)}</span>
+                ) : (
+                  <>
+                    {attachmentRows.length ? (
+                      <div className="grid gap-2">
+                        {attachmentRows.map((attachment) => (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            className="group relative block overflow-hidden rounded-[14px] border border-black/5 bg-white text-left"
+                            onClick={() => openChatImageViewer(attachment, message)}
+                          >
+                            {attachment.public_url ? (
+                              <img
+                                src={attachment.public_url}
+                                alt={attachment.file_name || "Chat attachment"}
+                                className="max-h-72 w-full object-cover"
+                              />
+                            ) : (
+                              <span className="block p-3 text-[12px] font-bold">Photo attachment</span>
+                            )}
+                            <span className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white shadow-md backdrop-blur-sm">
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M9 7h8v8" />
+                                <path d="m8 16 9-9" />
+                              </svg>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!hideBodyForPhoto && messageBody ? (
+                      <p className={`whitespace-pre-wrap break-words text-[14px] leading-snug ${attachmentRows.length ? "mt-2 font-medium" : "font-semibold"}`}>
+                        {messageBody}
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </>
+            )}
+            <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] font-medium ${mine ? "text-white/60" : "text-[#94A3B8]"}`}>
+              <span>{formatChatTime(message.created_at)}</span>
+              {mine ? statusNode : null}
             </div>
           </div>
         </div>
+      </div>
+    );
+  };
+
+  const renderChatListRibbonChip = (list) => {
+    const listId = String(list?.id || "");
+    const isSelected = String(selectedChatListId) === listId && chatPane === "list-detail";
+    const openCount = Number(list?.open_count || 0);
+    return (
+      <button
+        key={listId}
+        type="button"
+        className={`flex h-11 shrink-0 items-center gap-2 rounded-full border pl-2 pr-3.5 transition ${
+          isSelected ? "border-[#163B5C] bg-[#163B5C] text-white" : "border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+        }`}
+        onClick={() => openChatListDetail(list.id)}
+      >
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${isSelected ? "bg-white/15" : "bg-[#FBF6EA] text-[#9A6B12]"}`}>
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 6h13M8 12h13M8 18h13" />
+            <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+          </svg>
+        </span>
+        <span className="max-w-[120px] truncate text-[13px] font-bold">{list.title}</span>
+        {openCount > 0 ? (
+          <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-black ${
+            isSelected ? "bg-white/20 text-white" : "bg-[#F2F5FA] text-[#64748B]"
+          }`}>
+            {openCount}
+          </span>
+        ) : null}
       </button>
     );
   };
 
-  const renderChatListDetail = (list) => {
-    const rows = selectedChatListItems;
+  /* eslint-disable react-hooks/refs */
+  const renderChatListDetailView = (list) => {
+    const hierarchy = selectedChatListHierarchy;
+    const assignableMembers = selectedChatAssignableMembers;
+    const handleMainInputPointer = () => {
+      chatListInputPointerAtRef.current = Date.now();
+    };
+    const handleSubInputPointer = () => {
+      chatSubItemInputPointerAtRef.current = Date.now();
+    };
+    const handleMainInputBlur = (event) => {
+      if (!shouldPreserveTouchedInputFocus(chatListInputPointerAtRef.current)) return;
+      if (event.relatedTarget) return;
+      if (typeof window === "undefined") return;
+      requestAnimationFrame(() => restoreChatListInputFocus());
+    };
+    const handleSubInputBlur = (event) => {
+      if (!shouldPreserveTouchedInputFocus(chatSubItemInputPointerAtRef.current)) return;
+      if (event.relatedTarget) return;
+      if (typeof window === "undefined") return;
+      requestAnimationFrame(() => restoreChatSubItemInputFocus());
+    };
     return (
-      <div className="flex min-h-[calc(100dvh-150px)] flex-1 flex-col bg-white">
+      <div className="flex h-full min-h-0 flex-1 flex-col bg-white overflow-hidden">
         <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-white px-3 py-3">
           <div className="flex items-center gap-2">
             <button
@@ -4499,6 +6117,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                 setChatPane("thread");
                 setEditingListItemId("");
                 setEditingListItemText("");
+                setAssigningListItemId("");
                 setListItemDraft("");
               }}
               aria-label="Back to chat"
@@ -4516,11 +6135,6 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
-                {list.pinned ? (
-                  <span className="rounded-full bg-[#FBF8F1] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
-                    Pinned
-                  </span>
-                ) : null}
               </div>
               <p className="truncate text-[11px] font-semibold text-[#64748B]">
                 {list.open_count} open / {list.total_count} total
@@ -4572,21 +6186,27 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           </div>
         </div>
 
-        <div className="flex-1 space-y-2 overflow-y-auto bg-white px-3 py-3">
-          {rows.length === 0 ? (
+        <div className="flex-1 space-y-3 overflow-y-auto bg-white px-3 py-3 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
+          {hierarchy.length === 0 ? (
             <EmptyState
               title={list.total_count > 0 ? "Completed items hidden" : "No list items"}
               body={list.total_count > 0 ? "Tap the eye to show completed items." : "Add the first item below."}
             />
           ) : (
-            rows.map((item) => {
+            hierarchy.map((item) => {
               const editingThis = String(editingListItemId) === String(item.id);
+              const assigningThis = String(assigningListItemId) === String(item.id);
+              const assignee = getChatListAssigneeMeta(item);
+              const legacySubitems = item.legacySubitems || [];
               return (
                 <div
                   key={item.id}
-                  className={`rounded-[16px] border px-3 py-2.5 shadow-sm ${
+                  className={`rounded-[18px] border px-3 py-3 shadow-sm ${
                     item.is_done ? "border-[#DDE7DD] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-[#F8FAFC]"
                   }`}
+                  style={{ touchAction: "pan-y" }}
+                  onTouchStart={(event) => beginChatListSwipe(item.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                  onTouchEnd={(event) => endChatListSwipe(item, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
                 >
                   <div className="flex items-start gap-2">
                     <button
@@ -4605,24 +6225,97 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                         </svg>
                       ) : null}
                     </button>
+                    <button
+                      type="button"
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                        assignee ? "border-[#E7D9B0] bg-[#FBF6EA] text-[#9A6B12]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                      }`}
+                      onClick={() => {
+                        setAssigningListItemId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
+                        setEditingListItemId("");
+                        setEditingListItemText("");
+                      }}
+                      aria-label={assignee ? `Assigned to ${assignee.name}` : `Assign employee to item ${item.item_number}`}
+                    >
+                      {assignee ? (
+                        assignee.initial
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                          <path d="M4 20a8 8 0 0 1 16 0" />
+                        </svg>
+                      )}
+                    </button>
                     <div className="min-w-0 flex-1">
                       {editingThis ? (
-                        <input
-                          className="h-10 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
-                          value={editingListItemText}
-                          onChange={(event) => setEditingListItemText(event.target.value)}
-                          autoFocus
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
+                        <div className="space-y-2">
+                          <input
+                            ref={chatListEditInputRef}
+                            className="h-10 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                            value={editingListItemText}
+                            onChange={(event) => setEditingListItemText(event.target.value)}
+                            onFocus={(event) => {
+                              const valueLength = String(event.target.value || "").length;
+                              event.target.setSelectionRange?.(0, valueLength);
+                            }}
+                            autoFocus
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void saveChatListItemEdit(item);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingListItemId("");
+                                setEditingListItemText("");
+                              }
+                            }}
+                            onBlur={() => {
+                              const liveValue = normalizeChatListItemDraftText(chatListEditInputRef.current?.value || editingListItemText);
+                              if (!liveValue) {
+                                setEditingListItemId("");
+                                setEditingListItemText("");
+                                return;
+                              }
                               void saveChatListItemEdit(item);
-                            }
-                            if (event.key === "Escape") {
-                              setEditingListItemId("");
-                              setEditingListItemText("");
-                            }
-                          }}
-                        />
+                            }}
+                          />
+                          <select
+                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={String(item?.assigned_user_id || "")}
+                            onChange={(event) => void assignChatListItem(item, event.target.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            {assignableMembers.map((member) => (
+                              <option key={`assign-${item.id}-${member.user_id}`} value={member.user_id}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full border border-[#E2E8F0] bg-white px-3 py-1 text-[11px] font-bold text-[#061426]"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => void reparentChatListItemAction(item, "")}
+                            >
+                              Main item
+                            </button>
+                            {hierarchy
+                              .filter((candidate) => String(candidate.id) !== String(item.id))
+                              .slice(0, 4)
+                              .map((candidate) => (
+                                <button
+                                  key={`parent-${candidate.id}`}
+                                  type="button"
+                                  className="rounded-full border border-[#E2E8F0] bg-white px-3 py-1 text-[11px] font-bold text-[#163B5C]"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => void reparentChatListItemAction(item, candidate.id)}
+                                >
+                                  Under {candidate.item_number}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -4630,29 +6323,167 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                             item.is_done ? "opacity-60" : ""
                           }`}
                           onClick={() => {
+                            setAssigningListItemId("");
                             setEditingListItemId(item.id);
-                            setEditingListItemText(item.text || "");
+                            setEditingListItemText(normalizeChatListItemDraftText(item.text || ""));
                           }}
                           aria-label={`Edit item ${item.item_number}`}
                         >
                           <span className="mr-1 text-[#64748B]">{item.item_number}.</span>
-                          <span className={item.is_done ? "line-through" : ""}>{item.text}</span>
+                          <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
                         </button>
                       )}
+                      {assigningThis && !editingThis ? (
+                        <div className="mt-2">
+                          <select
+                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={String(item?.assigned_user_id || "")}
+                            onChange={(event) => void assignChatListItem(item, event.target.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            {assignableMembers.map((member) => (
+                              <option key={`inline-assign-${item.id}-${member.user_id}`} value={member.user_id}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
                       {item.is_done ? (
                         <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">
                           Completed
                         </p>
                       ) : null}
+                      {legacySubitems.length ? (
+                        <div className="mt-2 space-y-2 pl-3">
+                          {legacySubitems.map((subitem, legacyIndex) => (
+                            <div key={`${item.id}-legacy-${legacyIndex}`} className="flex items-center gap-2 border-t border-[#EEF2F7] pt-2 first:border-t-0 first:pt-0">
+                              <span className="h-4 w-4 rounded-full border border-[#C4D2E3]" />
+                              <span className="text-[13px] font-medium text-[#64748B]">{subitem}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(item.children || []).length ? (
+                        <div className="mt-2 space-y-2 pl-3">
+                          {item.children.map((child) => {
+                            const editingChild = String(editingListItemId) === String(child.id);
+                            return (
+                              <div
+                                key={child.id}
+                                className="flex items-start gap-2 rounded-[14px] border border-[#ECE8FF] bg-white px-2.5 py-2"
+                                style={{ touchAction: "pan-y" }}
+                                onTouchStart={(event) => beginChatListSwipe(child.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                                onTouchEnd={(event) => endChatListSwipe(child, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                              >
+                                <button
+                                  type="button"
+                                  role="checkbox"
+                                  aria-checked={Boolean(child.is_done)}
+                                  onClick={() => void toggleChatListItem(child)}
+                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                                    child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
+                                  }`}
+                                >
+                                  {child.is_done ? (
+                                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                      <path d="m3.2 8.3 3 3 6.5-6.6" />
+                                    </svg>
+                                  ) : null}
+                                </button>
+                                <div className="min-w-0 flex-1">
+                                  {editingChild ? (
+                                    <div className="space-y-2">
+                                      <input
+                                        ref={chatListEditInputRef}
+                                        className="h-9 w-full rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                                        value={editingListItemText}
+                                        onChange={(event) => setEditingListItemText(event.target.value)}
+                                        autoFocus
+                                        onKeyDown={(event) => {
+                                          if (event.key === "Enter") {
+                                            event.preventDefault();
+                                            void saveChatListItemEdit(child);
+                                          }
+                                          if (event.key === "Escape") {
+                                            setEditingListItemId("");
+                                            setEditingListItemText("");
+                                          }
+                                        }}
+                                        onBlur={() => void saveChatListItemEdit(child)}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="block w-full text-left text-[13px] font-medium text-[#475569]"
+                                      onClick={() => {
+                                        setAssigningListItemId("");
+                                        setEditingListItemId(child.id);
+                                        setEditingListItemText(normalizeChatListItemDraftText(child.text || ""));
+                                      }}
+                                    >
+                                      {normalizeChatListItemDraftText(child.text)}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                      {String(addingSubItemParentId) === String(item.id) ? (
+                        <div className="mt-2 flex gap-2 pl-3">
+                          <input
+                            ref={chatSubItemInputRef}
+                            className="chat-mobile-safe-input h-10 min-w-0 flex-1 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={subItemDraft}
+                            autoComplete="off"
+                            inputMode="text"
+                            enterKeyHint="done"
+                            onPointerDown={handleSubInputPointer}
+                            onMouseDown={handleSubInputPointer}
+                            onTouchStart={handleSubInputPointer}
+                            onChange={(event) => setSubItemDraft(event.target.value)}
+                            placeholder="Add sub-item"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void addChatListItem(item);
+                              }
+                              if (event.key === "Escape") {
+                                setAddingSubItemParentId("");
+                                setSubItemDraft("");
+                              }
+                            }}
+                            onBlur={handleSubInputBlur}
+                          />
+                          <button
+                            type="button"
+                            className="h-10 rounded-[12px] bg-[#061426] px-3 text-[12px] font-black text-white disabled:bg-[#CBD5E1]"
+                            disabled={!subItemDraft.trim() || listBusy}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => void addChatListItem(item)}
+                          >
+                            Add
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black leading-none text-[#DC2626]"
-                      onClick={() => void deleteChatListItem(item)}
-                      aria-label={`Remove item ${item.item_number}`}
-                    >
-                      −
-                    </button>
+                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[20px] font-black leading-none text-[#061426] shadow-[0_4px_12px_rgba(6,20,38,0.08)] active:bg-[#F8FAFC]"
+                        onClick={() => {
+                          setAddingSubItemParentId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
+                          setSubItemDraft("");
+                          setAssigningListItemId("");
+                        }}
+                        aria-label={`Add sub-item under item ${item.item_number}`}
+                      >
+                        +
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -4661,27 +6492,32 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
         </div>
 
         <div className="sticky bottom-0 border-t border-[#E2E8F0] bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
-          <div className="flex gap-2">
+          <div className="flex gap-2" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()}>
             <input
               ref={chatListItemInputRef}
-              className="h-11 min-w-0 flex-1 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+              className="chat-mobile-safe-input h-11 min-w-0 flex-1 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
               value={listItemDraft}
               autoComplete="off"
               inputMode="text"
               enterKeyHint="done"
+              onPointerDown={handleMainInputPointer}
+              onMouseDown={handleMainInputPointer}
+              onTouchStart={handleMainInputPointer}
               onChange={(event) => setListItemDraft(event.target.value)}
-              placeholder="Add item"
+              placeholder="Add main item"
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
                   void addChatListItem();
                 }
               }}
+              onBlur={handleMainInputBlur}
             />
             <button
               type="button"
               className="h-11 rounded-[14px] bg-[#061426] px-4 text-[13px] font-black text-white disabled:bg-[#CBD5E1]"
-              disabled={!listItemDraft.trim() || sending}
+              disabled={!listItemDraft.trim() || listBusy}
+              onPointerDown={(event) => event.preventDefault()}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => void addChatListItem()}
             >
@@ -4692,32 +6528,58 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
       </div>
     );
   };
+  /* eslint-enable react-hooks/refs */
 
 
   return (
-    <PageCard className="overflow-hidden">
-      <div className="min-h-[calc(100dvh-150px)] overflow-hidden bg-white md:grid md:grid-cols-[minmax(270px,38%)_1fr]">
-        <aside className={`${chatPane === "thread" ? "hidden md:flex" : "flex"} min-h-[calc(100dvh-150px)] flex-col border-[#E2E8F0] md:border-r`}>
-          <div className="bg-[#061426] px-4 pb-3 pt-4 text-white">
+    <PageCard
+      className={`overflow-hidden ${
+        isImmersivePane ? "min-h-full h-full border-0 rounded-none bg-transparent shadow-none" : ""
+      }`}
+      style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
+    >
+      <div
+        className={`overflow-hidden bg-white ${
+          isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
+        }`}
+        style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
+      >
+        <aside className={`${chatPane === "thread" || chatPane === "list-detail" ? "hidden" : "flex"} min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB] px-3 pb-3 pt-3`}>
+          <div className="rounded-[24px] bg-white px-3.5 pb-3 pt-3 shadow-[0_12px_30px_rgba(6,20,38,0.06)]">
             <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#C9A227]">Team</p>
-                <h1 className="truncate text-[25px] font-black leading-tight">Chats</h1>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    if (typeof onBack === "function") onBack();
+                  }}
+                  aria-label="Back"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <h1 className="truncate text-[20px] font-black leading-tight text-[#061426]">Chats</h1>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-[19px] font-black text-white active:bg-white/20"
-                  onClick={() => setComposerOpen("group")}
-                  aria-label="New group"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+                  onClick={() => setChatFilter((current) => (current === "groups" ? "all" : "groups"))}
+                  aria-label="Filter group chats"
                 >
-                  +
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 6h16" />
+                    <path d="M7 12h10" />
+                    <path d="M10 18h4" />
+                  </svg>
                 </button>
                 <button
                   type="button"
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white active:bg-white/20"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
                   onClick={() => setComposerOpen("direct")}
-                  aria-label="New chat"
+                  aria-label="Start chat"
                 >
                   <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M21 12a8 8 0 0 1-8 8H8l-5 2 1.8-4.6A8 8 0 1 1 21 12Z" />
@@ -4726,10 +6588,8 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                 </button>
               </div>
             </div>
-          </div>
 
-          <div className="space-y-3 border-b border-[#E2E8F0] bg-white p-3">
-            <label className="flex h-11 items-center gap-2 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3">
+            <label className="mt-2.5 flex h-11 items-center gap-3 rounded-[16px] border border-[#E6EAF1] bg-[#F8FAFC] px-3.5">
               <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="7" />
                 <path d="m21 21-4.3-4.3" />
@@ -4738,40 +6598,55 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                 value={chatSearch}
                 onChange={(event) => setChatSearch(event.target.value)}
                 className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#061426] outline-none placeholder:text-[#94A3B8]"
-                placeholder="Search or start new chat"
+                placeholder="Search chats..."
               />
             </label>
-            <div className="flex items-center gap-2">
-              {["all", "pinned"].map((filter) => (
+            <div className="opera-hide-scrollbar mt-2.5 flex items-center gap-2 overflow-x-auto">
+              {[
+                { key: "all", label: "All", count: chatFilterCounts.all },
+                { key: "pinned", label: "Pinned", count: chatFilterCounts.pinned },
+                { key: "groups", label: "Groups", count: chatFilterCounts.groups },
+              ].map((filter) => (
                 <button
-                  key={filter}
+                  key={filter.key}
                   type="button"
-                  className={`h-8 rounded-full px-4 text-[12px] font-black capitalize ${
-                    chatFilter === filter
-                      ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
-                      : "border border-[#E2E8F0] bg-white text-[#64748B]"
+                  className={`flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 text-[12px] font-black ${
+                    chatFilter === filter.key
+                      ? "bg-[#061426] text-white shadow-[0_12px_24px_rgba(6,20,38,0.15)]"
+                      : "border border-[#E2E8F0] bg-white text-[#061426]"
                   }`}
-                  onClick={() => setChatFilter(filter)}
+                  onClick={() => setChatFilter(filter.key)}
                 >
-                  {filter}
+                  <span>{filter.label}</span>
+                  <span className={`inline-flex min-w-[20px] items-center justify-center rounded-full px-1 py-0.5 text-[10px] ${
+                    chatFilter === filter.key ? "bg-white/18 text-white" : "bg-[#F2F5FA] text-[#64748B]"
+                  }`}>
+                    {filter.count}
+                  </span>
                 </button>
               ))}
               <button
                 type="button"
-                className="ml-auto h-8 rounded-full border border-[#E2E8F0] bg-white px-3 text-[12px] font-black text-[#061426]"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[#E2E8F0] bg-white px-3.5 text-[12px] font-black text-[#061426]"
                 onClick={() => void loadConversations()}
               >
-                Sync
+                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 0 1-15.5 6.4" />
+                  <path d="M3 12A9 9 0 0 1 18.5 5.6" />
+                  <path d="M8 17H5v3" />
+                  <path d="M16 7h3V4" />
+                </svg>
+                <span>Sync</span>
               </button>
             </div>
             {error ? (
-              <div className="rounded-[14px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
+              <div className="mt-3 rounded-[16px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
                 {error}
               </div>
             ) : null}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+          <div className="opera-scroll min-h-0 flex-1 overflow-y-auto pt-3">
             {loading ? (
               <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chats...</p>
             ) : visibleConversationRows.length === 0 ? (
@@ -4787,38 +6662,43 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                   conversation.pendingSetup
                     ? "Company-wide chat"
                     : conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet");
+                const unreadCount = Number(conversation?.unread_count || conversation?.unreadCount || 0);
                 return (
                   <button
                     key={conversation.id}
                     type="button"
-                    className={`flex w-full items-center gap-3 border-b border-[#E2E8F0] px-3 py-3 text-left transition active:bg-[#F8FAFC] ${
-                      activeConversation ? "bg-[#F8FAFC]" : "bg-white"
+                    className={`mx-0.5 mb-1.5 flex w-[calc(100%-0.25rem)] items-center gap-3 rounded-[18px] border px-3 py-2.5 text-left transition active:scale-[0.995] ${
+                      activeConversation ? "border-[#BCD2E8] bg-[#F3F7FC]" : "border-transparent bg-white active:bg-[#F8FAFC]"
                     }`}
                     onClick={() => {
-                      setSelectedConversationId(conversation.id);
-                      setChatPane("thread");
+                      openChatConversation(conversation.id);
                     }}
                   >
-                    <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-[13px] font-black text-white ${
+                    <span className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[14px] font-black text-white ${
                       conversation.type === "company" ? "bg-[#0B1F33]" : "bg-[#163B5C]"
                     }`}>
                       {initials}
+                      {conversation.type === "company" ? <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#22C55E]" /> : null}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="flex min-w-0 items-center gap-1">
-                        <span className="truncate text-[15px] font-black text-[#061426]">{name}</span>
-                        {conversation.type === "group" ? <span className="rounded-full bg-[#F8FAFC] px-1.5 text-[10px] font-black text-[#64748B]">Group</span> : null}
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-black text-[#061426]">{name}</span>
+                        {conversation.type === "group" ? <span className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-[9px] font-black text-[#2563EB]">Group</span> : null}
+                        {conversation.pinned ? (
+                          <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0 text-[#9A6B12]" fill="currentColor" stroke="none" aria-hidden="true">
+                            <path d="m12 17 4 4v-7l4-4V5H9l-5 5h7v11Z" />
+                          </svg>
+                        ) : null}
                       </span>
                       <span className="mt-0.5 block truncate text-[13px] font-semibold text-[#64748B]">
-                        {conversation.pinned ? "Pinned • " : ""}
                         {preview}
                       </span>
                     </span>
                     <span className="flex shrink-0 flex-col items-end gap-1 text-[11px] font-bold text-[#94A3B8]">
                       <span>{formatChatTime(conversation.last_message_at)}</span>
-                      {conversation.pinned ? (
-                        <span className="flex h-5 items-center rounded-full bg-[#FBF8F1] px-2 text-[10px] font-black text-[#9A6B12]">
-                          Pin
+                      {unreadCount > 0 ? (
+                        <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#061426] px-1.5 text-[10px] font-black text-white">
+                          {unreadCount > 99 ? "99+" : unreadCount}
                         </span>
                       ) : null}
                     </span>
@@ -4829,13 +6709,19 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           </div>
         </aside>
 
-        <section className={`${chatPane === "list" ? "hidden md:flex" : "flex"} relative min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB]`}>
+        <section
+          className={`${chatPane === "list" ? "hidden" : "flex"} relative flex-col bg-[#F4F7FB] ${
+            isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
+          }`}
+          style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
+        >
           {selectedConversation ? (
             <>
-              <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-[#E2E8F0] bg-[#061426] px-3 py-2.5 text-white md:bg-white md:text-[#061426]">
+              <div className="sticky top-0 z-10 border-b border-[#E6EAF1] bg-white/96 px-3 pb-2 pt-3 backdrop-blur">
+                <div className="flex items-center gap-3">
                 <button
                   type="button"
-                  className="flex h-10 w-9 items-center justify-center rounded-full text-white active:bg-white/10 md:hidden"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_8px_18px_rgba(6,20,38,0.08)] active:bg-[#F8FAFC]"
                   onClick={() => setChatPane("list")}
                   aria-label="Back to chats"
                 >
@@ -4843,52 +6729,60 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                     <path d="m15 18-6-6 6-6" />
                   </svg>
                 </button>
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/15 text-[12px] font-black text-white md:bg-[#061426] md:text-white">
-                  {displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}
+                <span className={`relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full ${
+                  selectedConversation.type === "direct" ? "bg-[#0B1F33] text-white" : "bg-[#163B5C] text-white"
+                }`}>
+                  {selectedConversation.type === "direct" ? (
+                    <span className="text-[14px] font-black">{displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}</span>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                        <path d="M17 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                        <path d="M4.5 18a4.5 4.5 0 0 1 9 0" />
+                        <path d="M14 18a3.5 3.5 0 0 1 6 0" />
+                      </svg>
+                      <span className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-[#22C55E] text-white shadow-sm">
+                        +
+                      </span>
+                    </>
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <h2 className="truncate text-[16px] font-black">{displayConversationName(selectedConversation)}</h2>
-                  <p className="truncate text-[12px] font-semibold text-white/75 md:text-[#64748B]">
-                    {selectedConversation.pendingSetup
-                      ? "Setting up company chat"
-                      : selectedConversation.type === "company"
-                        ? "Company-wide chat"
-                        : `${selectedConversation.member_user_ids?.length || 0} members`}
+                  <h2 className="truncate text-[17px] font-black leading-tight text-[#061426]">{displayConversationName(selectedConversation)}</h2>
+                  <p className="truncate text-[12px] font-semibold leading-tight text-[#64748B]">
+                    {selectedConversationSubtitle}
                   </p>
                 </div>
                 {!selectedConversation.pendingSetup ? (
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-2">
                     <button
                       type="button"
-                      className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                        selectedConversation.pinned ? "bg-[#C9A227] text-[#061426]" : "bg-white/10 text-white md:bg-[#F8FAFC] md:text-[#061426]"
-                      }`}
-                      onClick={() => void toggleConversationPin()}
-                      aria-label={selectedConversation.pinned ? "Unpin chat" : "Pin chat"}
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_8px_18px_rgba(6,20,38,0.08)]"
+                      onClick={() => setManageOpen((value) => !value)}
+                      aria-label="More chat options"
                     >
-                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="m15 4 5 5-4 4v4l-2 2-4-4-5 5 5-5-4-4 2-2h4l4-4Z" />
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none" />
+                        <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                        <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
                       </svg>
                     </button>
-                    {selectedConversation.type === "group" ? (
-                      <button
-                        type="button"
-                        className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-white md:bg-[#F8FAFC] md:text-[#061426]"
-                        onClick={() => setManageOpen((value) => !value)}
-                        aria-label="Chat options"
-                      >
-                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 5h.01M12 12h.01M12 19h.01" />
-                        </svg>
-                      </button>
-                    ) : null}
                   </div>
                 ) : null}
+                </div>
               </div>
 
               {manageOpen && !selectedConversation.pendingSetup ? (
-                <div className="absolute right-3 top-[58px] z-20 w-[min(310px,calc(100%-1.5rem))] rounded-[18px] border border-[#E2E8F0] bg-white p-3 shadow-[0_18px_48px_rgba(6,20,38,0.2)]">
+                <div className="absolute right-3 top-[74px] z-20 w-[min(310px,calc(100%-1.5rem))] rounded-[18px] border border-[#E2E8F0] bg-white p-3 shadow-[0_18px_48px_rgba(6,20,38,0.2)]">
                   <div className="space-y-2">
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                      onClick={() => void toggleConversationPin()}
+                    >
+                      {selectedConversation.pinned ? "Unpin chat" : "Pin chat"}
+                    </button>
                     {selectedCanLeave ? (
                       <button
                         type="button"
@@ -4935,169 +6829,53 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                 </div>
               ) : null}
 
-              {selectedChatList && chatPane === "list-detail" ? (
-                renderChatListDetail(selectedChatList)
+              {selectedChatListResolved && chatPane === "list-detail" ? (
+                renderChatListDetailView(selectedChatListResolved)
               ) : (
                 <>
-                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3">
-                {!selectedConversation.pendingSetup && chatLists.some((list) => list.pinned) ? (
-                  <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-                    {chatLists
-                      .filter((list) => list.pinned)
-                      .map((list) => (
-                      <button
-                        key={list.id}
-                        type="button"
-                        className={`min-w-[160px] rounded-[16px] border px-3 py-2 text-left shadow-[0_8px_22px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC] ${
-                          String(selectedChatListId) === String(list.id)
-                            ? "border-[#C9A227] bg-[#FBF8F1]"
-                            : "border-[#E2E8F0] bg-white"
-                        }`}
-                        onClick={() => {
-                          jumpToChatListCard(list.id);
-                        }}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
-                            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M8 6h13M8 12h13M8 18h13" />
-                              <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
-                            </svg>
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-[13px] font-black text-[#061426]">{list.title}</span>
-                            <span className="block text-[11px] font-bold text-[#64748B]">
-                              {list.open_count} open / {list.total_count} total
-                            </span>
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
+              {chatLists.length > 0 && !selectedConversation.pendingSetup ? (
+                <div className="opera-hide-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#E6EAF1] bg-white px-3 py-2.5">
+                  {chatLists.map((list) => renderChatListRibbonChip(list))}
+                </div>
+              ) : null}
+              <div
+                ref={chatThreadScrollRef}
+                className="opera-hide-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3"
+                    style={{
+                      backgroundColor: "#EFF3F8",
+                      backgroundImage:
+                        "radial-gradient(rgba(6,20,38,0.05) 1px, transparent 1px), radial-gradient(rgba(6,20,38,0.02) 1px, transparent 1px)",
+                      backgroundSize: "24px 24px",
+                      backgroundPosition: "0 0, 12px 12px",
+                    }}
+                  >
                 {selectedConversation.pendingSetup ? (
                   <EmptyState title="All employees" body="Company-wide chat will appear here once the chat service is connected." />
-                ) : messagesLoading ? (
+                ) : messagesLoading && !threadCacheHydrated ? (
                   <p className="pt-10 text-center text-[13px] font-semibold text-[#64748B]">Loading messages...</p>
                 ) : (
                   <>
-                    {messages.length === 0 && chatLists.length === 0 ? (
+                    {chatTimelineGroups.length === 0 ? (
                       <EmptyState title="No messages yet" body="Send the first update to this chat." className="mt-8" />
                     ) : (
-                      <>
-                        {messages.length > 0 ? (
-                          <>
-                            <div className="mx-auto mb-3 flex w-fit rounded-full bg-white/90 px-3 py-1 text-[11px] font-black text-[#64748B] shadow-sm">
-                              Today
+                      <div className="space-y-4">
+                        {chatTimelineGroups.map((group) => (
+                          <div key={group.dayKey} className="space-y-3">
+                            <div className="mx-auto flex w-fit rounded-full bg-white/92 px-3 py-1 text-[11px] font-bold text-[#5B6576] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+                              {group.label}
                             </div>
-                            {messages.map((message) => {
-                              const mine = String(message.sender_user_id) === String(currentUserId);
-                              return (
-                                <div key={message.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                                  <div
-                                    className={`max-w-[82%] rounded-[18px] px-3 py-2 shadow-sm ${
-                                      mine
-                                        ? "rounded-br-[5px] border border-[#BBF7D0] bg-[#ECFDF5] text-[#061426]"
-                                        : "rounded-bl-[5px] border border-[#E2E8F0] bg-white text-[#061426]"
-                                    }`}
-                                  >
-                                    {!mine ? <p className="mb-0.5 text-[11px] font-black text-[#163B5C]">{message.sender_name}</p> : null}
-                                    {message.deleted ? (
-                                      <p className="text-[13px] font-semibold italic text-[#64748B]">Message deleted</p>
-                                    ) : (
-                                      <>
-                                        {message.message_type === "checklist" ? (
-                                          <div className="space-y-2">
-                                            <p className="whitespace-pre-wrap break-words text-[14px] font-black leading-snug">{message.body}</p>
-                                            <div className="space-y-1">
-                                              {(message.checklist_items || []).map((item) => (
-                                                <label key={item.id} className="flex items-center gap-2 rounded-[12px] bg-white/70 px-2 py-1.5">
-                                                  <input
-                                                    type="checkbox"
-                                                    checked={Boolean(item.is_checked)}
-                                                    onChange={() => void toggleChecklistItem(item)}
-                                                    className="h-4 w-4 accent-[#061426]"
-                                                  />
-                                                  <span className={`text-[13px] font-semibold ${item.is_checked ? "line-through opacity-70" : ""}`}>
-                                                    {item.text}
-                                                  </span>
-                                                </label>
-                                              ))}
-                                            </div>
-                                          </div>
-                                        ) : (
-                                          <p className="whitespace-pre-wrap break-words text-[14px] font-semibold leading-snug">{message.body}</p>
-                                        )}
-                                        {(message.attachments || []).length ? (
-                                          <div className="mt-2 grid gap-2">
-                                            {(message.attachments || []).map((attachment) => (
-                                              <a
-                                                key={attachment.id}
-                                                href={attachment.public_url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="block overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white"
-                                              >
-                                                {attachment.public_url ? (
-                                                  <img
-                                                    src={attachment.public_url}
-                                                    alt={attachment.file_name || "Chat attachment"}
-                                                    className="max-h-56 w-full object-cover"
-                                                  />
-                                                ) : (
-                                                  <span className="block p-3 text-[12px] font-bold">Photo attachment</span>
-                                                )}
-                                              </a>
-                                            ))}
-                                          </div>
-                                        ) : null}
-                                      </>
-                                    )}
-                                    <div className="mt-1 flex items-center justify-end gap-2 text-[10px] font-bold text-[#64748B]">
-                                      {!message.deleted && message.can_pin ? (
-                                        <button
-                                          type="button"
-                                          className={`flex h-6 w-6 items-center justify-center rounded-full ${
-                                            message.pinned ? "bg-[#FBF8F1] text-[#9A6B12]" : "bg-white/70 text-[#061426]"
-                                          }`}
-                                          onClick={() => void toggleMessagePin(message)}
-                                          aria-label={message.pinned ? "Pinned message" : "Pin message"}
-                                        >
-                                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                            <path d="m15 4 5 5-4 4v4l-2 2-4-4-5 5 5-5-4-4 2-2h4l4-4Z" />
-                                          </svg>
-                                        </button>
-                                      ) : null}
-                                      {!message.deleted && message.can_delete ? (
-                                        <button
-                                          type="button"
-                                          className="flex h-6 w-6 items-center justify-center rounded-full bg-white/70 text-[18px] font-black leading-none text-[#DC2626]"
-                                          onClick={() => void deleteChatMessage(message)}
-                                          aria-label="Delete message"
-                                        >
-                                          −
-                                        </button>
-                                      ) : null}
-                                      <span>{formatChatTime(message.created_at)}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </>
-                        ) : null}
-                        {chatLists.length > 0 ? (
-                          <div className="space-y-3 pt-3">
-                            {chatLists.map((list) => renderChatListCard(list))}
+                            <div className="space-y-2.5">
+                              {group.rows.map((entry) => renderChatMessageRow(entry.row))}
+                            </div>
                           </div>
-                        ) : null}
-                      </>
+                        ))}
+                      </div>
                     )}
                   </>
                 )}
               </div>
 
-              <div className="border-t border-[#E2E8F0] bg-white px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]">
+              <div className="border-t border-[#E6EAF1] bg-white/96 px-2.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
                 <input
                   ref={chatImageInputRef}
                   type="file"
@@ -5105,49 +6883,114 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                   className="hidden"
                   onChange={(event) => void handleChatImagePick(event)}
                 />
-                <div className="flex items-end gap-2">
+                {chatReplyTarget ? (
+                  <div className="mb-2 rounded-[18px] border border-[#E2E8F0] bg-white px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+                          Replying to {chatReplyTarget.sender_name || "message"}
+                        </p>
+                        <p className="mt-0.5 line-clamp-2 text-[12px] font-semibold text-[#475569]">
+                          {String(chatReplyTarget.body || "").trim() || "Attachment"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[16px] font-black text-[#061426]"
+                        onClick={() => setChatReplyTarget(null)}
+                        aria-label="Cancel reply"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M6 6 18 18" />
+                          <path d="M18 6 6 18" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="relative flex items-center gap-1.5">
+                  {chatUtilityMenuOpen ? (
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-10 cursor-default"
+                      aria-label="Close menu"
+                      onClick={() => setChatUtilityMenuOpen(false)}
+                    />
+                  ) : null}
+                  {chatUtilityMenuOpen ? (
+                    <div
+                      className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-44 overflow-hidden rounded-[16px] border border-[#E6EAF1] bg-white shadow-[0_18px_44px_rgba(6,20,38,0.16)]"
+                      role="menu"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex h-11 w-full items-center gap-3 px-3.5 text-left text-[13px] font-bold text-[#061426] active:bg-[#F8FAFC]"
+                        disabled={selectedConversation.pendingSetup || chatUploading}
+                        onClick={() => {
+                          setChatUtilityMenuOpen(false);
+                          chatImageInputRef.current?.click();
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M4 7a2 2 0 0 1 2-2h2l1.5-2h5L16 5h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+                          <circle cx="12" cy="12" r="3.2" />
+                        </svg>
+                        {chatUploading ? "Uploading..." : "Camera"}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex h-11 w-full items-center gap-3 border-t border-[#F1F5F9] px-3.5 text-left text-[13px] font-bold text-[#061426] active:bg-[#F8FAFC]"
+                        disabled={selectedConversation.pendingSetup}
+                        onClick={() => {
+                          setChatUtilityMenuOpen(false);
+                          setListComposerOpen(true);
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M8 6h13M8 12h13M8 18h13" />
+                          <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+                        </svg>
+                        List
+                      </button>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] disabled:text-[#94A3B8]"
-                    disabled={selectedConversation.pendingSetup || chatUploading}
-                    onClick={() => chatImageInputRef.current?.click()}
-                    aria-label={chatUploading ? "Uploading photo" : "Attach photo"}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.08)] disabled:text-[#94A3B8]"
+                    disabled={selectedConversation.pendingSetup}
+                    onClick={() => setChatUtilityMenuOpen((value) => !value)}
+                    aria-label="Attach"
+                    aria-expanded={chatUtilityMenuOpen}
                   >
                     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M14.5 4.5 6.2 12.8a3 3 0 0 0 4.2 4.2l8.4-8.4a4.5 4.5 0 0 0-6.4-6.4L4.7 9.9a6 6 0 0 0 8.5 8.5l7.1-7.1" />
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
                     </svg>
                   </button>
+                  <div className="flex min-h-11 flex-1 items-center rounded-[24px] border border-[#E6EAF1] bg-white px-4 py-2 shadow-[0_6px_16px_rgba(6,20,38,0.06)]">
+                    <textarea
+                      ref={chatMessageInputRef}
+                      rows={1}
+                      className="chat-mobile-safe-input max-h-28 min-h-[20px] w-full resize-none self-center bg-transparent text-[16px] font-medium leading-[20px] text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                      value={messageDraft}
+                      maxLength={2000}
+                      placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
+                      disabled={selectedConversation.pendingSetup}
+                      onChange={(event) => setMessageDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {
+                          event.preventDefault();
+                          void sendChatMessage();
+                        }
+                      }}
+                    />
+                  </div>
                   <button
                     type="button"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] disabled:text-[#94A3B8]"
-                    disabled={selectedConversation.pendingSetup}
-                    onClick={() => setListComposerOpen(true)}
-                    aria-label="Create list"
-                  >
-                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M8 6h13M8 12h13M8 18h13" />
-                      <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
-                    </svg>
-                  </button>
-                  <textarea
-                    ref={chatMessageInputRef}
-                    className="max-h-28 min-h-[44px] flex-1 resize-none rounded-[22px] border border-[#CBD5E1] bg-white px-4 py-2.5 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
-                    value={messageDraft}
-                    maxLength={2000}
-                    placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
-                    disabled={selectedConversation.pendingSetup}
-                    onChange={(event) => setMessageDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        void sendChatMessage();
-                      }
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.18)] disabled:bg-[#CBD5E1]"
-                    disabled={selectedConversation.pendingSetup || !messageDraft.trim() || sending}
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.24)] active:bg-[#0B1F33] disabled:bg-[#CBD5E1]"
+                    disabled={selectedConversation.pendingSetup || !hasDraftMessage}
                     onClick={() => void sendChatMessage()}
                     aria-label="Send message"
                   >
@@ -5169,13 +7012,261 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
           )}
         </section>
 
+      {chatActiveMessage ? (
+        <div
+          className="fixed inset-0 z-[94] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10"
+          role="dialog"
+          aria-modal="true"
+          onClick={clearChatMessageActions}
+        >
+          <div className="w-full max-w-sm space-y-3" onClick={(event) => event.stopPropagation()}>
+            <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-white px-3 py-2 shadow-[0_24px_70px_rgba(6,20,38,0.18)]">
+              {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((reaction) => (
+                <button
+                  key={reaction}
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-[22px] transition active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setError("Reactions are coming soon in development.");
+                    clearChatMessageActions();
+                  }}
+                  aria-label={`React ${reaction}`}
+                >
+                  {reaction}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F8FAFC] text-[24px] font-medium text-[#061426]"
+                onClick={() => setError("More reactions are coming soon in development.")}
+                aria-label="More reactions"
+              >
+                +
+              </button>
+            </div>
+            <div className="overflow-hidden rounded-[26px] border border-[#E2E8F0] bg-white shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+              <div className="border-b border-[#EEF2F7] px-4 py-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-[18px] font-black text-[#061426]">
+                    {String(chatActiveMessage.sender_name || "Message").trim()}
+                  </h3>
+                  <p className="mt-0.5 line-clamp-2 text-[12px] font-semibold text-[#64748B]">
+                    {String(chatActiveMessage.body || "").trim() || "Attachment"}
+                  </p>
+                </div>
+              </div>
+              <div className="py-1">
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => startChatReply(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m10 9-5 5 5 5" />
+                      <path d="M20 4v7a4 4 0 0 1-4 4H5" />
+                    </svg>
+                  </span>
+                  Reply
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => openChatForwardTarget(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m14 6 6 6-6 6" />
+                      <path d="M20 12H8a4 4 0 0 0-4 4v2" />
+                    </svg>
+                  </span>
+                  Forward
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void copyChatMessageText(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="9" y="9" width="10" height="10" rx="2" />
+                      <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+                    </svg>
+                  </span>
+                  Copy
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void toggleMessagePin(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m12 17 4 4v-7l4-4V5H9l-5 5h7v11Z" />
+                    </svg>
+                  </span>
+                  {chatActiveMessage.pinned ? "Unstar" : "Star"}
+                </button>
+                {Array.isArray(chatActiveMessage.attachments) && chatActiveMessage.attachments.length ? (
+                  <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void saveChatMessageMedia(chatActiveMessage)}>
+                    <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 4v10" />
+                        <path d="M7.5 10.5 12 15l4.5-4.5" />
+                        <path d="M5 20h14" />
+                      </svg>
+                    </span>
+                    Save media
+                  </button>
+                ) : null}
+                {chatActiveMessage.can_delete ? (
+                  <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#DC2626] active:bg-[#FEF2F2]" onClick={() => void deleteChatMessage(chatActiveMessage)}>
+                    <span className="flex h-8 w-8 items-center justify-center text-[#DC2626]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4h8v2" />
+                        <path d="M7 6l1 13h8l1-13" />
+                        <path d="M10 10v6M14 10v6" />
+                      </svg>
+                    </span>
+                    Delete
+                  </button>
+                ) : null}
+                <div className="mx-4 my-1 h-px bg-[#EEF2F7]" />
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={clearChatMessageActions}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="1" />
+                      <circle cx="19" cy="12" r="1" />
+                      <circle cx="5" cy="12" r="1" />
+                    </svg>
+                  </span>
+                  More...
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {chatForwardMessage ? (
+        <div
+          className="fixed inset-0 z-[95] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            setChatForwardMessage(null);
+            setChatForwardSearch("");
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Forward</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">Choose chat</h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => {
+                  setChatForwardMessage(null);
+                  setChatForwardSearch("");
+                }}
+                aria-label="Close forward dialog"
+              >
+                x
+              </button>
+            </div>
+            <label className="mt-4 flex h-11 items-center gap-2 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                ref={chatForwardSearchRef}
+                value={chatForwardSearch}
+                onChange={(event) => setChatForwardSearch(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                placeholder="Search chats"
+              />
+            </label>
+            <div className="mt-3 max-h-[42dvh] space-y-2 overflow-y-auto">
+              {visibleConversationRows
+                .filter((conversation) => String(conversation.id) !== String(selectedConversationId))
+                .filter((conversation) => {
+                  const query = chatForwardSearch.trim().toLowerCase();
+                  if (!query) return true;
+                  const name = displayConversationName(conversation).toLowerCase();
+                  const preview = String(conversation.last_message || "").toLowerCase();
+                  return name.includes(query) || preview.includes(query);
+                })
+                .map((conversation) => {
+                  const name = displayConversationName(conversation);
+                  const preview = conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet");
+                  return (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 text-left active:bg-[#F8FAFC]"
+                      onClick={() => void sendForwardedChatMessage(conversation.id)}
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#061426] text-[12px] font-black text-white">
+                        {name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-black text-[#061426]">{name}</span>
+                        <span className="block truncate text-[12px] font-semibold text-[#64748B]">{preview}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {chatImageViewer ? (
+        <div className="fixed inset-0 z-[96] flex flex-col bg-[#061426] text-white" role="dialog" aria-modal="true">
+          <div className="flex items-center gap-3 border-b border-white/10 px-3 py-3">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
+              onClick={() => setChatImageViewer(null)}
+              aria-label="Close image viewer"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[11px] font-black uppercase tracking-[0.12em] text-white/70">
+                {chatImageViewer?.message?.sender_name || "Photo"}
+              </p>
+              <p className="truncate text-[14px] font-bold text-white/90">
+                {String(chatImageViewer?.attachment?.file_name || "Attachment").trim()}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
+              onClick={() => window.open(chatImageViewer?.attachment?.public_url || "", "_blank", "noopener,noreferrer")}
+              aria-label="Open image in new tab"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M7 17 17 7" />
+                <path d="M9 7h8v8" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex flex-1 items-center justify-center p-4">
+            {chatImageViewer?.attachment?.public_url ? (
+              <img
+                src={chatImageViewer.attachment.public_url}
+                alt={chatImageViewer?.attachment?.file_name || "Chat attachment"}
+                className="max-h-[80dvh] max-w-full rounded-[22px] object-contain shadow-[0_18px_60px_rgba(0,0,0,0.35)]"
+              />
+            ) : (
+              <EmptyState title="No image" body="The selected image could not be opened." />
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {listComposerOpen && selectedConversation && !selectedConversation.pendingSetup ? (
-        <div className="fixed inset-0 z-[92] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
-          <div className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+        <div className="fixed inset-0 z-[92] flex items-end justify-center bg-[#0B1F33]/55 px-2 pb-2 pt-10" role="dialog" aria-modal="true">
+          <div className="max-h-[88dvh] w-full max-w-[430px] overflow-y-auto rounded-t-[24px] rounded-b-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="mx-auto mb-3 h-1 w-12 rounded-full bg-[#CBD5E1]" aria-hidden="true" />
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Chat list</p>
-                <h3 className="mt-1 text-[22px] font-black text-[#061426]">Create list</h3>
+                <h3 className="mt-0.5 text-[20px] font-black text-[#061426]">Create list</h3>
               </div>
               <button
                 type="button"
@@ -5186,15 +7277,15 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
                 x
               </button>
             </div>
-            <label className="mt-4 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+            <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
               Title
               <input
                 ref={chatListTitleInputRef}
-                autoFocus
                 inputMode="text"
                 autoComplete="off"
                 enterKeyHint="next"
-                className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
+                style={{ fontSize: 16 }}
                 value={listTitle}
                 maxLength={120}
                 onChange={(event) => setListTitle(event.target.value)}
@@ -5204,13 +7295,14 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
             <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
               Items
               <textarea
-                className="min-h-[150px] w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2 text-[16px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                className="chat-mobile-safe-input min-h-[108px] w-full resize-none rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2.5 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
+                style={{ fontSize: 16 }}
                 value={listItemsText}
                 onChange={(event) => setListItemsText(event.target.value)}
-                placeholder={"Optional: one item per line\nPrimer\nDrywall compound\nScrews"}
+                placeholder={"One main item per line\n  Indent sub-items with spaces"}
               />
             </label>
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2">
               <button
                 type="button"
                 className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
@@ -5221,8 +7313,8 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
               <button
                 type="button"
                 className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
-                disabled={!listTitle.trim() || sending}
-                onClick={() => void createPinnedChatList()}
+                disabled={!listTitle.trim() || listBusy}
+                onClick={() => void createChatList()}
               >
                 Create
               </button>
@@ -5333,6 +7425,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone }) {
 
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
+  const [chatViewMode, setChatViewMode] = useState("list");
   const [projectId, setProjectId] = useState("");
   const [costCenter, setCostCenter] = useState("");
   const [clockCreateDraft, setClockCreateDraft] = useState({ open: false, itemType: "project", name: "" });
@@ -5380,8 +7473,14 @@ export default function EmployeeClockApp() {
   const [manualTimeClockOutTime, setManualTimeClockOutTime] = useState("");
   const [manualTimeProjectId, setManualTimeProjectId] = useState("");
   const [manualTimeCostCentre, setManualTimeCostCentre] = useState("");
+  const [manualTimeEmployeeId, setManualTimeEmployeeId] = useState("");
   const [manualTimeReason, setManualTimeReason] = useState("");
   const [manualTimeSaving, setManualTimeSaving] = useState(false);
+  const [clockInEditOpen, setClockInEditOpen] = useState(false);
+  const [clockInEditDate, setClockInEditDate] = useState("");
+  const [clockInEditTime, setClockInEditTime] = useState("");
+  const [clockInEditReason, setClockInEditReason] = useState("");
+  const [clockInEditSaving, setClockInEditSaving] = useState(false);
   const [timesheetRequests, setTimesheetRequests] = useState([]);
   const [timesheetRequestsLoading, setTimesheetRequestsLoading] = useState(false);
   const [timesheetRequestsError, setTimesheetRequestsError] = useState("");
@@ -5416,6 +7515,8 @@ export default function EmployeeClockApp() {
   const [materialSupplierDraft, setMaterialSupplierDraft] = useState("");
   const [materialAmountDraft, setMaterialAmountDraft] = useState("");
   const [payrollPanelOpen, setPayrollPanelOpen] = useState(false);
+  const [payrollDetailRow, setPayrollDetailRow] = useState(null);
+  const [payrollDetailScrollTop, setPayrollDetailScrollTop] = useState(0);
   const [payrollRangePreset, setPayrollRangePreset] = useState("last_3_months");
   const [payrollEmployeeFilter, setPayrollEmployeeFilter] = useState("all");
   const [payrollPeriodFilter, setPayrollPeriodFilter] = useState("all");
@@ -5456,6 +7557,9 @@ export default function EmployeeClockApp() {
   }));
   const [payrollPaymentMessage, setPayrollPaymentMessage] = useState("");
   const payrollReminderLastFetchKeyRef = useRef("");
+  const timesheetHighlightTimerRef = useRef(null);
+  const timesheetSanityHighlightTimerRef = useRef(null);
+  const payrollPanelScrollRef = useRef(null);
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
   const photoToolsRef = useRef(null);
@@ -5877,6 +7981,11 @@ export default function EmployeeClockApp() {
   const [settingsProfileEditOpen, setSettingsProfileEditOpen] = useState(false);
   const [settingsProfileSaving, setSettingsProfileSaving] = useState(false);
   const [settingsProfileMessage, setSettingsProfileMessage] = useState("");
+  const [specialProjectFormOpen, setSpecialProjectFormOpen] = useState(false);
+  const [specialProjectDraft, setSpecialProjectDraft] = useState(null);
+  const [specialProjectSaving, setSpecialProjectSaving] = useState(false);
+  const [specialProjectMessage, setSpecialProjectMessage] = useState("");
+  const [specialProjectError, setSpecialProjectError] = useState("");
   const [closingShiftId, setClosingShiftId] = useState(null);
   const [settingsTzMessage, setSettingsTzMessage] = useState("");
   const [settingsTzSaving, setSettingsTzSaving] = useState(false);
@@ -5915,18 +8024,21 @@ export default function EmployeeClockApp() {
   const [timesheetCompletedOnly, setTimesheetCompletedOnly] = useState(false);
   const [timesheetEmployeeFilter, setTimesheetEmployeeFilter] = useState("all");
   const [timesheetProjectFilter, setTimesheetProjectFilter] = useState("all");
+  const [timesheetTaskFilter, setTimesheetTaskFilter] = useState("all");
   const [timesheetShareMessage, setTimesheetShareMessage] = useState("");
   const [timesheetRangePreset, setTimesheetRangePreset] = useState("today");
   const [timesheetDatePickerOpen, setTimesheetDatePickerOpen] = useState(false);
   const [timesheetFilterSheetOpen, setTimesheetFilterSheetOpen] = useState(false);
   const [timesheetSanityExpanded, setTimesheetSanityExpanded] = useState(false);
+  const [timesheetSanityHighlightedIssueId, setTimesheetSanityHighlightedIssueId] = useState("");
+  const [timesheetHighlightedRecordId, setTimesheetHighlightedRecordId] = useState("");
   const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
   const [timesheetDraftDateFrom, setTimesheetDraftDateFrom] = useState("");
   const [timesheetDraftDateTo, setTimesheetDraftDateTo] = useState("");
   const [dashboardViewDate, setDashboardViewDate] = useState("");
   const [dashboardRows, setDashboardRows] = useState([]);
   const [dashboardDaySheets, setDashboardDaySheets] = useState([]);
-  /** Today's timesheets (company TZ) for live “currently working” list; extra fetch only when selected date ≠ today. */
+  /** Today's timesheets (company TZ) for live currently-working list; extra fetch only when selected date is not today. */
   const [dashboardTodaySheets, setDashboardTodaySheets] = useState([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
@@ -5954,7 +8066,7 @@ export default function EmployeeClockApp() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
-  /** list | cal1 | cal3 | cal7 | cal30 — Schedule tab list vs rolling calendar windows (company TZ). */
+  /** list | cal1 | cal3 | cal7 | cal30 â€” Schedule tab list vs rolling calendar windows (company TZ). */
   const [scheduleViewMode, setScheduleViewMode] = useState("list");
   /** First day (YYYY-MM-DD) of the visible calendar range in company TZ. */
   const [scheduleCalendarAnchor, setScheduleCalendarAnchor] = useState("");
@@ -5995,13 +8107,13 @@ export default function EmployeeClockApp() {
   const [employeeScheduledTasks, setEmployeeScheduledTasks] = useState([]);
   const [employeeScheduleLoading, setEmployeeScheduleLoading] = useState(false);
   const [employeeScheduleError, setEmployeeScheduleError] = useState("");
-  /** task id string → current user's assignee row (for accept/decline + display). */
+  /** task id string â†’ current user's assignee row (for accept/decline + display). */
   const [employeeScheduleLinkByTaskId, setEmployeeScheduleLinkByTaskId] = useState({});
   const employeeScheduleKnownAssignmentIdsRef = useRef(new Set());
   const employeeScheduleBootstrappedRef = useRef(false);
   const employeeScheduleRefreshInFlightRef = useRef(false);
   const shownAssignmentRowIdsRef = useRef(new Set());
-  /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow — Scheduled Task dropdown. */
+  /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow â€” Scheduled Task dropdown. */
   const [clockEmployeeScheduledTasks, setClockEmployeeScheduledTasks] = useState([]);
   const [clockEmployeeScheduleLoading, setClockEmployeeScheduleLoading] = useState(false);
   const [clockSelectedScheduledTaskId, setClockSelectedScheduledTaskId] = useState("");
@@ -6089,8 +8201,8 @@ export default function EmployeeClockApp() {
     if (!companyChecked) return;
     const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
     if (!todayKey) return;
+    const seedRangeFrom = addWallMonthsSafe(todayKey, -3, companyTimeZone) || todayKey;
     if (isEmployeeRole) {
-      const seedRangeFrom = addWallMonthsSafe(todayKey, -3, companyTimeZone) || todayKey;
       setTimesheetViewMode((prev) => (prev === "day" ? "range" : prev));
       setTimesheetRangePreset((prev) => (prev === "today" ? "custom" : prev));
       setTimesheetDateKey((prev) => prev || todayKey);
@@ -6098,8 +8210,10 @@ export default function EmployeeClockApp() {
       setTimesheetDateTo((prev) => prev || todayKey);
       return;
     }
+    setTimesheetViewMode((prev) => (prev === "day" ? "range" : prev));
+    setTimesheetRangePreset((prev) => (prev === "today" ? "custom" : prev));
     setTimesheetDateKey((prev) => prev || todayKey);
-    setTimesheetDateFrom((prev) => prev || todayKey);
+    setTimesheetDateFrom((prev) => prev || seedRangeFrom);
     setTimesheetDateTo((prev) => prev || todayKey);
   }, [companyChecked, companyTimeZone, isEmployeeRole]);
 
@@ -6202,7 +8316,13 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (activeTab !== "team" || !isAdmin || !userCompany?.id || !authUser?.id) return;
     let cancelled = false;
-    setTeamLoading(true);
+    const teamCacheKey = makeAppCacheKey("team", userCompany.id, authUser.id);
+    const cachedTeam = readLocalFirstCacheEnvelope(teamCacheKey, null);
+    const hasCachedTeam = Array.isArray(cachedTeam?.value?.rows) && cachedTeam.value.rows.length > 0;
+    if (hasCachedTeam) {
+      setTeamRows(normalizeArray(cachedTeam.value.rows));
+    }
+    setTeamLoading(!hasCachedTeam);
     setTeamError("");
     setTeamRoleFeedback({ type: "", text: "" });
     setTeamSchemaWarning("");
@@ -6318,11 +8438,14 @@ export default function EmployeeClockApp() {
           };
         });
 
-        if (!cancelled) setTeamRows(rows);
+        if (!cancelled) {
+          setTeamRows(rows);
+          writeLocalFirstCache(teamCacheKey, { rows }, { source: "remote", count: rows.length });
+        }
       } catch (err) {
         if (!cancelled) {
           setTeamError(getErrorMessage(err));
-          setTeamRows([]);
+          if (!hasCachedTeam) setTeamRows([]);
         }
       } finally {
         if (!cancelled) setTeamLoading(false);
@@ -6445,7 +8568,24 @@ export default function EmployeeClockApp() {
       return;
     }
     let cancelled = false;
-    setDashboardLoading(true);
+    const dashboardCacheKey = makeAppCacheKey("dashboard", userCompany.id, dashboardViewDate);
+    const cachedDashboard = readLocalFirstCacheEnvelope(dashboardCacheKey, null);
+    const hasCachedDashboard = Array.isArray(cachedDashboard?.value?.rows) && cachedDashboard.value.rows.length > 0;
+    if (hasCachedDashboard) {
+      setDashboardRows(normalizeArray(cachedDashboard.value.rows));
+      setDashboardDaySheets(normalizeArray(cachedDashboard.value.daySheets));
+      setDashboardTodaySheets(normalizeArray(cachedDashboard.value.todaySheets));
+      setDashboardAssignmentsByUserId(
+        cachedDashboard.value.assignmentsByUserId && typeof cachedDashboard.value.assignmentsByUserId === "object"
+          ? cachedDashboard.value.assignmentsByUserId
+          : {}
+      );
+    }
+    if (!hasCachedDashboard || isLocalFirstCacheStale(cachedDashboard.savedAt, 5 * 60 * 1000)) {
+      setDashboardLoading(!hasCachedDashboard);
+    } else {
+      setDashboardLoading(false);
+    }
     setDashboardError("");
     (async () => {
       try {
@@ -6556,14 +8696,26 @@ export default function EmployeeClockApp() {
           setDashboardDaySheets(dateFiltered);
           setDashboardTodaySheets(Array.isArray(todayFiltered) ? todayFiltered : []);
           setDashboardAssignmentsByUserId(assignByUser);
+          writeLocalFirstCache(
+            dashboardCacheKey,
+            {
+              rows,
+              daySheets: dateFiltered,
+              todaySheets: Array.isArray(todayFiltered) ? todayFiltered : [],
+              assignmentsByUserId: assignByUser,
+            },
+            { source: "remote", viewDate: dashboardViewDate }
+          );
         }
       } catch (err) {
         if (!cancelled) {
           setDashboardError(getErrorMessage(err));
-          setDashboardRows([]);
-          setDashboardDaySheets([]);
-          setDashboardTodaySheets([]);
-          setDashboardAssignmentsByUserId({});
+          if (!hasCachedDashboard) {
+            setDashboardRows([]);
+            setDashboardDaySheets([]);
+            setDashboardTodaySheets([]);
+            setDashboardAssignmentsByUserId({});
+          }
         }
       } finally {
         if (!cancelled) setDashboardLoading(false);
@@ -6637,9 +8789,23 @@ export default function EmployeeClockApp() {
       return;
     }
     let cancelled = false;
-    setScheduleLoading(true);
+    const scheduleCacheKey = makeAppCacheKey("schedule", userCompany.id, authUser.id);
+    const cachedSchedule = readLocalFirstCacheEnvelope(scheduleCacheKey, null);
+    const hasCachedSchedule = Array.isArray(cachedSchedule?.value?.tasks);
+    if (hasCachedSchedule) {
+      setScheduledTasks(normalizeArray(cachedSchedule.value.tasks));
+      setScheduleAssigneesByTaskId(
+        cachedSchedule.value.assigneesByTaskId && typeof cachedSchedule.value.assigneesByTaskId === "object"
+          ? cachedSchedule.value.assigneesByTaskId
+          : {}
+      );
+      if (Array.isArray(cachedSchedule.value.pickMembers)) {
+        setSchedulePickMembers(cachedSchedule.value.pickMembers);
+      }
+    }
+    setScheduleLoading(!hasCachedSchedule);
     setScheduleError("");
-    setSchedulePickMembersLoading(true);
+    setSchedulePickMembersLoading(!hasCachedSchedule);
     setSchedulePickMembersError("");
     (async () => {
       try {
@@ -6712,17 +8878,25 @@ export default function EmployeeClockApp() {
         pickRows.sort((a, b) => String(a.displayName).localeCompare(String(b.displayName)));
 
         if (!cancelled) {
-          setScheduledTasks(Array.isArray(taskData) ? taskData : []);
+          const tasks = Array.isArray(taskData) ? taskData : [];
+          setScheduledTasks(tasks);
           setScheduleAssigneesByTaskId(byTask);
           setSchedulePickMembers(pickRows);
+          writeLocalFirstCache(
+            scheduleCacheKey,
+            { tasks, assigneesByTaskId: byTask, pickMembers: pickRows },
+            { source: "remote", count: tasks.length }
+          );
         }
       } catch (err) {
         if (!cancelled) {
           setScheduleError(getErrorMessage(err));
-          setScheduledTasks([]);
-          setScheduleAssigneesByTaskId({});
+          if (!hasCachedSchedule) {
+            setScheduledTasks([]);
+            setScheduleAssigneesByTaskId({});
+            setSchedulePickMembers([]);
+          }
           setSchedulePickMembersError(getErrorMessage(err));
-          setSchedulePickMembers([]);
         }
       } finally {
         if (!cancelled) {
@@ -6940,10 +9114,10 @@ export default function EmployeeClockApp() {
     const groups = {};
     for (const task of rows) {
       const rawStart = task?.start_time;
-      let dateKey = "—";
+      let dateKey = "â€”";
       if (rawStart != null && rawStart !== "") {
         const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
-        dateKey = k && String(k).trim() !== "" ? k : "—";
+        dateKey = k && String(k).trim() !== "" ? k : "â€”";
       }
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
@@ -6986,10 +9160,10 @@ export default function EmployeeClockApp() {
     const groups = {};
     for (const task of rows) {
       const rawStart = task?.start_time;
-      let dateKey = "—";
+      let dateKey = "â€”";
       if (rawStart != null && rawStart !== "") {
         const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
-        dateKey = k && String(k).trim() !== "" ? k : "—";
+        dateKey = k && String(k).trim() !== "" ? k : "â€”";
       }
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
@@ -7165,8 +9339,28 @@ export default function EmployeeClockApp() {
 
   const fetchTimesheetsFromSupabase = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    const timesheetsCacheKey = makeAppCacheKey("timesheets", userCompany.id, authUser.id, isEmployeeRole ? "employee" : "admin");
+    const cachedTimesheets = readLocalFirstCacheEnvelope(timesheetsCacheKey, null);
+    if (cachedTimesheets?.value?.records) {
+      const cachedRecords = normalizeArray(cachedTimesheets.value.records);
+      setRecords(isEmployeeRole ? cachedRecords.filter((record) => timesheetRecordBelongsToUser(record, authUser)) : cachedRecords);
+      if (Array.isArray(cachedTimesheets.value.vacationPeriods)) {
+        setVacationPeriods(cachedTimesheets.value.vacationPeriods);
+        vacationPeriodsLoadedRef.current = true;
+      }
+      if (Array.isArray(cachedTimesheets.value.timesheetRequests)) {
+        setTimesheetRequests(cachedTimesheets.value.timesheetRequests);
+      }
+      if (cachedTimesheets.value.currentShift !== undefined) {
+        setCurrentShift(cachedTimesheets.value.currentShift);
+      }
+    }
 
-    setTimesheetsLoading(true);
+    if (!cachedTimesheets?.savedAt || isLocalFirstCacheStale(cachedTimesheets.savedAt, 5 * 60 * 1000)) {
+      setTimesheetsLoading(true);
+    } else {
+      setTimesheetsLoading(false);
+    }
     setTimesheetsError("");
     try {
       let query = supabase
@@ -7224,6 +9418,11 @@ export default function EmployeeClockApp() {
         if (previousBelongsToCurrentUser && previousShift?.supabaseTimesheetId) return null;
         return previousShift;
       });
+      writeLocalFirstCache(
+        timesheetsCacheKey,
+        { records: enriched },
+        { source: "remote", updatedAt: new Date().toISOString(), currentShiftLoaded: Boolean(latestOwnActive) }
+      );
     } catch (err) {
       const msg = getErrorMessage(err);
       setTimesheetsError(msg);
@@ -7236,10 +9435,23 @@ export default function EmployeeClockApp() {
     } finally {
       setTimesheetsLoading(false);
     }
-  }, [authUser, profileFullName, userCompany?.id, userCompanyRole, isEmployeeRole]);
+  }, [authUser, isEmployeeRole, profileFullName, userCompany?.id, userCompanyRole]);
 
   const fetchVacationPeriodsFromSupabase = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return [];
+    const vacationCacheKey = makeAppCacheKey("timesheets", "vacation", userCompany.id, authUser.id, isEmployeeRole ? "employee" : "admin");
+    const cachedVacation = readLocalFirstCacheEnvelope(vacationCacheKey, null);
+    if (cachedVacation?.value?.records) {
+      const cachedRows = normalizeArray(cachedVacation.value.records);
+      setVacationPeriods(cachedRows);
+      localVacationBackupRef.current = cachedRows;
+      vacationPeriodsLoadedRef.current = true;
+      if (!cachedVacation.savedAt || isLocalFirstCacheStale(cachedVacation.savedAt, 10 * 60 * 1000)) {
+        // fall through to refresh below
+      } else {
+        return cachedRows;
+      }
+    }
 
     try {
       let query = supabase
@@ -7281,10 +9493,11 @@ export default function EmployeeClockApp() {
             profileDisplayName: employeeName,
             profileEmailForRow: employeeEmail,
           };
-        });
+      });
       setVacationPeriods(mapped);
       localVacationBackupRef.current = mapped;
       vacationPeriodsLoadedRef.current = true;
+      writeLocalFirstCache(vacationCacheKey, { records: mapped }, { source: "remote", count: mapped.length });
       return mapped;
     } catch (err) {
       if (!isMissingVacationPeriodsTableError(err)) {
@@ -7299,6 +9512,17 @@ export default function EmployeeClockApp() {
 
   const fetchTimesheetChangeRequests = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
+    const requestCacheKey = makeAppCacheKey("timesheets", "requests", userCompany.id, authUser.id, isAdmin ? "admin" : "employee");
+    const cachedRequests = readLocalFirstCacheEnvelope(requestCacheKey, null);
+    if (cachedRequests?.value?.records) {
+      const cachedRows = normalizeArray(cachedRequests.value.records);
+      setTimesheetRequests(cachedRows);
+      if (!cachedRequests.savedAt || isLocalFirstCacheStale(cachedRequests.savedAt, 5 * 60 * 1000)) {
+        // refresh below
+      } else {
+        return;
+      }
+    }
     setTimesheetRequestsLoading(true);
     setTimesheetRequestsError("");
     try {
@@ -7311,7 +9535,9 @@ export default function EmployeeClockApp() {
       if (!isAdmin) query = query.eq("user_id", authUser.id);
       const { data, error } = await query;
       if (error) throw error;
-      setTimesheetRequests((data || []).map(mapTimesheetChangeRequestFromSupabase));
+      const mapped = (data || []).map(mapTimesheetChangeRequestFromSupabase);
+      setTimesheetRequests(mapped);
+      writeLocalFirstCache(requestCacheKey, { records: mapped }, { source: "remote", count: mapped.length });
     } catch (err) {
       console.warn("[TIMESHEET_REQUESTS] load failed", err);
       setTimesheetRequestsError("Timesheet approval requests are not ready. Run the timesheet_change_requests SQL migration.");
@@ -7322,9 +9548,25 @@ export default function EmployeeClockApp() {
 
   const fetchPayrollData = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
-    setPayrollSettingsLoading(true);
-    setPayrollPaymentsLoading(true);
-    setPayrollLoanTransactionsLoading(true);
+    const payrollCacheKey = makeAppCacheKey("payroll", userCompany.id, authUser.id, isAdmin ? "admin" : "employee");
+    const cachedPayroll = readLocalFirstCacheEnvelope(payrollCacheKey, null);
+    if (cachedPayroll?.value) {
+      if (cachedPayroll.value.settings !== undefined) setPayrollSettings(cachedPayroll.value.settings || null);
+      if (Array.isArray(cachedPayroll.value.payments)) setPayrollPayments(cachedPayroll.value.payments);
+      if (Array.isArray(cachedPayroll.value.loans)) setPayrollLoanTransactions(cachedPayroll.value.loans);
+      if (cachedPayroll.value.employeeMetaById && typeof cachedPayroll.value.employeeMetaById === "object") {
+        setPayrollEmployeeMetaById(cachedPayroll.value.employeeMetaById);
+      }
+    }
+    if (!cachedPayroll?.savedAt || isLocalFirstCacheStale(cachedPayroll.savedAt, 5 * 60 * 1000)) {
+      setPayrollSettingsLoading(true);
+      setPayrollPaymentsLoading(true);
+      setPayrollLoanTransactionsLoading(true);
+    } else {
+      setPayrollSettingsLoading(false);
+      setPayrollPaymentsLoading(false);
+      setPayrollLoanTransactionsLoading(false);
+    }
     setPayrollSettingsError("");
     setPayrollPaymentsError("");
     setPayrollLoanTransactionsError("");
@@ -7425,6 +9667,16 @@ export default function EmployeeClockApp() {
         setPayrollPayments(Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
         setPayrollLoanTransactions(Array.isArray(loansRes.data) ? loansRes.data : []);
         setPayrollEmployeeMetaById(payrollMeta);
+        writeLocalFirstCache(
+          payrollCacheKey,
+          {
+            settings: settingsRes.data || null,
+            payments: Array.isArray(paymentsRes.data) ? paymentsRes.data : [],
+            loans: Array.isArray(loansRes.data) ? loansRes.data : [],
+            employeeMetaById: payrollMeta,
+          },
+          { source: "remote", scope: "payroll", employeeMode: true }
+        );
         return;
       }
       const settingsPromise = supabase
@@ -7543,6 +9795,16 @@ export default function EmployeeClockApp() {
       setPayrollPayments(Array.isArray(paymentsRes.data) ? paymentsRes.data : []);
       setPayrollLoanTransactions(Array.isArray(loansRes.data) ? loansRes.data : []);
       setPayrollEmployeeMetaById(payrollMeta);
+      writeLocalFirstCache(
+        payrollCacheKey,
+        {
+          settings: settingsRes.data || null,
+          payments: Array.isArray(paymentsRes.data) ? paymentsRes.data : [],
+          loans: Array.isArray(loansRes.data) ? loansRes.data : [],
+          employeeMetaById: payrollMeta,
+        },
+        { source: "remote", scope: "payroll", employeeMode: false }
+      );
     } catch (err) {
       const msg = getErrorMessage(err);
       console.warn("[PAYROLL] load failed", err);
@@ -7688,6 +9950,7 @@ export default function EmployeeClockApp() {
   // V2.1: company projects + tasks (Supabase-backed)
   const [companyProjects, setCompanyProjects] = useState([]); // [{ id, name }]
   const [costCentresByProjectId, setCostCentresByProjectId] = useState({}); // { [projectId]: string[] }
+  const [costCentreRowsByProjectId, setCostCentreRowsByProjectId] = useState({}); // { [projectId]: cost centre rows[] }
   const [projectsLoading, setProjectsLoading] = useState(false);
   const [projectsError, setProjectsError] = useState("");
   const [useProjectFallback, setUseProjectFallback] = useState(false);
@@ -7716,6 +9979,11 @@ export default function EmployeeClockApp() {
   const [projectsTaskFormOpen, setProjectsTaskFormOpen] = useState(false);
   const [projectsTaskProjectId, setProjectsTaskProjectId] = useState("");
   const [projectsTaskName, setProjectsTaskName] = useState("");
+  const [projectsTaskManualContract, setProjectsTaskManualContract] = useState(false);
+  const [projectsTaskFixedAmount, setProjectsTaskFixedAmount] = useState("");
+  const [projectsTaskStartDate, setProjectsTaskStartDate] = useState("");
+  const [projectsTaskEndDate, setProjectsTaskEndDate] = useState("");
+  const [projectsTaskNotes, setProjectsTaskNotes] = useState("");
   const [projectsTaskSaving, setProjectsTaskSaving] = useState(false);
   const [projectsTaskError, setProjectsTaskError] = useState("");
   const [projectsTaskSuccess, setProjectsTaskSuccess] = useState("");
@@ -7752,11 +10020,52 @@ export default function EmployeeClockApp() {
     return rows.filter((p) => norm(p.status) !== "archived");
   }, [projectsScreenRows, projectsListFilter]);
 
+  const specialProjectSettingsRows = useMemo(() => {
+    return (companyProjects || [])
+      .map((project) => ({
+        ...project,
+        specialProjectActive: Boolean(project?.specialProjectActive ?? project?.special_project_active),
+        specialHourlyRate: Number(project?.specialHourlyRate ?? project?.special_hourly_rate ?? 0) || 0,
+        specialProjectNotes: String(project?.specialProjectNotes ?? project?.special_project_notes ?? "").trim(),
+      }))
+      .filter((project) => project.specialProjectActive || project.specialHourlyRate > 0)
+      .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+  }, [companyProjects]);
+
   const fallbackProjects = useMemo(() => adminProjects.map((p) => ({ id: p.id, name: p.name })), []);
   const effectiveProjects = useMemo(() => {
     if (useProjectFallback) return fallbackProjects;
     return companyProjects;
   }, [useProjectFallback, fallbackProjects, companyProjects]);
+
+  const projectMetaById = useMemo(() => {
+    const map = {};
+    for (const project of normalizeArray(effectiveProjects)) {
+      if (!project?.id) continue;
+      map[String(project.id)] = project;
+    }
+    return map;
+  }, [effectiveProjects]);
+
+  const costCentreMetaByProjectId = useMemo(() => {
+    if (useProjectFallback) {
+      return adminProjects.reduce((acc, project) => {
+        acc[String(project.id)] = (project.costCenters || []).map((name) => ({
+          id: `${project.id}::${name}`,
+          project_id: project.id,
+          name,
+          status: "active",
+          manual_contract_active: false,
+          manual_contract_fixed_amount: 0,
+          manual_contract_notes: "",
+          manual_contract_start_date: "",
+          manual_contract_end_date: "",
+        }));
+        return acc;
+      }, {});
+    }
+    return costCentreRowsByProjectId;
+  }, [adminProjects, costCentreRowsByProjectId, useProjectFallback]);
 
   const effectiveCostCentresByProjectId = useMemo(() => {
     if (useProjectFallback) {
@@ -8134,13 +10443,115 @@ export default function EmployeeClockApp() {
     return Math.max(0, total - breakTotal);
   };
 
+  const getRecordProjectMeta = useCallback(
+    (record) => {
+      const projectId = String(record?.projectId ?? record?.project_id ?? "").trim();
+      if (!projectId) return null;
+      return projectMetaById[projectId] || projectMetaById[String(Number(projectId))] || null;
+    },
+    [projectMetaById]
+  );
+
+  const getRecordCostCentreMeta = useCallback(
+    (record) => {
+      const projectId = String(record?.projectId ?? record?.project_id ?? "").trim();
+      const taskName = String(record?.costCenter || record?.cost_centre || record?.task || "").trim().toLowerCase();
+      if (!projectId || !taskName) return null;
+      const rows = costCentreMetaByProjectId[String(projectId)] || costCentreMetaByProjectId[Number(projectId)] || [];
+      return rows.find((row) => String(row?.name || "").trim().toLowerCase() === taskName) || null;
+    },
+    [costCentreMetaByProjectId]
+  );
+
+  const resolvePayrollChargeForRecord = useCallback(
+    ({ record, periodKey = "", seenManualContractKeys = null, includeDedup = true }) => {
+      if (!record) {
+        return {
+          amount: 0,
+          rateUsed: 0,
+          sourceType: "empty",
+          sourceLabel: "",
+          uniqueKey: "",
+          manualContractDuplicate: false,
+        };
+      }
+      if (isVacationTimesheetRecord(record)) {
+        return {
+          amount: 0,
+          rateUsed: 0,
+          sourceType: "vacation",
+          sourceLabel: "Vacation",
+          uniqueKey: "",
+          manualContractDuplicate: false,
+        };
+      }
+      const workedMinutes = isCompletedReportTimesheet(record) ? getReportWorkedMinutes(record) : getWorkedMinutes(record);
+      const projectMeta = getRecordProjectMeta(record);
+      const costCentreMeta = getRecordCostCentreMeta(record);
+      const manualContractFixedAmount = Number(costCentreMeta?.manual_contract_fixed_amount ?? 0) || 0;
+      const manualContractActive = Boolean(costCentreMeta?.manual_contract_active) && manualContractFixedAmount > 0;
+      const manualContractKey = manualContractActive
+        ? [
+            String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim(),
+            String(periodKey || "").trim(),
+            String(costCentreMeta?.name || record?.costCenter || record?.task || "").trim().toLowerCase(),
+          ].join("::")
+        : "";
+      if (manualContractActive && includeDedup && seenManualContractKeys?.has?.(manualContractKey)) {
+        return {
+          amount: 0,
+          rateUsed: manualContractFixedAmount,
+          sourceType: "manual_contract_duplicate",
+          sourceLabel: `${String(costCentreMeta?.name || record?.costCenter || "Manual contract").trim()} (already counted)`,
+          uniqueKey: manualContractKey,
+          manualContractDuplicate: true,
+        };
+      }
+      if (manualContractActive && includeDedup && seenManualContractKeys?.add) {
+        seenManualContractKeys.add(manualContractKey);
+      }
+      const specialProjectRate = Number(projectMeta?.special_hourly_rate ?? 0) || 0;
+      const specialProjectActive = Boolean(projectMeta?.special_project_active) && specialProjectRate > 0;
+      if (manualContractActive) {
+        return {
+          amount: manualContractFixedAmount,
+          rateUsed: manualContractFixedAmount,
+          sourceType: "manual_contract",
+          sourceLabel: `${String(costCentreMeta?.name || record?.costCenter || "Manual contract").trim()} fixed`,
+          uniqueKey: manualContractKey,
+          manualContractDuplicate: false,
+          workedMinutes,
+        };
+      }
+      if (specialProjectActive) {
+        return {
+          amount: (workedMinutes / 60) * specialProjectRate,
+          rateUsed: specialProjectRate,
+          sourceType: "special_project",
+          sourceLabel: `${String(projectMeta?.name || record?.project || "Special project").trim()} special rate`,
+          uniqueKey: `${String(record?.supabaseTimesheetId ?? record?.id ?? "")}::special`,
+          manualContractDuplicate: false,
+          workedMinutes,
+        };
+      }
+      const rate = hourlyRateFromProfileValue(record.hourlyRate ?? 0);
+      return {
+        amount: (workedMinutes / 60) * rate,
+        rateUsed: rate,
+        sourceType: "hourly",
+        sourceLabel: rate > 0 ? `${formatMoney(rate)}/hr` : "Hourly",
+        uniqueKey: `${String(record?.supabaseTimesheetId ?? record?.id ?? "")}::hourly`,
+        manualContractDuplicate: false,
+        workedMinutes,
+      };
+    },
+    [getRecordCostCentreMeta, getRecordProjectMeta]
+  );
+
   const getLabourCost = (record) => {
     if (record == null) return 0;
-    if (isVacationTimesheetRecord(record)) return 0;
-    const rate = hourlyRateFromProfileValue(record.hourlyRate ?? 0);
-    const minutes = getWorkedMinutes(record);
-    const calculated = (minutes / 60) * rate;
-    if (Number.isFinite(calculated) && (rate > 0 || minutes > 0)) return calculated;
+    const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
+    if (Number.isFinite(resolved.amount)) return resolved.amount;
     if (record.labour_cost != null && record.labour_cost !== "") {
       const stored = Number(record.labour_cost);
       if (Number.isFinite(stored)) return stored;
@@ -8169,14 +10580,13 @@ export default function EmployeeClockApp() {
 
   const getReportLabourCost = (record) => {
     if (!isCompletedReportTimesheet(record)) return 0;
-    if (isVacationTimesheetRecord(record)) return 0;
+    const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
+    if (Number.isFinite(resolved.amount)) return resolved.amount;
     if (record.labour_cost != null && record.labour_cost !== "") {
       const stored = Number(record.labour_cost);
       if (Number.isFinite(stored)) return stored;
     }
-    const minutes = getReportWorkedMinutes(record);
-    const raw = (minutes / 60) * (Number(record.hourlyRate ?? 0) || 0);
-    return Number.isFinite(raw) ? raw : 0;
+    return 0;
   };
 
   const visibleRecords = dedupeTimesheetRowsByStableId(
@@ -8198,9 +10608,57 @@ export default function EmployeeClockApp() {
     }
     return activeByUser;
   }, [visibleRecords]);
-  const visibleCurrentShift = currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
-    ? currentShift
-    : null;
+  const latestOwnActiveRecord = useMemo(
+    () =>
+      pickLatestActiveTimesheetForLiveDashboard(
+        normalizeArray(visibleRecords).filter((record) => timesheetRecordBelongsToUser(record, authUser))
+      ),
+    [visibleRecords, authUser]
+  );
+  const visibleCurrentShift = useMemo(() => {
+    const stateShift =
+      currentShift && (isAdmin || (currentShift.userId || currentShift.user_id || currentShift.employeeId) === authUser?.id)
+        ? currentShift
+        : null;
+    if (!latestOwnActiveRecord) return stateShift;
+    return makeCurrentShiftFromActiveTimesheetRecord(latestOwnActiveRecord, {
+      fallbackName: (profileFullName || "").trim(),
+      fallbackEmail: authUser?.email || "",
+      existingShift: stateShift,
+      photosTaken: Number(stateShift?.photosTaken || 0),
+    });
+  }, [authUser?.email, authUser?.id, currentShift, isAdmin, latestOwnActiveRecord, profileFullName]);
+
+  useEffect(() => {
+    if (!latestOwnActiveRecord) return;
+    setCurrentShift((previousShift) => {
+      const nextShift = makeCurrentShiftFromActiveTimesheetRecord(latestOwnActiveRecord, {
+        fallbackName: (profileFullName || "").trim(),
+        fallbackEmail: authUser?.email || "",
+        existingShift: previousShift,
+        photosTaken: Number(previousShift?.photosTaken || 0),
+      });
+      const prevKey = JSON.stringify({
+        id: previousShift?.supabaseTimesheetId ?? previousShift?.id ?? null,
+        clockIn: previousShift?.clockIn || "",
+        breakStart: previousShift?.breakStart || "",
+        breakEnd: previousShift?.breakEnd || "",
+        project: previousShift?.project || "",
+        costCenter: previousShift?.costCenter || "",
+        hourlyRate: Number(previousShift?.hourlyRate || 0),
+      });
+      const nextKey = JSON.stringify({
+        id: nextShift?.supabaseTimesheetId ?? nextShift?.id ?? null,
+        clockIn: nextShift?.clockIn || "",
+        breakStart: nextShift?.breakStart || "",
+        breakEnd: nextShift?.breakEnd || "",
+        project: nextShift?.project || "",
+        costCenter: nextShift?.costCenter || "",
+        hourlyRate: Number(nextShift?.hourlyRate || 0),
+      });
+      return prevKey === nextKey ? previousShift : nextShift;
+    });
+  }, [authUser?.email, latestOwnActiveRecord, profileFullName]);
 
   const dashboardTodayWorkedCards = useMemo(() => {
     if (!isAdmin) return [];
@@ -8483,7 +10941,12 @@ export default function EmployeeClockApp() {
         id: `request-${request.id}`,
         kind: "Correction",
         title: `${request.employeeName || "Employee"} requested time approval`,
-        detail: request.requestType === "edit_time" ? "Timesheet edit" : "Manual time",
+        detail:
+          request.requestType === "manual_time"
+            ? "Manual time"
+            : request.requestType === "edit_time" && !request.originalSnapshot?.clock_out && request.timesheetId
+              ? "Clock-in edit"
+              : "Timesheet edit",
         when: request.createdAt,
         tone: "bg-blue-50 text-blue-800 border-blue-100",
       });
@@ -8679,7 +11142,7 @@ export default function EmployeeClockApp() {
 
       const saveViaApi = async (reason) => {
         try {
-          const { data: sessionData } = await supabase.auth.getSession();
+          const { data: sessionData } = await safeGetSession();
           const token = sessionData?.session?.access_token;
           if (!token) return null;
           console.log("[PROJECT_MEDIA] saving metadata via api", reason || "");
@@ -8904,6 +11367,19 @@ export default function EmployeeClockApp() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [visibleRecords]);
 
+  const timesheetTaskOptions = useMemo(() => {
+    const tasks = new Map();
+    for (const record of normalizeArray(visibleRecords)) {
+      const taskName = String(record?.costCenter || record?.cost_centre || record?.task || "").trim();
+      if (!taskName) continue;
+      const key = taskName.toLowerCase();
+      if (!tasks.has(key)) tasks.set(key, taskName);
+    }
+    return [...tasks.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [visibleRecords]);
+
   const vacationEmployeeOptions = useMemo(() => {
     const people = new Map();
     for (const row of normalizeArray(displayedTeamRows)) {
@@ -8931,6 +11407,8 @@ export default function EmployeeClockApp() {
       .filter((record) => {
         const employeeId = String(record?.employeeId ?? record?.userId ?? record?.employee_id ?? "").trim();
         if (timesheetEmployeeFilter !== "all" && employeeId !== String(timesheetEmployeeFilter)) return false;
+        if (timesheetProjectFilter !== "all") return false;
+        if (timesheetTaskFilter !== "all") return false;
         return vacationPeriodOverlapsRange(record, from, to);
       })
       .map((record) => {
@@ -8959,13 +11437,29 @@ export default function EmployeeClockApp() {
     profileFullName,
     teamProfileFullNameByUserId,
     timesheetEmployeeFilter,
+    timesheetProjectFilter,
+    timesheetTaskFilter,
     timesheetRangeBounds.from,
     timesheetRangeBounds.to,
     vacationPeriods,
   ]);
 
   const visibleTimesheetRecords = useMemo(() => {
-    const normalRows = normalizeArray(visibleRecords).filter((record) => !isVacationTimesheetRecord(record));
+    const from = timesheetRangeBounds.from;
+    const to = timesheetRangeBounds.to;
+    const normalRows = normalizeArray(visibleRecords).filter((record) => {
+      if (isVacationTimesheetRecord(record)) return false;
+      return timesheetRecordMatchesFilters(record, {
+        employeeFilter: timesheetEmployeeFilter,
+        projectFilter: timesheetProjectFilter,
+        taskFilter: timesheetTaskFilter,
+        completedOnly: timesheetCompletedOnly,
+        fromKey: from,
+        toKey: to,
+        timeZone: companyTimeZone,
+        isCompletedRecord: isCompletedReportTimesheet,
+      });
+    });
     const merged = [...normalRows, ...visibleVacationTimesheetRecords];
     merged.sort((a, b) => {
       const aKey = parseStoredInstant(a?.clockIn || a?.vacationStartDate || "").getTime();
@@ -8975,7 +11469,17 @@ export default function EmployeeClockApp() {
       return safeB - safeA;
     });
     return merged;
-  }, [visibleRecords, visibleVacationTimesheetRecords]);
+  }, [
+    companyTimeZone,
+    timesheetCompletedOnly,
+    timesheetEmployeeFilter,
+    timesheetProjectFilter,
+    timesheetRangeBounds.from,
+    timesheetRangeBounds.to,
+    timesheetTaskFilter,
+    visibleRecords,
+    visibleVacationTimesheetRecords,
+  ]);
 
   const visibleTimesheetSummary = useMemo(() => {
     return visibleTimesheetRecords.reduce(
@@ -8997,6 +11501,43 @@ export default function EmployeeClockApp() {
   const visibleTimesheetSanityIssues = useMemo(() => {
     return getVisibleTimesheetSanityIssues(timesheetSanityChecks, timesheetSanityExpanded);
   }, [timesheetSanityChecks, timesheetSanityExpanded]);
+
+  const focusTimesheetRecord = useCallback(
+    (recordId, issueId = "") => {
+      const targetId = String(recordId || "").trim();
+      if (!targetId || typeof window === "undefined") return;
+      setTimesheetSanityExpanded(true);
+      setTimesheetHighlightedRecordId(targetId);
+      setTimesheetSanityHighlightedIssueId(String(issueId || "").trim());
+      if (timesheetHighlightTimerRef.current) window.clearTimeout(timesheetHighlightTimerRef.current);
+      if (timesheetSanityHighlightTimerRef.current) window.clearTimeout(timesheetSanityHighlightTimerRef.current);
+      const scrollTarget = () => {
+        const el = window.document?.getElementById(`timesheet-row-${targetId}`);
+        if (el?.scrollIntoView) {
+          el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+        }
+      };
+      window.requestAnimationFrame?.(() => {
+        window.requestAnimationFrame?.(scrollTarget);
+      });
+      timesheetHighlightTimerRef.current = window.setTimeout(() => {
+        setTimesheetHighlightedRecordId((current) => (current === targetId ? "" : current));
+        timesheetHighlightTimerRef.current = null;
+      }, 3000);
+      timesheetSanityHighlightTimerRef.current = window.setTimeout(() => {
+        setTimesheetSanityHighlightedIssueId((current) => (current === String(issueId || "").trim() ? "" : current));
+        timesheetSanityHighlightTimerRef.current = null;
+      }, 3000);
+    },
+    []
+  );
+
+  useEffect(() => {
+    return () => {
+      if (timesheetHighlightTimerRef.current) window.clearTimeout(timesheetHighlightTimerRef.current);
+      if (timesheetSanityHighlightTimerRef.current) window.clearTimeout(timesheetSanityHighlightTimerRef.current);
+    };
+  }, []);
 
   const payrollEffectiveSettings = useMemo(() => {
     if (payrollSettings) {
@@ -9146,15 +11687,21 @@ export default function EmployeeClockApp() {
           periodStart: period.startKey,
           periodEnd: period.endKey,
           payDate: period.payDateKey,
-          periodLabel: period.label,
+          periodLabel: formatPayrollPeriodLabelCompact(period.startKey, period.endKey, companyTimeZone),
           frequency: period.frequency,
           workedMinutes: 0,
           workedAmount: 0,
           paidAmount: 0,
+          loanGivenAmount: 0,
+          loanReturnedAmount: 0,
+          loanNetAmount: 0,
+          previousBalance: 0,
           balance: 0,
           payments: [],
+          loans: [],
           records: [],
           vacations: [],
+          manualContractSeenKeys: new Set(),
         });
       }
       return groups.get(key);
@@ -9163,13 +11710,14 @@ export default function EmployeeClockApp() {
     for (const record of payrollBaseRecords) {
       const employeeId = String(record?.userId ?? record?.user_id ?? record?.employeeId ?? "").trim();
       if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
       const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
       const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
       const clockKey = calendarDateKeyInTimeZone(record?.clockOut || record?.clockIn, companyTimeZone);
       if (!clockKey) continue;
       if (payrollStartDate && clockKey < payrollStartDate) continue;
       const period = getPayrollPeriodWindowForDateKey(clockKey, payrollEffectiveSettings, companyTimeZone);
-      if (!period || !payrollPeriodOverlapsRange(period, payrollDateBounds.from, payrollDateBounds.to)) continue;
+      if (!period) continue;
       const employeeName =
         payrollEmployeeLabelById[employeeId] ||
         resolveTimesheetEmployeeTitle(record, {
@@ -9180,10 +11728,23 @@ export default function EmployeeClockApp() {
         shortUserLabel(employeeId);
       const group = ensureGroup(employeeId, employeeName, period);
       const workedMinutes = getReportWorkedMinutes(record);
-      const workedAmount = getReportLabourCost(record);
+      const chargeMeta = resolvePayrollChargeForRecord({
+        record,
+        periodKey: `${period.startKey}__${period.endKey}`,
+        seenManualContractKeys: group.manualContractSeenKeys,
+        includeDedup: true,
+      });
+      const workedAmount = Number(chargeMeta.amount) || 0;
       group.workedMinutes += workedMinutes;
       group.workedAmount += workedAmount;
-      group.records.push(record);
+      group.records.push({
+        ...record,
+        payrollChargeAmount: workedAmount,
+        payrollRateUsed: Number(chargeMeta.rateUsed) || 0,
+        payrollChargeSource: chargeMeta.sourceType,
+        payrollChargeLabel: chargeMeta.sourceLabel,
+        payrollChargeKey: chargeMeta.uniqueKey,
+      });
     }
 
     for (const payment of payrollPaymentsActive) {
@@ -9212,9 +11773,36 @@ export default function EmployeeClockApp() {
       group.payments.push(payment);
     }
 
+    for (const loan of payrollLoanTransactionsActive) {
+      const employeeId = String(loan?.employee_id ?? loan?.employeeId ?? "").trim();
+      if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
+      const transactionDate = String(loan?.transaction_date || "").trim();
+      if (!transactionDate) continue;
+      if (payrollStartDate && transactionDate < payrollStartDate) continue;
+      const period = getPayrollPeriodWindowForDateKey(transactionDate, payrollEffectiveSettings, companyTimeZone);
+      if (!period) continue;
+      const employeeName = payrollEmployeeLabelById[employeeId] || shortUserLabel(employeeId);
+      const group = ensureGroup(employeeId, employeeName, period);
+      const loanAmount = parsePayrollAmount(loan?.amount ?? 0);
+      const transactionType = String(loan?.transaction_type || "").trim().toLowerCase() === "loan_returned" ? "loan_returned" : "loan_given";
+      if (transactionType === "loan_returned") {
+        group.loanReturnedAmount += loanAmount;
+      } else {
+        group.loanGivenAmount += loanAmount;
+      }
+      group.loans.push({
+        ...loan,
+        signedAmount: transactionType === "loan_returned" ? loanAmount : -loanAmount,
+      });
+    }
+
     for (const vacation of payrollVacationRecords) {
       const employeeId = String(vacation?.employeeId ?? vacation?.userId ?? vacation?.employee_id ?? "").trim();
       if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
       const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
       const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
       const employeeName =
@@ -9253,6 +11841,9 @@ export default function EmployeeClockApp() {
         payments: [...row.payments].sort((a, b) =>
           String(b?.paid_date || b?.created_at || "").localeCompare(String(a?.paid_date || a?.created_at || ""))
         ),
+        loans: [...row.loans].sort((a, b) =>
+          String(b?.transaction_date || b?.created_at || "").localeCompare(String(a?.transaction_date || a?.created_at || ""))
+        ),
       };
     });
     const rowsByEmployee = new Map();
@@ -9261,15 +11852,17 @@ export default function EmployeeClockApp() {
       rowsByEmployee.get(row.employeeId).push(row);
     }
     for (const [employeeId, employeeRows] of rowsByEmployee.entries()) {
-      let runningBalance = parsePayrollAmount(payrollEmployeeMetaById?.[employeeId]?.openingBalance || 0);
-      const ascending = [...employeeRows].sort((a, b) => {
-        const startCmp = String(a.periodStart || "").localeCompare(String(b.periodStart || ""));
-        if (startCmp !== 0) return startCmp;
-        return String(a.periodEnd || "").localeCompare(String(b.periodEnd || ""));
-      });
-      for (const row of ascending) {
-        runningBalance += (Number(row.workedAmount) || 0) - (Number(row.paidAmount) || 0);
-        row.balance = runningBalance;
+      const openingBalance = parsePayrollAmount(payrollEmployeeMetaById?.[employeeId]?.openingBalance || 0);
+      const computedRows = applyRunningPayrollBalances(employeeRows, openingBalance);
+      const computedById = new Map(computedRows.map((row) => [String(row.id || ""), row]));
+      for (const row of employeeRows) {
+        const computed = computedById.get(String(row.id || ""));
+        if (!computed) continue;
+        row.previousBalance = computed.previousBalance;
+        row.loanGivenAmount = computed.loanGivenAmount;
+        row.loanReturnedAmount = computed.loanReturnedAmount;
+        row.loanNetAmount = computed.loanNetAmount;
+        row.balance = computed.balance;
       }
     }
     const visibleRows = rows.filter((row) => {
@@ -9296,6 +11889,7 @@ export default function EmployeeClockApp() {
     payrollEmployeeFilter,
     payrollEmployeeLabelById,
     payrollEmployeeMetaById,
+    payrollLoanTransactionsActive,
     payrollPaymentsActive,
     payrollPeriodFilter,
     profileFullName,
@@ -9316,6 +11910,10 @@ export default function EmployeeClockApp() {
         workedMinutes: 0,
         workedAmount: 0,
         paidAmount: 0,
+        loanGivenAmount: 0,
+        loanReturnedAmount: 0,
+        loanNetAmount: 0,
+        previousBalance: openingBalance,
         openingBalance,
         payrollStartDate: String(meta?.payrollStartDate || meta?.joiningDate || "").trim() || "",
       });
@@ -9331,6 +11929,10 @@ export default function EmployeeClockApp() {
           workedMinutes: 0,
           workedAmount: 0,
           paidAmount: 0,
+          loanGivenAmount: 0,
+          loanReturnedAmount: 0,
+          loanNetAmount: 0,
+          previousBalance: parsePayrollAmount(payrollEmployeeMetaById?.[key]?.openingBalance || 0),
           openingBalance: parsePayrollAmount(payrollEmployeeMetaById?.[key]?.openingBalance || 0),
           payrollStartDate:
             String(payrollEmployeeMetaById?.[key]?.payrollStartDate || payrollEmployeeMetaById?.[key]?.joiningDate || "").trim() || "",
@@ -9341,15 +11943,19 @@ export default function EmployeeClockApp() {
       bucket.workedMinutes += Number(row.workedMinutes) || 0;
       bucket.workedAmount += Number(row.workedAmount) || 0;
       bucket.paidAmount += Number(row.paidAmount) || 0;
+      bucket.loanGivenAmount += Number(row.loanGivenAmount) || 0;
+      bucket.loanReturnedAmount += Number(row.loanReturnedAmount) || 0;
+      bucket.loanNetAmount += Number(row.loanNetAmount) || 0;
     }
-    const out = [...grouped.values()].map((row) => ({
-      ...row,
-      balance:
-        row.periods.length > 0
-          ? Number(row.periods[0]?.balance ?? row.openingBalance ?? 0)
-          : Number(row.openingBalance ?? 0),
-      periods: [...row.periods].sort((a, b) => String(b.periodEnd || "").localeCompare(String(a.periodEnd || ""))),
-    }));
+    const out = [...grouped.values()].map((row) => {
+      const periodsDescending = [...row.periods].sort((a, b) => String(b.periodEnd || "").localeCompare(String(a.periodEnd || "")));
+      const periodSummary = summarizePayrollPeriods(row.periods, row.openingBalance);
+      return {
+        ...row,
+        ...periodSummary,
+        periods: periodsDescending,
+      };
+    });
     out.sort((a, b) => {
       const latestA = String(a.periods?.[0]?.periodEnd || a.periodEnd || "");
       const latestB = String(b.periods?.[0]?.periodEnd || b.periodEnd || "");
@@ -9359,65 +11965,6 @@ export default function EmployeeClockApp() {
     });
     return out;
   }, [payrollEmployeeMetaById, payrollPeriodRows]);
-
-  const payrollLoanRowsByEmployee = useMemo(() => {
-    const grouped = new Map();
-    for (const transaction of payrollLoanTransactionsActive) {
-      const employeeId = String(transaction?.employee_id ?? transaction?.employeeId ?? "").trim();
-      if (!employeeId) continue;
-      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
-      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
-      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
-      const transactionDate = String(transaction?.transaction_date || "").trim();
-      if (!transactionDate) continue;
-      if (payrollStartDate && transactionDate < payrollStartDate) continue;
-      if (payrollDateBounds.from && transactionDate < payrollDateBounds.from) continue;
-      if (payrollDateBounds.to && transactionDate > payrollDateBounds.to) continue;
-      if (payrollPeriodFilter !== "all") {
-        const period = getPayrollPeriodWindowForDateKey(transactionDate, payrollEffectiveSettings, companyTimeZone);
-        if (!period || payrollPeriodOptionKey(period.startKey, period.endKey) !== payrollPeriodFilter) continue;
-      }
-      if (!grouped.has(employeeId)) grouped.set(employeeId, []);
-      grouped.get(employeeId).push(transaction);
-    }
-    const out = {};
-    for (const [employeeId, rows] of grouped.entries()) {
-      out[employeeId] = [...rows].sort((a, b) =>
-        String(b?.transaction_date || b?.created_at || "").localeCompare(String(a?.transaction_date || a?.created_at || ""))
-      );
-    }
-    return out;
-  }, [
-    companyTimeZone,
-    payrollDateBounds.from,
-    payrollDateBounds.to,
-    payrollEmployeeFilter,
-    payrollEffectiveSettings,
-    payrollEmployeeMetaById,
-    payrollLoanTransactionsActive,
-    payrollPeriodFilter,
-  ]);
-
-  const payrollSummary = useMemo(() => {
-    const summary = payrollPeriodRows.reduce(
-      (summary, row) => {
-        summary.workedMinutes += Number(row.workedMinutes) || 0;
-        summary.workedAmount += Number(row.workedAmount) || 0;
-        summary.paidAmount += Number(row.paidAmount) || 0;
-        return summary;
-      },
-      { workedMinutes: 0, workedAmount: 0, paidAmount: 0 }
-    );
-    const openingBalance =
-      payrollEmployeeFilter !== "all"
-        ? parsePayrollAmount(payrollEmployeeMetaById?.[String(payrollEmployeeFilter)]?.openingBalance || 0)
-        : 0;
-    return {
-      ...summary,
-      openingBalance,
-      balance: openingBalance + summary.workedAmount - summary.paidAmount,
-    };
-  }, [payrollEmployeeFilter, payrollEmployeeMetaById, payrollPeriodRows]);
 
   const payrollCurrentPeriod = useMemo(
     () => getPayrollPeriodWindowForDateKey(calendarDateKeyInTimeZone(now, companyTimeZone), payrollEffectiveSettings, companyTimeZone),
@@ -9762,6 +12309,28 @@ export default function EmployeeClockApp() {
     [manualTimeProjectId, effectiveCostCentresByProjectId]
   );
 
+  const manualTimeEmployeeOptions = useMemo(() => {
+    const people = new Map();
+    for (const [employeeId, meta] of Object.entries(payrollEmployeeMetaById || {})) {
+      const id = String(employeeId || "").trim();
+      if (!id) continue;
+      const label =
+        String(meta?.fullName || meta?.email || shortUserLabel(id)).trim() ||
+        shortUserLabel(id);
+      people.set(id, label);
+    }
+    if (authUser?.id && !people.has(String(authUser.id))) {
+      people.set(
+        String(authUser.id),
+        String(profileFullName || authUser.email || shortUserLabel(authUser.id)).trim() ||
+          shortUserLabel(authUser.id)
+      );
+    }
+    return [...people.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [authUser?.email, authUser?.id, payrollEmployeeMetaById, profileFullName]);
+
   const reportsDistinctCostCentres = useMemo(() => {
     const s = new Set();
     for (const r of reportsScreenRows) {
@@ -9809,9 +12378,9 @@ export default function EmployeeClockApp() {
       }
       if (dim === "cost_center") {
         const cc = reportsCostCentreKeyFromRow(rec);
-        return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
+        return { key: `cc:${cc}`, label: cc === "â€”" ? "(none)" : cc };
       }
-      return { key: "?", label: "—" };
+      return { key: "?", label: "â€”" };
     };
 
     const l1Map = {};
@@ -10042,32 +12611,33 @@ export default function EmployeeClockApp() {
       if (!countRes.error) setInAppNotifUnread(countRes.count ?? 0);
       setInAppNotifError("");
 
-      if (isAdmin) {
-        const unreadIds = new Set(
-          rows.filter((n) => n.read_at == null && n.is_read !== true).map((n) => String(n.id))
-        );
-        if (!notifPollBootstrappedRef.current) {
-          notifPollBootstrappedRef.current = true;
-          notifLastUnreadIdsRef.current = unreadIds;
-        } else {
-          const previous = notifLastUnreadIdsRef.current;
-          const newUnreadIds = [...unreadIds].filter((id) => !previous.has(id));
-          for (const id of newUnreadIds) {
-            const row = rows.find((r) => String(r.id) === id);
-            if (row) tryShowClockBrowserNotification(row, systemNotifShownIdsRef);
-          }
-          const firstToastRow = newUnreadIds
-            .map((id) => rows.find((r) => String(r.id) === id))
-            .find(Boolean);
-          if (firstToastRow) {
-            setLiveToast({
-              id: firstToastRow.id,
-              title: firstToastRow.title,
-              message: firstToastRow.message,
-            });
-          }
-          notifLastUnreadIdsRef.current = unreadIds;
+      const unreadIds = new Set(
+        rows.filter((n) => n.read_at == null && n.is_read !== true).map((n) => String(n.id))
+      );
+      if (!notifPollBootstrappedRef.current) {
+        notifPollBootstrappedRef.current = true;
+        notifLastUnreadIdsRef.current = unreadIds;
+      } else {
+        const previous = notifLastUnreadIdsRef.current;
+        const newUnreadRows = [...unreadIds]
+          .filter((id) => !previous.has(id))
+          .map((id) => rows.find((r) => String(r.id) === id))
+          .filter(Boolean);
+        const popupRows = isAdmin
+          ? newUnreadRows
+          : newUnreadRows.filter((row) => String(row?.type || "").trim().toLowerCase() === "chat_message");
+        for (const row of popupRows) {
+          tryShowClockBrowserNotification(row, systemNotifShownIdsRef);
         }
+        const firstToastRow = popupRows.find(Boolean);
+        if (firstToastRow) {
+          setLiveToast({
+            id: firstToastRow.id,
+            title: firstToastRow.title,
+            message: firstToastRow.message,
+          });
+        }
+        notifLastUnreadIdsRef.current = unreadIds;
       }
     } catch (e) {
       console.warn("[NOTIFY] poll failed", e);
@@ -10188,13 +12758,26 @@ export default function EmployeeClockApp() {
   ]);
 
   useEffect(() => {
+    if (!authUser?.id || !userCompany?.id || !companyChecked) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("tab") !== "chat") return;
+    setActiveTab("chat");
+  }, [authUser?.id, userCompany?.id, companyChecked]);
+
+  useEffect(() => {
     if (typeof navigator === "undefined" || !navigator.serviceWorker) return;
     const onMessage = (event) => {
       const data = event?.data || {};
-      if (data.type !== "OPEN_SCHEDULE") return;
-      setActiveTab("schedule");
-      if (!isAdmin && isEmployeeRole) {
-        void refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
+      if (data.type === "OPEN_SCHEDULE") {
+        setActiveTab("schedule");
+        if (!isAdmin && isEmployeeRole) {
+          void refreshEmployeeAssignedSchedule({ detectNew: false, showLoading: true });
+        }
+      } else if (data.type === "OPEN_CHAT") {
+        setActiveTab("chat");
+      } else {
+        return;
       }
       const notificationId = String(data.notificationId || "").trim();
       if (notificationId && authUser?.id) {
@@ -10205,7 +12788,7 @@ export default function EmployeeClockApp() {
           .eq("id", notificationId)
           .eq("recipient_user_id", authUser.id)
           .then(({ error }) => {
-            if (error) console.warn("[NOTIFY] mark schedule click read failed", error);
+            if (error) console.warn("[NOTIFY] mark notification click read failed", error);
             else {
               setInAppNotifications((prev) =>
                 (Array.isArray(prev) ? prev : []).map((x) =>
@@ -10497,13 +13080,24 @@ export default function EmployeeClockApp() {
     let cancelled = false;
 
     const loadProjects = async () => {
-      setProjectsLoading(true);
+      const projectsCacheKey = makeAppCacheKey("projects", companyId, authUser.id, "settings");
+      const cachedProjects = readLocalFirstCacheEnvelope(projectsCacheKey, null);
+      if (cachedProjects?.value?.companyProjects) {
+        setCompanyProjects(Array.isArray(cachedProjects.value.companyProjects) ? cachedProjects.value.companyProjects : []);
+        setCostCentresByProjectId(cachedProjects.value.costCentresByProjectId || {});
+        setCostCentreRowsByProjectId(cachedProjects.value.costCentreRowsByProjectId || {});
+      }
+      if (!cachedProjects?.savedAt || isLocalFirstCacheStale(cachedProjects.savedAt, 10 * 60 * 1000)) {
+        setProjectsLoading(true);
+      } else {
+        setProjectsLoading(false);
+      }
       setProjectsError("");
       setUseProjectFallback(false);
       try {
         const { data: projects, error: projectsErr } = await supabase
           .from("projects")
-          .select("id, name")
+          .select("id, name, status, special_project_active, special_hourly_rate, special_project_notes")
           .eq("company_id", companyId)
           .eq("status", "active")
           .order("name", { ascending: true });
@@ -10516,13 +13110,14 @@ export default function EmployeeClockApp() {
 
         if (projectList.length === 0) {
           setCostCentresByProjectId({});
+          setCostCentreRowsByProjectId({});
           return;
         }
 
         const projectIds = projectList.map((p) => p.id);
         const { data: centres, error: centresErr } = await supabase
           .from("cost_centres")
-          .select("id, name, project_id")
+          .select("id, name, project_id, status, manual_contract_active, manual_contract_fixed_amount, manual_contract_notes, manual_contract_start_date, manual_contract_end_date")
           .in("project_id", projectIds)
           .eq("status", "active")
           .order("name", { ascending: true });
@@ -10535,9 +13130,25 @@ export default function EmployeeClockApp() {
           acc[pid].push(c.name);
           return acc;
         }, {});
+        const rowsByProject = (Array.isArray(centres) ? centres : []).reduce((acc, c) => {
+          const pid = c.project_id;
+          if (!acc[pid]) acc[pid] = [];
+          acc[pid].push(c);
+          return acc;
+        }, {});
 
         if (cancelled) return;
         setCostCentresByProjectId(map);
+        setCostCentreRowsByProjectId(rowsByProject);
+        writeLocalFirstCache(
+          projectsCacheKey,
+          {
+            companyProjects: projectList,
+            costCentresByProjectId: map,
+            costCentreRowsByProjectId: rowsByProject,
+          },
+          { source: "remote", count: projectList.length }
+        );
       } catch (err) {
         console.log("Project load failed, using fallback:", err);
         if (cancelled) return;
@@ -10676,7 +13287,7 @@ export default function EmployeeClockApp() {
       try {
         const { data: projects, error: projectsErr } = await supabase
           .from("projects")
-          .select("id, name, status")
+          .select("id, name, status, special_project_active, special_hourly_rate, special_project_notes")
           .eq("company_id", userCompany.id)
           .order("name", { ascending: true });
 
@@ -10691,13 +13302,14 @@ export default function EmployeeClockApp() {
         const projectIds = projectList.map((p) => p.id);
         const { data: centres, error: centresErr } = await supabase
           .from("cost_centres")
-          .select("id, name, project_id, status")
+          .select("id, name, project_id, status, manual_contract_active, manual_contract_fixed_amount, manual_contract_notes, manual_contract_start_date, manual_contract_end_date")
           .in("project_id", projectIds)
           .order("name", { ascending: true });
 
         if (centresErr) throw centresErr;
 
         const byProjectId = {};
+        const rowsByProjectId = {};
         for (const c of Array.isArray(centres) ? centres : []) {
           const pid = String(c.project_id);
           if (!byProjectId[pid]) byProjectId[pid] = [];
@@ -10705,7 +13317,14 @@ export default function EmployeeClockApp() {
             id: c.id,
             name: c.name,
             status: c.status,
+            manualContractActive: Boolean(c.manual_contract_active),
+            manualContractFixedAmount: Number(c.manual_contract_fixed_amount ?? 0) || 0,
+            manualContractNotes: c.manual_contract_notes || "",
+            manualContractStartDate: c.manual_contract_start_date || "",
+            manualContractEndDate: c.manual_contract_end_date || "",
           });
+          if (!rowsByProjectId[pid]) rowsByProjectId[pid] = [];
+          rowsByProjectId[pid].push(c);
         }
 
         if (!isAdmin) {
@@ -10717,6 +13336,7 @@ export default function EmployeeClockApp() {
                 assignedSummaries: [],
               }))
             );
+            setCostCentreRowsByProjectId(rowsByProjectId);
           }
           return;
         }
@@ -10794,15 +13414,22 @@ export default function EmployeeClockApp() {
           id: p.id,
           name: p.name,
           status: p.status,
+          specialProjectActive: Boolean(p.special_project_active),
+          specialHourlyRate: Number(p.special_hourly_rate ?? 0) || 0,
+          specialProjectNotes: p.special_project_notes || "",
           costCentres: byProjectId[String(p.id)] || [],
           assignedSummaries: assignedSummariesForProject(p.id),
         }));
 
-        if (!cancelled) setProjectsScreenRows(rows);
+        if (!cancelled) {
+          setProjectsScreenRows(rows);
+          setCostCentreRowsByProjectId(rowsByProjectId);
+        }
       } catch (err) {
         if (!cancelled) {
           setProjectsScreenError(getErrorMessage(err));
           setProjectsScreenRows([]);
+          setCostCentreRowsByProjectId({});
         }
       } finally {
         if (!cancelled) setProjectsScreenLoading(false);
@@ -11239,7 +13866,7 @@ export default function EmployeeClockApp() {
       console.log("Checking session...");
 
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await safeGetSession();
         if (error) {
           console.log("Session error:", error);
         }
@@ -11686,22 +14313,16 @@ export default function EmployeeClockApp() {
       setAuthRole("employee");
 
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const accessToken = sessionData?.session?.access_token;
+        const accessToken = await getFreshAccessToken();
         if (accessToken) {
-          const assignRes = await fetch("/api/assign-default-projects", {
+          const { response: assignRes, json } = await fetchAuthedApiJson("/api/assign-default-projects", {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${accessToken}`,
-            },
             body: JSON.stringify({
               company_id: company.id,
               target_user_id: authUser.id,
             }),
           });
           if (!assignRes.ok) {
-            const json = await assignRes.json().catch(() => ({}));
             console.warn("[JOIN_COMPANY] default project assignment failed", json);
           }
         }
@@ -11731,14 +14352,20 @@ export default function EmployeeClockApp() {
   };
 
   const liveSeconds = useMemo(() => {
-    if (!visibleCurrentShift?.clockIn) return 0;
-    const tIn = new Date(visibleCurrentShift.clockIn).getTime();
+    const shiftStart =
+      visibleCurrentShift?.clockIn ||
+      visibleCurrentShift?.date ||
+      visibleCurrentShift?.createdAt ||
+      visibleCurrentShift?.updatedAt ||
+      null;
+    if (!shiftStart) return 0;
+    const tIn = parseStoredInstant(shiftStart).getTime();
     const tNow = now instanceof Date ? now.getTime() : new Date(now).getTime();
     if (!Number.isFinite(tIn) || !Number.isFinite(tNow)) return 0;
     const totalSeconds = Math.max(0, Math.floor((tNow - tIn) / 1000));
     let activeBreakSeconds = 0;
     if (visibleCurrentShift.breakStart && !visibleCurrentShift.breakEnd) {
-      const tBreak = new Date(visibleCurrentShift.breakStart).getTime();
+      const tBreak = parseStoredInstant(visibleCurrentShift.breakStart).getTime();
       if (Number.isFinite(tBreak)) {
         activeBreakSeconds = Math.max(0, Math.floor((tNow - tBreak) / 1000));
       }
@@ -11754,33 +14381,33 @@ export default function EmployeeClockApp() {
     return Number.isFinite(earned) ? earned : 0;
   })();
 
-  const createProjectTaskViaApi = async ({ itemType, name, projectId: targetProjectId = "", projectName = "" }) => {
+  const createProjectTaskViaApi = async ({
+    itemType,
+    name,
+    projectId: targetProjectId = "",
+    projectName = "",
+    specialProject = null,
+    manualContract = null,
+  }) => {
     if (!authUser?.id || !userCompany?.id) throw new Error("Company/user missing. Please logout and login again.");
     if (!canCreateProjectTaskFromClock) {
       throw new Error("Project/task creation is not available for this profile.");
     }
     const cleanName = String(name || "").trim();
     if (!cleanName) throw new Error(itemType === "task" ? "Task name is required." : "Project name is required.");
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError) throw sessionError;
-    const accessToken = sessionData?.session?.access_token;
-    if (!accessToken) throw new Error("Sign in again before creating project/task.");
     try {
-      const response = await fetch(getOperaApiUrl("/api/create-project-task"), {
+      const { response, json } = await fetchAuthedApiJson(getOperaApiUrl("/api/create-project-task"), {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: JSON.stringify({
           company_id: userCompany.id,
           item_type: itemType,
           name: cleanName,
           project_id: targetProjectId || null,
           project_name: projectName || "",
+          special_project: specialProject || null,
+          manual_contract: manualContract || null,
         }),
       });
-      const json = await response.json().catch(() => ({}));
       if (!response.ok || !json?.ok) {
         throw new Error(json?.error || "Project/task creation failed.");
       }
@@ -11788,7 +14415,14 @@ export default function EmployeeClockApp() {
     } catch (error) {
       if (isLocalOperaHost()) {
         console.warn("[PROJECT_TASK] API unavailable in local dev, using Supabase fallback", error);
-        return createProjectTaskDirectly({ itemType, name: cleanName, projectId: targetProjectId, projectName });
+        return createProjectTaskDirectly({
+          itemType,
+          name: cleanName,
+          projectId: targetProjectId,
+          projectName,
+          specialProject,
+          manualContract,
+        });
       }
       throw error;
     }
@@ -12044,7 +14678,16 @@ export default function EmployeeClockApp() {
     return { users: userIds.length, costCentres: pccaRows.length };
   };
 
-  const insertCompanyProjectWithCentres = async ({ companyId, userId, projectName, costCentresCsv, assignCreatorWhenNotGlobal = false }) => {
+  const insertCompanyProjectWithCentres = async ({
+    companyId,
+    userId,
+    projectName,
+    costCentresCsv,
+    assignCreatorWhenNotGlobal = false,
+    specialProjectActive = false,
+    specialHourlyRate = 0,
+    specialProjectNotes = "",
+  }) => {
     const name = String(projectName || "").trim();
     if (!name) {
       const err = new Error("Project name is required.");
@@ -12068,12 +14711,15 @@ export default function EmployeeClockApp() {
       name,
       status: "active",
       created_by: userId,
+      special_project_active: Boolean(specialProjectActive),
+      special_hourly_rate: Number(specialHourlyRate ?? 0) || 0,
+      special_project_notes: String(specialProjectNotes || "").trim(),
     };
 
     const { data: created, error: projectErr } = await supabase
       .from("projects")
       .insert([projectPayload])
-      .select("id, name")
+      .select("id, name, status, special_project_active, special_hourly_rate, special_project_notes")
       .single();
 
     if (projectErr) throw projectErr;
@@ -12134,7 +14780,14 @@ export default function EmployeeClockApp() {
     return { project: created, cost_centres: createdCentres, assignments };
   };
 
-  const createProjectTaskDirectly = async ({ itemType, name, projectId: targetProjectId = "", projectName = "" }) => {
+  const createProjectTaskDirectly = async ({
+    itemType,
+    name,
+    projectId: targetProjectId = "",
+    projectName = "",
+    specialProject = null,
+    manualContract = null,
+  }) => {
     if (!authUser?.id || !userCompany?.id) throw new Error("Company/user missing. Please logout and login again.");
     if (!canCreateProjectTaskFromClock) throw new Error("Project/task creation is not available for this profile.");
 
@@ -12142,6 +14795,9 @@ export default function EmployeeClockApp() {
     if (!cleanName) throw new Error(itemType === "task" ? "Task name is required." : "Project name is required.");
 
     if (itemType === "project") {
+      const specialProjectActive = Boolean(specialProject?.active);
+      const specialHourlyRate = Number(specialProject?.specialHourlyRate ?? specialProject?.special_hourly_rate ?? 0) || 0;
+      const specialProjectNotes = String(specialProject?.notes ?? specialProject?.special_project_notes ?? "").trim();
       const existing = (companyProjects || []).find(
         (project) => String(project?.name || "").trim().toLowerCase() === cleanName.toLowerCase()
       );
@@ -12149,7 +14805,7 @@ export default function EmployeeClockApp() {
         return {
           ok: true,
           item_type: "project",
-          project: { id: existing.id, name: existing.name || cleanName },
+          project: { id: existing.id, name: existing.name || cleanName, special_project_active: specialProjectActive, special_hourly_rate: specialHourlyRate, special_project_notes: specialProjectNotes },
           cost_centres: [],
           existed: true,
           assignments: { projects: 0, costCentres: 0 },
@@ -12162,6 +14818,9 @@ export default function EmployeeClockApp() {
         projectName: cleanName,
         costCentresCsv: "",
         assignCreatorWhenNotGlobal: !isAdmin,
+        specialProjectActive,
+        specialHourlyRate,
+        specialProjectNotes,
       });
       if (!isAdmin) await notifyEmployeeProjectTaskCreated({ itemType: "project", itemName: cleanName });
 
@@ -12178,6 +14837,11 @@ export default function EmployeeClockApp() {
       };
     }
 
+    const manualContractFixedAmount = Number(manualContract?.fixedAmount ?? manualContract?.fixed_amount ?? 0) || 0;
+    const manualContractNotes = String(manualContract?.notes ?? manualContract?.manual_contract_notes ?? "").trim();
+    const manualContractActive = Boolean(manualContract?.active ?? manualContract?.manual_contract_active ?? manualContractFixedAmount > 0);
+    const manualContractStartDate = String(manualContract?.startDate ?? manualContract?.manual_contract_start_date ?? "").trim();
+    const manualContractEndDate = String(manualContract?.endDate ?? manualContract?.manual_contract_end_date ?? "").trim();
     const activeProjects = (companyProjects || []).filter((project) => project?.id != null);
     const targetProjectIds = companyAssignAllTasksToAllProjects
       ? activeProjects.map((project) => project.id).filter(Boolean)
@@ -12209,6 +14873,11 @@ export default function EmployeeClockApp() {
         status: "active",
         display_order: 1000 + index,
         created_by: authUser.id,
+        manual_contract_active: manualContractActive,
+        manual_contract_fixed_amount: manualContractFixedAmount,
+        manual_contract_notes: manualContractNotes,
+        manual_contract_start_date: manualContractStartDate || null,
+        manual_contract_end_date: manualContractEndDate || null,
       }));
 
     let insertedTasks = [];
@@ -12248,12 +14917,12 @@ export default function EmployeeClockApp() {
     }
 
     if (!isAdmin && insertedTasks.length > 0) {
-      const projectLabel =
-        companyAssignAllTasksToAllProjects
-          ? "All active projects"
-          : projectName || companyProjects.find((project) => String(project.id) === String(targetProjectId))?.name || "";
-      await notifyEmployeeProjectTaskCreated({ itemType: "task", itemName: cleanName, projectName: projectLabel });
-    }
+        const projectLabel =
+          companyAssignAllTasksToAllProjects
+            ? "All active projects"
+            : projectName || companyProjects.find((project) => String(project.id) === String(targetProjectId))?.name || "";
+        await notifyEmployeeProjectTaskCreated({ itemType: "task", itemName: cleanName, projectName: projectLabel });
+      }
 
     return {
       ok: true,
@@ -12321,6 +14990,11 @@ export default function EmployeeClockApp() {
     setProjectsTaskFormOpen(false);
     setProjectsTaskProjectId("");
     setProjectsTaskName("");
+    setProjectsTaskManualContract(false);
+    setProjectsTaskFixedAmount("");
+    setProjectsTaskStartDate("");
+    setProjectsTaskEndDate("");
+    setProjectsTaskNotes("");
     setProjectsTaskError("");
     setProjectsTaskSuccess("");
     setProjectsTaskSaving(false);
@@ -12341,17 +15015,22 @@ export default function EmployeeClockApp() {
     }
 
     const activeProjects = (companyProjects || []).filter((project) => project?.id != null);
+    const manualContractMode = Boolean(projectsTaskManualContract) || Number(projectsTaskFixedAmount || 0) > 0;
     const targetProjectIds = companyAssignAllTasksToAllProjects
       ? activeProjects.map((project) => project.id)
       : [projectsTaskProjectId].filter(Boolean);
 
     if (targetProjectIds.length === 0) {
-      setProjectsTaskError(
-        companyAssignAllTasksToAllProjects
-          ? "Add an active project before adding a task."
-          : "Choose a project for this task."
-      );
-      return;
+      if (manualContractMode && activeProjects.length > 0) {
+        targetProjectIds.push(activeProjects[0].id);
+      } else {
+        setProjectsTaskError(
+          companyAssignAllTasksToAllProjects
+            ? "Add an active project before adding a task."
+            : "Choose a project for this task."
+        );
+        return;
+      }
     }
 
     setProjectsTaskSaving(true);
@@ -12362,18 +15041,35 @@ export default function EmployeeClockApp() {
     setAssignmentsSuccess("");
     try {
       if (!isAdmin) {
+        const fallbackProjectId = manualContractMode ? String(activeProjects[0]?.id || "") : "";
         const projectLabel =
           companyAssignAllTasksToAllProjects
             ? "All active projects"
-            : companyProjects.find((project) => String(project.id) === String(projectsTaskProjectId))?.name || "";
+            : companyProjects.find((project) => String(project.id) === String(projectsTaskProjectId))?.name ||
+              activeProjects[0]?.name ||
+              "";
         const json = await createProjectTaskViaApi({
           itemType: "task",
           name: taskName,
-          projectId: companyAssignAllTasksToAllProjects ? "" : projectsTaskProjectId,
+          projectId: companyAssignAllTasksToAllProjects ? "" : (projectsTaskProjectId || fallbackProjectId),
           projectName: projectLabel,
+          manualContract: projectsTaskManualContract
+            ? {
+                active: true,
+                fixedAmount: projectsTaskFixedAmount,
+                notes: projectsTaskNotes,
+                startDate: projectsTaskStartDate,
+                endDate: projectsTaskEndDate,
+              }
+            : null,
         });
         setProjectsTaskName("");
         setProjectsTaskProjectId("");
+        setProjectsTaskManualContract(false);
+        setProjectsTaskFixedAmount("");
+        setProjectsTaskStartDate("");
+        setProjectsTaskEndDate("");
+        setProjectsTaskNotes("");
         setProjectsTaskFormOpen(false);
         setCompanyProjectsRefreshKey((key) => key + 1);
         setProjectsScreenRefreshKey((key) => key + 1);
@@ -12398,6 +15094,11 @@ export default function EmployeeClockApp() {
           .filter((row) => String(row?.status || "active").toLowerCase() !== "archived")
           .map((row) => `${String(row.project_id)}::${String(row.name || "").trim().toLowerCase()}`)
       );
+      const manualFixedAmount = Number(projectsTaskFixedAmount || 0) || 0;
+      const manualContractActive = Boolean(projectsTaskManualContract) || manualFixedAmount > 0;
+      const manualContractStartDate = String(projectsTaskStartDate || "").trim();
+      const manualContractEndDate = String(projectsTaskEndDate || "").trim();
+      const manualContractNotes = String(projectsTaskNotes || "").trim();
       const rows = targetProjectIds
         .filter((projectId) => !existingActive.has(`${String(projectId)}::${wantedNameKey}`))
         .map((projectId, index) => ({
@@ -12407,6 +15108,11 @@ export default function EmployeeClockApp() {
           status: "active",
           display_order: 1000 + index,
           created_by: authUser.id,
+          manual_contract_active: manualContractActive,
+          manual_contract_fixed_amount: manualFixedAmount,
+          manual_contract_notes: manualContractNotes,
+          manual_contract_start_date: manualContractStartDate || null,
+          manual_contract_end_date: manualContractEndDate || null,
         }));
 
       let insertedRows = [];
@@ -12447,6 +15153,11 @@ export default function EmployeeClockApp() {
 
       setProjectsTaskName("");
       setProjectsTaskProjectId("");
+      setProjectsTaskManualContract(false);
+      setProjectsTaskFixedAmount("");
+      setProjectsTaskStartDate("");
+      setProjectsTaskEndDate("");
+      setProjectsTaskNotes("");
       setProjectsTaskFormOpen(false);
       setCompanyProjectsRefreshKey((key) => key + 1);
       setProjectsScreenRefreshKey((key) => key + 1);
@@ -12547,6 +15258,11 @@ export default function EmployeeClockApp() {
         dbId: cc.id,
         name: cc.name || "",
         status: normSt(cc.status),
+        manualContractActive: Boolean(cc.manualContractActive ?? cc.manual_contract_active ?? false),
+        manualContractFixedAmount: String(cc.manualContractFixedAmount ?? cc.manual_contract_fixed_amount ?? ""),
+        manualContractStartDate: String(cc.manualContractStartDate ?? cc.manual_contract_start_date ?? ""),
+        manualContractEndDate: String(cc.manualContractEndDate ?? cc.manual_contract_end_date ?? ""),
+        manualContractNotes: String(cc.manualContractNotes ?? cc.manual_contract_notes ?? ""),
         isNew: false,
       })),
       initialCcIds: (row.costCentres || []).map((cc) => cc.id).filter((id) => id != null),
@@ -12578,6 +15294,11 @@ export default function EmployeeClockApp() {
         dbId: line.dbId ?? null,
         name: String(line.name || "").trim(),
         status: projStatus === "archived" ? "archived" : line.status === "archived" ? "archived" : "active",
+        manualContractActive: Boolean(line.manualContractActive),
+        manualContractFixedAmount: String(line.manualContractFixedAmount || ""),
+        manualContractStartDate: String(line.manualContractStartDate || ""),
+        manualContractEndDate: String(line.manualContractEndDate || ""),
+        manualContractNotes: String(line.manualContractNotes || ""),
         isNew: Boolean(line.isNew),
       }));
       const emptyExistingLine = lines.find((line) => line.dbId != null && !line.name);
@@ -12586,17 +15307,8 @@ export default function EmployeeClockApp() {
         return;
       }
 
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) throw new Error("Not signed in.");
-
-      const res = await fetch("/api/update-project", {
+      const { response: res, json } = await fetchAuthedApiJson("/api/update-project", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: JSON.stringify({
           company_id: userCompany.id,
           project_id: editingProjectId,
@@ -12606,7 +15318,6 @@ export default function EmployeeClockApp() {
           lines,
         }),
       });
-      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(typeof json.error === "string" ? json.error : "Could not save project.");
       }
@@ -12946,7 +15657,7 @@ export default function EmployeeClockApp() {
     const isSafari = /safari/.test(ua) && !/crios|chrome/.test(ua);
     if (isIOS && isSafari) return "iPhone: tap the Share button in Safari, scroll down, then tap Add to Home Screen.";
     if (isIOS && !isSafari) return "iPhone: open this link in Safari, then tap Share and Add to Home Screen.";
-    if (isAndroid && isChrome) return "Android: Tap Chrome menu (⋮) → Install App or Add to Home Screen.";
+    if (isAndroid && isChrome) return "Android: Tap Chrome menu (â‹®) â†’ Install App or Add to Home Screen.";
     return "Use your browser menu and choose Install App or Add to Home Screen.";
   };
 
@@ -13129,7 +15840,7 @@ const handleClockIn = async () => {
   };
 
   setCurrentShift(newShift);
-    setLocationStatus("Saving clock-in…");
+    setLocationStatus("Saving clock-inâ€¦");
 
     const clockInInsertBase = {
         user_id: authUser.id,
@@ -13466,7 +16177,7 @@ const handlePhotoQuickUpload = async (event) => {
     setUploadProgress(100);
     const uploadedStatus = photo.metadataSyncFailed
       ? "Photo uploaded. Shared database sync pending."
-      : "Photo uploaded ✅";
+      : "Photo uploaded âœ…";
     setPhotoStatus(uploadedStatus);
     void schedulePhotoNotificationAfterUpload();
     schedulePhotoStatusClear(uploadedStatus, 3000, { clearUploadProgress: true });
@@ -14833,7 +17544,13 @@ const handlePhotoQuickUpload = async (event) => {
       actorRole: resolvedCompanyRole,
       type: "timesheet_change_requested",
       title: "Timesheet approval needed",
-      message: `${label} requested ${requestRow.request_type === "manual_time" ? "manual time" : "a timesheet edit"} approval.`,
+      message: `${label} requested ${
+        requestRow.request_type === "manual_time"
+          ? "manual time"
+          : requestRow.request_type === "edit_time" && !requestRow.original_snapshot?.clock_out && requestRow.timesheet_id
+            ? "a clock-in edit"
+            : "a timesheet edit"
+      } approval.`,
       projectId: requestRow.requested_project_id,
       projectName: requestRow.requested_project_name,
       costCentre: requestRow.requested_cost_centre,
@@ -14851,12 +17568,31 @@ const handlePhotoQuickUpload = async (event) => {
     setManualTimeDate((prev) => prev || todayKey);
     setManualTimeClockInTime((prev) => prev || "08:00");
     setManualTimeClockOutTime((prev) => prev || "16:00");
+    const fallbackEmployeeId = isAdmin
+      ? String(
+          manualTimeEmployeeId ||
+            (timesheetEmployeeFilter !== "all" ? timesheetEmployeeFilter : "") ||
+            manualTimeEmployeeOptions[0]?.id ||
+            authUser?.id ||
+            ""
+        ).trim()
+      : String(authUser?.id || "").trim();
+    setManualTimeEmployeeId(fallbackEmployeeId);
     const firstProject = clockSelectableProjects[0] || effectiveProjects[0] || null;
     const nextProjectId = manualTimeProjectId || (firstProject?.id != null ? String(firstProject.id) : "");
     setManualTimeProjectId(nextProjectId);
     const centres = costCentresForEditProject(nextProjectId);
     setManualTimeCostCentre((prev) => (prev && centres.includes(prev) ? prev : centres[0] || ""));
     setManualTimeOpen(true);
+  };
+
+  const openClockInEditRequestForm = () => {
+    if (!visibleCurrentShift?.clockIn) return;
+    const inParts = wallClockPartsInTimeZone(visibleCurrentShift.clockIn, companyTimeZone);
+    setClockInEditDate(inParts.dateStr);
+    setClockInEditTime(inParts.timeStr.slice(0, 5));
+    setClockInEditReason("");
+    setClockInEditOpen(true);
   };
 
   const openVacationForm = () => {
@@ -15034,6 +17770,27 @@ const handlePhotoQuickUpload = async (event) => {
     event?.preventDefault?.();
     if (manualTimeSaving) return;
     if (!authUser?.id || !userCompany?.id) return;
+    const targetEmployeeId = String(isAdmin ? manualTimeEmployeeId || authUser.id : authUser.id).trim();
+    const targetEmployee =
+      manualTimeEmployeeOptions.find((option) => String(option.id) === targetEmployeeId) || null;
+    const targetEmployeeName =
+      String(
+        targetEmployee?.name ||
+          payrollEmployeeMetaById?.[targetEmployeeId]?.fullName ||
+          payrollEmployeeMetaById?.[targetEmployeeId]?.email ||
+          profileFullName ||
+          authUser.email ||
+          shortUserLabel(targetEmployeeId)
+      ).trim() || shortUserLabel(targetEmployeeId);
+    const targetEmployeeEmail =
+      String(
+        payrollEmployeeMetaById?.[targetEmployeeId]?.email ||
+          (targetEmployeeId === String(authUser.id || "") ? authUser.email || "" : "")
+      ).trim() || null;
+    if (!targetEmployeeId) {
+      alert("Please select an employee.");
+      return;
+    }
     const projectOptions = isAdmin ? effectiveProjects : clockSelectableProjects;
     const project = projectOptions.find((p) => String(p.id) === String(manualTimeProjectId));
     if (!project) {
@@ -15058,6 +17815,43 @@ const handlePhotoQuickUpload = async (event) => {
 
     setManualTimeSaving(true);
     try {
+      if (isAdmin) {
+        const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
+          userId: targetEmployeeId,
+          companyId: userCompany.id,
+          timeZone: companyTimeZone,
+          clockInIso,
+          clockOutIso,
+          timesheetHourlyRate: 0,
+          breakStartIso: null,
+          breakEndIso: null,
+        });
+        const hourlyRate = hourlyRateFromProfileValue(labourUpdate.hourly_rate);
+        const insertRow = {
+          company_id: userCompany.id,
+          user_id: targetEmployeeId,
+          employee_name: targetEmployeeName,
+          employee_email: targetEmployeeEmail,
+          company_name: userCompany.name || null,
+          project_id: project.id,
+          project_name: project.name || "",
+          cost_centre: manualTimeCostCentre || "",
+          break_start_at: null,
+          break_end_at: null,
+          break_minutes: 0,
+          clock_in: clockInIso,
+          hourly_rate: hourlyRate,
+          ...labourUpdate,
+        };
+        const { error } = await supabaseInsertTimesheetRow(supabase, insertRow);
+        if (error) throw error;
+        setManualTimeOpen(false);
+        setManualTimeReason("");
+        await fetchTimesheetsFromSupabase();
+        alert(`Manual time saved for ${targetEmployeeName}.`);
+        return;
+      }
+
       await submitTimesheetChangeRequest({
         company_id: userCompany.id,
         user_id: authUser.id,
@@ -15081,6 +17875,93 @@ const handlePhotoQuickUpload = async (event) => {
       alert(getErrorMessage(err));
     } finally {
       setManualTimeSaving(false);
+    }
+  };
+
+  const submitClockInEditRequest = async (event) => {
+    event?.preventDefault?.();
+    if (clockInEditSaving) return;
+    if (!authUser?.id || !userCompany?.id || !visibleCurrentShift?.supabaseTimesheetId) return;
+    if (!clockInEditDate || !clockInEditTime) {
+      alert("Clock-in date and time are required.");
+      return;
+    }
+    const requestedClockIn = wallDateTimeToUtcIso(clockInEditDate, clockInEditTime, companyTimeZone);
+    if (!requestedClockIn) {
+      alert("Invalid clock-in date or time.");
+      return;
+    }
+    const requestedClockInMs = new Date(requestedClockIn).getTime();
+    const nowMs = Date.now();
+    if (!Number.isFinite(requestedClockInMs) || requestedClockInMs > nowMs) {
+      alert("Clock-in time cannot be in the future.");
+      return;
+    }
+    const breakStartMs = visibleCurrentShift.breakStart ? new Date(visibleCurrentShift.breakStart).getTime() : NaN;
+    if (Number.isFinite(breakStartMs) && requestedClockInMs >= breakStartMs) {
+      alert("Clock-in must stay before the break start.");
+      return;
+    }
+
+    setClockInEditSaving(true);
+    try {
+      if (isAdmin) {
+        const nextHourlyRate = await getEffectiveHourlyRate(supabase, {
+          companyId: userCompany.id,
+          employeeId: authUser.id,
+          shiftDate: requestedClockIn,
+          timeZone: companyTimeZone,
+          fallbackRate: visibleCurrentShift.hourlyRate || 0,
+        });
+        const updateRow = {
+          clock_in: requestedClockIn,
+        };
+        if (Number.isFinite(Number(nextHourlyRate))) {
+          updateRow.hourly_rate = Number(nextHourlyRate);
+        }
+        const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, updateRow);
+        if (error) throw error;
+        setClockInEditOpen(false);
+        setClockInEditReason("");
+        await fetchTimesheetsFromSupabase();
+        alert("Clock-in time updated.");
+        return;
+      }
+
+      await submitTimesheetChangeRequest({
+        company_id: userCompany.id,
+        user_id: authUser.id,
+        employee_name: (profileFullName || "").trim() || authUser.email || "Employee",
+        employee_email: authUser.email || null,
+        request_type: "edit_time",
+        status: "pending",
+        timesheet_id: visibleCurrentShift.supabaseTimesheetId,
+        original_snapshot: {
+          clock_in: visibleCurrentShift.clockIn,
+          clock_out: visibleCurrentShift.clockOut || null,
+          break_start_at: visibleCurrentShift.breakStart || null,
+          break_end_at: visibleCurrentShift.breakEnd || null,
+          break_minutes: Number(visibleCurrentShift.breakMinutes || 0),
+          project_id: visibleCurrentShift.projectId || null,
+          project_name: visibleCurrentShift.project || "",
+          cost_centre: visibleCurrentShift.costCenter || "",
+          hourly_rate: visibleCurrentShift.hourlyRate || 0,
+          status: visibleCurrentShift.status || "Active",
+        },
+        requested_clock_in: requestedClockIn,
+        requested_clock_out: visibleCurrentShift.clockIn || requestedClockIn,
+        requested_project_id: visibleCurrentShift.projectId != null ? String(visibleCurrentShift.projectId) : "",
+        requested_project_name: visibleCurrentShift.project || "",
+        requested_cost_centre: visibleCurrentShift.costCenter || "",
+        reason: String(clockInEditReason || "").trim() || "Employee requested clock-in change",
+      });
+      setClockInEditOpen(false);
+      setClockInEditReason("");
+      alert("Clock-in edit sent to supervisor for approval.");
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setClockInEditSaving(false);
     }
   };
 
@@ -15514,12 +18395,16 @@ const handlePhotoQuickUpload = async (event) => {
       const requestBreakStartIso = request.requestedBreakStartAt || null;
       const requestBreakEndIso = request.requestedBreakEndAt || null;
       const requestBreakMinutes = breakMinutesBetween(clockInIso, clockOutIso, requestBreakStartIso, requestBreakEndIso);
+      const isClockInOnlyRequest =
+        request.requestType === "edit_time" &&
+        !request.originalSnapshot?.clock_out &&
+        Boolean(request.timesheetId);
       const { update: labourUpdate } = await buildTimesheetClockOutUpdate(supabase, {
         userId: request.userId,
         companyId: request.companyId || userCompany?.id,
         timeZone: companyTimeZone,
         clockInIso,
-        clockOutIso,
+        clockOutIso: clockOutIso || request.originalSnapshot?.clock_out || new Date().toISOString(),
         timesheetHourlyRate:
           request.requestType === "edit_time" ? request.originalSnapshot?.hourly_rate : 0,
         breakStartIso: requestBreakStartIso,
@@ -15545,6 +18430,23 @@ const handlePhotoQuickUpload = async (event) => {
           ...labourUpdate,
         };
         const { error } = await supabaseInsertTimesheetRow(supabase, insertRow);
+        if (error) throw error;
+      } else if (isClockInOnlyRequest) {
+        if (!request.timesheetId) throw new Error("Missing original timesheet id.");
+        const nextHourlyRate = await getEffectiveHourlyRate(supabase, {
+          companyId: request.companyId || userCompany?.id,
+          employeeId: request.userId,
+          shiftDate: clockInIso,
+          timeZone: companyTimeZone,
+          fallbackRate: request.originalSnapshot?.hourly_rate || 0,
+        });
+        const updateRow = {
+          clock_in: clockInIso,
+        };
+        if (Number.isFinite(Number(nextHourlyRate))) {
+          updateRow.hourly_rate = Number(nextHourlyRate);
+        }
+        const { error } = await supabaseUpdateTimesheetRow(supabase, request.timesheetId, updateRow);
         if (error) throw error;
       } else {
         if (!request.timesheetId) throw new Error("Missing original timesheet id.");
@@ -15605,8 +18507,17 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderTimesheetRequestCard = (request) => {
     const busy = reviewingTimesheetRequestId === request.id;
-    const requestLabel = request.requestType === "manual_time" ? "Manual time" : "Edit request";
     const original = request.originalSnapshot || {};
+    const isClockInOnlyRequest =
+      request.requestType === "edit_time" &&
+      !original.clock_out &&
+      Boolean(request.timesheetId);
+    const requestLabel =
+      request.requestType === "manual_time"
+        ? "Manual time"
+        : isClockInOnlyRequest
+          ? "Clock-in edit"
+          : "Edit request";
     return (
       <div key={request.id} className="rounded-[22px] border border-amber-200 bg-amber-50 p-3.5 shadow-sm">
         <div className="flex items-start justify-between gap-3">
@@ -15628,8 +18539,17 @@ const handlePhotoQuickUpload = async (event) => {
           </div>
           <div className="rounded-2xl bg-white p-2">
             <p className="text-[10px] font-black uppercase text-slate-500">Clock out</p>
-            <p className="font-black text-slate-950">{formatDate(request.requestedClockOut, companyTimeZone)}</p>
-            <p className="font-bold">{formatTime(request.requestedClockOut, companyTimeZone)}</p>
+            {!isClockInOnlyRequest && request.requestedClockOut ? (
+              <>
+                <p className="font-black text-slate-950">{formatDate(request.requestedClockOut, companyTimeZone)}</p>
+                <p className="font-bold">{formatTime(request.requestedClockOut, companyTimeZone)}</p>
+              </>
+            ) : (
+              <>
+                <p className="font-black text-slate-950">Keep open</p>
+                <p className="font-bold">No clock-out change</p>
+              </>
+            )}
           </div>
         </div>
         <p className="mt-2 text-[14px] font-bold text-slate-800">
@@ -15637,13 +18557,13 @@ const handlePhotoQuickUpload = async (event) => {
         </p>
         {(request.requestedBreakStartAt || request.requestedBreakEndAt || request.requestedBreakMinutes > 0) ? (
           <p className="mt-1 text-[12px] font-semibold text-slate-500">
-            Break: {request.requestedBreakStartAt ? formatTime(request.requestedBreakStartAt, companyTimeZone) : "—"} - {request.requestedBreakEndAt ? formatTime(request.requestedBreakEndAt, companyTimeZone) : "—"}
+            Break: {request.requestedBreakStartAt ? formatTime(request.requestedBreakStartAt, companyTimeZone) : "â€”"} - {request.requestedBreakEndAt ? formatTime(request.requestedBreakEndAt, companyTimeZone) : "â€”"}
             {request.requestedBreakMinutes > 0 ? ` (${formatHoursMinutes(request.requestedBreakMinutes)})` : ""}
           </p>
         ) : null}
         {request.requestType === "edit_time" && original.clock_in ? (
           <p className="mt-1 text-[12px] font-semibold text-slate-500">
-            Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "—"}
+            Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "â€”"}
           </p>
         ) : null}
         {request.reason ? <p className="mt-1 text-[13px] text-slate-600">{request.reason}</p> : null}
@@ -15792,18 +18712,10 @@ const handlePhotoQuickUpload = async (event) => {
   });
 
   const callFieldAi = useCallback(async (action, payload = {}) => {
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token;
-    if (sessionError || !token) throw new Error("Sign in again before using AI.");
-    const response = await fetch("/api/ai-field-docs", {
+    const { response, json: result } = await fetchAuthedApiJson("/api/ai-field-docs", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
       body: JSON.stringify({ action, ...payload }),
     });
-    const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result?.error || result?.message || "AI request failed.");
     return result;
   }, []);
@@ -17754,19 +20666,8 @@ const handlePhotoQuickUpload = async (event) => {
     const eff = joining_date;
     setTeamAddSubmitting(true);
     try {
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) {
-        setTeamAddError("Not signed in.");
-        return;
-      }
-      const res = await fetch("/api/create-employee", {
+      const { response: res, json } = await fetchAuthedApiJson("/api/create-employee", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: JSON.stringify({
           company_id: userCompany.id,
           full_name: name,
@@ -17784,7 +20685,6 @@ const handlePhotoQuickUpload = async (event) => {
           employment_status: "active",
         }),
       });
-      const json = await res.json().catch(() => ({}));
       if (!res.ok) {
         setTeamAddError(typeof json.error === "string" ? json.error : "Could not create employee.");
         return;
@@ -17940,13 +20840,6 @@ const handlePhotoQuickUpload = async (event) => {
     }
 
     try {
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-      if (sessionErr) throw sessionErr;
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) {
-        throw new Error("Not signed in.");
-      }
-
       if (loginFieldsDirty && !ownerLoginLocked) {
         const apiBody = {
           company_id: userCompany.id,
@@ -17957,15 +20850,10 @@ const handlePhotoQuickUpload = async (event) => {
         if (passwordDraft) {
           apiBody.new_password = passwordDraft;
         }
-        const res = await fetch("/api/update-employee-login", {
+        const { response: res, json } = await fetchAuthedApiJson("/api/update-employee-login", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
           body: JSON.stringify(apiBody),
         });
-        const json = await res.json().catch(() => ({}));
         if (!res.ok) {
           throw new Error(typeof json.error === "string" ? json.error : "Could not update login details.");
         }
@@ -17974,12 +20862,8 @@ const handlePhotoQuickUpload = async (event) => {
         }
       }
 
-      const profileRes = await fetch("/api/update-employee-profile", {
+      const { response: profileRes, json: profileJson } = await fetchAuthedApiJson("/api/update-employee-profile", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-        },
         body: JSON.stringify({
           company_id: userCompany.id,
           target_user_id: row.userId,
@@ -17997,7 +20881,6 @@ const handlePhotoQuickUpload = async (event) => {
           auto_payroll_amount: autoPayrollEnabled ? autoPayrollAmount : 0,
         }),
       });
-      const profileJson = await profileRes.json().catch(() => ({}));
       if (!profileRes.ok) {
         throw new Error(typeof profileJson.error === "string" ? profileJson.error : "Could not save member profile.");
       }
@@ -18181,6 +21064,95 @@ const handlePhotoQuickUpload = async (event) => {
       setPayrollSettingsMessage(getErrorMessage(err));
     } finally {
       setPayrollSettingsSaving(false);
+    }
+  };
+
+  const openSpecialProjectForm = (project = null) => {
+    if (!isAdmin) return;
+    setSpecialProjectError("");
+    setSpecialProjectMessage("");
+    setSpecialProjectDraft({
+      id: project?.id ? String(project.id) : "",
+      name: String(project?.name || "").trim(),
+      active: project ? Boolean(project?.specialProjectActive ?? project?.special_project_active ?? (String(project?.status || "").toLowerCase() !== "archived")) : true,
+      specialHourlyRate: String(project?.specialHourlyRate ?? project?.special_hourly_rate ?? ""),
+      notes: String(project?.specialProjectNotes ?? project?.special_project_notes ?? "").trim(),
+    });
+    setSpecialProjectFormOpen(true);
+  };
+
+  const cancelSpecialProjectForm = () => {
+    setSpecialProjectFormOpen(false);
+    setSpecialProjectDraft(null);
+    setSpecialProjectSaving(false);
+    setSpecialProjectError("");
+  };
+
+  const handleSaveSpecialProject = async (event) => {
+    event.preventDefault();
+    if (!isAdmin || !userCompany?.id || !authUser?.id) return;
+    const name = String(specialProjectDraft?.name || "").trim();
+    const rate = Number(specialProjectDraft?.specialHourlyRate || 0);
+    const notes = String(specialProjectDraft?.notes || "").trim();
+    const active = Boolean(specialProjectDraft?.active);
+    if (!name) {
+      setSpecialProjectError("Project name is required.");
+      return;
+    }
+    if (!Number.isFinite(rate) || rate < 0) {
+      setSpecialProjectError("Enter a valid hourly rate.");
+      return;
+    }
+    setSpecialProjectSaving(true);
+    setSpecialProjectError("");
+    setSpecialProjectMessage("");
+    try {
+      if (!specialProjectDraft?.id) {
+        const json = await createProjectTaskViaApi({
+          itemType: "project",
+          name,
+          specialProject: {
+            active,
+            specialHourlyRate: rate,
+            notes,
+          },
+        });
+        setSpecialProjectMessage(json?.existed ? "Project already exists." : "Special project added.");
+      } else {
+        const { data: sessionData, error: sessionErr } = await safeGetSession();
+        if (sessionErr) throw sessionErr;
+        const accessToken = sessionData?.session?.access_token;
+        if (!accessToken) throw new Error("Sign in again before updating the special project.");
+        const res = await fetch("/api/update-project", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            company_id: userCompany.id,
+            project_id: specialProjectDraft.id,
+            name,
+            status: "active",
+            special_project_active: active,
+            special_hourly_rate: rate,
+            special_project_notes: notes,
+            initial_cost_centre_ids: [],
+            lines: [],
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(typeof json?.error === "string" ? json.error : "Could not save project.");
+        setSpecialProjectMessage("Special project saved.");
+      }
+      setCompanyProjectsRefreshKey((k) => k + 1);
+      setProjectsScreenRefreshKey((k) => k + 1);
+      setSpecialProjectFormOpen(false);
+      setSpecialProjectDraft(null);
+    } catch (err) {
+      setSpecialProjectError(getErrorMessage(err));
+    } finally {
+      setSpecialProjectSaving(false);
     }
   };
 
@@ -18426,6 +21398,12 @@ const handlePhotoQuickUpload = async (event) => {
     } catch (err) {
       setPayrollPaymentMessage(getErrorMessage(err));
     }
+  };
+
+  const handleVoidPayrollPaymentFromModal = async () => {
+    if (!payrollPaymentDraft?.id || String(payrollPaymentDraft.paymentKind || "salary") !== "salary") return;
+    await handleVoidPayrollPayment({ id: payrollPaymentDraft.id });
+    setPayrollPaymentFormOpen(false);
   };
 
   const handleEditPayrollPayment = (payment) => {
@@ -18853,9 +21831,9 @@ const handlePhotoQuickUpload = async (event) => {
     const recordRowId = record.supabaseTimesheetId ?? record.id;
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
 
-    const inDateText = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "—";
+    const inDateText = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "â€”";
     const inTimeText = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "";
-    let outDateText = "—";
+    let outDateText = "â€”";
     let outTimeText = "";
     let outClass = "font-black text-[#061426]";
     let staleActiveMissingOut = false;
@@ -18910,13 +21888,21 @@ const handlePhotoQuickUpload = async (event) => {
       ? breakMinutesBetween(record.clockIn, record.clockOut || new Date().toISOString(), record.breakStart, record.breakEnd)
       : Number(record.breakMinutes || 0);
     const showBreakLine = Boolean(record.breakStart || record.breakEnd || recordBreakMinutes > 0);
-    const breakStartText = record.breakStart ? formatTime(record.breakStart, companyTimeZone) : "—";
-    const breakEndText = record.breakEnd ? formatTime(record.breakEnd, companyTimeZone) : "—";
+    const breakStartText = record.breakStart ? formatTime(record.breakStart, companyTimeZone) : "-";
+    const breakEndText = record.breakEnd ? formatTime(record.breakEnd, companyTimeZone) : "-";
     const breakDurationText = formatHoursMinutes(Math.max(0, Number(recordBreakMinutes || 0)));
     const canShowMoreMenu = isAdmin || record.clockInLocation || record.clockOutLocation;
 
+    const isHighlightedTimesheet = String(timesheetHighlightedRecordId || "") === String(recordRowId || "");
+
     return (
-    <div key={record.id} className="rounded-[16px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+    <div
+      id={`timesheet-row-${recordRowId}`}
+      key={record.id}
+      className={`rounded-[16px] border bg-white px-4 py-4 shadow-[0_10px_26px_rgba(6,20,38,0.07)] ${
+        isHighlightedTimesheet ? "border-[#C9A227] ring-2 ring-[#C9A227] ring-offset-2 ring-offset-[#F4F7FB]" : "border-[#E2E8F0]"
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[15px] font-black leading-snug text-[#061426]">{timesheetTitle}</p>
@@ -19038,7 +22024,7 @@ const handlePhotoQuickUpload = async (event) => {
               disabled={editCentres.length === 0}
             >
               {editCentres.length === 0 ? (
-                <option value="">—</option>
+                <option value="">â€”</option>
               ) : (
                 editCentres.map((c) => (
                   <option key={c} value={c}>
@@ -19102,24 +22088,10 @@ const handlePhotoQuickUpload = async (event) => {
             </p>
           )}
           {showBreakLine ? (
-            <p className="mt-1 text-[11px] font-semibold text-[#64748B]">
-              Break time: {breakDurationText}
-            </p>
-          ) : null}
-          {showBreakLine ? (
-            <div className="mt-2 grid grid-cols-3 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
-              <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
-                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break start</p>
-                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakStartText}</p>
-              </div>
-              <div className="min-w-0 border-r border-[#E2E8F0] px-2">
-                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break stop</p>
-                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakEndText}</p>
-              </div>
-              <div className="min-w-0 pl-2">
-                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break total</p>
-                <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{breakDurationText}</p>
-              </div>
+            <div className="mt-2 flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-black text-[#061426]">
+              <span className="shrink-0 uppercase tracking-[0.08em] text-[#64748B]">Break 1</span>
+              <span className="min-w-0 flex-1 truncate">{breakStartText} - {breakEndText}</span>
+              <span className="shrink-0 tabular-nums">{breakDurationText}</span>
             </div>
           ) : null}
           {showCloseShift && (
@@ -19129,10 +22101,10 @@ const handlePhotoQuickUpload = async (event) => {
               disabled={busyClose}
               onClick={() => void handleCloseStaleShift(record)}
             >
-              {busyClose ? "Closing…" : "Close shift"}
+              {busyClose ? "Closingâ€¦" : "Close shift"}
             </Button>
           )}
-          {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee — waiting for admin approval.</p>}
+          {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee â€” waiting for admin approval.</p>}
           {pendingEditRequest ? (
             <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
               Edit request pending supervisor approval.
@@ -19197,17 +22169,12 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderPayrollPanel = () => {
     if (!payrollPanelOpen || !isAdmin) return null;
-    const rangeLabel = payrollRangePresetLabel(payrollRangePreset);
-    const employeeLabel =
-      payrollEmployeeFilter === "all"
-        ? "All employees"
-        : payrollEmployeeOptions.find((employee) => String(employee.id) === String(payrollEmployeeFilter))?.name || "Selected employee";
     const currentPayrollPeriodLabel = payrollCurrentPeriod
-      ? formatPayrollPeriodLabel(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
-      : "—";
+      ? formatPayrollPeriodLabelCompact(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
+      : "-";
     const currentPayDateLabel = payrollCurrentPeriod?.payDateKey
       ? formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)
-      : "—";
+      : "-";
     const payrollShowEmployeeList = isAdmin && payrollEmployeeFilter === "all";
     const payrollDetailEmployeeId = payrollShowEmployeeList
       ? ""
@@ -19220,9 +22187,349 @@ const handlePhotoQuickUpload = async (event) => {
       ? payrollEmployeeGroups.find((group) => String(group.employeeId) === String(payrollDetailEmployeeId)) || null
       : null;
 
+    const openPayrollDetailRow = (row) => {
+      if (!row) return;
+      const scrollTop = payrollPanelScrollRef.current?.scrollTop || 0;
+      setPayrollDetailScrollTop(scrollTop);
+      setPayrollDetailRow(row);
+    };
+
+    const payrollDetailRecords = payrollDetailRow
+      ? [...normalizeArray(payrollDetailRow.records || [])].sort((a, b) =>
+          String(a?.clockIn || a?.clock_out || a?.created_at || "").localeCompare(
+            String(b?.clockIn || b?.clock_out || b?.created_at || "")
+          )
+        )
+      : [];
+
+    const payrollPeriodActivityItems = (period) => {
+      const payments = normalizeArray(period?.payments).map((payment, index) => ({
+        key: `payment-${payment.id || index}`,
+        kind: "payment",
+        date: payment.paid_date,
+        order: index,
+        amount: -Math.abs(Number(payment.paid_amount || 0)),
+        label: "Payment",
+        note: String(payment.note || "").trim() || "Paid for payroll",
+        balance: period?.balance || 0,
+        onClick: isAdmin ? () => handleEditPayrollPayment(payment) : undefined,
+      }));
+      const loans = normalizeArray(period?.loans).map((loan, index) => {
+        const isReturned = String(loan?.transaction_type || "") === "loan_returned";
+        return {
+          key: `loan-${loan.id || index}`,
+          kind: isReturned ? "loan_returned" : "loan_given",
+          date: loan.transaction_date,
+          order: payments.length + index,
+          amount: isReturned ? Math.abs(Number(loan.amount || 0)) : -Math.abs(Number(loan.amount || 0)),
+          label: isReturned ? "Loan returned" : "Loan given",
+          note: String(loan.note || "").trim() || (isReturned ? "Returned loan amount" : "Loan amount given"),
+          balance: period?.balance || 0,
+          onClick: isAdmin ? () => handleEditPayrollPayment({ ...loan, paymentKind: "loan" }) : undefined,
+        };
+      });
+      return [...payments, ...loans].sort((a, b) => {
+        const dateCompare = String(b.date || "").localeCompare(String(a.date || ""));
+        return dateCompare || a.order - b.order;
+      });
+    };
+
+    const payrollActivityNoteLabel = (item) => {
+      const note = String(item?.note || "").trim();
+      if (!note) return item?.kind === "loan_returned" ? "Returned loan amount" : item?.kind === "loan_given" ? "Loan amount given" : "Paid for payroll";
+      const normalized = note.toLowerCase();
+      if (item?.kind === "payment" && normalized.includes("payroll seed")) return "Paid for payroll seed";
+      if (item?.kind === "loan_returned" && normalized.includes("loan returned")) return "Returned loan amount";
+      if (item?.kind === "loan_given" && normalized.includes("loan given")) return "Loan amount given";
+      return note;
+    };
+
+    const renderPayrollMetricTile = ({ label, value, icon, colorClass, valueClass = "text-[#061426]", onClick }) => {
+      const Tag = onClick ? "button" : "div";
+      return (
+        <Tag
+          type={onClick ? "button" : undefined}
+          className={`min-w-0 rounded-[18px] border border-[#E2E8F0] bg-white p-3 text-left shadow-[0_8px_22px_rgba(6,20,38,0.05)] ${onClick ? "active:bg-[#F8FAFC]" : ""}`}
+          onClick={onClick}
+        >
+          <span className={`flex h-10 w-10 items-center justify-center rounded-full ${colorClass}`}>
+            {icon}
+          </span>
+          <p className="mt-4 text-[9px] font-black uppercase tracking-[0.06em] text-[#64748B]">{label}</p>
+          <p className={`mt-2 whitespace-nowrap text-[16px] font-black leading-tight tabular-nums sm:text-[18px] ${valueClass}`}>{value}</p>
+        </Tag>
+      );
+    };
+
+    const renderPayrollActivityRow = (item) => {
+      const positive = Number(item.amount || 0) >= 0;
+      const isPayment = item.kind === "payment";
+      const iconClass = isPayment
+        ? "bg-[#FEF2F2] text-[#DC2626]"
+        : positive
+          ? "bg-[#ECFDF5] text-[#15803D]"
+          : "bg-[#FFF7E6] text-[#D97706]";
+      return (
+        <div
+          key={item.key}
+          className={`rounded-[22px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_8px_22px_rgba(6,20,38,0.05)] ${item.onClick ? "cursor-pointer active:bg-[#F8FAFC]" : ""}`}
+          onClick={item.onClick}
+          role={item.onClick ? "button" : undefined}
+          tabIndex={item.onClick ? 0 : undefined}
+        >
+          <div className="flex items-center gap-4">
+            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconClass}`}>
+              {isPayment ? (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14" />
+                  <path d="m18 13-6 6-6-6" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  {positive ? <path d="M7 7h7a5 5 0 1 1 0 10H6" /> : <path d="M17 17H10a5 5 0 1 1 0-10h8" />}
+                  <path d={positive ? "m7 7 3-3M7 7l3 3" : "m17 17-3 3m3-3-3-3"} />
+                </svg>
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className={`text-[18px] font-black tabular-nums ${positive ? "text-[#15803D]" : "text-[#DC2626]"}`}>
+                {formatPayrollSignedMoney(item.amount)}
+              </p>
+              <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
+                {item.label} <span className="px-1">•</span> {payrollActivityNoteLabel(item)}
+              </p>
+            </div>
+            {item.onClick ? (
+              <span className="shrink-0 text-[#64748B]">
+                <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    };
+
+    const renderPayrollPeriodCard = (period) => {
+      if (!period) return null;
+      const activityItems = payrollPeriodActivityItems(period);
+      const periodLabel = period.periodLabel || formatPayrollPeriodLabelCompact(period.periodStart, period.periodEnd, companyTimeZone);
+      const payDateLabel = period.payDate ? formatPayrollDateKeyShort(period.payDate, companyTimeZone, { includeYear: true }) : currentPayDateLabel;
+      return (
+        <section key={period.id || `${period.periodStart}-${period.periodEnd}`} className="space-y-5">
+          <div className="rounded-[24px] border border-[#E2E8F0] bg-white px-5 py-5 shadow-[0_12px_30px_rgba(6,20,38,0.08)]">
+            <div className="flex items-center gap-4">
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#2563EB]">
+                {renderTimesheetUiIcon("calendar", "h-7 w-7")}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[13px] font-black text-[#64748B]">Pay period</p>
+                <p className="mt-1 text-[18px] font-black leading-snug text-[#061426]">{periodLabel}</p>
+                <div className="my-3 h-px bg-[#E2E8F0]" />
+                <p className="text-[13px] font-black text-[#64748B]">Pay day</p>
+                <p className="mt-1 text-[18px] font-black leading-snug text-[#061426]">{payDateLabel}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            {renderPayrollMetricTile({
+              label: "Hours",
+              value: formatHoursMinutes(period.workedMinutes || 0),
+              colorClass: "bg-[#EFF6FF] text-[#2563EB]",
+              icon: renderTimesheetUiIcon("clock", "h-5 w-5"),
+              onClick: () => openPayrollDetailRow({ ...payrollDetailEmployeeGroup, ...period }),
+            })}
+            {renderPayrollMetricTile({
+              label: "Worked",
+              value: formatMoney(period.workedAmount || 0),
+              colorClass: "bg-[#ECFDF5] text-[#15803D]",
+              icon: renderTimesheetUiIcon("wallet", "h-5 w-5"),
+              onClick: () => openPayrollDetailRow({ ...payrollDetailEmployeeGroup, ...period }),
+            })}
+            {renderPayrollMetricTile({
+              label: "Paid",
+              value: formatMoney(period.paidAmount || 0),
+              colorClass: "bg-[#F7FEE7] text-[#65A30D]",
+              icon: renderTimesheetUiIcon("wallet", "h-5 w-5"),
+            })}
+            {renderPayrollMetricTile({
+              label: "Loans",
+              value: formatPayrollSignedMoney(period.loanNetAmount || 0),
+              colorClass: "bg-[#F5F3FF] text-[#7C3AED]",
+              icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
+            })}
+            {renderPayrollMetricTile({
+              label: "Prev Bal",
+              value: formatMoney(period.previousBalance || 0),
+              colorClass: "bg-[#FFF7E6] text-[#D97706]",
+              icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
+            })}
+            {renderPayrollMetricTile({
+              label: "Balance",
+              value: formatMoney(period.balance || 0),
+              colorClass: Number(period.balance || 0) >= 0 ? "bg-[#FFF7E6] text-[#D97706]" : "bg-[#FEF2F2] text-[#DC2626]",
+              icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
+              valueClass: Number(period.balance || 0) >= 0 ? "text-[#D97706]" : "text-[#DC2626]",
+            })}
+          </div>
+
+          <div className="space-y-3">
+            <p className="px-1 text-[13px] font-black uppercase tracking-[0.08em] text-[#64748B]">Recent Activity</p>
+            {activityItems.length > 0 ? (
+              activityItems.map(renderPayrollActivityRow)
+            ) : (
+              <p className="rounded-[18px] border border-dashed border-[#CBD5E1] bg-white px-4 py-3 text-[13px] font-semibold text-[#64748B]">
+                No recent activity yet.
+              </p>
+            )}
+          </div>
+        </section>
+      );
+    };
+
+    if (payrollDetailRow) {
+      const detailPeriodLabel = payrollDetailRow.periodLabel || formatPayrollPeriodLabelCompact(payrollDetailRow.periodStart, payrollDetailRow.periodEnd, companyTimeZone);
+      return (
+        <div
+          ref={payrollPanelScrollRef}
+          className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-[#F4F7FB]/95 px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-3 backdrop-blur-sm shadow-[0_8px_24px_rgba(6,20,38,0.05)]">
+            <div className="flex items-start gap-3">
+              <button
+                type="button"
+                className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                onClick={() => {
+                  const scrollTop = payrollDetailScrollTop || 0;
+                  setPayrollDetailRow(null);
+                  window.requestAnimationFrame?.(() => {
+                    payrollPanelScrollRef.current?.scrollTo({ top: scrollTop, behavior: "auto" });
+                  });
+                }}
+                aria-label="Back to payroll"
+              >
+                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll detail</p>
+                <h3 className="mt-1 text-[22px] font-black leading-tight text-[#061426]">{payrollDetailEmployeeName || "Payroll detail"}</h3>
+                <p className="mt-1 max-w-full break-words text-[11px] font-semibold leading-snug text-[#64748B] sm:text-[12px]">
+                  {detailPeriodLabel} â€¢ Pay date {payrollDetailRow.payDate ? formatPayrollDateKeyShort(payrollDetailRow.payDate, companyTimeZone, { includeYear: true }) : "â€”"}
+                </p>
+              </div>
+              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(payrollDetailRow.balance)}`}>
+                {formatMoney(payrollDetailRow.balance)}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-4 px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))]">
+            <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-4 shadow-[0_8px_22px_rgba(6,20,38,0.06)]">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
+                  <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                    {formatHoursMinutes(payrollDetailRow.workedMinutes || 0)}
+                  </p>
+                </div>
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
+                  <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                    {formatMoney(payrollDetailRow.workedAmount || 0)}
+                  </p>
+                </div>
+                <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                  <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
+                  <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
+                    {formatMoney(payrollDetailRow.paidAmount || 0)}
+                  </p>
+                </div>
+                <div className={`rounded-[18px] border p-3 ${payrollBalanceBadgeClass(payrollDetailRow.balance)}`}>
+                  <p className="text-[10px] font-black uppercase tracking-[0.08em]">Balance</p>
+                  <p className="mt-2 text-[16px] font-black leading-none tabular-nums">
+                    {formatMoney(payrollDetailRow.balance || 0)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-2">
+              {payrollDetailRecords.length === 0 ? (
+                <div className="rounded-[18px] border border-dashed border-[#CBD5E1] bg-white px-4 py-6 text-center text-[13px] font-semibold text-[#64748B]">
+                  No timesheet rows found for this payroll period.
+                </div>
+              ) : (
+                payrollDetailRecords.map((record) => {
+                  const recordDate = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "â€”";
+                  const inTime = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "â€”";
+                  const outTime = record.clockOut ? formatTime(record.clockOut, companyTimeZone) : "Working";
+                  const projectName = String(record.project || record.project_name || "Unassigned").trim() || "Unassigned";
+                  const taskName = String(record.costCenter || record.cost_centre || record.task || "Unassigned").trim() || "Unassigned";
+                  const rateLabel = Number(record.payrollRateUsed || 0) > 0
+                    ? formatMoney(Number(record.payrollRateUsed || 0)) + (record.payrollChargeSource === "manual_contract" ? " fixed" : "/hr")
+                    : record.payrollChargeSource === "manual_contract"
+                      ? "Fixed"
+                      : "â€”";
+                  const amountLabel = formatMoney(Number(record.payrollChargeAmount || 0));
+                  const duplicateNote = record.payrollChargeSource === "manual_contract_duplicate" ? "Included in fixed contract total" : "";
+                  const recordKey = String(record.payrollChargeKey || record.supabaseTimesheetId || record.id || `${recordDate}-${inTime}-${taskName}`);
+                  return (
+                    <div key={recordKey} className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-black leading-tight text-[#061426]">{recordDate}</p>
+                          <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
+                            In {inTime} â€¢ Out {outTime}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[10px] font-black text-[#061426]">
+                          {record.payrollChargeSource === "manual_contract" ? "Fixed" : record.payrollChargeSource === "special_project" ? "Special" : "Hourly"}
+                        </span>
+                      </div>
+                      <p className="mt-2 truncate text-[13px] font-semibold text-[#061426]">
+                        {projectName} / {taskName}
+                      </p>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                          <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total hours</p>
+                          <p className="mt-1 text-[14px] font-black text-[#061426] tabular-nums">
+                            {formatHoursMinutes(Number(record.payrollChargeSource === "manual_contract" ? (getWorkedMinutes(record) || 0) : (getReportWorkedMinutes(record) || getWorkedMinutes(record) || 0)))}
+                          </p>
+                        </div>
+                        <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                          <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Rate used</p>
+                          <p className="mt-1 text-[14px] font-black text-[#061426] tabular-nums">{rateLabel}</p>
+                        </div>
+                        <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
+                          <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Amount</p>
+                          <p className="mt-1 text-[14px] font-black text-[#061426] tabular-nums">{amountLabel}</p>
+                        </div>
+                        <div className={`rounded-[14px] border px-3 py-2 ${record.payrollChargeSource === "manual_contract_duplicate" ? "border-[#FDE68A] bg-[#FFF7E6] text-[#9A6B12]" : "border-[#E2E8F0] bg-white text-[#061426]"}`}>
+                          <p className="text-[9px] font-black uppercase tracking-[0.08em]">Note</p>
+                          <p className="mt-1 text-[13px] font-semibold leading-snug">
+                            {duplicateNote || "Clocked time"}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <>
-        <div className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]" role="dialog" aria-modal="true">
+        <div ref={payrollPanelScrollRef} className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]" role="dialog" aria-modal="true">
           <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-[#F4F7FB]/95 px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-3 backdrop-blur-sm shadow-[0_8px_24px_rgba(6,20,38,0.05)]">
             <div className="flex items-start gap-3">
               <button
@@ -19230,6 +22537,7 @@ const handlePhotoQuickUpload = async (event) => {
                 className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
                 onClick={() => {
                   if (payrollShowEmployeeList) {
+                    setPayrollDetailRow(null);
                     setPayrollPanelOpen(false);
                     setPayrollPaymentFormOpen(false);
                     setPayrollAddPaymentMenuOpen(false);
@@ -19237,12 +22545,14 @@ const handlePhotoQuickUpload = async (event) => {
                     return;
                   }
                   if (isAdmin && payrollEmployeeFilter !== "all") {
+                    setPayrollDetailRow(null);
                     setPayrollEmployeeFilter("all");
                     setPayrollPaymentFormOpen(false);
                     setPayrollAddPaymentMenuOpen(false);
                     setPayrollAddPaymentMenuContext(null);
                     return;
                   }
+                  setPayrollDetailRow(null);
                   setPayrollPanelOpen(false);
                   setPayrollPaymentFormOpen(false);
                   setPayrollAddPaymentMenuOpen(false);
@@ -19261,174 +22571,116 @@ const handlePhotoQuickUpload = async (event) => {
                 </h3>
                 {!payrollShowEmployeeList && payrollDetailEmployeeMeta ? (
                   <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                    Start {payrollDetailEmployeeMeta.payrollStartDate ? formatPayrollDateKeyShort(payrollDetailEmployeeMeta.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"} • Opening {formatPayrollAbsoluteMoney(payrollDetailEmployeeMeta.openingBalance || 0)} • {payrollOpeningBalanceMeaning(payrollDetailEmployeeMeta.openingBalance || 0)}
+                    Start {payrollDetailEmployeeMeta.payrollStartDate ? formatPayrollDateKeyShort(payrollDetailEmployeeMeta.payrollStartDate, companyTimeZone, { includeYear: true }) : "-"} • Opening {formatPayrollAbsoluteMoney(payrollDetailEmployeeMeta.openingBalance || 0)} • {payrollOpeningBalanceMeaning(payrollDetailEmployeeMeta.openingBalance || 0)}
                   </p>
                 ) : null}
               </div>
             </div>
           </div>
 
-          <div className="mt-4 px-4">
-              <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                {payrollSettingsLoading ? (
-                  <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
-                ) : payrollSettings ? (
-                  <div className="space-y-3">
-                    <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3">
-                      <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Current payroll period</p>
-                      <p className="mt-1 text-[14px] font-black text-[#061426]">{currentPayrollPeriodLabel}</p>
-                      <p className="mt-1 text-[12px] font-semibold text-[#64748B]">Pay date: {currentPayDateLabel}</p>
+          {payrollShowEmployeeList ? (
+            <>
+              <div className="mt-4 px-4">
+                <div className="rounded-[24px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_12px_30px_rgba(6,20,38,0.08)]">
+                  {payrollSettingsLoading ? (
+                    <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
+                  ) : payrollSettings ? (
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#2563EB]">
+                        {renderTimesheetUiIcon("calendar", "h-6 w-6")}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#94A3B8]">Current payroll period</p>
+                        <p className="mt-1 text-[16px] font-black leading-tight text-[#061426]">{currentPayrollPeriodLabel}</p>
+                        <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Pay date: {currentPayDateLabel}</p>
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <p className="text-[13px] font-semibold leading-snug text-[#64748B]">
-                      Set an anchor Friday in Settings to start payroll periods and payment history.
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-[13px] font-semibold leading-snug text-[#64748B]">
+                        Set an anchor Friday in Settings to start payroll periods and payment history.
+                      </p>
+                      <button
+                        type="button"
+                        className="w-full rounded-[14px] bg-[#061426] px-4 py-3 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                        onClick={() => {
+                          setPayrollPanelOpen(false);
+                          setActiveTab("settings");
+                        }}
+                      >
+                        Open settings
+                      </button>
+                    </div>
+                  )}
+                  {payrollSettingsError ? (
+                    <p className="mt-3 rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold leading-snug text-[#DC2626]">
+                      {payrollSettingsError}
                     </p>
-                    <button
-                      type="button"
-                      className="w-full rounded-[14px] bg-[#061426] px-4 py-3 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                      onClick={() => {
-                        setPayrollPanelOpen(false);
-                        setActiveTab("settings");
-                      }}
-                    >
-                      Open settings
-                    </button>
-                  </div>
-                )}
-                {payrollSettingsError ? (
-                  <p className="mt-2 rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-3 py-2 text-[12px] font-semibold leading-snug text-[#DC2626]">
-                    {payrollSettingsError}
-                  </p>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            <div className="mt-4 px-4">
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {PAYROLL_RANGE_OPTIONS.map((option) => {
-                  const active = payrollRangePreset === option.id;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={`shrink-0 rounded-full border px-3 py-2 text-[12px] font-black transition ${
-                        active
-                          ? "border-[#061426] bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.14)]"
-                          : "border-[#CBD5E1] bg-white text-[#475569] active:bg-[#F8FAFC]"
-                      }`}
-                      onClick={() => setPayrollRangePreset(option.id)}
-                    >
-                      {option.label}
-                    </button>
-                  );
+              <div className="mt-4 px-4">
+                <div className="grid grid-cols-[1.12fr_1.12fr_0.68fr] gap-2">
+                  {PAYROLL_RANGE_OPTIONS.map((option) => {
+                    const active = payrollRangePreset === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={`min-w-0 rounded-full border px-2 py-3 text-[12px] font-black leading-tight transition ${
+                          active
+                            ? "border-[#061426] bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)]"
+                            : "border-[#E2E8F0] bg-white text-[#64748B] shadow-[0_4px_12px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                        }`}
+                        onClick={() => setPayrollRangePreset(option.id)}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 px-4">
+                {renderRoyalNavyFilterSelect({
+                  label: "Payroll period",
+                  icon: "calendar",
+                  value: payrollPeriodFilter,
+                  onChange: (event) => setPayrollPeriodFilter(event.target.value),
+                  children: (
+                    <>
+                      <option value="all">All periods</option>
+                      {payrollPeriodOptions.map((period) => (
+                        <option key={period.id} value={period.id}>
+                          {period.label}
+                        </option>
+                      ))}
+                    </>
+                  ),
+                })}
+                {renderRoyalNavyFilterSelect({
+                  label: "Employee",
+                  icon: "user",
+                  value: payrollEmployeeFilter,
+                  onChange: (event) => setPayrollEmployeeFilter(event.target.value),
+                  children: (
+                    <>
+                      <option value="all">All employees</option>
+                      {payrollEmployeeOptions.map((employee) => (
+                        <option key={employee.id} value={employee.id}>
+                          {employee.name}
+                        </option>
+                      ))}
+                    </>
+                  ),
                 })}
               </div>
-            </div>
+            </>
+          ) : null}
 
-            <div className="mt-3 grid gap-3 px-4">
-              {renderRoyalNavyFilterSelect({
-                label: "Payroll period",
-                icon: "calendar",
-                value: payrollPeriodFilter,
-                onChange: (event) => setPayrollPeriodFilter(event.target.value),
-                children: (
-                  <>
-                    <option value="all">All periods</option>
-                    {payrollPeriodOptions.map((period) => (
-                      <option key={period.id} value={period.id}>
-                        {period.label}
-                      </option>
-                    ))}
-                  </>
-                ),
-              })}
-              {payrollShowEmployeeList
-                ? renderRoyalNavyFilterSelect({
-                    label: "Employee",
-                    icon: "user",
-                    value: payrollEmployeeFilter,
-                    onChange: (event) => setPayrollEmployeeFilter(event.target.value),
-                    children: (
-                      <>
-                        <option value="all">All employees</option>
-                        {payrollEmployeeOptions.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name}
-                          </option>
-                        ))}
-                      </>
-                    ),
-                  })
-                : null}
-            </div>
-
-            <div className="px-4 pt-3">
-              {payrollShowEmployeeList ? (
-                <div className="rounded-[18px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Employees</p>
-                      <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Tap an employee to open their payroll detail.</p>
-                    </div>
-                    <span className="shrink-0 rounded-full border border-[#CBD5E1] bg-[#F8FAFC] px-2.5 py-1 text-[10px] font-black text-[#061426]">
-                      {payrollEmployeeGroups.length} employees
-                    </span>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {payrollEmployeeGroups.map((group) => (
-                      <button
-                        key={group.employeeId}
-                        type="button"
-                        className="w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2.5 text-left shadow-[0_10px_26px_rgba(6,20,38,0.07)] active:bg-[#F8FAFC]"
-                        onClick={() => setPayrollEmployeeFilter(group.employeeId)}
-                        aria-label={`Open payroll detail for ${group.employeeName}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-[14px] font-black leading-tight text-[#061426]">{group.employeeName}</p>
-                            <p className="mt-0.5 text-[11px] font-semibold text-[#64748B]">
-                              {group.periods.length} period{group.periods.length === 1 ? "" : "s"} • {formatHoursMinutes(group.workedMinutes)} worked • {formatMoney(group.workedAmount)} earned
-                            </p>
-                          </div>
-                          <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
-                            {formatMoney(group.balance)}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                ) : (
-                  <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] font-semibold text-[#64748B]">
-                    <div className="flex items-baseline gap-1">
-                      <span>Hours:</span>
-                      <span className="font-black text-[#061426] tabular-nums">{formatHoursMinutes(payrollSummary.workedMinutes)}</span>
-                    </div>
-                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                    <div className="flex items-baseline gap-1">
-                      <span>Worked:</span>
-                      <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.workedAmount)}</span>
-                    </div>
-                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                    <div className="flex items-baseline gap-1">
-                      <span>Paid:</span>
-                      <span className="font-black text-[#061426] tabular-nums">{formatMoney(payrollSummary.paidAmount)}</span>
-                    </div>
-                    <span className="hidden h-4 w-px bg-[#E2E8F0] sm:block" />
-                    <div className={`flex items-baseline gap-1 rounded-full border px-2.5 py-1 ${payrollBalanceBadgeClass(payrollSummary.balance)}`}>
-                      <span>Balance:</span>
-                      <span className="font-black tabular-nums">{formatMoney(payrollSummary.balance)}</span>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-3">
-              <div className="space-y-3">
+            <div className="px-4 pb-[max(1rem,env(safe-area-inset-bottom,1rem))] pt-4">
+              <div className="space-y-4">
                 {payrollPaymentsError || payrollLoanTransactionsError ? (
                   <p className="rounded-[16px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] font-semibold text-[#DC2626]">
                     {payrollPaymentsError || payrollLoanTransactionsError}
@@ -19448,195 +22700,72 @@ const handlePhotoQuickUpload = async (event) => {
                       Try a wider date range, or set up payroll in Settings first.
                     </p>
                   </div>
-                ) : (
-                  (payrollDetailEmployeeGroup ? [payrollDetailEmployeeGroup] : []).map((group) => (
-                    <div key={group.employeeId} className="rounded-[20px] border border-[#E2E8F0] bg-white p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-[16px] font-black leading-tight text-[#061426]">{group.employeeName}</p>
-                          <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                            {group.periods.length} period{group.periods.length === 1 ? "" : "s"} • {formatHoursMinutes(group.workedMinutes)} worked • {formatMoney(group.workedAmount)} earned
-                          </p>
-                          <p className="mt-0.5 text-[11px] font-semibold text-[#64748B]">
-                            Payroll start {group.payrollStartDate ? formatPayrollDateKeyShort(group.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"} • Opening {formatPayrollAbsoluteMoney(group.openingBalance || 0)} • {payrollOpeningBalanceMeaning(group.openingBalance || 0)}
-                          </p>
-                        </div>
-                        <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
-                          {formatMoney(group.balance)}
-                        </span>
+                ) : payrollShowEmployeeList ? (
+                  <div className="rounded-[24px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black uppercase tracking-[0.08em] text-[#64748B]">Employees</p>
+                        <p className="mt-1 text-[14px] font-semibold text-[#64748B]">Tap an employee to open their payroll detail.</p>
                       </div>
-
-                      <div className="mt-3 space-y-3">
-                        {group.periods.length === 0 ? (
-                          <p className="rounded-[16px] border border-dashed border-[#CBD5E1] bg-white px-3 py-3 text-[12px] font-semibold text-[#64748B]">
-                            No payroll periods yet. Hours and payments will appear after this employee&apos;s payroll start date.
-                          </p>
-                        ) : null}
-                        {group.periods.map((period) => (
-                          <div key={period.id} className="rounded-[24px] border border-[#E2E8F0] bg-[#F8FAFC] p-4 shadow-[0_8px_22px_rgba(6,20,38,0.05)]">
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0">
-                                <p className="truncate text-[22px] font-black leading-tight text-[#061426]">{period.periodLabel}</p>
-                                <p className="mt-1.5 text-[14px] font-semibold text-[#64748B]">
-                                  Pay date {formatPayrollDateKeyShort(period.payDate, companyTimeZone, { includeYear: true })}
-                                </p>
-                                <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
-                                  Balance after this period {formatMoney(period.balance)}
-                                </p>
-                              </div>
-                              <button
-                                type="button"
-                                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[22px] font-black leading-none text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
-                                onClick={() =>
-                                  openPayrollPaymentMenu({
-                                    employeeId: period.employeeId,
-                                    employeeName: group.employeeName,
-                                    periodStart: period.periodStart,
-                                    periodEnd: period.periodEnd,
-                                    periodLabel: period.periodLabel,
-                                    payDate: period.payDate,
-                                  })
-                                }
-                                aria-label="Add payment"
-                              >
-                                +
-                              </button>
-                            </div>
-
-                            <div className="mt-4 grid grid-cols-2 gap-3">
-                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Hours</p>
-                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
-                                  {formatHoursMinutes(period.workedMinutes)}
-                                </p>
-                              </div>
-                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Worked</p>
-                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
-                                  {formatMoney(period.workedAmount)}
-                                </p>
-                              </div>
-                              <div className="rounded-[20px] border border-[#E2E8F0] bg-white p-3">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
-                                <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
-                                  {formatMoney(period.paidAmount)}
-                                </p>
-                              </div>
-                              <div className={`rounded-[20px] border p-3 ${payrollBalanceBadgeClass(period.balance)}`}>
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em]">Balance</p>
-                                <p className="mt-2 text-[16px] font-black leading-none tabular-nums">
-                                  {formatMoney(period.balance)}
-                                </p>
-                              </div>
-                            </div>
-
-                            {Array.isArray(period.vacations) && period.vacations.length > 0 ? (
-                              <div className="mt-4 space-y-2">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Vacation</p>
-                                {period.vacations
-                                  .slice()
-                                  .sort((a, b) =>
-                                    String(b?.vacationStartDate || b?.start_date || b?.clockIn || "").localeCompare(
-                                      String(a?.vacationStartDate || a?.start_date || a?.clockIn || "")
-                                    )
-                                  )
-                                  .map((vacation) => (
-                                    <div key={vacation.id} className="rounded-[14px] border border-[#E2E8F0] bg-[#FBF8F1] px-3 py-2">
-                                      <p className="text-[13px] font-black text-[#061426]">
-                                        {formatVacationRangeLabel(vacation, companyTimeZone)} - Vacation
-                                      </p>
-                                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                                        {String(vacation?.vacationReason || vacation?.reason || vacation?.costCenter || "Vacation").trim() || "Vacation"}
-                                      </p>
-                                    </div>
-                                  ))}
-                              </div>
-                            ) : null}
-
-                            {period.payments.length > 0 ? (
-                              <div className="mt-4 space-y-2">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Payments</p>
-                                {period.payments.map((payment) => (
-                                  <div key={payment.id} className="rounded-[14px] border border-[#E2E8F0] bg-white p-3">
-                                    <div className="flex items-start justify-between gap-3">
-                                      <div className="min-w-0">
-                                        <p className="text-[14px] font-black text-[#061426] tabular-nums">
-                                          {formatMoney(Number(payment.paid_amount || 0))}
-                                        </p>
-                                        <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
-                                          {formatPayrollDateKeyShort(payment.paid_date, companyTimeZone, { includeYear: true })} • Balance {formatMoney(period.balance)}
-                                        </p>
-                                        {String(payment.note || "").trim() ? (
-                                          <p className="mt-1 text-[12px] font-semibold leading-snug text-[#061426]">{payment.note}</p>
-                                        ) : null}
-                                      </div>
-                                      <div className="flex shrink-0 items-center gap-1.5">
-                                        <button
-                                          type="button"
-                                          className="rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[11px] font-black text-[#061426] active:bg-[#F8FAFC]"
-                                          onClick={() => handleEditPayrollPayment(payment)}
-                                        >
-                                          Edit
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="rounded-full border border-[#FECACA] bg-[#FEF2F2] px-2.5 py-1 text-[11px] font-black text-[#DC2626] active:bg-[#FFF7F7]"
-                                          onClick={() => void handleVoidPayrollPayment(payment)}
-                                        >
-                                          Void
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="mt-4 rounded-[14px] border border-dashed border-[#CBD5E1] bg-white px-3 py-2 text-[12px] font-semibold text-[#64748B]">
-                                No payments recorded yet.
-                              </p>
-                            )}
-
-                            {payrollLoanRowsByEmployee[period.employeeId]?.length ? (
-                              <div className="mt-4 space-y-2">
-                                <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Loan transactions</p>
-                                {payrollLoanRowsByEmployee[period.employeeId].map((loan) => {
-                                  const loanAmount = Number(loan?.amount || 0);
-                                  const loanSignedAmount = String(loan?.transaction_type || "") === "loan_returned" ? loanAmount : -loanAmount;
-                                  return (
-                                    <div key={loan.id} className="rounded-[14px] border border-[#E2E8F0] bg-white p-3">
-                                      <div className="flex items-start justify-between gap-3">
-                                        <div className="min-w-0">
-                                          <p className="text-[14px] font-black text-[#061426] tabular-nums">
-                                            {formatPayrollSignedMoney(loanSignedAmount)}
-                                          </p>
-                                          <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
-                                            {formatPayrollDateKeyShort(loan.transaction_date, companyTimeZone, { includeYear: true })} • Balance {formatMoney(period.balance)}
-                                          </p>
-                                          {String(loan.note || "").trim() ? (
-                                            <p className="mt-1 text-[12px] font-semibold leading-snug text-[#061426]">{loan.note}</p>
-                                          ) : null}
-                                        </div>
-                                        <span
-                                          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${
-                                            String(loan?.transaction_type || "") === "loan_returned"
-                                              ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
-                                              : "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]"
-                                          }`}
-                                        >
-                                          {String(loan?.transaction_type || "") === "loan_returned" ? "Money received" : "Money given"}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
+                      <span className="shrink-0 rounded-full bg-[#EEF4FF] px-3 py-1 text-[12px] font-black text-[#2563EB]">
+                        {payrollEmployeeGroups.length} employees
+                      </span>
                     </div>
-                  ))
-                )}
+                    <div className="mt-4 space-y-3">
+                      {payrollEmployeeGroups.map((group) => {
+                        const initials = String(group.employeeName || "")
+                          .split(/\s+/)
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((part) => part[0])
+                          .join("")
+                          .toUpperCase() || "EM";
+                        return (
+                          <button
+                            key={group.employeeId}
+                            type="button"
+                            className="w-full rounded-[20px] border border-[#EAF0F6] bg-white px-4 py-4 text-left shadow-[0_8px_22px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                            onClick={() => setPayrollEmployeeFilter(group.employeeId)}
+                            aria-label={`Open payroll detail for ${group.employeeName}`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#DDEAFE] text-[15px] font-black text-[#2563EB]">
+                                {initials}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="truncate text-[15px] font-black text-[#061426]">{group.employeeName}</p>
+                                    <p className="mt-1 text-[13px] font-semibold leading-snug text-[#64748B]">
+                                      {group.periods.length} period{group.periods.length === 1 ? "" : "s"} · {formatHoursMinutes(group.workedMinutes)} worked · {formatMoney(group.workedAmount)} earned
+                                    </p>
+                                  </div>
+                                  <span className={`shrink-0 rounded-full border px-3 py-1 text-[12px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
+                                    {formatMoney(group.balance)}
+                                  </span>
+                                </div>
+                                <div className="mt-2 flex items-start justify-between gap-3">
+                                  <p className="text-[12px] font-semibold leading-snug text-[#64748B]">
+                                    Previous balance {formatMoney(group.previousBalance)} | Loans -{formatPayrollAbsoluteMoney(group.loanGivenAmount)} +{formatPayrollAbsoluteMoney(group.loanReturnedAmount)}
+                                  </p>
+                                  <span className="shrink-0 text-[#94A3B8]">
+                                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="m9 6 6 6-6 6" />
+                                    </svg>
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : payrollDetailEmployeeGroup ? (
+                  <div className="space-y-7">
+                    {normalizeArray(payrollDetailEmployeeGroup.periods).map(renderPayrollPeriodCard)}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -19684,7 +22813,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="min-w-0">
                         <p className="truncate text-[14px] font-black leading-tight text-[#061426]">{candidate.employeeName}</p>
                         <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
-                          {candidate.periodLabel} • {formatPayrollAbsoluteMoney(candidate.amount)}
+                          {candidate.periodLabel} â€¢ {formatPayrollAbsoluteMoney(candidate.amount)}
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full border border-[#BBF7D0] bg-[#ECFDF5] px-2.5 py-1 text-[10px] font-black text-[#15803D]">
@@ -20013,11 +23142,20 @@ const handlePhotoQuickUpload = async (event) => {
                         ? payrollPaymentDraft.paymentKind === "loan"
                           ? "Update loan"
                           : "Update payment"
-                        : payrollPaymentDraft.paymentKind === "loan"
+                      : payrollPaymentDraft.paymentKind === "loan"
                           ? "Save loan payment"
                           : "Save payment"}
                   </Button>
                 </div>
+                {payrollPaymentDraft.id && payrollPaymentDraft.paymentKind === "salary" ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] font-black text-[#DC2626] shadow-[0_6px_18px_rgba(220,38,38,0.08)] active:bg-[#FFF7F7]"
+                    onClick={() => void handleVoidPayrollPaymentFromModal()}
+                  >
+                    Void payment
+                  </button>
+                ) : null}
               </form>
             </div>
           </div>
@@ -20258,7 +23396,7 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
             <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
               <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
-                <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
+                <p className="text-sm text-slate-700 font-semibold">Refreshing workspaceâ€¦</p>
                 <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
               </div>
             </div>
@@ -20277,7 +23415,7 @@ const handlePhotoQuickUpload = async (event) => {
     );
   }
 
-  // Logged in, but not in a company yet → onboarding
+  // Logged in, but not in a company yet â†’ onboarding
   if (authStep === "company_created" && createdCompanyCode) {
     return (
       <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
@@ -20329,7 +23467,7 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Create Company</h1>
-              <p className="text-sm text-slate-600 mt-1">You’ll get a company code to share with employees.</p>
+              <p className="text-sm text-slate-600 mt-1">Youâ€™ll get a company code to share with employees.</p>
               <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
             </div>
 
@@ -20524,11 +23662,11 @@ const handlePhotoQuickUpload = async (event) => {
           timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
         }).format(new Date(labelIso))
       : String(dateKey);
-    return `${weekday} • ${dateLabel}`.toUpperCase();
+    return `${weekday} â€¢ ${dateLabel}`.toUpperCase();
   };
 
   const formatScheduleListTime = (iso) => {
-    if (!iso) return "—";
+    if (!iso) return "â€”";
     try {
       return new Intl.DateTimeFormat("en-US", {
         hour: "numeric",
@@ -20542,13 +23680,13 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const formatScheduleListWindow = (task) => {
-    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
     if (task?.end_time) return `${startDisp} - ${formatScheduleListTime(task.end_time)}`;
     const durRaw = task?.duration_minutes;
     if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw))) {
       return `${startDisp} - ${Number(durRaw)} min`;
     }
-    return `${startDisp} - —`;
+    return `${startDisp} - â€”`;
   };
 
   const scheduleAssignmentChipClass = (label, tone = "assignment") => {
@@ -20590,10 +23728,10 @@ const handlePhotoQuickUpload = async (event) => {
     const projLine = proj.length > 0 ? proj : "No project selected";
     const cc = String(task?.cost_centre ?? "").trim();
     const ccLine = cc.length > 0 ? cc : "No task";
-    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
+    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "â€”";
     const endRaw = task?.end_time;
     const durRaw = task?.duration_minutes;
-    let windowLabel = "—";
+    let windowLabel = "â€”";
     if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
     else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
       windowLabel = `${Number(durRaw)} min`;
@@ -20604,7 +23742,7 @@ const handlePhotoQuickUpload = async (event) => {
     const respondedAt = linkRow?.responded_at;
     const respondedDisp =
       respondedAt != null && respondedAt !== ""
-        ? `${formatDate(respondedAt, companyTimeZone)} · ${formatTime(respondedAt, companyTimeZone)}`
+        ? `${formatDate(respondedAt, companyTimeZone)} Â· ${formatTime(respondedAt, companyTimeZone)}`
         : null;
     const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
     const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
@@ -20612,7 +23750,7 @@ const handlePhotoQuickUpload = async (event) => {
     const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
     const at = String(task?.assigned_team ?? "").trim();
     const notesDisp = String(task?.notes ?? "").trim();
-    const st = String(task?.status ?? "").trim() || "—";
+    const st = String(task?.status ?? "").trim() || "â€”";
     return (
       <div
         key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
@@ -20635,7 +23773,7 @@ const handlePhotoQuickUpload = async (event) => {
         <p className="text-[12px] text-slate-800">
           <span className="font-semibold text-slate-600">Time: </span>
           {startDisp}
-          {" → "}
+          {" â†’ "}
           {windowLabel}
         </p>
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -20667,7 +23805,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
                   className="rounded-lg bg-[#061426] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                 >
-                  {savingThis ? "Saving…" : "Accept"}
+                  {savingThis ? "Savingâ€¦" : "Accept"}
                 </button>
                 <button
                   type="button"
@@ -20705,7 +23843,7 @@ const handlePhotoQuickUpload = async (event) => {
                     }
                     className="rounded-lg bg-rose-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                   >
-                    {savingThis ? "Saving…" : "Confirm decline"}
+                    {savingThis ? "Savingâ€¦" : "Confirm decline"}
                   </button>
                   <button
                     type="button"
@@ -20738,7 +23876,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderEmployeeScheduleListTaskCard = (task, dateKey) => {
     const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
-    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
     const linkRow =
       task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
     const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
@@ -20858,6 +23996,12 @@ const handlePhotoQuickUpload = async (event) => {
   );
 
   const employeeClockActionLabel = visibleCurrentShift ? "Clock Out" : "Clock In";
+  const pendingCurrentShiftClockInEditRequest = pendingTimesheetRequests.find(
+    (request) =>
+      request?.requestType === "edit_time" &&
+      !request?.originalSnapshot?.clock_out &&
+      String(request?.timesheetId || "") === String(visibleCurrentShift?.supabaseTimesheetId || "")
+  );
   const handleEmployeeBottomClockAction = () => {
     if (activeTab !== "clock") setActiveTab("clock");
     const runAction = () => {
@@ -21551,6 +24695,10 @@ const handlePhotoQuickUpload = async (event) => {
       ? "All Projects"
       : timesheetProjectOptions.find((project) => String(project.id) === String(timesheetProjectFilter))?.name ||
         "Selected Project";
+  const timesheetTaskFilterLabel =
+    timesheetTaskFilter === "all"
+      ? "All Tasks"
+      : timesheetTaskOptions.find((task) => String(task.id) === String(timesheetTaskFilter))?.name || "Selected Task";
 
   const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
     ? reportsRowsFilteredForUi.length
@@ -21585,7 +24733,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
     if (dim === "cost_center") {
       const cc = reportsCostCentreKeyFromRow(row);
-      return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
+      return { key: `cc:${cc}`, label: cc === "â€”" ? "(none)" : cc };
     }
     return { key: "unknown", label: "Unknown" };
   };
@@ -21825,7 +24973,7 @@ const handlePhotoQuickUpload = async (event) => {
     setDailyEmailLoading(true);
     setDailyEmailStatus("");
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await safeGetSession();
       const token = sessionData?.session?.access_token;
       if (!token) throw new Error("Login session is not ready.");
       const reportDate = reportsDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone);
@@ -21874,7 +25022,7 @@ const handlePhotoQuickUpload = async (event) => {
     setWhatsappReportLoading(true);
     setWhatsappReportStatus("");
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
+      const { data: sessionData } = await safeGetSession();
       const token = sessionData?.session?.access_token;
       if (!token) throw new Error("Login session is not ready.");
       const reportDate = reportsDateFrom || calendarDateKeyInTimeZone(new Date(), companyTimeZone);
@@ -22071,8 +25219,10 @@ const handlePhotoQuickUpload = async (event) => {
   const appHeaderUserName = (profileFullName || "").trim() || "User";
   const appHeaderMetaSeparator = "\u2022";
   const appHeaderMetaLabel = appHeaderUserName;
+  const appHeaderBuildLabel = IS_OPERA_DEVELOPMENT_APP && OPERA_APP_BUILD_CODE ? OPERA_APP_BUILD_CODE : "";
   const isHomeTab = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
-  const showFullScreenShellHeader = ["clock", "chat", "timesheet"].includes(activeTab);
+  const isChatImmersiveView = activeTab === "chat";
+  const showFullScreenShellHeader = ["clock", "timesheet"].includes(activeTab) || (activeTab === "chat" && !isChatImmersiveView);
   const fullScreenShellTitle =
     activeTab === "chat" ? "Chat" : activeTab === "timesheet" ? "Timesheets" : "Clock";
   const homeTabForRole = isAdmin ? "dashboard" : "clock";
@@ -22231,18 +25381,25 @@ const handlePhotoQuickUpload = async (event) => {
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
-        <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]">
-          {isHomeTab ? (
+        <div
+          className={`opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain ${
+            isChatImmersiveView
+              ? "bg-[#EFEAE2] p-0 space-y-0 pb-0"
+              : "p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]"
+          }`}
+        >
+          {!isChatImmersiveView && isHomeTab ? (
             <AppHeader
               companyName={userCompany?.name || "Company"}
               metaLabel={appHeaderMetaLabel}
+              buildLabel={appHeaderBuildLabel}
               iconSrc={OPERA_APP_ICON}
               isDevelopment={IS_OPERA_DEVELOPMENT_APP}
               showCompanyName={true}
               unreadCount={inAppNotifUnread}
               onNotifications={() => setActiveTab("notifications")}
             />
-          ) : showFullScreenShellHeader ? (
+          ) : !isChatImmersiveView && showFullScreenShellHeader ? (
             <div className="flex items-center gap-3 rounded-[20px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
               <button
                 type="button"
@@ -22265,12 +25422,12 @@ const handlePhotoQuickUpload = async (event) => {
               </button>
               <div className="min-w-0 flex-1 text-center">
                 <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Back</p>
-                <h1 className="truncate text-[18px] font-black leading-tight text-[#061426]">{fullScreenShellTitle}</h1>
+                <h1 className="truncate text-[17px] font-black leading-tight text-[#061426] sm:text-[18px]">{fullScreenShellTitle}</h1>
               </div>
               <button
                 type="button"
                 onClick={() => setActiveTab("notifications")}
-                className="opera-header-icon-button relative shrink-0"
+                className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-sm transition active:scale-[0.98] active:bg-white"
                 aria-label="Notifications"
               >
                 <svg viewBox="0 0 24 24" className="h-[17px] w-[17px]" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -22278,21 +25435,24 @@ const handlePhotoQuickUpload = async (event) => {
                   <path d="M10 21h4" />
                 </svg>
                 {inAppNotifUnread > 0 ? (
-                  <span className="opera-notification-badge">{inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}</span>
+                  <span className="absolute -right-1 -top-1 flex min-h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#DC2626] px-1 text-[10px] font-black leading-none text-white shadow-sm">
+                    {inAppNotifUnread > 99 ? "99+" : inAppNotifUnread}
+                  </span>
                 ) : null}
               </button>
             </div>
-          ) : (
+          ) : !isChatImmersiveView ? (
             <AppHeader
               companyName={userCompany?.name || "Company"}
               metaLabel={appHeaderMetaLabel}
+              buildLabel={appHeaderBuildLabel}
               iconSrc={OPERA_APP_ICON}
               isDevelopment={IS_OPERA_DEVELOPMENT_APP}
               showCompanyName={false}
               unreadCount={inAppNotifUnread}
               onNotifications={() => setActiveTab("notifications")}
             />
-          )}
+          ) : null}
 
           {!isAdmin && activeAssignNotif ? (
             <div className="fixed inset-0 z-[72] bg-[#0B1F33]/40 px-3 py-6" role="dialog" aria-modal="true">
@@ -22325,11 +25485,11 @@ const handlePhotoQuickUpload = async (event) => {
                         onClick={() => void handleEmployeeConfirmAssignmentNotification(false)}
                         className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-[14px] font-bold text-slate-800 disabled:opacity-50"
                       >
-                        {assignNotifSaving ? "Saving…" : "OK"}
+                        {assignNotifSaving ? "Savingâ€¦" : "OK"}
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      “OK” confirms you saw the assignment. Accept/decline is separate inside Schedule.
+                      â€œOKâ€ confirms you saw the assignment. Accept/decline is separate inside Schedule.
                     </p>
                   </div>
                 </div>
@@ -22520,7 +25680,7 @@ const handlePhotoQuickUpload = async (event) => {
             </Card>
           )}
 
-          {!isInstalled && !installHelpDismissed && (
+          {!isChatImmersiveView && !isInstalled && !installHelpDismissed && (
             <Card className="rounded-[20px] border border-blue-100 bg-white shadow-sm">
               <CardContent className="p-3">
                 <div className="flex items-center gap-2.5">
@@ -22572,7 +25732,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {projectsError && (
                   <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-[14px] text-amber-900">
-                    Project loading failed — using emergency fallback projects.<br />
+                    Project loading failed â€” using emergency fallback projects.<br />
                     <span className="text-[13px] text-amber-800">{projectsError}</span>
                   </div>
                 )}
@@ -22594,7 +25754,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <label className="text-[13px] font-semibold text-slate-700">Project / Job Site</label>
                   </div>
                   <select
-                    className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] font-semibold leading-tight text-[#061426]"
+                    className="min-h-[46px] w-full appearance-none rounded-[12px] border border-slate-200 bg-white px-3 py-2 pr-10 text-[14px] font-semibold leading-[1.3] text-[#061426] shadow-[0_1px_2px_rgba(6,20,38,0.03)]"
                     value={projectId}
                     disabled={projectsLoading}
                     onChange={(event) => {
@@ -22621,7 +25781,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <label className="text-[13px] font-semibold text-slate-700">Task</label>
                   </div>
                   <select
-                    className="h-10 w-full rounded-[10px] border border-slate-200 bg-white px-3 text-[12px] font-semibold leading-tight text-[#061426]"
+                    className="min-h-[46px] w-full appearance-none rounded-[12px] border border-slate-200 bg-white px-3 py-2 pr-10 text-[14px] font-semibold leading-[1.3] text-[#061426] shadow-[0_1px_2px_rgba(6,20,38,0.03)]"
                     value={costCenter}
                     disabled={
                       !clockSelectedProject ||
@@ -22677,6 +25837,134 @@ const handlePhotoQuickUpload = async (event) => {
                   </span>
                   Clock In
                 </Button>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                    onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
+                  >
+                    <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                    <span className="truncate">{manualTimeOpen ? "Close manual clock-in/out" : "Manual Clock In / Out"}</span>
+                  </button>
+                  <p className="px-1 text-[12px] font-semibold leading-snug text-slate-500">
+                    {isAdmin
+                      ? "Managers can choose an employee and save manual clock-in/out directly from here."
+                      : "Manual clock-in goes to your manager for approval before it appears in Timesheets."}
+                  </p>
+                </div>
+
+                {manualTimeOpen ? (
+                  <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                    <p className="text-[15px] font-black text-slate-950">{isAdmin ? "Manual clock-in / out" : "Manual time request"}</p>
+                    {isAdmin ? (
+                      <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        Employee
+                        <select
+                          className="min-h-[46px] w-full appearance-none rounded-[14px] border border-slate-200 bg-white px-3 py-2 pr-10 text-[15px] font-semibold leading-[1.25] text-[#061426]"
+                          value={manualTimeEmployeeId}
+                          onChange={(event) => setManualTimeEmployeeId(event.target.value)}
+                          required
+                        >
+                          <option value="">Select employee</option>
+                          {manualTimeEmployeeOptions.map((employee) => (
+                            <option key={employee.id} value={String(employee.id)}>
+                              {employee.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Date
+                      <input
+                        type="date"
+                        className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeDate}
+                        onChange={(event) => setManualTimeDate(event.target.value)}
+                        required
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        Clock in
+                        <input
+                          type="time"
+                          className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                          value={manualTimeClockInTime}
+                          onChange={(event) => setManualTimeClockInTime(event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                        Clock out
+                        <input
+                          type="time"
+                          className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                          value={manualTimeClockOutTime}
+                          onChange={(event) => setManualTimeClockOutTime(event.target.value)}
+                          required
+                        />
+                      </label>
+                    </div>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Project
+                      <select
+                        className="min-h-[46px] w-full appearance-none rounded-[14px] border border-slate-200 bg-white px-3 py-2 pr-10 text-[15px] font-semibold leading-[1.25] text-[#061426]"
+                        value={manualTimeProjectId}
+                        onChange={(event) => {
+                          const next = event.target.value;
+                          setManualTimeProjectId(next);
+                          const centres =
+                            effectiveCostCentresByProjectId[String(next)] ||
+                            effectiveCostCentresByProjectId[Number(next)] ||
+                            [];
+                          setManualTimeCostCentre(centres[0] || "");
+                        }}
+                        required
+                      >
+                        <option value="">Select project</option>
+                        {manualTimeProjectOptions.map((project) => (
+                          <option key={project.id} value={String(project.id)}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Task
+                      <select
+                        className="min-h-[46px] w-full appearance-none rounded-[14px] border border-slate-200 bg-white px-3 py-2 pr-10 text-[15px] font-semibold leading-[1.25] text-[#061426]"
+                        value={manualTimeCostCentre}
+                        onChange={(event) => setManualTimeCostCentre(event.target.value)}
+                        disabled={!manualTimeProjectId || manualTimeCostCentres.length === 0}
+                      >
+                        <option value="">{manualTimeProjectId ? "Select task" : "Select project first"}</option>
+                        {manualTimeCostCentres.map((centre) => (
+                          <option key={centre} value={centre}>
+                            {centre}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                      Reason
+                      <input
+                        type="text"
+                        className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                        value={manualTimeReason}
+                        onChange={(event) => setManualTimeReason(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="w-full rounded-[14px] bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                      disabled={manualTimeSaving}
+                    >
+                      {manualTimeSaving ? (isAdmin ? "Saving..." : "Sending...") : (isAdmin ? "Save manual clock-in" : "Send for supervisor approval")}
+                    </button>
+                  </form>
+                ) : null}
 
                 <div ref={photoToolsRef} className="space-y-2.5 pt-1">
                   {isClockSetupWarningStatus ? (
@@ -23099,6 +26387,67 @@ const handlePhotoQuickUpload = async (event) => {
                       </span>
                       Clock Out
                     </Button>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC] disabled:opacity-60"
+                        onClick={clockInEditOpen ? () => setClockInEditOpen(false) : openClockInEditRequestForm}
+                        disabled={!isAdmin && Boolean(pendingCurrentShiftClockInEditRequest)}
+                      >
+                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("clock", "h-4 w-4")}</span>
+                        <span className="truncate">
+                          {!isAdmin && pendingCurrentShiftClockInEditRequest
+                            ? "Clock-in edit pending approval"
+                            : clockInEditOpen
+                              ? "Close clock-in edit"
+                              : "Edit Clock-In Time"}
+                        </span>
+                      </button>
+                      {clockInEditOpen && (isAdmin || !pendingCurrentShiftClockInEditRequest) ? (
+                          <form onSubmit={(event) => void submitClockInEditRequest(event)} className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
+                            <p className="text-[15px] font-black text-slate-950">{isAdmin ? "Edit clock-in time" : "Clock-in change request"}</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                                Date
+                                <input
+                                  type="date"
+                                  className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                                  value={clockInEditDate}
+                                  onChange={(event) => setClockInEditDate(event.target.value)}
+                                  required
+                                />
+                              </label>
+                              <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                                Time
+                                <input
+                                  type="time"
+                                  className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                                  value={clockInEditTime}
+                                  onChange={(event) => setClockInEditTime(event.target.value)}
+                                  required
+                                />
+                              </label>
+                            </div>
+                            <label className="block space-y-1 text-[12px] font-black uppercase tracking-wide text-slate-500">
+                              Reason
+                              <input
+                                type="text"
+                                className="h-11 w-full rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[15px] font-bold"
+                                value={clockInEditReason}
+                                onChange={(event) => setClockInEditReason(event.target.value)}
+                                placeholder="Optional"
+                              />
+                            </label>
+                            <button
+                              type="submit"
+                              className="w-full rounded-[14px] bg-[#0B1F33] px-4 py-3 text-[15px] font-black text-white disabled:opacity-50"
+                              disabled={clockInEditSaving}
+                            >
+                              {clockInEditSaving ? (isAdmin ? "Saving..." : "Sending...") : (isAdmin ? "Save clock-in time" : "Send for supervisor approval")}
+                            </button>
+                          </form>
+                        ) : null}
+                    </div>
                     <div ref={photoToolsRef} className="space-y-3">
                       <div className="grid grid-cols-2 gap-2">
                         <button
@@ -23397,17 +26746,6 @@ const handlePhotoQuickUpload = async (event) => {
           {activeTab === "timesheet" && (
             <Card className="overflow-hidden rounded-[24px] border border-[#E2E8F0] bg-[#F4F7FB] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
               <CardContent className="space-y-3 p-3">
-                <div className="flex items-start gap-3 px-1 pt-1">
-                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
-                    {renderTimesheetUiIcon("clock", "h-6 w-6")}
-                  </span>
-                  <div className="min-w-0">
-                    <h2 className="text-[30px] font-black leading-none tracking-tight text-[#061426]">Timesheets</h2>
-                    <p className="mt-2 text-[13px] font-semibold leading-tight text-[#64748B]">
-                      Review labour hours and costs
-                    </p>
-                  </div>
-                </div>
 
                 <div className="grid grid-cols-4 gap-1 rounded-[14px] border border-[#E2E8F0] bg-white p-1.5 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
                   {[
@@ -23445,7 +26783,7 @@ const handlePhotoQuickUpload = async (event) => {
                         {timesheetDateRangeLabel}
                       </span>
                       <span className="mt-1 block truncate text-[12px] font-semibold text-[#64748B]">
-                        {timesheetEmployeeFilterLabel} &bull; {timesheetProjectFilterLabel}
+                        {timesheetEmployeeFilterLabel} &bull; {timesheetProjectFilterLabel} &bull; {timesheetTaskFilterLabel}
                         {timesheetCompletedOnly ? " &bull; Completed only" : ""}
                       </span>
                     </span>
@@ -23626,7 +26964,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : null}
                 {timesheetsLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600 mb-3">
-                    Loading timesheets…
+                    Loading timesheetsâ€¦
                   </div>
                 )}
                 {timesheetsError && (
@@ -23661,31 +26999,40 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     {timesheetSanityChecks.length > 0 ? (
                       <div className="mt-3 space-y-2">
-                        {visibleTimesheetSanityIssues.map((issue) => (
-                          <div
-                            key={issue.id}
-                            className={`rounded-[14px] border px-3 py-2 ${
-                              issue.severity === "danger"
-                                ? "border-[#FECACA] bg-[#FEF2F2]"
-                                : issue.severity === "warning"
-                                  ? "border-[#FDE68A] bg-[#FFF7E6]"
-                                  : "border-[#BFDBFE] bg-[#EFF6FF]"
-                            }`}
-                          >
-                            <p
-                              className={`text-[13px] font-black leading-tight ${
+                        {visibleTimesheetSanityIssues.map((issue) => {
+                          const targetRecordId = issue.recordId || (Array.isArray(issue.recordIds) ? issue.recordIds[0] : "");
+                          return (
+                            <button
+                              key={issue.id}
+                              type="button"
+                              className={`w-full rounded-[14px] border px-3 py-2 text-left transition active:scale-[0.99] ${
+                                timesheetSanityHighlightedIssueId === issue.id
+                                  ? "ring-2 ring-[#C9A227] ring-offset-2 ring-offset-[#F4F7FB]"
+                                  : ""
+                              } ${
                                 issue.severity === "danger"
-                                  ? "text-[#DC2626]"
+                                  ? "border-[#FECACA] bg-[#FEF2F2]"
                                   : issue.severity === "warning"
-                                    ? "text-[#9A6B12]"
-                                    : "text-[#163B5C]"
+                                    ? "border-[#FDE68A] bg-[#FFF7E6]"
+                                    : "border-[#BFDBFE] bg-[#EFF6FF]"
                               }`}
+                              onClick={() => focusTimesheetRecord(targetRecordId, issue.id)}
                             >
-                              {issue.title}
-                            </p>
-                            <p className="mt-1 text-[12px] font-semibold leading-snug text-[#475569]">{issue.detail}</p>
-                          </div>
-                        ))}
+                              <p
+                                className={`text-[13px] font-black leading-tight ${
+                                  issue.severity === "danger"
+                                    ? "text-[#DC2626]"
+                                    : issue.severity === "warning"
+                                      ? "text-[#9A6B12]"
+                                      : "text-[#163B5C]"
+                                }`}
+                              >
+                                {issue.title}
+                              </p>
+                              <p className="mt-1 text-[12px] font-semibold leading-snug text-[#475569]">{issue.detail}</p>
+                            </button>
+                          );
+                        })}
                         {timesheetSanityChecks.length > 5 ? (
                           <button
                             type="button"
@@ -23925,6 +27272,31 @@ const handlePhotoQuickUpload = async (event) => {
                             </span>
                           </span>
                         </label>
+                        <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
+                          Task
+                          <span className="relative block">
+                            <span className="pointer-events-none absolute left-3 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center text-[#061426]">
+                              {renderTimesheetUiIcon("task", "h-4 w-4")}
+                            </span>
+                            <select
+                              className="h-12 w-full appearance-none rounded-[14px] border border-[#CBD5E1] bg-white px-10 pr-9 text-[14px] font-black text-[#061426] outline-none focus:border-[#94A3B8]"
+                              value={timesheetTaskFilter}
+                              onChange={(event) => setTimesheetTaskFilter(event.target.value)}
+                            >
+                              <option value="all">All Tasks</option>
+                              {timesheetTaskOptions.map((task) => (
+                                <option key={task.id} value={task.id}>
+                                  {task.name}
+                                </option>
+                              ))}
+                            </select>
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#061426]">
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="m6 9 6 6 6-6" />
+                              </svg>
+                            </span>
+                          </span>
+                        </label>
                         <label className="flex h-12 items-center justify-between gap-3 rounded-[14px] border border-[#E2E8F0] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
                           <span>Completed shifts only</span>
                           <input
@@ -23948,6 +27320,7 @@ const handlePhotoQuickUpload = async (event) => {
                             onClick={() => {
                               setTimesheetEmployeeFilter("all");
                               setTimesheetProjectFilter("all");
+                              setTimesheetTaskFilter("all");
                               setTimesheetCompletedOnly(false);
                             }}
                           >
@@ -24882,7 +28255,7 @@ const handlePhotoQuickUpload = async (event) => {
                         >
                           {listShowCompleted ? (
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
-                              ✓
+                              âœ“
                             </span>
                           ) : (
                             <input
@@ -24946,7 +28319,7 @@ const handlePhotoQuickUpload = async (event) => {
                     disabled={markingAllNotifs || inAppNotifUnread === 0}
                     onClick={() => void handleMarkAllNotificationsRead()}
                   >
-                    {markingAllNotifs ? "…" : "Mark all read"}
+                    {markingAllNotifs ? "â€¦" : "Mark all read"}
                   </Button>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
@@ -24969,7 +28342,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ? "Not supported"
                             : mobileNotifPermissionUi === "default"
                               ? "Not yet enabled"
-                              : "—"}
+                              : "â€”"}
                     </span>
                   </p>
                   <p className="text-[10px] text-slate-500 leading-snug">
@@ -24998,7 +28371,7 @@ const handlePhotoQuickUpload = async (event) => {
                               ? "Error"
                               : backgroundPushUi === "default"
                                 ? "Not yet enabled"
-                                : "—"}
+                                : "â€”"}
                     </span>
                   </p>
                   {backgroundPushError && (
@@ -25021,8 +28394,8 @@ const handlePhotoQuickUpload = async (event) => {
                   {inAppNotifications.map((n) => {
                     const unread = n.read_at == null && n.is_read !== true;
                     const ts = n.created_at
-                      ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} · ${formatTime(n.created_at, companyTimeZone)}`
-                      : "—";
+                      ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} Â· ${formatTime(n.created_at, companyTimeZone)}`
+                      : "â€”";
                     return (
                       <div
                         key={n.id}
@@ -25038,7 +28411,7 @@ const handlePhotoQuickUpload = async (event) => {
                             disabled={markingNotifId === String(n.id)}
                             onClick={() => void handleMarkNotificationRead(n)}
                           >
-                            {markingNotifId === String(n.id) ? "…" : "Mark as read"}
+                            {markingNotifId === String(n.id) ? "â€¦" : "Mark as read"}
                           </Button>
                         )}
                       </div>
@@ -25055,6 +28428,9 @@ const handlePhotoQuickUpload = async (event) => {
               authUser={authUser}
               userCompany={userCompany}
               companyTimeZone={companyTimeZone}
+              setInAppNotifications={setInAppNotifications}
+              onViewModeChange={setChatViewMode}
+              onBack={() => setActiveTab(homeTabForRole)}
             />
           )}
 
@@ -25215,8 +28591,8 @@ const handlePhotoQuickUpload = async (event) => {
               <section className="relative overflow-hidden rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                 <div className="relative flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h2 className="truncate text-[24px] font-semibold leading-tight text-slate-950">{homeHeroTitle}</h2>
-                    <p className="mt-1 truncate text-[13px] font-medium text-slate-500">
+                    <h2 className="text-[20px] font-semibold leading-tight text-slate-950 sm:text-[24px]">{homeHeroTitle}</h2>
+                    <p className="mt-1 text-[12px] font-medium leading-snug text-slate-500 sm:text-[13px]">
                       {homeTodayLabel}
                     </p>
                   </div>
@@ -25776,7 +29152,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
                 {!userCompany?.id || !companyChecked ? (
-                  <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
+                  <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please waitâ€¦</p>
                 ) : null}
                 {dashboardActionFeedback && (
                   <div
@@ -25796,18 +29172,18 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="hidden">
                         <span className="text-slate-600 font-medium">Currently Working: </span>
                         <span className="font-bold tabular-nums text-slate-900">
-                          {dashboardLoading ? "—" : (dashboardLiveWorkingCards || []).length}
+                          {dashboardLoading ? "â€”" : (dashboardLiveWorkingCards || []).length}
                         </span>
                       </p>
                     </div>
                     {dashboardLiveLocationsLoading ? (
-                      <p className="text-[14px] text-slate-600">Refreshing live GPS…</p>
+                      <p className="text-[14px] text-slate-600">Refreshing live GPSâ€¦</p>
                     ) : null}
                     {dashboardLiveLocationsError ? (
                       <p className="text-[14px] text-amber-800">{String(dashboardLiveLocationsError)}</p>
                     ) : null}
                     {dashboardLoading ? (
-                      <p className="text-[14px] text-slate-600">Loading active employees…</p>
+                      <p className="text-[14px] text-slate-600">Loading active employeesâ€¦</p>
                     ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] bg-[#0B1F33] p-3 text-white shadow-[0_14px_28px_rgba(15,23,42,0.24)]">
@@ -25849,7 +29225,7 @@ const handlePhotoQuickUpload = async (event) => {
                               )
                             )
                           : 0;
-                        const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
+                        const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "â€”";
                         const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                         const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
                         const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
@@ -25867,7 +29243,7 @@ const handlePhotoQuickUpload = async (event) => {
                           >
                             <div className="min-w-0">
                               <p className="text-[17px] font-black text-slate-950 leading-snug break-words flex items-start justify-between gap-3">
-                                {displayName || "—"}
+                                {displayName || "â€”"}
                                 <span className="shrink-0 rounded-full bg-[#0B1F33] px-3 py-1.5 text-[13px] font-black tabular-nums text-white shadow-[0_8px_16px_rgba(15,23,42,0.20)]">{formatTimer(timerSeconds)}</span>
                               </p>
                               <p className="mt-1 text-[14px] font-bold text-slate-500 leading-snug tabular-nums">
@@ -26033,7 +29409,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {dashboardLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600">
-                    Loading dashboard…
+                    Loading dashboardâ€¦
                   </div>
                 )}
                 {dashboardError && (
@@ -26140,14 +29516,14 @@ const handlePhotoQuickUpload = async (event) => {
                               {isRowClockedIn ? (
                                 <span className="inline-flex items-center gap-1 font-semibold text-green-700">
                                   <span className="text-green-600" aria-hidden>
-                                    ●
+                                    â—
                                   </span>
                                   Clocked In
                                 </span>
                               ) : (
                                 <span className="inline-flex items-center gap-1 font-semibold text-red-700">
                                   <span className="text-red-600" aria-hidden>
-                                    ●
+                                    â—
                                   </span>
                                   Not Clocked In
                                 </span>
@@ -26155,7 +29531,7 @@ const handlePhotoQuickUpload = async (event) => {
                               {hasLiveMap && (
                                 <>
                                   <span className="text-slate-300 select-none" aria-hidden>
-                                    ·
+                                    Â·
                                   </span>
                                   <button
                                     type="button"
@@ -26243,7 +29619,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         }
                                       >
                                         {centresForPick.length === 0 ? (
-                                          <option value="">—</option>
+                                          <option value="">â€”</option>
                                         ) : (
                                           centresForPick.map((c) => (
                                             <option key={c} value={c}>
@@ -26276,7 +29652,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     disabled={dashRowSaving || dashClockInBlocked}
                                     onClick={() => void handleDashboardEmployeeClockIn(row)}
                                   >
-                                    {dashRowSaving ? "…" : "Clock In"}
+                                    {dashRowSaving ? "â€¦" : "Clock In"}
                                   </Button>
                                 </>
                               )}
@@ -26287,7 +29663,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={dashRowSaving || !rep?.supabaseTimesheetId}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                                 >
-                                  {dashRowSaving ? "…" : "Clock Out"}
+                                  {dashRowSaving ? "â€¦" : "Clock Out"}
                                 </Button>
                               )}
                               {showDashFixOut && (
@@ -26297,7 +29673,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={dashRowSaving || !rep?.supabaseTimesheetId}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "fix")}
                                 >
-                                  {dashRowSaving ? "…" : "Fix Clock Out"}
+                                  {dashRowSaving ? "â€¦" : "Fix Clock Out"}
                                 </Button>
                               )}
                             </div>
@@ -27163,7 +30539,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {reportsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Loading reports…
+                    Loading reportsâ€¦
                   </div>
                 )}
                 {reportsScreenError && (
@@ -27348,7 +30724,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ].filter(Boolean).join(" / ")}
                           </p>
                           <p className="hidden">
-                          ·{" "}
+                          Â·{" "}
                           {reportsBreakdownTree.d1 === "employee"
                             ? "Employee"
                             : reportsBreakdownTree.d1 === "project"
@@ -27357,7 +30733,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {reportsBreakdownTree.d2 !== "none" && (
                             <>
                               {" "}
-                              →{" "}
+                              â†’{" "}
                               {reportsBreakdownTree.d2 === "employee"
                                 ? "Employee"
                                 : reportsBreakdownTree.d2 === "project"
@@ -27368,7 +30744,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {reportsBreakdownTree.d3 !== "none" && (
                             <>
                               {" "}
-                              →{" "}
+                              â†’{" "}
                               {reportsBreakdownTree.d3 === "employee"
                                 ? "Employee"
                                 : reportsBreakdownTree.d3 === "project"
@@ -27407,7 +30783,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     <div className="min-w-0 flex-1">
                                       <p className="text-sm font-bold text-slate-950 leading-snug break-words">
                                         <span className="mr-1.5 inline-block w-4 text-slate-400" aria-hidden>
-                                          {openL1 ? "▾" : "▸"}
+                                          {openL1 ? "â–¾" : "â–¸"}
                                         </span>
                                         {n1.label}
                                       </p>
@@ -27464,7 +30840,7 @@ const handlePhotoQuickUpload = async (event) => {
                                                   <div className="min-w-0 flex-1">
                                                     <p className="text-[13px] font-semibold text-slate-900 leading-snug break-words">
                                                       <span className="mr-1 inline-block w-3.5 text-slate-400 text-xs" aria-hidden>
-                                                        {openL2 ? "▾" : "▸"}
+                                                        {openL2 ? "â–¾" : "â–¸"}
                                                       </span>
                                                       {n2.label}
                                                     </p>
@@ -27584,7 +30960,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
                         }}
                       >
-                        ← Prev
+                        â† Prev
                       </button>
                       <button
                         type="button"
@@ -27610,7 +30986,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
                         }}
                       >
-                        Next →
+                        Next â†’
                       </button>
                     </div>
                   ) : null}
@@ -27621,7 +30997,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
                 {employeeScheduleLoading ? (
-                  <p className="text-sm text-slate-600 py-4 text-center">Loading your schedule…</p>
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading your scheduleâ€¦</p>
                 ) : employeeScheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{employeeScheduleError}</div>
                 ) : scheduleViewMode !== "list" ? (
@@ -27706,7 +31082,7 @@ const handlePhotoQuickUpload = async (event) => {
                             (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
                           );
                           if (!t) return null;
-                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "â€”";
                           return (
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
                               {renderEmployeeScheduleTaskCard(t, dk)}
@@ -27865,7 +31241,7 @@ const handlePhotoQuickUpload = async (event) => {
                             (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
                           );
                           if (!t) return null;
-                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "â€”";
                           return (
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
                               {renderEmployeeScheduleTaskCard(t, dk)}
@@ -27952,7 +31328,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
                         }}
                       >
-                        ← Prev
+                        â† Prev
                       </button>
                       <button
                         type="button"
@@ -27978,7 +31354,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
                         }}
                       >
-                        Next →
+                        Next â†’
                       </button>
                     </div>
                   ) : null}
@@ -27987,7 +31363,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {scheduleMoveModeTaskId ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
                     <p className="text-[14px] font-semibold text-amber-950 leading-snug min-w-0 flex-1">
-                      Move mode active — tap a new slot or date on the calendar, or cancel.
+                      Move mode active â€” tap a new slot or date on the calendar, or cancel.
                     </p>
                     <button
                       type="button"
@@ -28089,7 +31465,7 @@ const handlePhotoQuickUpload = async (event) => {
                           }
                           disabled={scheduleSaving}
                         >
-                          <option value="">— Optional —</option>
+                          <option value="">â€” Optional â€”</option>
                           {(effectiveProjects || []).map((p) => (
                             <option key={String(p.id)} value={String(p.id)}>
                               {p.name}
@@ -28112,7 +31488,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={scheduleSaving || !scheduleDraft.projectId}
                         >
                           <option value="">
-                            {scheduleDraft.projectId ? "— Select task —" : "Pick a project first"}
+                            {scheduleDraft.projectId ? "â€” Select task â€”" : "Pick a project first"}
                           </option>
                           {(scheduleCostCentreOptions || []).map((name) => (
                             <option key={String(name)} value={String(name)}>
@@ -28214,7 +31590,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="hidden">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-dur">
-                        Duration (minutes) — if end time is not used
+                        Duration (minutes) â€” if end time is not used
                       </label>
                       <input
                         id="sched-dur"
@@ -28230,7 +31606,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="space-y-1.5">
                       <p className="schedule-form-label">Assign employees</p>
                       {schedulePickMembersLoading ? (
-                        <p className="text-[11px] text-slate-500">Loading team members…</p>
+                        <p className="text-[11px] text-slate-500">Loading team membersâ€¦</p>
                       ) : schedulePickMembersError ? (
                         <p className="text-[11px] text-red-700 leading-snug">{schedulePickMembersError}</p>
                       ) : (schedulePickMembers || []).length === 0 ? (
@@ -28353,14 +31729,14 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                     <div className="flex gap-2 pt-0.5">
                       <Button type="submit" className="flex-1 rounded-2xl h-12 text-[16px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]" disabled={scheduleSaving}>
-                        {scheduleSaving ? "Saving…" : "Save job"}
+                        {scheduleSaving ? "Savingâ€¦" : "Save job"}
                       </Button>
                     </div>
                   </form>
                 )}
 
                 {scheduleLoading ? (
-                  <p className="text-sm text-slate-600 py-4 text-center">Loading schedule…</p>
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading scheduleâ€¦</p>
                 ) : scheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{scheduleError}</div>
                 ) : scheduleViewMode !== "list" ? (
@@ -28676,10 +32052,10 @@ const handlePhotoQuickUpload = async (event) => {
                               const projLine = proj.length > 0 ? proj : "No project selected";
                               const cc = String(task?.cost_centre ?? "").trim();
                               const ccLine = cc.length > 0 ? cc : "No task";
-                              const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
+                              const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
                               const endRaw = task?.end_time;
                               const durRaw = task?.duration_minutes;
-                              let windowLabel = "—";
+                              let windowLabel = "â€”";
                               if (endRaw) windowLabel = formatScheduleListTime(endRaw);
                               else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
                                 windowLabel = `${Number(durRaw)} min`;
@@ -28785,7 +32161,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         onClick={() => void handleScheduleDeleteTask(task?.id)}
                                         className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-800 disabled:opacity-50"
                                       >
-                                        {scheduleDeleteSavingId === tidKey ? "…" : "Delete"}
+                                        {scheduleDeleteSavingId === tidKey ? "â€¦" : "Delete"}
                                       </button>
                                     </div>
                                   </div>
@@ -28881,7 +32257,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             }
                                             disabled={scheduleEditSaving}
                                           >
-                                            <option value="">— Optional —</option>
+                                            <option value="">â€” Optional â€”</option>
                                             {(effectiveProjects || []).map((p) => (
                                               <option key={String(p.id)} value={String(p.id)}>
                                                 {p.name}
@@ -28905,7 +32281,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             disabled={scheduleEditSaving || !scheduleEditDraft.projectId}
                                           >
                                             <option value="">
-                                              {scheduleEditDraft.projectId ? "— Select —" : "Pick a project first"}
+                                              {scheduleEditDraft.projectId ? "â€” Select â€”" : "Pick a project first"}
                                             </option>
                                             {(scheduleEditCostCentreOptions || []).map((name) => (
                                               <option key={String(name)} value={String(name)}>
@@ -29047,7 +32423,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       <div className="space-y-1">
                                         <p className="schedule-form-label">Assign employees</p>
                                         {schedulePickMembersLoading ? (
-                                          <p className="text-[11px] text-slate-500">Loading…</p>
+                                          <p className="text-[11px] text-slate-500">Loadingâ€¦</p>
                                         ) : (schedulePickMembers || []).length === 0 ? (
                                           <p className="text-[11px] text-slate-600">No employees found.</p>
                                         ) : (
@@ -29169,7 +32545,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
                                         >
                                           <span className="text-[#C9A227]">{renderTimesheetUiIcon("save", "h-4 w-4")}</span>
-                                          {scheduleEditSaving ? "Saving…" : "Save"}
+                                          {scheduleEditSaving ? "Savingâ€¦" : "Save"}
                                         </Button>
                                         <button
                                           type="button"
@@ -29196,7 +32572,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           className="flex w-full items-center justify-center gap-2 rounded-[14px] h-11 text-[14px] font-black border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] disabled:opacity-50"
                                         >
                                           {renderTimesheetUiIcon("trash", "h-4 w-4")}
-                                          {scheduleDeleteSavingId === tidKey ? "Deleting…" : "Delete Job"}
+                                          {scheduleDeleteSavingId === tidKey ? "Deletingâ€¦" : "Delete Job"}
                                         </button>
                                       </div>
                                     </form>
@@ -29332,7 +32708,7 @@ const handlePhotoQuickUpload = async (event) => {
                         className="flex-1 rounded-lg h-9 text-xs font-semibold"
                         disabled={projectsAddSaving}
                       >
-                        {projectsAddSaving ? "Saving…" : "Save"}
+                        {projectsAddSaving ? "Savingâ€¦" : "Save"}
                       </Button>
                       <Button
                         type="button"
@@ -29379,7 +32755,7 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                     <div className="space-y-1">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-task-name">
-                        Task name
+                        Manual contract name / task name
                       </label>
                       <input
                         id="projects-task-name"
@@ -29392,6 +32768,70 @@ const handlePhotoQuickUpload = async (event) => {
                         required
                       />
                     </div>
+                    <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-[12px] font-bold text-slate-900">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
+                        checked={projectsTaskManualContract}
+                        onChange={(e) => setProjectsTaskManualContract(e.target.checked)}
+                        disabled={projectsTaskSaving}
+                      />
+                      <span>
+                        <span className="block">Manual contract</span>
+                        <span className="block pt-0.5 text-[11px] font-semibold text-slate-500">
+                          Pays a fixed amount instead of hourly pay for this task.
+                        </span>
+                      </span>
+                    </label>
+                    {projectsTaskManualContract ? (
+                      <div className="space-y-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                        <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                          Fixed amount
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            step="0.01"
+                            min={0}
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={projectsTaskFixedAmount}
+                            onChange={(e) => setProjectsTaskFixedAmount(e.target.value)}
+                            disabled={projectsTaskSaving}
+                          />
+                        </label>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                            Start date
+                            <input
+                              type="date"
+                              className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                              value={projectsTaskStartDate}
+                              onChange={(e) => setProjectsTaskStartDate(e.target.value)}
+                              disabled={projectsTaskSaving}
+                            />
+                          </label>
+                          <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                            End date
+                            <input
+                              type="date"
+                              className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                              value={projectsTaskEndDate}
+                              onChange={(e) => setProjectsTaskEndDate(e.target.value)}
+                              disabled={projectsTaskSaving}
+                            />
+                          </label>
+                        </div>
+                        <label className="block space-y-1 text-[11px] font-medium text-slate-600">
+                          Notes
+                          <textarea
+                            className="min-h-[72px] w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={projectsTaskNotes}
+                            onChange={(e) => setProjectsTaskNotes(e.target.value)}
+                            placeholder="Optional notes"
+                            disabled={projectsTaskSaving}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
                     {projectsTaskError && (
                       <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
                         {projectsTaskError}
@@ -29468,7 +32908,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {projectsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Loading projects…
+                    Loading projectsâ€¦
                   </div>
                 )}
                 {projectsScreenError && (
@@ -29545,7 +32985,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   Tasks
                                 </p>
                                 {projectEditDraft.lines.length === 0 && (
-                                  <p className="text-xs text-slate-500">None — add one below if needed.</p>
+                                  <p className="text-xs text-slate-500">None â€” add one below if needed.</p>
                                 )}
                                 {projectEditDraft.lines.map((line) => (
                                   <div
@@ -29601,10 +33041,126 @@ const handlePhotoQuickUpload = async (event) => {
                                         </select>
                                       </div>
                                     </div>
+                                    <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                                      <input
+                                        type="checkbox"
+                                        className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                                        checked={Boolean(line.manualContractActive)}
+                                        onChange={(e) =>
+                                          setProjectEditDraft((d) => {
+                                            if (!d) return d;
+                                            return {
+                                              ...d,
+                                              lines: d.lines.map((l) =>
+                                                l.key === line.key
+                                                  ? { ...l, manualContractActive: e.target.checked }
+                                                  : l
+                                              ),
+                                            };
+                                          })
+                                        }
+                                        disabled={projectEditSaving}
+                                      />
+                                      <span>Manual contract</span>
+                                    </label>
+                                    {line.manualContractActive ? (
+                                      <div className="grid gap-2 sm:grid-cols-2">
+                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                          Fixed amount
+                                          <input
+                                            type="number"
+                                            inputMode="decimal"
+                                            step="0.01"
+                                            min={0}
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                            value={line.manualContractFixedAmount}
+                                            onChange={(e) =>
+                                              setProjectEditDraft((d) => {
+                                                if (!d) return d;
+                                                return {
+                                                  ...d,
+                                                  lines: d.lines.map((l) =>
+                                                    l.key === line.key
+                                                      ? { ...l, manualContractFixedAmount: e.target.value }
+                                                      : l
+                                                  ),
+                                                };
+                                              })
+                                            }
+                                            disabled={projectEditSaving}
+                                          />
+                                        </label>
+                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                          Start date
+                                          <input
+                                            type="date"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                            value={line.manualContractStartDate}
+                                            onChange={(e) =>
+                                              setProjectEditDraft((d) => {
+                                                if (!d) return d;
+                                                return {
+                                                  ...d,
+                                                  lines: d.lines.map((l) =>
+                                                    l.key === line.key
+                                                      ? { ...l, manualContractStartDate: e.target.value }
+                                                      : l
+                                                  ),
+                                                };
+                                              })
+                                            }
+                                            disabled={projectEditSaving}
+                                          />
+                                        </label>
+                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                          End date
+                                          <input
+                                            type="date"
+                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                            value={line.manualContractEndDate}
+                                            onChange={(e) =>
+                                              setProjectEditDraft((d) => {
+                                                if (!d) return d;
+                                                return {
+                                                  ...d,
+                                                  lines: d.lines.map((l) =>
+                                                    l.key === line.key
+                                                      ? { ...l, manualContractEndDate: e.target.value }
+                                                      : l
+                                                  ),
+                                                };
+                                              })
+                                            }
+                                            disabled={projectEditSaving}
+                                          />
+                                        </label>
+                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600 sm:col-span-2">
+                                          Notes
+                                          <textarea
+                                            className="min-h-[60px] w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                            value={line.manualContractNotes}
+                                            onChange={(e) =>
+                                              setProjectEditDraft((d) => {
+                                                if (!d) return d;
+                                                return {
+                                                  ...d,
+                                                  lines: d.lines.map((l) =>
+                                                    l.key === line.key
+                                                      ? { ...l, manualContractNotes: e.target.value }
+                                                      : l
+                                                  ),
+                                                };
+                                              })
+                                            }
+                                            disabled={projectEditSaving}
+                                          />
+                                        </label>
+                                      </div>
+                                    ) : null}
                                     <div className="flex justify-end">
                                       <button
                                         type="button"
-                                        className="text-[11px] font-semibold text-slate-600 underline"
+                                        className="text-[11px] font-semibold text-slate-600"
                                         disabled={projectEditSaving}
                                         onClick={() =>
                                           setProjectEditDraft((d) => {
@@ -29616,7 +33172,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           })
                                         }
                                       >
-                                        Remove from list
+                                        - Remove from list
                                       </button>
                                     </div>
                                   </div>
@@ -29637,6 +33193,11 @@ const handlePhotoQuickUpload = async (event) => {
                                             dbId: null,
                                             name: "",
                                             status: "active",
+                                            manualContractActive: false,
+                                            manualContractFixedAmount: "",
+                                            manualContractStartDate: "",
+                                            manualContractEndDate: "",
+                                            manualContractNotes: "",
                                             isNew: true,
                                           },
                                         ],
@@ -29659,7 +33220,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={projectEditSaving}
                                   onClick={() => void handleProjectsScreenSaveEdit()}
                                 >
-                                  {projectEditSaving ? "Saving…" : "Save"}
+                                  {projectEditSaving ? "Savingâ€¦" : "Save"}
                                 </Button>
                                 <Button
                                   type="button"
@@ -29674,14 +33235,21 @@ const handlePhotoQuickUpload = async (event) => {
                           ) : (
                             <>
                               <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
-                                <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words min-w-0 flex-1">
-                                  {proj.name}
-                                </h3>
+                                <div className="min-w-0 flex-1">
+                                  <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words">
+                                    {proj.name}
+                                  </h3>
+                                  {proj.specialProjectActive ? (
+                                    <p className="mt-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                                      Special rate {formatMoney(Number(proj.specialHourlyRate || 0))}
+                                    </p>
+                                  ) : null}
+                                </div>
                                 <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                   <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-800 ring-1 ring-slate-200/80 capitalize">
                                     {proj.status != null && String(proj.status).trim() !== ""
                                       ? String(proj.status).replace(/_/g, " ")
-                                      : "—"}
+                                      : "â€”"}
                                   </span>
                                   {isAdmin ? (
                                     <Button
@@ -29715,16 +33283,25 @@ const handlePhotoQuickUpload = async (event) => {
                                     {proj.costCentres.map((cc) => (
                                       <li
                                         key={cc.id}
-                                        className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5 text-xs text-slate-800"
+                                        className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 text-xs text-slate-800"
                                       >
-                                        <span className="font-medium break-words min-w-0">{cc.name}</span>
-                                        {cc.status != null &&
-                                          String(cc.status).trim() !== "" &&
-                                          String(cc.status).toLowerCase() !== "active" && (
-                                            <span className="shrink-0 text-[10px] text-slate-500 capitalize">
-                                              {String(cc.status).replace(/_/g, " ")}
+                                        <div className="min-w-0">
+                                          <span className="block font-medium break-words">{cc.name}</span>
+                                          {cc.manualContractActive ? (
+                                            <span className="mt-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                                              Manual contract {formatMoney(Number(cc.manualContractFixedAmount || 0))}
                                             </span>
-                                          )}
+                                          ) : null}
+                                        </div>
+                                        <div className="shrink-0 text-right">
+                                          {cc.status != null &&
+                                            String(cc.status).trim() !== "" &&
+                                            String(cc.status).toLowerCase() !== "active" && (
+                                              <span className="block text-[10px] text-slate-500 capitalize">
+                                                {String(cc.status).replace(/_/g, " ")}
+                                              </span>
+                                            )}
+                                        </div>
                                       </li>
                                     ))}
                                   </ul>
@@ -29772,9 +33349,9 @@ const handlePhotoQuickUpload = async (event) => {
                                       >
                                         <span className="font-semibold text-slate-900">{s.displayName}</span>
                                         {s.costCentreLabels && s.costCentreLabels.length > 0 ? (
-                                          <span className="text-slate-600"> · {s.costCentreLabels.join(", ")}</span>
+                                          <span className="text-slate-600"> Â· {s.costCentreLabels.join(", ")}</span>
                                         ) : (
-                                          <span className="text-amber-800 font-medium"> · No tasks assigned</span>
+                                          <span className="text-amber-800 font-medium"> Â· No tasks assigned</span>
                                         )}
                                       </li>
                                     ))}
@@ -29787,7 +33364,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 space-y-2.5">
                                     <p className="text-xs font-semibold text-slate-900">Assignment editor</p>
                                     {assignmentsEditorLoading ? (
-                                      <p className="text-xs text-slate-600">Loading company members…</p>
+                                      <p className="text-xs text-slate-600">Loading company membersâ€¦</p>
                                     ) : (
                                       <>
                                         <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-0.5">
@@ -29903,7 +33480,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             disabled={assignmentsEditorSaving || assignmentsEditorLoading}
                                             onClick={() => void handleSaveProjectAssignments()}
                                           >
-                                            {assignmentsEditorSaving ? "Saving…" : "Save"}
+                                            {assignmentsEditorSaving ? "Savingâ€¦" : "Save"}
                                           </Button>
                                           <Button
                                             type="button"
@@ -30370,7 +33947,7 @@ const handlePhotoQuickUpload = async (event) => {
                   {displayedTeamRows.map((row) => {
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
-                    const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "—";
+                    const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "â€”";
                     const isEditing = isAdmin && String(teamEditingMemberRowId) === String(row.memberRowId);
                     const payDisp =
                       row.hourlyRate != null && Number.isFinite(Number(row.hourlyRate))
@@ -30456,13 +34033,13 @@ const handlePhotoQuickUpload = async (event) => {
                                 Payroll start{" "}
                                 {row.payrollStartDate
                                   ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true })
-                                  : "—"}{" "}
-                                • Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))} •{" "}
+                                  : "â€”"}{" "}
+                                â€¢ Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))} â€¢{" "}
                                 {payrollOpeningBalanceMeaning(Number(row.payrollOpeningBalance || 0))}
                               </p>
                               {row.autoPayrollEnabled ? (
                                 <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">
-                                  Auto payroll {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} •{" "}
+                                  Auto payroll {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} â€¢{" "}
                                   {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
                                 </p>
                               ) : null}
@@ -30796,7 +34373,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 disabled={Boolean(teamSavingMemberRowId)}
                                 onClick={() => void handleTeamMemberSave(row)}
                               >
-                                {teamSavingMemberRowId === String(row.memberRowId) ? "Saving…" : "Save"}
+                                {teamSavingMemberRowId === String(row.memberRowId) ? "Savingâ€¦" : "Save"}
                               </Button>
                               <Button
                                 type="button"
@@ -31045,7 +34622,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="rounded-[16px] bg-slate-50 border border-slate-100 p-3 space-y-2">
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Company</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "—"}</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "â€”"}</span>
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Time zone</span>
@@ -31076,8 +34653,8 @@ const handlePhotoQuickUpload = async (event) => {
                       {payrollCurrentPeriod ? (
                         <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3">
                           <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Current payroll period</p>
-                          <p className="mt-1 text-[14px] font-black text-slate-900">
-                            {formatPayrollPeriodLabel(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
+                          <p className="mt-1 break-words text-[13px] font-black leading-snug text-slate-900 sm:text-[14px]">
+                            {formatPayrollPeriodLabelCompact(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
                           </p>
                           <p className="mt-1 text-[12px] font-semibold text-slate-600">
                             Pay date: {formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)}
@@ -31089,7 +34666,7 @@ const handlePhotoQuickUpload = async (event) => {
                           <span className="text-[14px] font-semibold text-slate-500">Company code</span>
                           <div className="flex min-w-0 items-center gap-2">
                             <code className="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[13px] font-black tracking-wide text-slate-900 truncate">
-                              {userCompany?.code || "—"}
+                              {userCompany?.code || "â€”"}
                             </code>
                             <button
                               type="button"
@@ -31255,15 +34832,15 @@ const handlePhotoQuickUpload = async (event) => {
                               <span className="text-[15px] font-bold text-slate-900 text-right break-words">
                                 {payrollCurrentPeriod?.payDateKey
                                   ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
-                                  : "—"}
+                                  : "â€”"}
                               </span>
                             </div>
                           </>
-                        ) : (
-                          <div className="space-y-2">
-                            <p className="text-[13px] font-semibold text-slate-600">
-                              Set an anchor Friday to start payroll tracking and payment history.
-                            </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-[13px] font-semibold text-slate-600">
+                          Set an anchor Friday to start payroll tracking and payment history.
+                        </p>
                             <Button
                               type="button"
                               className="w-full rounded-2xl h-11 text-[14px] font-bold"
@@ -31273,6 +34850,154 @@ const handlePhotoQuickUpload = async (event) => {
                             </Button>
                           </div>
                         )}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+
+                {isAdmin ? (
+                  <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[16px] font-black text-slate-900">Special Projects</p>
+                        <p className="text-[12px] font-semibold text-slate-500">Projects that pay a special hourly rate.</p>
+                      </div>
+                      <Button
+                        type="button"
+                        className="shrink-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-[14px] font-bold text-slate-900"
+                        onClick={() => openSpecialProjectForm()}
+                        disabled={specialProjectSaving}
+                      >
+                        + Add
+                      </Button>
+                    </div>
+                    {specialProjectError ? (
+                      <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-semibold text-red-900">
+                        {specialProjectError}
+                      </div>
+                    ) : null}
+                    {specialProjectMessage ? (
+                      <div
+                        className={`rounded-2xl border px-3 py-2 text-[12px] font-semibold ${
+                          specialProjectMessage.includes("saved") || specialProjectMessage.includes("added")
+                            ? "border-emerald-100 bg-emerald-50 text-emerald-900"
+                            : "border-slate-200 bg-slate-50 text-slate-700"
+                        }`}
+                      >
+                        {specialProjectMessage}
+                      </div>
+                    ) : null}
+                    {specialProjectFormOpen && specialProjectDraft ? (
+                      <form onSubmit={handleSaveSpecialProject} className="space-y-3 rounded-[18px] border border-slate-200 bg-slate-50 p-3">
+                        <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
+                          Project name
+                          <input
+                            className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                            value={specialProjectDraft.name}
+                            onChange={(e) =>
+                              setSpecialProjectDraft((draft) => (draft ? { ...draft, name: e.target.value } : draft))
+                            }
+                            disabled={specialProjectSaving}
+                          />
+                        </label>
+                        <label className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-[13px] font-bold text-slate-900">
+                          <input
+                            type="checkbox"
+                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300"
+                            checked={Boolean(specialProjectDraft.active)}
+                            onChange={(e) =>
+                              setSpecialProjectDraft((draft) => (draft ? { ...draft, active: e.target.checked } : draft))
+                            }
+                            disabled={specialProjectSaving}
+                          />
+                          <span>
+                            <span className="block">Special rate active</span>
+                            <span className="block pt-0.5 text-[11px] font-semibold text-slate-500">
+                              When off, the project stays normal and payroll uses the employee&apos;s regular rate.
+                            </span>
+                          </span>
+                        </label>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
+                            Special hourly rate
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.01"
+                              min={0}
+                              className="w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                              value={specialProjectDraft.specialHourlyRate}
+                              onChange={(e) =>
+                                setSpecialProjectDraft((draft) =>
+                                  draft ? { ...draft, specialHourlyRate: e.target.value } : draft
+                                )
+                              }
+                              disabled={specialProjectSaving}
+                            />
+                          </label>
+                          <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
+                            Notes
+                            <textarea
+                              className="min-h-[72px] w-full rounded-2xl border bg-white py-2.5 px-3 text-[15px]"
+                              value={specialProjectDraft.notes}
+                              onChange={(e) =>
+                                setSpecialProjectDraft((draft) =>
+                                  draft ? { ...draft, notes: e.target.value } : draft
+                                )
+                              }
+                              disabled={specialProjectSaving}
+                            />
+                          </label>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button type="submit" className="flex-1 rounded-2xl h-11 text-[14px] font-bold" disabled={specialProjectSaving}>
+                            {specialProjectSaving ? "Saving..." : "Save"}
+                          </Button>
+                          <Button
+                            type="button"
+                            className="flex-1 rounded-2xl h-11 text-[14px] font-bold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                            disabled={specialProjectSaving}
+                            onClick={cancelSpecialProjectForm}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </form>
+                    ) : null}
+                    {specialProjectSettingsRows.length === 0 ? (
+                      <p className="text-[13px] font-semibold text-slate-500">No special projects yet.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {specialProjectSettingsRows.map((project) => (
+                          <div key={project.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="text-[14px] font-black text-slate-900">{project.name}</p>
+                                <p className="mt-0.5 text-[12px] font-semibold text-slate-600">
+                                  {project.specialProjectActive ? "Active special rate" : "Inactive special rate"}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-800">
+                                {formatMoney(project.specialHourlyRate)}
+                              </span>
+                            </div>
+                            {project.specialProjectNotes ? (
+                              <p className="mt-2 text-[12px] font-semibold leading-snug text-slate-600">
+                                {project.specialProjectNotes}
+                              </p>
+                            ) : null}
+                            <div className="mt-3 flex gap-2">
+                              <Button
+                                type="button"
+                                className="flex-1 rounded-xl h-9 text-[12px] font-bold"
+                                onClick={() => openSpecialProjectForm(project)}
+                                disabled={specialProjectSaving}
+                              >
+                                Edit
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -31304,7 +35029,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </label>
                       <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
                         <p className="text-[13px] font-semibold text-slate-500">Email</p>
-                        <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "—"}</p>
+                        <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "â€”"}</p>
                       </div>
                       {settingsProfileMessage && (
                         <div
@@ -31329,7 +35054,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Email</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-all">{authUser?.email || "—"}</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-all">{authUser?.email || "â€”"}</span>
                       </div>
                     </div>
                   )}
@@ -31625,7 +35350,7 @@ const handlePhotoQuickUpload = async (event) => {
                     >
                       {clockListShowCompleted ? (
                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
-                          ✓
+                          âœ“
                         </span>
                       ) : (
                         <input
@@ -32088,7 +35813,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => setListImageViewer(null)}
                   aria-label="Close task picture"
                 >
-                  ×
+                  Ã—
                 </button>
               </div>
               <div className="bg-[#0B1F33]">
@@ -32123,7 +35848,7 @@ const handlePhotoQuickUpload = async (event) => {
                     onClick={() => setPhotoViewer(null)}
                     aria-label="Close photo viewer"
                   >
-                    ×
+                    Ã—
                   </button>
                 </div>
                 <div className="bg-[#0B1F33]">
@@ -32188,7 +35913,7 @@ const handlePhotoQuickUpload = async (event) => {
                   }}
                   aria-label="Close menu"
                 >
-                  ×
+                  Ã—
                 </button>
               </div>
 
@@ -32198,7 +35923,7 @@ const handlePhotoQuickUpload = async (event) => {
                   className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-black text-slate-800 shadow-sm"
                   onClick={() => setMenuPanel("main")}
                 >
-                  ← Back
+                  â† Back
                 </button>
               )}
 
@@ -32251,7 +35976,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => openMenuTab("timesheet")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
-                      <span className="text-slate-400">›</span>
+                      <span className="text-slate-400">â€º</span>
                     </button>
                     {isAdmin && (
                       <>
@@ -32271,7 +35996,7 @@ const handlePhotoQuickUpload = async (event) => {
                           onClick={() => openMenuTab("reports")}
                         >
                           <span className="block text-[17px] font-black text-slate-950">Reports</span>
-                          <span className="text-slate-400">›</span>
+                          <span className="text-slate-400">â€º</span>
                         </button>
                         <button
                           type="button"
@@ -32324,7 +36049,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => setMenuPanel("settings")}
                     >
                       <span>Settings</span>
-                      <span className="text-slate-400">›</span>
+                      <span className="text-slate-400">â€º</span>
                     </button>
                   </>
                 )}
@@ -32383,21 +36108,23 @@ const handlePhotoQuickUpload = async (event) => {
 
         {renderPayrollPanel()}
 
-        <BottomNav
-          isAdmin={isAdmin}
-          isEmployeeRole={isEmployeeRole}
-          activeTab={activeTab}
-          visibleCurrentShift={visibleCurrentShift}
-          onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
-          onSchedule={() => setActiveTab("schedule")}
-          onClock={() => setActiveTab("clock")}
-          onChat={() => setActiveTab("chat")}
-          onTimesheets={() => setActiveTab("timesheet")}
-          onMore={() => {
-            setMenuPanel("main");
-            setIsMenuOpen(true);
-          }}
-        />
+        {!isChatImmersiveView ? (
+          <BottomNav
+            isAdmin={isAdmin}
+            isEmployeeRole={isEmployeeRole}
+            activeTab={activeTab}
+            visibleCurrentShift={visibleCurrentShift}
+            onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
+            onSchedule={() => setActiveTab("schedule")}
+            onClock={() => setActiveTab("clock")}
+            onChat={() => setActiveTab("chat")}
+            onTimesheets={() => setActiveTab("timesheet")}
+            onMore={() => {
+              setMenuPanel("main");
+              setIsMenuOpen(true);
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

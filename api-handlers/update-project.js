@@ -3,6 +3,7 @@
  * Keeps project archive changes reliable when browser RLS hides/blocks employee data.
  */
 import { createClient } from "@supabase/supabase-js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -65,13 +66,13 @@ export default async function handler(req, res) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-  if (userErr || !userData?.user?.id) {
+  const { user: verifiedUser, error: userErr } = await verifyUserToken(url, token, { fallbackClient: supabase });
+  if (userErr || !verifiedUser?.id) {
     res.status(401).json({ error: "Invalid or expired session" });
     return;
   }
 
-  const callerId = userData.user.id;
+  const callerId = verifiedUser.id;
   const { data: callerMember, error: callerErr } = await supabase
     .from("company_members")
     .select("role")
@@ -106,10 +107,22 @@ export default async function handler(req, res) {
 
   const { data: updatedProject, error: projectErr } = await supabase
     .from("projects")
-    .update({ name, status: projectStatus })
+    .update({
+      name,
+      status: projectStatus,
+      ...(Object.prototype.hasOwnProperty.call(body, "special_project_active")
+        ? { special_project_active: Boolean(body.special_project_active) }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, "special_hourly_rate")
+        ? { special_hourly_rate: Number(body.special_hourly_rate ?? 0) || 0 }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(body, "special_project_notes")
+        ? { special_project_notes: String(body.special_project_notes || "").trim() }
+        : {}),
+    })
     .eq("company_id", companyId)
     .eq("id", projectId)
-    .select("id, name, status")
+    .select("id, name, status, special_project_active, special_hourly_rate, special_project_notes")
     .maybeSingle();
   if (projectErr) {
     res.status(500).json({ error: projectErr.message });
@@ -167,9 +180,28 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "Task name cannot be empty." });
         return;
       }
+      const taskUpdatePayload = {
+        name: taskName,
+        status: taskStatus,
+      };
+      if (Object.prototype.hasOwnProperty.call(line, "manualContractActive")) {
+        taskUpdatePayload.manual_contract_active = Boolean(line.manualContractActive);
+      }
+      if (Object.prototype.hasOwnProperty.call(line, "manualContractFixedAmount")) {
+        taskUpdatePayload.manual_contract_fixed_amount = Number(line.manualContractFixedAmount ?? 0) || 0;
+      }
+      if (Object.prototype.hasOwnProperty.call(line, "manualContractNotes")) {
+        taskUpdatePayload.manual_contract_notes = String(line.manualContractNotes || "").trim();
+      }
+      if (Object.prototype.hasOwnProperty.call(line, "manualContractStartDate")) {
+        taskUpdatePayload.manual_contract_start_date = String(line.manualContractStartDate || "").trim() || null;
+      }
+      if (Object.prototype.hasOwnProperty.call(line, "manualContractEndDate")) {
+        taskUpdatePayload.manual_contract_end_date = String(line.manualContractEndDate || "").trim() || null;
+      }
       const { error: taskUpdateErr } = await supabase
         .from("cost_centres")
-        .update({ name: taskName, status: taskStatus })
+        .update(taskUpdatePayload)
         .eq("company_id", companyId)
         .eq("project_id", projectId)
         .eq("id", dbId);
@@ -185,6 +217,11 @@ export default async function handler(req, res) {
         status: taskStatus,
         display_order: nextOrder,
         created_by: callerId,
+        manual_contract_active: Boolean(line?.manualContractActive),
+        manual_contract_fixed_amount: Number(line?.manualContractFixedAmount ?? 0) || 0,
+        manual_contract_notes: String(line?.manualContractNotes || "").trim(),
+        manual_contract_start_date: String(line?.manualContractStartDate || "").trim() || null,
+        manual_contract_end_date: String(line?.manualContractEndDate || "").trim() || null,
       });
       if (taskInsertErr) {
         res.status(500).json({ error: taskInsertErr.message });

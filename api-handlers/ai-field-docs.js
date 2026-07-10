@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { getSharedAiConfig, getSharedAiStatus } from "../api-shared/sharedEnv.js";
+import { verifyUserToken } from "./_verifyUserToken.js";
 
 function getSupabaseUrl() {
   return process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
@@ -401,8 +402,7 @@ export default async function handler(req, res) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  const { data: userData, error: userErr } = await supabase.auth.getUser(token);
-  const caller = userData?.user;
+  const { user: caller, error: userErr } = await verifyUserToken(url, token, { fallbackClient: supabase });
   if (userErr || !caller?.id) {
     sendApiError(res, 401, "invalid_auth", "Invalid authorization");
     return;
