@@ -4023,31 +4023,61 @@ function PublicPhotoShareView({ share, index, setIndex }) {
   );
 }
 
-function useVisualViewportHeight() {
-  const [height, setHeight] = useState(() =>
-    typeof window !== "undefined" ? window.visualViewport?.height || window.innerHeight : 0
-  );
+/**
+ * Keeps immersive chat containers sized to the true visible viewport (so the
+ * mobile keyboard never covers content) WITHOUT going through React state.
+ * visualViewport can fire resize/scroll many times while typing on some
+ * mobile keyboards; routing that through useState would re-render the whole
+ * (very large) chat screen on every keystroke. DOM refs sidestep that.
+ */
+function useImmersiveViewportHeight(refs, isImmersivePane) {
+  const isImmersiveRef = useRef(isImmersivePane);
+
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
+    const applyHeight = () => {
+      if (!isImmersiveRef.current) return;
+      const height = window.visualViewport?.height || window.innerHeight;
+      const px = `${height}px`;
+      for (const ref of refs) {
+        if (ref.current) {
+          ref.current.style.height = px;
+          ref.current.style.maxHeight = px;
+        }
+      }
+    };
+    applyHeight();
     const viewport = window.visualViewport;
-    const updateHeight = () => setHeight(viewport?.height || window.innerHeight);
-    updateHeight();
     if (viewport) {
-      viewport.addEventListener("resize", updateHeight);
-      viewport.addEventListener("scroll", updateHeight);
+      viewport.addEventListener("resize", applyHeight);
+      viewport.addEventListener("scroll", applyHeight);
       return () => {
-        viewport.removeEventListener("resize", updateHeight);
-        viewport.removeEventListener("scroll", updateHeight);
+        viewport.removeEventListener("resize", applyHeight);
+        viewport.removeEventListener("scroll", applyHeight);
       };
     }
-    window.addEventListener("resize", updateHeight);
-    return () => window.removeEventListener("resize", updateHeight);
+    window.addEventListener("resize", applyHeight);
+    return () => window.removeEventListener("resize", applyHeight);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return height;
+
+  useEffect(() => {
+    isImmersiveRef.current = isImmersivePane;
+    if (typeof window === "undefined") return;
+    const px = isImmersivePane ? `${window.visualViewport?.height || window.innerHeight}px` : "";
+    for (const ref of refs) {
+      if (ref.current) {
+        ref.current.style.height = px;
+        ref.current.style.maxHeight = px;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isImmersivePane]);
 }
 
 function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNotifications, onViewModeChange, onBack }) {
-  const chatViewportHeight = useVisualViewportHeight();
+  const chatGridRef = useRef(null);
+  const chatSectionRef = useRef(null);
   const [conversations, setConversations] = useState([]);
   const [members, setMembers] = useState([]);
   const [selectedConversationId, setSelectedConversationId] = useState("");
@@ -4106,6 +4136,10 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
   const conversationMembersRef = useRef([]);
   const [threadCacheHydrated, setThreadCacheHydrated] = useState(false);
   const isImmersivePane = chatPane !== "list";
+  useImmersiveViewportHeight(
+    useMemo(() => [chatGridRef, chatSectionRef], []),
+    isImmersivePane
+  );
 
   const companyId = userCompany?.id || "";
   const currentUserId = authUser?.id || "";
@@ -5180,7 +5214,6 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
     );
     setMessageDraft("");
     setChatReplyTarget(null);
-    requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
     setSending(true);
     setError("");
     try {
@@ -6536,13 +6569,12 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
       className={`overflow-hidden ${
         isImmersivePane ? "min-h-full h-full border-0 rounded-none bg-transparent shadow-none" : ""
       }`}
-      style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
     >
       <div
+        ref={chatGridRef}
         className={`overflow-hidden bg-white ${
           isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
         }`}
-        style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
       >
         <aside className={`${chatPane === "thread" || chatPane === "list-detail" ? "hidden" : "flex"} min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB] px-3 pb-3 pt-3`}>
           <div className="rounded-[24px] bg-white px-3.5 pb-3 pt-3 shadow-[0_12px_30px_rgba(6,20,38,0.06)]">
@@ -6710,10 +6742,10 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
         </aside>
 
         <section
+          ref={chatSectionRef}
           className={`${chatPane === "list" ? "hidden" : "flex"} relative flex-col bg-[#F4F7FB] ${
             isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
           }`}
-          style={isImmersivePane ? { height: chatViewportHeight, maxHeight: chatViewportHeight } : undefined}
         >
           {selectedConversation ? (
             <>
