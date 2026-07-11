@@ -7456,7 +7456,34 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
 }
 
 export default function EmployeeClockApp() {
-  const [activeTab, setActiveTab] = useState("clock");
+  const [activeTab, setActiveTabRaw] = useState("clock");
+  // --- TEMP PERF DEBUG: click-to-render timer (remove once slowness is diagnosed) ---
+  const tabSwitchClickAtRef = useRef(null);
+  const [tabSwitchDebug, setTabSwitchDebug] = useState(null);
+  const setActiveTab = useCallback((next) => {
+    tabSwitchClickAtRef.current = performance.now();
+    setActiveTabRaw(next);
+  }, []);
+  useEffect(() => {
+    const clickedAt = tabSwitchClickAtRef.current;
+    if (clickedAt == null) return undefined;
+    let cancelled = false;
+    // Double rAF: first fires before the browser paints the new frame, second
+    // fires right after - this measures actual click-to-painted-screen time,
+    // not just "React finished its JS work" time.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const elapsedMs = Math.round(performance.now() - clickedAt);
+        setTabSwitchDebug({ tab: activeTab, ms: elapsedMs, at: new Date().toLocaleTimeString() });
+        tabSwitchClickAtRef.current = null;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+  // --- END TEMP PERF DEBUG ---
   const [chatViewMode, setChatViewMode] = useState("list");
   const [projectId, setProjectId] = useState("");
   const [costCenter, setCostCenter] = useState("");
@@ -25414,6 +25441,14 @@ const handlePhotoQuickUpload = async (event) => {
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
+        {tabSwitchDebug ? (
+          <div
+            className="pointer-events-none fixed left-1/2 top-2 z-[999] -translate-x-1/2 rounded-full border border-[#C9A227]/60 bg-[#061426]/95 px-3 py-1 text-[11px] font-black tabular-nums text-white shadow-lg"
+            style={{ fontFamily: "monospace" }}
+          >
+            DEBUG {tabSwitchDebug.tab}: {tabSwitchDebug.ms}ms @ {tabSwitchDebug.at}
+          </div>
+        ) : null}
         <div
           className={`opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain ${
             isChatImmersiveView
