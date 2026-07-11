@@ -4325,6 +4325,8 @@ export default function EmployeeClockApp() {
   const [payrollLoanTransactionsError, setPayrollLoanTransactionsError] = useState("");
   const [payrollAddPaymentMenuOpen, setPayrollAddPaymentMenuOpen] = useState(false);
   const [payrollAddPaymentMenuContext, setPayrollAddPaymentMenuContext] = useState(null);
+  /** Chooser opened by tapping the Paid Cash / Loans tile on a period card when it has multiple entries: { kind: "payment"|"loan", period }. */
+  const [payrollTilePicker, setPayrollTilePicker] = useState(null);
   const [payrollAutoPayrollPromptOpen, setPayrollAutoPayrollPromptOpen] = useState(false);
   const [payrollAutoPayrollPromptDismissedPeriodKey, setPayrollAutoPayrollPromptDismissedPeriodKey] = useState("");
   const [payrollAutoPayrollProcessing, setPayrollAutoPayrollProcessing] = useState(false);
@@ -19324,16 +19326,53 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               onClick: () => openPayrollDetailRow({ ...payrollDetailEmployeeGroup, ...period }),
             })}
             {renderPayrollMetricTile({
-              label: "Paid",
+              label: "Paid Cash",
               value: formatMoney(period.paidAmount || 0),
               colorClass: "bg-[#F7FEE7] text-[#65A30D]",
               icon: renderTimesheetUiIcon("wallet", "h-5 w-5"),
+              onClick: isAdmin
+                ? () => {
+                    const payments = normalizeArray(period.payments);
+                    if (payments.length === 1) {
+                      handleEditPayrollPayment(payments[0]);
+                    } else if (payments.length > 1) {
+                      setPayrollTilePicker({ kind: "payment", period });
+                    } else {
+                      openPayrollPaymentForm(null, {
+                        paymentKind: "salary",
+                        employeeId: payrollDetailEmployeeGroup?.employeeId,
+                        periodStart: period.periodStart,
+                        periodEnd: period.periodEnd,
+                        paidDate: period.payDate || calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                      });
+                    }
+                  }
+                : undefined,
             })}
             {renderPayrollMetricTile({
               label: "Loans",
               value: formatPayrollSignedMoney(period.loanNetAmount || 0),
               colorClass: "bg-[#F5F3FF] text-[#7C3AED]",
               icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
+              onClick: isAdmin
+                ? () => {
+                    const loans = normalizeArray(period.loans);
+                    if (loans.length === 1) {
+                      handleEditPayrollPayment({ ...loans[0], paymentKind: "loan" });
+                    } else if (loans.length > 1) {
+                      setPayrollTilePicker({ kind: "loan", period });
+                    } else {
+                      openPayrollPaymentForm(null, {
+                        paymentKind: "loan",
+                        employeeId: payrollDetailEmployeeGroup?.employeeId,
+                        periodStart: period.periodStart,
+                        periodEnd: period.periodEnd,
+                        paidDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                        loanDirection: "loan_given",
+                      });
+                    }
+                  }
+                : undefined,
             })}
             {renderPayrollMetricTile({
               label: "Prev Bal",
@@ -19420,7 +19459,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </p>
                 </div>
                 <div className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
-                  <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">Paid Cash</p>
                   <p className="mt-2 text-[16px] font-black leading-none text-[#061426] tabular-nums">
                     {formatMoney(payrollDetailRow.paidAmount || 0)}
                   </p>
@@ -19911,6 +19950,78 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     +
                   </span>
                 </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {payrollTilePicker ? (
+          <div
+            className="fixed inset-0 z-[87] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setPayrollTilePicker(null)}
+          >
+            <div
+              className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                  <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">
+                    {payrollTilePicker.kind === "loan" ? "Edit loans" : "Edit payments"}
+                  </h3>
+                  <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                    {payrollTilePicker.period.periodLabel ||
+                      formatPayrollPeriodLabelCompact(payrollTilePicker.period.periodStart, payrollTilePicker.period.periodEnd, companyTimeZone)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => setPayrollTilePicker(null)}
+                  aria-label="Close edit chooser"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2">
+                {(payrollTilePicker.kind === "loan"
+                  ? normalizeArray(payrollTilePicker.period.loans)
+                  : normalizeArray(payrollTilePicker.period.payments)
+                ).map((row, index) => {
+                  const isLoan = payrollTilePicker.kind === "loan";
+                  const isReturned = isLoan && String(row?.transaction_type || "") === "loan_returned";
+                  const amount = Math.abs(Number(isLoan ? row?.amount || 0 : row?.paid_amount || 0));
+                  const dateKey = String(isLoan ? row?.transaction_date || "" : row?.paid_date || "").trim();
+                  return (
+                    <button
+                      key={row?.id || index}
+                      type="button"
+                      className="flex items-center justify-between rounded-[16px] border border-[#CBD5E1] bg-white px-4 py-3 text-left shadow-[0_8px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                      onClick={() => {
+                        setPayrollTilePicker(null);
+                        handleEditPayrollPayment(isLoan ? { ...row, paymentKind: "loan" } : row);
+                      }}
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-[15px] font-black text-[#061426]">{formatMoney(amount)}</span>
+                        <span className="mt-0.5 block text-[12px] font-semibold text-[#64748B]">
+                          {isLoan ? (isReturned ? "Money received" : "Money given") : "Salary"}
+                          {dateKey ? ` • ${formatPayrollDateKeyShort(dateKey, companyTimeZone, { includeYear: true })}` : ""}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-[#64748B]">
+                        <svg viewBox="0 0 24 24" className="h-5 w-5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="m9 6 6 6-6 6" />
+                        </svg>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
