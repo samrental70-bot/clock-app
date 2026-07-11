@@ -13546,16 +13546,13 @@ export default function EmployeeClockApp() {
   }, [authUser?.id, userCompany?.id]);
 
   useEffect(() => {
-    void loadProjectMediaFromSupabase({ silent: true });
-  }, [loadProjectMediaFromSupabase]);
-
-  useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return;
     void syncLocalProjectMediaMetadataToSupabase();
   }, [authUser?.id, companyChecked, syncLocalProjectMediaMetadataToSupabase, userCompany?.id]);
 
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return undefined;
+    if (activeTab !== "photos" && activeTab !== "receipts") return undefined;
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
       void loadProjectMediaFromSupabase({ silent: true });
@@ -13566,11 +13563,15 @@ export default function EmployeeClockApp() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [authUser?.id, companyChecked, loadProjectMediaFromSupabase, userCompany?.id]);
+  }, [activeTab, authUser?.id, companyChecked, loadProjectMediaFromSupabase, userCompany?.id]);
 
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return undefined;
     if (activeTab !== "photos" && activeTab !== "receipts") return undefined;
+    // Load immediately on entering Photos/Receipts, then refresh every 10s while the tab stays active.
+    // This fetch (select=*, up to 1000 rows) is heavy, so it's scoped to only the two tabs that need it
+    // instead of firing unconditionally on every app mount and window focus regardless of active tab.
+    void loadProjectMediaFromSupabase({ silent: true });
     const id = setInterval(() => {
       void loadProjectMediaFromSupabase({ silent: true });
     }, 10000);
