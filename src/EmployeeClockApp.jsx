@@ -5225,15 +5225,25 @@ export default function EmployeeClockApp() {
       }
     };
     void checkPendingPayDetails();
+    // Refocusing the window fires both `focus` and `visibilitychange` within
+    // milliseconds, and users alt-tab often — throttle so a refocus can't
+    // re-run the members+profiles fetch more than once per interval period.
+    let lastFocusRunMs = Date.now();
+    const runThrottled = () => {
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 25000) return;
+      lastFocusRunMs = ts;
+      void checkPendingPayDetails();
+    };
     const interval = window.setInterval(() => {
       // Skip while backgrounded so an idle admin session doesn't keep
       // polling every 30s indefinitely.
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       void checkPendingPayDetails();
     }, 30000);
-    const onFocus = () => void checkPendingPayDetails();
+    const onFocus = () => runThrottled();
     const onVisibility = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") void checkPendingPayDetails();
+      if (typeof document !== "undefined" && document.visibilityState === "visible") runThrottled();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
@@ -6633,14 +6643,23 @@ export default function EmployeeClockApp() {
       void runAutoClockOutSweep();
     };
     run();
+    // Throttle refocus-triggered sweeps: `focus` + `visibilitychange` double-fire
+    // on every alt-tab back, and the sweep doesn't need sub-minute freshness.
+    let lastFocusRunMs = Date.now();
+    const runThrottled = () => {
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 60000) return;
+      lastFocusRunMs = ts;
+      run();
+    };
     const intervalId = window.setInterval(() => {
       // Skip while backgrounded so an idle tab doesn't keep sweeping every 5 minutes indefinitely.
       if (document.visibilityState === "hidden") return;
       run();
     }, 5 * 60 * 1000);
-    const handleFocus = () => run();
+    const handleFocus = () => runThrottled();
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") run();
+      if (document.visibilityState === "visible") runThrottled();
     };
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
@@ -7293,10 +7312,15 @@ export default function EmployeeClockApp() {
     return 0;
   };
 
-  const visibleRecords = dedupeTimesheetRowsByStableId(
-    isAdmin
-      ? records
-      : records.filter((record) => timesheetRecordBelongsToUser(record, authUser))
+  // Memoized so the array identity is stable across renders; without this,
+  // every render re-deduped the full company timesheet list AND invalidated
+  // every downstream useMemo keyed on visibleRecords (they all re-scan it).
+  const visibleRecords = useMemo(
+    () =>
+      dedupeTimesheetRowsByStableId(
+        isAdmin ? records : records.filter((record) => timesheetRecordBelongsToUser(record, authUser))
+      ),
+    [records, isAdmin, authUser]
   );
   const teamActiveShiftByUserId = useMemo(() => {
     const grouped = {};
@@ -8857,11 +8881,19 @@ export default function EmployeeClockApp() {
       return;
     }
     void refreshPayrollBalanceReminder();
+    // Throttle refocus-triggered refreshes (focus + visibilitychange double-fire).
+    let lastFocusRunMs = Date.now();
+    const runThrottled = () => {
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 60000) return;
+      lastFocusRunMs = ts;
+      void refreshPayrollBalanceReminder();
+    };
     const interval = setInterval(() => void refreshPayrollBalanceReminder(), 10 * 60 * 1000);
-    const onFocus = () => void refreshPayrollBalanceReminder();
+    const onFocus = () => runThrottled();
     const onVisibility = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void refreshPayrollBalanceReminder();
+        runThrottled();
       }
     };
     window.addEventListener("focus", onFocus);
@@ -9401,8 +9433,14 @@ export default function EmployeeClockApp() {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
       void pollInAppNotifications();
     }, 15000);
+    // Throttle refocus-triggered polls: alt-tabbing back shouldn't hit
+    // Supabase again if the 15s interval poll ran recently anyway.
+    let lastFocusRunMs = Date.now();
     const onVisibility = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        const ts = Date.now();
+        if (ts - lastFocusRunMs < 10000) return;
+        lastFocusRunMs = ts;
         void pollInAppNotifications();
       }
     };
@@ -9428,10 +9466,19 @@ export default function EmployeeClockApp() {
     };
 
     refresh();
+    // Throttle refocus-triggered refreshes (focus + visibilitychange double-fire);
+    // the 7s poll above already keeps this fresh while the tab is visible.
+    let lastFocusRunMs = Date.now();
+    const runThrottled = () => {
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 7000) return;
+      lastFocusRunMs = ts;
+      refresh();
+    };
     const interval = setInterval(refreshIfVisible, 7000);
-    const onFocus = () => refresh();
+    const onFocus = () => runThrottled();
     const onVisibility = () => {
-      if (typeof document === "undefined" || document.visibilityState === "visible") refresh();
+      if (typeof document === "undefined" || document.visibilityState === "visible") runThrottled();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisibility);
@@ -9661,7 +9708,12 @@ export default function EmployeeClockApp() {
     return false;
   };
 
-  const filterRecordsByRange = () => {
+  // Day-granular key so the report memos below only recompute when the
+  // calendar day rolls over (or their real inputs change), instead of on
+  // every render — these filter/reduce passes scan the full timesheet list.
+  const reportNowDayKey = now.toDateString();
+
+  const filteredRecords = useMemo(() => {
     const nowDate = new Date();
     return records.filter((record) => {
       const date = new Date(record.clockIn);
@@ -9676,52 +9728,73 @@ export default function EmployeeClockApp() {
       if (reportRange === "custom" && customFrom && customTo) return date >= new Date(customFrom) && date <= new Date(customTo);
       return true;
     });
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, reportRange, customFrom, customTo, reportNowDayKey]);
 
-  const filteredRecords = filterRecordsByRange();
+  const reportScopedRecords = useMemo(
+    () =>
+      filteredRecords.filter((record) => {
+        if (reportType === "employee" && reportEmployeeId !== "all") return record.employeeId === Number(reportEmployeeId);
+        if (reportType === "project" && reportProjectId !== "all") {
+          const selectedReportProject = adminProjects.find((project) => project.id === reportProjectId);
+          return selectedReportProject ? record.project === selectedReportProject.name : true;
+        }
+        return true;
+      }),
+    [filteredRecords, reportType, reportEmployeeId, reportProjectId, adminProjects]
+  );
 
-  const reportScopedRecords = filteredRecords.filter((record) => {
-    if (reportType === "employee" && reportEmployeeId !== "all") return record.employeeId === Number(reportEmployeeId);
-    if (reportType === "project" && reportProjectId !== "all") {
-      const selectedReportProject = adminProjects.find((project) => project.id === reportProjectId);
-      return selectedReportProject ? record.project === selectedReportProject.name : true;
-    }
-    return true;
-  });
+  const reportTotalMinutes = useMemo(
+    () => reportScopedRecords.reduce((total, record) => total + getWorkedMinutes(record), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportScopedRecords]
+  );
+  const reportTotalCost = useMemo(
+    () => reportScopedRecords.reduce((total, record) => total + getLabourCost(record), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportScopedRecords]
+  );
 
-  const reportTotalMinutes = reportScopedRecords.reduce((total, record) => total + getWorkedMinutes(record), 0);
-  const reportTotalCost = reportScopedRecords.reduce((total, record) => total + getLabourCost(record), 0);
+  const employeeReportRows = useMemo(
+    () =>
+      reportScopedRecords.map((record) => ({
+        id: record.id,
+        date: formatDateParts(record.clockIn, companyTimeZone),
+        employee: resolveTimesheetEmployeeTitle(record, {
+          profileFullName,
+          authUser,
+          teamProfileFullNameByUserId,
+        }),
+        project: record.project,
+        costCenter: record.costCenter,
+        cost: getLabourCost(record),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportScopedRecords, companyTimeZone, profileFullName, authUser, teamProfileFullNameByUserId]
+  );
 
-  const employeeReportRows = reportScopedRecords.map((record) => ({
-    id: record.id,
-    date: formatDateParts(record.clockIn, companyTimeZone),
-    employee: resolveTimesheetEmployeeTitle(record, {
-      profileFullName,
-      authUser,
-      teamProfileFullNameByUserId,
-    }),
-    project: record.project,
-    costCenter: record.costCenter,
-    cost: getLabourCost(record),
-  }));
-
-  const projectReportRows = Object.values(
-    reportScopedRecords.reduce((acc, record) => {
-      const key = `${record.project}-${record.costCenter}`;
-      if (!acc[key]) {
-        acc[key] = {
-          key,
-          date: formatDateParts(record.clockIn, companyTimeZone),
-          project: record.project,
-          costCenter: record.costCenter,
-          minutes: 0,
-          cost: 0,
-        };
-      }
-      acc[key].minutes += getWorkedMinutes(record);
-      acc[key].cost += getLabourCost(record);
-      return acc;
-    }, {})
+  const projectReportRows = useMemo(
+    () =>
+      Object.values(
+        reportScopedRecords.reduce((acc, record) => {
+          const key = `${record.project}-${record.costCenter}`;
+          if (!acc[key]) {
+            acc[key] = {
+              key,
+              date: formatDateParts(record.clockIn, companyTimeZone),
+              project: record.project,
+              costCenter: record.costCenter,
+              minutes: 0,
+              cost: 0,
+            };
+          }
+          acc[key].minutes += getWorkedMinutes(record);
+          acc[key].cost += getLabourCost(record);
+          return acc;
+        }, {})
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportScopedRecords, companyTimeZone]
   );
 
   const photoFolders = Object.keys(filteredProjectPhotos);
@@ -10278,8 +10351,14 @@ export default function EmployeeClockApp() {
   useEffect(() => {
     if (!authUser?.id || !userCompany?.id || !companyChecked) return undefined;
     if (activeTab !== "photos" && activeTab !== "receipts") return undefined;
+    // Throttle refocus-triggered refreshes (focus + visibilitychange double-fire);
+    // the 10s poll in the effect below already keeps this fresh while active.
+    let lastFocusRunMs = Date.now();
     const refresh = () => {
       if (document.visibilityState === "hidden") return;
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 10000) return;
+      lastFocusRunMs = ts;
       void loadProjectMediaFromSupabase({ silent: true });
     };
     window.addEventListener("focus", refresh);
@@ -10419,9 +10498,20 @@ export default function EmployeeClockApp() {
     const refresh = () => {
       void loadProjectListsFromSupabase({ migrateLocal: false });
     };
-    const handleFocus = () => refresh();
+    // Refocus refetch is only useful where the lists are visible (Lists tab or
+    // the Clock list modal); firing it on every alt-tab from any tab just adds
+    // load. Also throttled since focus + visibilitychange double-fire.
+    let lastFocusRunMs = Date.now();
+    const runThrottled = () => {
+      if (!shouldPoll) return;
+      const ts = Date.now();
+      if (ts - lastFocusRunMs < 10000) return;
+      lastFocusRunMs = ts;
+      refresh();
+    };
+    const handleFocus = () => runThrottled();
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") refresh();
+      if (document.visibilityState === "visible") runThrottled();
     };
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
