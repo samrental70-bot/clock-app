@@ -983,6 +983,9 @@ function flattenClockProjectListsForSupabase(state, { userId, companyId }) {
 }
 
 export const DEFAULT_COMPANY_TIME_ZONE = "America/Toronto";
+
+/** How many timesheet cards render per "Show more" batch on the Timesheets tab. */
+const TIMESHEET_RENDER_BATCH = 40;
 const DEFAULT_AUTO_CLOCK_OUT_TIME = "00:00";
 const AUTO_TIMED_OUT_STATUS = "Auto timed out";
 const COMPANY_SETTINGS_SELECT =
@@ -4700,6 +4703,10 @@ export default function EmployeeClockApp() {
   const [timesheetDatePickerOpen, setTimesheetDatePickerOpen] = useState(false);
   const [timesheetFilterSheetOpen, setTimesheetFilterSheetOpen] = useState(false);
   const [timesheetSanityExpanded, setTimesheetSanityExpanded] = useState(false);
+  // Windowed list rendering: only this many timesheet cards mount at once
+  // ("Show more" reveals the next batch). Rendering the whole filtered range
+  // (hundreds of cards on real production data) froze tab switches.
+  const [timesheetRenderLimit, setTimesheetRenderLimit] = useState(TIMESHEET_RENDER_BATCH);
   const [timesheetSanityHighlightedIssueId, setTimesheetSanityHighlightedIssueId] = useState("");
   const [timesheetHighlightedRecordId, setTimesheetHighlightedRecordId] = useState("");
   const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
@@ -7148,23 +7155,52 @@ export default function EmployeeClockApp() {
     companyAssignAllProjectsToAllEmployees,
   ]);
 
-  const getWorkedMinutes = (record) => {
-    if (record == null) return 0;
-    if (isVacationTimesheetRecord(record)) return 0;
-    let clockOut = record.clockOut || null;
-    if (!clockOut) {
-      const dueIso = autoClockOutIsoForShift(record.clockIn, companyTimeZone, companyAutoClockOutTime);
-      const dueMs = dueIso ? new Date(dueIso).getTime() : NaN;
-      const nowMs = Date.now();
-      clockOut = Number.isFinite(dueMs) && nowMs >= dueMs ? dueIso : new Date(nowMs).toISOString();
-    }
-    const total = minutesBetween(record.clockIn, clockOut);
-    const breakTotal =
-      record.breakStart && record.breakEnd
-        ? breakMinutesBetween(record.clockIn, clockOut, record.breakStart, record.breakEnd)
-        : Math.max(0, Number(record.breakMinutes || 0));
-    return Math.max(0, total - breakTotal);
-  };
+  // useCallback (not a plain function) because these cost helpers appear in
+  // the dependency arrays of several expensive useMemos (timesheet summary,
+  // report totals, payroll rows). As plain functions they got a new identity
+  // every render, which silently defeated all of those memos.
+  const getWorkedMinutes = useCallback(
+    (record) => {
+      if (record == null) return 0;
+      if (isVacationTimesheetRecord(record)) return 0;
+      let clockOut = record.clockOut || null;
+      if (!clockOut) {
+        const dueIso = autoClockOutIsoForShift(record.clockIn, companyTimeZone, companyAutoClockOutTime);
+        const dueMs = dueIso ? new Date(dueIso).getTime() : NaN;
+        const nowMs = Date.now();
+        clockOut = Number.isFinite(dueMs) && nowMs >= dueMs ? dueIso : new Date(nowMs).toISOString();
+      }
+      const total = minutesBetween(record.clockIn, clockOut);
+      const breakTotal =
+        record.breakStart && record.breakEnd
+          ? breakMinutesBetween(record.clockIn, clockOut, record.breakStart, record.breakEnd)
+          : Math.max(0, Number(record.breakMinutes || 0));
+      return Math.max(0, total - breakTotal);
+    },
+    [companyTimeZone, companyAutoClockOutTime]
+  );
+
+  const isCompletedReportTimesheet = useCallback((record) => {
+    if (!record?.clockIn || !record?.clockOut) return false;
+    if (isVacationTimesheetRecord(record)) return false;
+    const t0 = parseStoredInstant(record.clockIn).getTime();
+    const t1 = parseStoredInstant(record.clockOut).getTime();
+    return Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0;
+  }, []);
+
+  const getReportWorkedMinutes = useCallback(
+    (record) => {
+      if (!isCompletedReportTimesheet(record)) return 0;
+      if (isVacationTimesheetRecord(record)) return 0;
+      const total = minutesBetween(record.clockIn, record.clockOut);
+      const breakTotal =
+        record.breakStart && record.breakEnd
+          ? breakMinutesBetween(record.clockIn, record.clockOut, record.breakStart, record.breakEnd)
+          : Math.max(0, Number(record.breakMinutes || 0));
+      return Math.max(0, total - breakTotal);
+    },
+    [isCompletedReportTimesheet]
+  );
 
   const getRecordProjectMeta = useCallback(
     (record) => {
@@ -7268,49 +7304,36 @@ export default function EmployeeClockApp() {
         workedMinutes,
       };
     },
-    [getRecordCostCentreMeta, getRecordProjectMeta]
+    [getRecordCostCentreMeta, getRecordProjectMeta, getWorkedMinutes, getReportWorkedMinutes, isCompletedReportTimesheet]
   );
 
-  const getLabourCost = (record) => {
-    if (record == null) return 0;
-    const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
-    if (Number.isFinite(resolved.amount)) return resolved.amount;
-    if (record.labour_cost != null && record.labour_cost !== "") {
-      const stored = Number(record.labour_cost);
-      if (Number.isFinite(stored)) return stored;
-    }
-    return 0;
-  };
+  const getLabourCost = useCallback(
+    (record) => {
+      if (record == null) return 0;
+      const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
+      if (Number.isFinite(resolved.amount)) return resolved.amount;
+      if (record.labour_cost != null && record.labour_cost !== "") {
+        const stored = Number(record.labour_cost);
+        if (Number.isFinite(stored)) return stored;
+      }
+      return 0;
+    },
+    [resolvePayrollChargeForRecord]
+  );
 
-  const isCompletedReportTimesheet = (record) => {
-    if (!record?.clockIn || !record?.clockOut) return false;
-    if (isVacationTimesheetRecord(record)) return false;
-    const t0 = parseStoredInstant(record.clockIn).getTime();
-    const t1 = parseStoredInstant(record.clockOut).getTime();
-    return Number.isFinite(t0) && Number.isFinite(t1) && t1 > t0;
-  };
-
-  const getReportWorkedMinutes = (record) => {
-    if (!isCompletedReportTimesheet(record)) return 0;
-    if (isVacationTimesheetRecord(record)) return 0;
-    const total = minutesBetween(record.clockIn, record.clockOut);
-    const breakTotal =
-      record.breakStart && record.breakEnd
-        ? breakMinutesBetween(record.clockIn, record.clockOut, record.breakStart, record.breakEnd)
-        : Math.max(0, Number(record.breakMinutes || 0));
-    return Math.max(0, total - breakTotal);
-  };
-
-  const getReportLabourCost = (record) => {
-    if (!isCompletedReportTimesheet(record)) return 0;
-    const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
-    if (Number.isFinite(resolved.amount)) return resolved.amount;
-    if (record.labour_cost != null && record.labour_cost !== "") {
-      const stored = Number(record.labour_cost);
-      if (Number.isFinite(stored)) return stored;
-    }
-    return 0;
-  };
+  const getReportLabourCost = useCallback(
+    (record) => {
+      if (!isCompletedReportTimesheet(record)) return 0;
+      const resolved = resolvePayrollChargeForRecord({ record, includeDedup: false });
+      if (Number.isFinite(resolved.amount)) return resolved.amount;
+      if (record.labour_cost != null && record.labour_cost !== "") {
+        const stored = Number(record.labour_cost);
+        if (Number.isFinite(stored)) return stored;
+      }
+      return 0;
+    },
+    [isCompletedReportTimesheet, resolvePayrollChargeForRecord]
+  );
 
   // Memoized so the array identity is stable across renders; without this,
   // every render re-deduped the full company timesheet list AND invalidated
@@ -8207,6 +8230,20 @@ export default function EmployeeClockApp() {
     timesheetTaskFilter,
     visibleRecords,
     visibleVacationTimesheetRecords,
+  ]);
+
+  useEffect(() => {
+    // New filter/range selection starts back at the first batch of cards.
+    setTimesheetRenderLimit(TIMESHEET_RENDER_BATCH);
+  }, [
+    activeTab,
+    timesheetRangePreset,
+    timesheetRangeBounds.from,
+    timesheetRangeBounds.to,
+    timesheetEmployeeFilter,
+    timesheetProjectFilter,
+    timesheetTaskFilter,
+    timesheetCompletedOnly,
   ]);
 
   const visibleTimesheetSummary = useMemo(() => {
@@ -23796,7 +23833,16 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       <p className="mx-auto mt-2 max-w-[230px] text-[14px] font-semibold leading-snug text-[#64748B]">Change filters or date range to review more records.</p>
                     </div>
                   )}
-                  {visibleTimesheetRecords.map((record) => renderTimesheetCard(record, true))}
+                  {visibleTimesheetRecords.slice(0, timesheetRenderLimit).map((record) => renderTimesheetCard(record, true))}
+                  {visibleTimesheetRecords.length > timesheetRenderLimit ? (
+                    <button
+                      type="button"
+                      className="flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-[#CBD5E1] bg-white text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                      onClick={() => setTimesheetRenderLimit((current) => current + TIMESHEET_RENDER_BATCH)}
+                    >
+                      Show more ({visibleTimesheetRecords.length - timesheetRenderLimit} remaining)
+                    </button>
+                  ) : null}
                 </div>
                 {vacationModalOpen ? (
                   <div
