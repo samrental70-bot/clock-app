@@ -124,19 +124,16 @@ const AppHeader = ({
                 {headerTitle || "Company"}
             </h1>
             {isDevelopment ? (
-              <span className="shrink-0 rounded-full border border-[#C9A227]/45 bg-[#FFF7E6] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+              <span
+                className="shrink-0 rounded-full border border-[#C9A227]/45 bg-[#FFF7E6] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]"
+                title={buildLabel || undefined}
+              >
                 Dev
               </span>
             ) : null}
           </div>
           {showCompanyName && userLabel ? (
             <p className="mt-0.5 truncate text-[11px] font-medium leading-tight text-slate-500">{userLabel}</p>
-          ) : null}
-          {showCompanyName && buildLabel ? (
-            <p className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-slate-400">{buildLabel}</p>
-          ) : null}
-          {!showCompanyName && buildLabel ? (
-            <p className="mt-0.5 truncate text-[10px] font-semibold leading-tight text-slate-400">{buildLabel}</p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center justify-end">
@@ -159,6 +156,114 @@ const AppHeader = ({
         </div>
       </div>
     </div>
+  );
+};
+
+const MenuIcon = ({ type }) => {
+  const common = {
+    viewBox: "0 0 24 24",
+    className: "h-[18px] w-[18px]",
+    "aria-hidden": "true",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+  };
+  if (type === "schedule") {
+    return (
+      <svg {...common}>
+        <path d="M7 3v4M17 3v4" />
+        <path d="M4 8h16" />
+        <path d="M6 5h12a2 2 0 0 1 2 2v12H4V7a2 2 0 0 1 2-2Z" />
+      </svg>
+    );
+  }
+  if (type === "timesheet") {
+    return (
+      <svg {...common}>
+        <path d="M7 4h10a2 2 0 0 1 2 2v14H5V6a2 2 0 0 1 2-2Z" />
+        <path d="M8 9h8M8 13h8M8 17h4" />
+      </svg>
+    );
+  }
+  if (type === "projects") {
+    return (
+      <svg {...common}>
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+      </svg>
+    );
+  }
+  if (type === "materials") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+        <path d="m8 12 2.5 2.5L16 9" />
+      </svg>
+    );
+  }
+  if (type === "team") {
+    return (
+      <svg {...common}>
+        <circle cx="9" cy="8" r="3" />
+        <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+        <path d="M16 8a3 3 0 1 1 3.5 2.96" />
+        <path d="M15 14.5c2.6.4 4.5 2.6 4.5 5.5" />
+      </svg>
+    );
+  }
+  if (type === "chat") {
+    return (
+      <svg {...common}>
+        <path d="M21 12a7.5 7.5 0 0 1-7.5 7.5H8l-5 2 1.7-4.4A7.5 7.5 0 1 1 21 12Z" />
+        <path d="M8 11h8M8 15h5" />
+      </svg>
+    );
+  }
+  if (type === "photos") {
+    return (
+      <svg {...common}>
+        <rect x="3.5" y="5" width="17" height="14" rx="2" />
+        <circle cx="9" cy="10.5" r="1.75" />
+        <path d="m6 17 4.5-4.5L13 15l2.5-2.5L20 17" />
+      </svg>
+    );
+  }
+  if (type === "receipts") {
+    return (
+      <svg {...common}>
+        <path d="M6 3h12v18l-2.5-1.5L13 21l-2.5-1.5L8 21l-2-1.5V3Z" />
+        <path d="M9 8h6M9 12h6" />
+      </svg>
+    );
+  }
+  if (type === "reports") {
+    return (
+      <svg {...common}>
+        <path d="M5 20V10M12 20V4M19 20v-7" />
+      </svg>
+    );
+  }
+  if (type === "requests") {
+    return (
+      <svg {...common}>
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path d="m8.5 12 2.2 2.2L15.5 9" />
+      </svg>
+    );
+  }
+  if (type === "settings") {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 13.5a7.9 7.9 0 0 0 0-3L21 9l-2-3.4-1.9.8a7.7 7.7 0 0 0-2.6-1.5L14 3h-4l-.5 2a7.7 7.7 0 0 0-2.6 1.5l-1.9-.8L3 9l1.6 1.5a7.9 7.9 0 0 0 0 3L3 15l2 3.4 1.9-.8a7.7 7.7 0 0 0 2.6 1.5l.5 2h4l.5-2a7.7 7.7 0 0 0 2.6-1.5l1.9.8 2-3.4-1.6-1.5Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <circle cx="12" cy="12" r="8.5" />
+    </svg>
   );
 };
 
@@ -989,7 +1094,7 @@ const normalizeStatus = (status) => String(status || "").trim().toLowerCase();
 
 const normalizeMemberRole = (role) => String(role || "").trim().toLowerCase();
 
-/** Single canonical role from company_members / local state. Unknown â†’ employee (safe). admin â†’ owner. */
+/** Single canonical role from company_members / local state. Unknown → employee (safe). admin → owner. */
 function normalizeCompanyMemberRole(role) {
   const r = normalizeMemberRole(role);
   if (r === "owner" || r === "admin") return "owner";
@@ -997,7 +1102,7 @@ function normalizeCompanyMemberRole(role) {
   return "employee";
 }
 
-/** profiles.employment_status â†’ "active" | "archived" */
+/** profiles.employment_status → "active" | "archived" */
 function normalizeEmploymentStatus(raw) {
   const s = raw != null ? String(raw).trim().toLowerCase() : "active";
   return s === "archived" ? "archived" : "active";
@@ -1201,7 +1306,7 @@ const SCHEDULE_GRID_TOTAL_MINUTES = (SCHEDULE_GRID_HOUR_END - SCHEDULE_GRID_HOUR
 const SCHEDULE_GRID_PX_PER_HOUR = 46;
 const SCHEDULE_MONTH_CHIP_MAX = 1;
 
-/** Ignore taps meant for chips/cards/dialogsâ€”not empty calendar background. Handles non-Element targets safely. */
+/** Ignore taps meant for chips/cards/dialogs—not empty calendar background. Handles non-Element targets safely. */
 function isAdminScheduleCalendarBackgroundIgnored(ev) {
   const te = ev?.target;
   const el =
@@ -1276,7 +1381,7 @@ function looksLikeUuidOrIdLike(value) {
   if (!s) return false;
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
   if (/^[0-9a-f]{32}$/i.test(s)) return true;
-  if (/^[0-9a-f]{6}â€¦[0-9a-f]{4}$/i.test(s)) return true;
+  if (/^[0-9a-f]{6}…[0-9a-f]{4}$/i.test(s)) return true;
   return false;
 }
 
@@ -1292,10 +1397,10 @@ function pickGoodFreeformEmployeeName(record) {
 }
 
 function shortUserLabel(userId) {
-  if (userId == null || userId === "") return "â€”";
+  if (userId == null || userId === "") return "—";
   const s = String(userId);
   if (s.length <= 12) return s;
-  return `${s.slice(0, 6)}â€¦${s.slice(-4)}`;
+  return `${s.slice(0, 6)}…${s.slice(-4)}`;
 }
 
 function timesheetRecordBelongsToUser(record, authUser) {
@@ -1459,10 +1564,10 @@ function formatClockScheduledTaskOptionLabel(task, timeZone) {
   if (dk === todayKey) dayPart = "Today";
   else if (dk === nextKey) dayPart = "Tomorrow";
   const tm = formatTime(st, tz);
-  return `${title} Â· ${dayPart} Â· ${tm}`;
+  return `${title} · ${dayPart} · ${tm}`;
 }
 
-/** Wall date YYYY-MM-DD + time HH:mm in `timeZone` â†’ UTC ISO string. */
+/** Wall date YYYY-MM-DD + time HH:mm in `timeZone` → UTC ISO string. */
 /** Normalize user time input (e.g. "9:00" or "09:00") to HH:mm:ss for wall clock helpers. */
 function normalizeTimeInputForWallClock(timeInput) {
   const s = String(timeInput ?? "").trim();
@@ -1616,7 +1721,7 @@ function scheduleTaskDurationMinutes(task, timeZone) {
   return 60;
 }
 
-/** Move/reschedule: only start_time, end_time, duration_minutes â€” preserves wall duration or uses duration_minutes / 60. */
+/** Move/reschedule: only start_time, end_time, duration_minutes — preserves wall duration or uses duration_minutes / 60. */
 function buildScheduledTaskClockMovePayload(task, newStartIso, companyTimeZone) {
   const tz = companyTimeZone || DEFAULT_COMPANY_TIME_ZONE;
   const oldStartMs = parseStoredInstant(task?.start_time).getTime();
@@ -1672,7 +1777,7 @@ function addWallMonthsSafe(dateKey, deltaMonths, timeZone) {
   return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-/** Sunday-first month grid: 6 rows Ã— 7 cols; cells may be outside anchor month (greyed). */
+/** Sunday-first month grid: 6 rows × 7 cols; cells may be outside anchor month (greyed). */
 function buildMonthGridCells(anchorKey, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const seg = String(anchorKey || "").split("-");
@@ -1741,7 +1846,7 @@ function lastWallDayOfMonthInTimeZone(year, month1to12, timeZone) {
   }
 }
 
-/** Reports quick ranges: wall dates in `timeZone` (Mondayâ€“Sunday week). */
+/** Reports quick ranges: wall dates in `timeZone` (Monday–Sunday week). */
 function computeReportsQuickRange(preset, now, timeZone) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const todayKey = calendarDateKeyInTimeZone(now, tz);
@@ -2089,7 +2194,7 @@ function payrollPeriodOptionsForRange(settings, rangeFrom, rangeTo, timeZone) {
         startKey,
         endKey,
         payDateKey: String(period.payDateKey || endKey).trim() || endKey,
-        label: `${formatPayrollPeriodLabel(startKey, endKey, tz)} â€¢ Pay ${formatPayrollDateKeyNumeric(period.payDateKey || endKey, tz)}`,
+        label: `${formatPayrollPeriodLabel(startKey, endKey, tz)} • Pay ${formatPayrollDateKeyNumeric(period.payDateKey || endKey, tz)}`,
       });
     }
     const prevDate = addWallDaysInTimeZone(startKey, -1, tz);
@@ -2105,11 +2210,11 @@ function payrollBalanceBadgeClass(balance) {
   const value = Number(balance) || 0;
   if (value > 0) return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
   if (value < 0) return "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]";
-  return "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]";
+  return "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]";
 }
 
 function reportsCostCentreKeyFromRow(row) {
-  return String(row?.costCenter ?? "").trim() || "â€”";
+  return String(row?.costCenter ?? "").trim() || "—";
 }
 
 function reportDimensionLabel(value) {
@@ -2186,6 +2291,17 @@ function mediaTypeLabel(value) {
   if (normalized === "receipt") return "Receipt";
   if (normalized === "document") return "Document";
   return "Photo";
+}
+
+function humanizeReceiptStatus(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (!/^[A-Z0-9_]+$/.test(raw)) return raw;
+  return raw
+    .toLowerCase()
+    .split("_")
+    .map((word) => (word ? word[0].toUpperCase() + word.slice(1) : word))
+    .join(" ");
 }
 
 function mediaItemMediaType(item) {
@@ -2643,14 +2759,14 @@ function teamAttendanceStatusForRecord(record, ctx) {
 
 /** Dashboard row: aggregate display for all timesheets that day for one employee (multiple shifts). */
 function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, getWorkedMinutes, getLabourCost) {
-  const projectDisp = rep?.project ? String(rep.project) : "â€”";
-  const costDisp = rep?.costCenter ? String(rep.costCenter) : "â€”";
+  const projectDisp = rep?.project ? String(rep.project) : "—";
+  const costDisp = rep?.costCenter ? String(rep.costCenter) : "—";
   if (!userDayRows?.length) {
     return {
-      inDisp: "â€”",
-      outDisp: "â€”",
-      totalDisp: "â€”",
-      labourDisp: "â€”",
+      inDisp: "—",
+      outDisp: "—",
+      totalDisp: "—",
+      labourDisp: "—",
       totalMinutes: 0,
       labourCost: 0,
       projectDisp,
@@ -2660,7 +2776,7 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
   const byInAsc = [...userDayRows].sort(
     (a, b) => parseStoredInstant(a.clockIn).getTime() - parseStoredInstant(b.clockIn).getTime()
   );
-  const inDisp = byInAsc[0]?.clockIn ? formatTime(byInAsc[0].clockIn, companyTimeZone) : "â€”";
+  const inDisp = byInAsc[0]?.clockIn ? formatTime(byInAsc[0].clockIn, companyTimeZone) : "—";
   const outsDesc = [...userDayRows]
     .filter((r) => r.clockOut)
     .sort((a, b) => parseStoredInstant(b.clockOut).getTime() - parseStoredInstant(a.clockOut).getTime());
@@ -2668,7 +2784,7 @@ function computeDashboardEmployeeDayMetrics(userDayRows, rep, companyTimeZone, g
     (r) => normalizeStatus(r.status) === "active" && !r.clockOut
   );
   const outDisp =
-    anyOpenNoOut || !outsDesc.length ? "â€”" : formatTime(outsDesc[0].clockOut, companyTimeZone);
+    anyOpenNoOut || !outsDesc.length ? "—" : formatTime(outsDesc[0].clockOut, companyTimeZone);
   let sumMin = 0;
   let sumLab = 0;
   for (const ts of userDayRows) {
@@ -2701,7 +2817,7 @@ const COMPANY_TIME_ZONE_OPTIONS = [
 function formatDate(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
-  if (Number.isNaN(date.getTime())) return "â€”";
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     weekday: "short",
@@ -2714,7 +2830,7 @@ function formatDate(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 function formatDateParts(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const d = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
-  if (Number.isNaN(d.getTime())) return { day: "â€”", fullDate: "â€”" };
+  if (Number.isNaN(d.getTime())) return { day: "—", fullDate: "—" };
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: tz, weekday: "short" }).format(d);
   const fullDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -2728,7 +2844,7 @@ function formatDateParts(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
 function formatTime(dateOrString, timeZone = DEFAULT_COMPANY_TIME_ZONE) {
   const tz = timeZone || DEFAULT_COMPANY_TIME_ZONE;
   const date = dateOrString instanceof Date ? dateOrString : parseStoredInstant(dateOrString);
-  if (Number.isNaN(date.getTime())) return "â€”";
+  if (Number.isNaN(date.getTime())) return "—";
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
     hour: "numeric",
@@ -2795,7 +2911,7 @@ function getProjectFolderName(projectName) {
   return projectName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-/** Normalize profiles.hourly_rate for inserts (missing / invalid â†’ 0). */
+/** Normalize profiles.hourly_rate for inserts (missing / invalid → 0). */
 function hourlyRateFromProfileValue(hr) {
   if (hr == null || hr === "") return 0;
   const n = typeof hr === "number" ? hr : Number(String(hr).replace(",", "."));
@@ -2990,7 +3106,7 @@ async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZ
   };
 }
 
-/** Map Supabase `timesheets` row â†’ UI record shape used by Timesheet tab / reports */
+/** Map Supabase `timesheets` row → UI record shape used by Timesheet tab / reports */
 function mapTimesheetRowFromSupabase(row) {
   const projectName = row.project_name || "";
   const empName = row.employee_name || "";
@@ -3568,16 +3684,16 @@ function withTimeout(promise, ms = 10000, message = "Operation timed out") {
 
 /**
  * Notification recipients by actor role (company_members in same company; actor always excluded).
- * - employee â†’ all owner + supervisor user_ids
- * - supervisor â†’ owner user_ids only
- * - owner â†’ none (no notifications for own actions)
+ * - employee → all owner + supervisor user_ids
+ * - supervisor → owner user_ids only
+ * - owner → none (no notifications for own actions)
  */
 async function getNotificationRecipients(supabase, companyId, actorUserId, actorRole) {
   const ar = normalizeMemberRole(actorRole);
   console.log("[NOTIFY] actor role", ar, "actorUserId", actorUserId, "companyId", companyId);
   if (!companyId || !actorUserId) return [];
   if (ar === "owner") {
-    console.log("[NOTIFY] recipients (owner actor) â†’ []");
+    console.log("[NOTIFY] recipients (owner actor) → []");
     return [];
   }
   const { data, error } = await supabase.from("company_members").select("user_id, role").eq("company_id", companyId);
@@ -3701,7 +3817,7 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   }
 }
 
-/** Insert one in-app row per recipient. Failures are logged only â€” never throws. */
+/** Insert one in-app row per recipient. Failures are logged only — never throws. */
 function scheduleAssignmentMessageSignature(row) {
   const title = String(row?.title ?? "").trim();
   const message = String(row?.message ?? "").trim();
@@ -7727,7 +7843,6 @@ export default function EmployeeClockApp() {
   const [startupError, setStartupError] = useState("");
   const hasSuccessfulLoginRef = useRef(false);
   const loginClickedRef = useRef(false);
-  const [loginDebug, setLoginDebug] = useState("");
   const hasOpenedAppRef = useRef(false);
   // Live refs for auth listener stability (avoid stale closures)
   const authUserRef = useRef(null);
@@ -8098,7 +8213,7 @@ export default function EmployeeClockApp() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
-  /** list | cal1 | cal3 | cal7 | cal30 â€” Schedule tab list vs rolling calendar windows (company TZ). */
+  /** list | cal1 | cal3 | cal7 | cal30 — Schedule tab list vs rolling calendar windows (company TZ). */
   const [scheduleViewMode, setScheduleViewMode] = useState("list");
   /** First day (YYYY-MM-DD) of the visible calendar range in company TZ. */
   const [scheduleCalendarAnchor, setScheduleCalendarAnchor] = useState("");
@@ -8139,13 +8254,13 @@ export default function EmployeeClockApp() {
   const [employeeScheduledTasks, setEmployeeScheduledTasks] = useState([]);
   const [employeeScheduleLoading, setEmployeeScheduleLoading] = useState(false);
   const [employeeScheduleError, setEmployeeScheduleError] = useState("");
-  /** task id string â†’ current user's assignee row (for accept/decline + display). */
+  /** task id string → current user's assignee row (for accept/decline + display). */
   const [employeeScheduleLinkByTaskId, setEmployeeScheduleLinkByTaskId] = useState({});
   const employeeScheduleKnownAssignmentIdsRef = useRef(new Set());
   const employeeScheduleBootstrappedRef = useRef(false);
   const employeeScheduleRefreshInFlightRef = useRef(false);
   const shownAssignmentRowIdsRef = useRef(new Set());
-  /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow â€” Scheduled Task dropdown. */
+  /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow — Scheduled Task dropdown. */
   const [clockEmployeeScheduledTasks, setClockEmployeeScheduledTasks] = useState([]);
   const [clockEmployeeScheduleLoading, setClockEmployeeScheduleLoading] = useState(false);
   const [clockSelectedScheduledTaskId, setClockSelectedScheduledTaskId] = useState("");
@@ -9146,10 +9261,10 @@ export default function EmployeeClockApp() {
     const groups = {};
     for (const task of rows) {
       const rawStart = task?.start_time;
-      let dateKey = "â€”";
+      let dateKey = "—";
       if (rawStart != null && rawStart !== "") {
         const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
-        dateKey = k && String(k).trim() !== "" ? k : "â€”";
+        dateKey = k && String(k).trim() !== "" ? k : "—";
       }
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
@@ -9192,10 +9307,10 @@ export default function EmployeeClockApp() {
     const groups = {};
     for (const task of rows) {
       const rawStart = task?.start_time;
-      let dateKey = "â€”";
+      let dateKey = "—";
       if (rawStart != null && rawStart !== "") {
         const k = calendarDateKeyInTimeZone(rawStart, companyTimeZone);
-        dateKey = k && String(k).trim() !== "" ? k : "â€”";
+        dateKey = k && String(k).trim() !== "" ? k : "—";
       }
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(task);
@@ -12410,9 +12525,9 @@ export default function EmployeeClockApp() {
       }
       if (dim === "cost_center") {
         const cc = reportsCostCentreKeyFromRow(rec);
-        return { key: `cc:${cc}`, label: cc === "â€”" ? "(none)" : cc };
+        return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
       }
-      return { key: "?", label: "â€”" };
+      return { key: "?", label: "—" };
     };
 
     const l1Map = {};
@@ -14017,7 +14132,6 @@ export default function EmployeeClockApp() {
     setOauthError("");
     setCompanyError("");
     setStartupError("");
-    setLoginDebug(`Clicked. Email: ${loginEmail}`);
 
     try {
       console.log("LOGIN ATTEMPT", loginEmail.trim());
@@ -14029,7 +14143,6 @@ export default function EmployeeClockApp() {
     if (error) {
         console.error("LOGIN ERROR", error);
       setLoginError(error.message);
-        setLoginDebug(`Login error: ${error.message}`);
       return;
     }
 
@@ -14038,7 +14151,6 @@ export default function EmployeeClockApp() {
       hasSuccessfulLoginRef.current = true;
 
       console.log("LOGIN SUCCESS user id", user.id);
-      setLoginDebug(`Login success. User: ${user.id}`);
 
     setAuthUser(user);
       setCompanyChecked(false);
@@ -15689,7 +15801,7 @@ export default function EmployeeClockApp() {
     const isSafari = /safari/.test(ua) && !/crios|chrome/.test(ua);
     if (isIOS && isSafari) return "iPhone: tap the Share button in Safari, scroll down, then tap Add to Home Screen.";
     if (isIOS && !isSafari) return "iPhone: open this link in Safari, then tap Share and Add to Home Screen.";
-    if (isAndroid && isChrome) return "Android: Tap Chrome menu (â‹®) â†’ Install App or Add to Home Screen.";
+    if (isAndroid && isChrome) return "Android: Tap Chrome menu (⋮) → Install App or Add to Home Screen.";
     return "Use your browser menu and choose Install App or Add to Home Screen.";
   };
 
@@ -15872,7 +15984,7 @@ const handleClockIn = async () => {
   };
 
   setCurrentShift(newShift);
-    setLocationStatus("Saving clock-inâ€¦");
+    setLocationStatus("Saving clock-in…");
 
     const clockInInsertBase = {
         user_id: authUser.id,
@@ -16209,7 +16321,7 @@ const handlePhotoQuickUpload = async (event) => {
     setUploadProgress(100);
     const uploadedStatus = photo.metadataSyncFailed
       ? "Photo uploaded. Shared database sync pending."
-      : "Photo uploaded âœ…";
+      : "Photo uploaded ✅";
     setPhotoStatus(uploadedStatus);
     void schedulePhotoNotificationAfterUpload();
     schedulePhotoStatusClear(uploadedStatus, 3000, { clearUploadProgress: true });
@@ -18589,13 +18701,13 @@ const handlePhotoQuickUpload = async (event) => {
         </p>
         {(request.requestedBreakStartAt || request.requestedBreakEndAt || request.requestedBreakMinutes > 0) ? (
           <p className="mt-1 text-[12px] font-semibold text-slate-500">
-            Break: {request.requestedBreakStartAt ? formatTime(request.requestedBreakStartAt, companyTimeZone) : "â€”"} - {request.requestedBreakEndAt ? formatTime(request.requestedBreakEndAt, companyTimeZone) : "â€”"}
+            Break: {request.requestedBreakStartAt ? formatTime(request.requestedBreakStartAt, companyTimeZone) : "—"} - {request.requestedBreakEndAt ? formatTime(request.requestedBreakEndAt, companyTimeZone) : "—"}
             {request.requestedBreakMinutes > 0 ? ` (${formatHoursMinutes(request.requestedBreakMinutes)})` : ""}
           </p>
         ) : null}
         {request.requestType === "edit_time" && original.clock_in ? (
           <p className="mt-1 text-[12px] font-semibold text-slate-500">
-            Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "â€”"}
+            Original: {formatTime(original.clock_in, companyTimeZone)} - {original.clock_out ? formatTime(original.clock_out, companyTimeZone) : "—"}
           </p>
         ) : null}
         {request.reason ? <p className="mt-1 text-[13px] text-slate-600">{request.reason}</p> : null}
@@ -21863,9 +21975,9 @@ const handlePhotoQuickUpload = async (event) => {
     const recordRowId = record.supabaseTimesheetId ?? record.id;
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
 
-    const inDateText = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "â€”";
+    const inDateText = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "—";
     const inTimeText = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "";
-    let outDateText = "â€”";
+    let outDateText = "—";
     let outTimeText = "";
     let outClass = "font-black text-[#061426]";
     let staleActiveMissingOut = false;
@@ -22056,7 +22168,7 @@ const handlePhotoQuickUpload = async (event) => {
               disabled={editCentres.length === 0}
             >
               {editCentres.length === 0 ? (
-                <option value="">â€”</option>
+                <option value="">—</option>
               ) : (
                 editCentres.map((c) => (
                   <option key={c} value={c}>
@@ -22092,20 +22204,30 @@ const handlePhotoQuickUpload = async (event) => {
         </div>
       ) : (
         <>
-          <div className="mt-3 grid grid-cols-3 border-t border-[#E2E8F0] pt-3">
-            <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
-              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
-              <p className="mt-1 truncate text-[11px] font-black leading-tight text-[#061426]">{inDateText}</p>
-              {inTimeText ? <p className="mt-0.5 truncate text-[12px] font-black leading-tight text-[#061426]">{inTimeText}</p> : null}
-            </div>
-            <div className="min-w-0 border-r border-[#E2E8F0] px-2">
-              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
-              <p className={`mt-1 truncate text-[11px] leading-tight ${outClass}`}>{outDateText}</p>
-              {outTimeText ? <p className={`mt-0.5 truncate text-[12px] leading-tight ${outClass}`}>{outTimeText}</p> : null}
-            </div>
-            <div className="min-w-0 pl-2">
-              <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total</p>
-              <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{timesheetTotalDisplay}</p>
+          <div className="mt-3 border-t border-[#E2E8F0] pt-3">
+            <p className="text-[11px] font-black leading-tight text-[#64748B]">{inDateText}</p>
+            <div className="mt-1.5 grid grid-cols-3">
+              <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
+                {inTimeText ? <p className="mt-0.5 truncate text-[12px] font-black leading-tight text-[#061426]">{inTimeText}</p> : null}
+              </div>
+              <div className="min-w-0 border-r border-[#E2E8F0] px-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
+                {outTimeText ? (
+                  <>
+                    {outDateText !== inDateText ? (
+                      <p className={`mt-0.5 truncate text-[10px] leading-tight ${outClass}`}>{outDateText}</p>
+                    ) : null}
+                    <p className={`mt-0.5 truncate text-[12px] leading-tight ${outClass}`}>{outTimeText}</p>
+                  </>
+                ) : (
+                  <p className={`mt-0.5 truncate text-[11px] leading-tight ${outClass}`}>{outDateText}</p>
+                )}
+              </div>
+              <div className="min-w-0 pl-2">
+                <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total</p>
+                <p className="mt-0.5 truncate text-[12px] font-black text-[#061426]">{timesheetTotalDisplay}</p>
+              </div>
             </div>
           </div>
           {staleActiveMissingOut && (
@@ -22133,10 +22255,10 @@ const handlePhotoQuickUpload = async (event) => {
               disabled={busyClose}
               onClick={() => void handleCloseStaleShift(record)}
             >
-              {busyClose ? "Closingâ€¦" : "Close shift"}
+              {busyClose ? "Closing…" : "Close shift"}
             </Button>
           )}
-          {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee â€” waiting for admin approval.</p>}
+          {record.edited && <p className="mt-2 text-[13px] text-red-600">Time edited by employee — waiting for admin approval.</p>}
           {pendingEditRequest ? (
             <p className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
               Edit request pending supervisor approval.
@@ -22426,7 +22548,7 @@ const handlePhotoQuickUpload = async (event) => {
       return (
         <div
           ref={payrollPanelScrollRef}
-          className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]"
+          className="fixed inset-0 z-[86] mx-auto flex w-full max-w-sm flex-col overflow-y-auto border-x border-slate-200/80 bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
           role="dialog"
           aria-modal="true"
         >
@@ -22452,7 +22574,7 @@ const handlePhotoQuickUpload = async (event) => {
                 <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll detail</p>
                 <h3 className="mt-1 text-[22px] font-black leading-tight text-[#061426]">{payrollDetailEmployeeName || "Payroll detail"}</h3>
                 <p className="mt-1 max-w-full break-words text-[11px] font-semibold leading-snug text-[#64748B] sm:text-[12px]">
-                  {detailPeriodLabel} â€¢ Pay date {payrollDetailRow.payDate ? formatPayrollDateKeyShort(payrollDetailRow.payDate, companyTimeZone, { includeYear: true }) : "â€”"}
+                  {detailPeriodLabel} • Pay date {payrollDetailRow.payDate ? formatPayrollDateKeyShort(payrollDetailRow.payDate, companyTimeZone, { includeYear: true }) : "—"}
                 </p>
               </div>
               <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(payrollDetailRow.balance)}`}>
@@ -22498,8 +22620,8 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
               ) : (
                 payrollDetailRecords.map((record) => {
-                  const recordDate = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "â€”";
-                  const inTime = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "â€”";
+                  const recordDate = record.clockIn ? formatDateParts(record.clockIn, companyTimeZone).fullDate : "—";
+                  const inTime = record.clockIn ? formatTime(record.clockIn, companyTimeZone) : "—";
                   const outTime = record.clockOut ? formatTime(record.clockOut, companyTimeZone) : "Working";
                   const projectName = String(record.project || record.project_name || "Unassigned").trim() || "Unassigned";
                   const taskName = String(record.costCenter || record.cost_centre || record.task || "Unassigned").trim() || "Unassigned";
@@ -22507,7 +22629,7 @@ const handlePhotoQuickUpload = async (event) => {
                     ? formatMoney(Number(record.payrollRateUsed || 0)) + (record.payrollChargeSource === "manual_contract" ? " fixed" : "/hr")
                     : record.payrollChargeSource === "manual_contract"
                       ? "Fixed"
-                      : "â€”";
+                      : "—";
                   const amountLabel = formatMoney(Number(record.payrollChargeAmount || 0));
                   const duplicateNote = record.payrollChargeSource === "manual_contract_duplicate" ? "Included in fixed contract total" : "";
                   const recordKey = String(record.payrollChargeKey || record.supabaseTimesheetId || record.id || `${recordDate}-${inTime}-${taskName}`);
@@ -22517,7 +22639,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <div className="min-w-0">
                           <p className="text-[15px] font-black leading-tight text-[#061426]">{recordDate}</p>
                           <p className="mt-1 text-[12px] font-semibold text-[#64748B]">
-                            In {inTime} â€¢ Out {outTime}
+                            In {inTime} • Out {outTime}
                           </p>
                         </div>
                         <span className="shrink-0 rounded-full border border-[#CBD5E1] bg-white px-2.5 py-1 text-[10px] font-black text-[#061426]">
@@ -22561,7 +22683,7 @@ const handlePhotoQuickUpload = async (event) => {
 
     return (
       <>
-        <div ref={payrollPanelScrollRef} className="fixed inset-0 z-[86] flex flex-col overflow-y-auto bg-[#F4F7FB]" role="dialog" aria-modal="true">
+        <div ref={payrollPanelScrollRef} className="fixed inset-0 z-[86] mx-auto flex w-full max-w-sm flex-col overflow-y-auto border-x border-slate-200/80 bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)]" role="dialog" aria-modal="true">
           <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-[#F4F7FB]/95 px-4 pt-[max(0.75rem,env(safe-area-inset-top,0px))] pb-3 backdrop-blur-sm shadow-[0_8px_24px_rgba(6,20,38,0.05)]">
             <div className="flex items-start gap-3">
               <button
@@ -22845,7 +22967,7 @@ const handlePhotoQuickUpload = async (event) => {
                       <div className="min-w-0">
                         <p className="truncate text-[14px] font-black leading-tight text-[#061426]">{candidate.employeeName}</p>
                         <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
-                          {candidate.periodLabel} â€¢ {formatPayrollAbsoluteMoney(candidate.amount)}
+                          {candidate.periodLabel} • {formatPayrollAbsoluteMoney(candidate.amount)}
                         </p>
                       </div>
                       <span className="shrink-0 rounded-full border border-[#BBF7D0] bg-[#ECFDF5] px-2.5 py-1 text-[10px] font-black text-[#15803D]">
@@ -23396,12 +23518,6 @@ const handlePhotoQuickUpload = async (event) => {
               {loginLoading ? "Logging in..." : "Login"}
             </Button>
 
-            {loginDebug && (
-              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-3 text-xs text-slate-700 whitespace-pre-wrap">
-                Debug: {loginDebug}
-              </div>
-            )}
-
             <button
               type="button"
               className="w-full text-sm text-slate-600 underline"
@@ -23426,9 +23542,9 @@ const handlePhotoQuickUpload = async (event) => {
   return (
         <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
           <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
-            <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
+            <div className="opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain pl-2.5 pr-2.5 pt-2.5 sm:pl-4 sm:pr-4 sm:pt-4 space-y-2.5 sm:space-y-3 pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))]">
               <div className="rounded-3xl bg-white border shadow-sm p-2.5 sm:p-4">
-                <p className="text-sm text-slate-700 font-semibold">Refreshing workspaceâ€¦</p>
+                <p className="text-sm text-slate-700 font-semibold">Refreshing workspace…</p>
                 <p className="text-xs text-slate-500 mt-1">You can keep using the app.</p>
               </div>
             </div>
@@ -23447,7 +23563,7 @@ const handlePhotoQuickUpload = async (event) => {
     );
   }
 
-  // Logged in, but not in a company yet â†’ onboarding
+  // Logged in, but not in a company yet → onboarding
   if (authStep === "company_created" && createdCompanyCode) {
     return (
       <div className="min-h-screen bg-[#F4F7FB] flex justify-center items-center text-slate-900 p-4">
@@ -23499,7 +23615,7 @@ const handlePhotoQuickUpload = async (event) => {
           <div className="w-full max-w-sm bg-[#F4F7FB] rounded-[20px] border border-slate-200 shadow-[0_8px_24px_rgba(15,23,42,0.06)] overflow-hidden">
             <div className="bg-white border-b border-slate-100 p-5">
               <h1 className="text-2xl font-bold tracking-tight">Create Company</h1>
-              <p className="text-sm text-slate-600 mt-1">Youâ€™ll get a company code to share with employees.</p>
+              <p className="text-sm text-slate-600 mt-1">You’ll get a company code to share with employees.</p>
               <p className="text-[11px] text-slate-400 mt-1">Signed in as {authUser.email}</p>
             </div>
 
@@ -23694,11 +23810,11 @@ const handlePhotoQuickUpload = async (event) => {
           timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
         }).format(new Date(labelIso))
       : String(dateKey);
-    return `${weekday} â€¢ ${dateLabel}`.toUpperCase();
+    return `${weekday} • ${dateLabel}`.toUpperCase();
   };
 
   const formatScheduleListTime = (iso) => {
-    if (!iso) return "â€”";
+    if (!iso) return "—";
     try {
       return new Intl.DateTimeFormat("en-US", {
         hour: "numeric",
@@ -23712,13 +23828,13 @@ const handlePhotoQuickUpload = async (event) => {
   };
 
   const formatScheduleListWindow = (task) => {
-    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
     if (task?.end_time) return `${startDisp} - ${formatScheduleListTime(task.end_time)}`;
     const durRaw = task?.duration_minutes;
     if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw))) {
       return `${startDisp} - ${Number(durRaw)} min`;
     }
-    return `${startDisp} - â€”`;
+    return `${startDisp} - —`;
   };
 
   const scheduleAssignmentChipClass = (label, tone = "assignment") => {
@@ -23760,10 +23876,10 @@ const handlePhotoQuickUpload = async (event) => {
     const projLine = proj.length > 0 ? proj : "No project selected";
     const cc = String(task?.cost_centre ?? "").trim();
     const ccLine = cc.length > 0 ? cc : "No task";
-    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "â€”";
+    const startDisp = task?.start_time ? formatTime(task.start_time, companyTimeZone) : "—";
     const endRaw = task?.end_time;
     const durRaw = task?.duration_minutes;
-    let windowLabel = "â€”";
+    let windowLabel = "—";
     if (endRaw) windowLabel = formatTime(endRaw, companyTimeZone);
     else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
       windowLabel = `${Number(durRaw)} min`;
@@ -23774,7 +23890,7 @@ const handlePhotoQuickUpload = async (event) => {
     const respondedAt = linkRow?.responded_at;
     const respondedDisp =
       respondedAt != null && respondedAt !== ""
-        ? `${formatDate(respondedAt, companyTimeZone)} Â· ${formatTime(respondedAt, companyTimeZone)}`
+        ? `${formatDate(respondedAt, companyTimeZone)} · ${formatTime(respondedAt, companyTimeZone)}`
         : null;
     const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
     const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
@@ -23782,7 +23898,7 @@ const handlePhotoQuickUpload = async (event) => {
     const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
     const at = String(task?.assigned_team ?? "").trim();
     const notesDisp = String(task?.notes ?? "").trim();
-    const st = String(task?.status ?? "").trim() || "â€”";
+    const st = String(task?.status ?? "").trim() || "—";
     return (
       <div
         key={String(task?.id ?? `${dateKey}-${ttitle}-${startDisp}`)}
@@ -23805,7 +23921,7 @@ const handlePhotoQuickUpload = async (event) => {
         <p className="text-[12px] text-slate-800">
           <span className="font-semibold text-slate-600">Time: </span>
           {startDisp}
-          {" â†’ "}
+          {" → "}
           {windowLabel}
         </p>
         <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -23837,7 +23953,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => void handleEmployeeScheduleAccept(assigneeRowId)}
                   className="rounded-lg bg-[#061426] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                 >
-                  {savingThis ? "Savingâ€¦" : "Accept"}
+                  {savingThis ? "Saving…" : "Accept"}
                 </button>
                 <button
                   type="button"
@@ -23875,7 +23991,7 @@ const handlePhotoQuickUpload = async (event) => {
                     }
                     className="rounded-lg bg-rose-700 px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-50"
                   >
-                    {savingThis ? "Savingâ€¦" : "Confirm decline"}
+                    {savingThis ? "Saving…" : "Confirm decline"}
                   </button>
                   <button
                     type="button"
@@ -23908,7 +24024,7 @@ const handlePhotoQuickUpload = async (event) => {
 
   const renderEmployeeScheduleListTaskCard = (task, dateKey) => {
     const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
-    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
+    const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
     const linkRow =
       task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
     const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
@@ -24326,11 +24442,9 @@ const handlePhotoQuickUpload = async (event) => {
         : "flex h-[64px] w-full flex-col items-center justify-center gap-1 rounded-[14px] border px-1.5 text-center transition disabled:opacity-50",
       active
         ? "border-[#061426] bg-[#061426] text-white"
-        : receipt
-          ? "border-[#15803D] bg-[#15803D] text-white active:bg-[#146C35]"
-          : dark
-            ? "border-[#061426] bg-[#061426] text-white active:bg-[#0B1F33]"
-            : "border-slate-200 bg-white text-[#061426] active:bg-slate-50",
+        : receipt || dark
+          ? "border-[#061426] bg-[#061426] text-white active:bg-[#0B1F33]"
+          : "border-slate-200 bg-white text-[#061426] active:bg-slate-50",
     ].join(" ");
 
   const clockActionGlyphClass = ({ active = false, receipt = false, dark = false, compact = false } = {}) =>
@@ -24338,19 +24452,13 @@ const handlePhotoQuickUpload = async (event) => {
       compact
         ? "flex h-4 w-4 items-center justify-center rounded-[5px] text-[9px] font-semibold leading-none"
         : "flex h-6 w-6 items-center justify-center rounded-[8px] border text-[10px] font-semibold leading-none",
-      active
-        ? "border-white/25 bg-white/10 text-white"
-        : receipt
-          ? compact
-            ? "text-white"
-            : "border-white/25 bg-white/10 text-white"
-          : dark
-            ? compact
-              ? "text-white"
-              : "border-white/25 bg-white/10 text-white"
-            : compact
-              ? "text-[#061426]"
-              : "border-slate-200 bg-slate-50 text-[#061426]",
+      active || receipt || dark
+        ? compact
+          ? "text-white"
+          : "border-white/25 bg-white/10 text-white"
+        : compact
+          ? "text-[#061426]"
+          : "border-slate-200 bg-slate-50 text-[#061426]",
     ].join(" ");
 
   const renderClockActionIcon = (type) => {
@@ -24765,7 +24873,7 @@ const handlePhotoQuickUpload = async (event) => {
     }
     if (dim === "cost_center") {
       const cc = reportsCostCentreKeyFromRow(row);
-      return { key: `cc:${cc}`, label: cc === "â€”" ? "(none)" : cc };
+      return { key: `cc:${cc}`, label: cc === "—" ? "(none)" : cc };
     }
     return { key: "unknown", label: "Unknown" };
   };
@@ -25253,7 +25361,7 @@ const handlePhotoQuickUpload = async (event) => {
   const appHeaderMetaLabel = appHeaderUserName;
   const appHeaderBuildLabel = IS_OPERA_DEVELOPMENT_APP && OPERA_APP_BUILD_CODE ? OPERA_APP_BUILD_CODE : "";
   const isHomeTab = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
-  const isChatImmersiveView = activeTab === "chat";
+  const isChatImmersiveView = activeTab === "chat" && chatViewMode !== "list";
   const showFullScreenShellHeader = ["clock", "timesheet"].includes(activeTab) || (activeTab === "chat" && !isChatImmersiveView);
   const fullScreenShellTitle =
     activeTab === "chat" ? "Chat" : activeTab === "timesheet" ? "Timesheets" : "Clock";
@@ -25300,14 +25408,14 @@ const handlePhotoQuickUpload = async (event) => {
         {
           label: "Schedule",
           subtitle: "Work calendar",
-          icon: "Sc",
+          icon: "schedule",
           color: "blue",
           onClick: () => openMenuTab("schedule"),
         },
         {
           label: "Timesheets",
           subtitle: "Hours and labour cost",
-          icon: "Ts",
+          icon: "timesheet",
           color: "slate",
           onClick: () => openMenuTab("timesheet"),
         },
@@ -25315,7 +25423,7 @@ const handlePhotoQuickUpload = async (event) => {
           ? {
               label: "Projects",
               subtitle: "Job sites",
-              icon: "Pr",
+              icon: "projects",
               color: "amber",
               onClick: () => openMenuTab("projects"),
             }
@@ -25323,7 +25431,7 @@ const handlePhotoQuickUpload = async (event) => {
         {
           label: "Tasks & materials",
           subtitle: "Lists for field work",
-          icon: "Tm",
+          icon: "materials",
           color: "slate",
           onClick: () => openMenuTab("lists"),
         },
@@ -25336,22 +25444,22 @@ const handlePhotoQuickUpload = async (event) => {
           ? {
               label: "Team",
               subtitle: "Employee accounts",
-              icon: "Te",
-              color: "green",
+              icon: "team",
+              color: "slate",
               onClick: () => openMenuTab("team"),
             }
           : null,
         {
           label: "Chat",
           subtitle: "Team messages",
-          icon: "Ch",
+          icon: "chat",
           color: "navy",
           onClick: () => openMenuTab("chat"),
         },
         {
           label: "Photos",
           subtitle: "Field media",
-          icon: "Ph",
+          icon: "photos",
           color: "purple",
           badge: photoNotificationCount > 0 ? (photoNotificationCount > 99 ? "99+" : String(photoNotificationCount)) : "",
           onClick: openPhotosTab,
@@ -25359,7 +25467,7 @@ const handlePhotoQuickUpload = async (event) => {
         {
           label: "Receipts",
           subtitle: "Costs and uploads",
-          icon: "Rc",
+          icon: "receipts",
           color: "amber",
           onClick: () => openMenuTab("receipts"),
         },
@@ -25367,7 +25475,7 @@ const handlePhotoQuickUpload = async (event) => {
           ? {
               label: "Reports",
               subtitle: "Labour and project views",
-              icon: "Rp",
+              icon: "reports",
               color: "slate",
               onClick: () => openMenuTab("reports"),
             }
@@ -25381,7 +25489,7 @@ const handlePhotoQuickUpload = async (event) => {
           ? {
               label: "Request Center",
               subtitle: "Time approvals",
-              icon: "Rq",
+              icon: "requests",
               color: "blue",
               badge: pendingTimesheetRequests.length > 0 ? (pendingTimesheetRequests.length > 99 ? "99+" : String(pendingTimesheetRequests.length)) : "",
               onClick: () => {
@@ -25393,7 +25501,7 @@ const handlePhotoQuickUpload = async (event) => {
         {
           label: "Settings",
           subtitle: isAdmin ? "Company controls" : "App preferences",
-          icon: "St",
+          icon: "settings",
           color: "navy",
           onClick: () => openMenuTab("settings"),
         },
@@ -25404,7 +25512,6 @@ const handlePhotoQuickUpload = async (event) => {
   const menuIconClassByColor = {
     amber: "bg-amber-50 text-amber-600",
     blue: "bg-blue-50 text-blue-600",
-    green: "bg-emerald-50 text-emerald-600",
     navy: "bg-[#0B1F33] text-white",
     purple: "bg-violet-50 text-violet-600",
     slate: "bg-slate-100 text-slate-600",
@@ -25417,7 +25524,7 @@ const handlePhotoQuickUpload = async (event) => {
           className={`opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain ${
             isChatImmersiveView
               ? "bg-[#EFEAE2] p-0 space-y-0 pb-0"
-              : "p-2.5 sm:p-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]"
+              : "pl-2.5 pr-2.5 pt-2.5 sm:pl-4 sm:pr-4 sm:pt-4 space-y-2.5 sm:space-y-3 pb-[calc(5rem+env(safe-area-inset-bottom,0px))]"
           }`}
         >
           {!isChatImmersiveView && isHomeTab ? (
@@ -25433,27 +25540,28 @@ const handlePhotoQuickUpload = async (event) => {
             />
           ) : !isChatImmersiveView && showFullScreenShellHeader ? (
             <div className="flex items-center gap-3 rounded-[20px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_6px_18px_rgba(6,20,38,0.05)]">
-              <button
-                type="button"
-                onClick={() => setActiveTab(homeTabForRole)}
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-sm active:bg-white"
-                aria-label="Back to home"
-              >
-                <svg
-                  viewBox="0 0 24 24"
-                  className="h-5 w-5"
-                  aria-hidden="true"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+              {["clock", "timesheet"].includes(activeTab) ? null : (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab(homeTabForRole)}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426] shadow-sm active:bg-white"
+                  aria-label="Back to home"
                 >
-                  <path d="m15 18-6-6 6-6" />
-                </svg>
-              </button>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-5 w-5"
+                    aria-hidden="true"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+              )}
               <div className="min-w-0 flex-1 text-center">
-                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Back</p>
                 <h1 className="truncate text-[17px] font-black leading-tight text-[#061426] sm:text-[18px]">{fullScreenShellTitle}</h1>
               </div>
               <button
@@ -25517,11 +25625,11 @@ const handlePhotoQuickUpload = async (event) => {
                         onClick={() => void handleEmployeeConfirmAssignmentNotification(false)}
                         className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-[14px] font-bold text-slate-800 disabled:opacity-50"
                       >
-                        {assignNotifSaving ? "Savingâ€¦" : "OK"}
+                        {assignNotifSaving ? "Saving…" : "OK"}
                       </button>
                     </div>
                     <p className="text-[11px] text-slate-500 leading-snug">
-                      â€œOKâ€ confirms you saw the assignment. Accept/decline is separate inside Schedule.
+                      “OK” confirms you saw the assignment. Accept/decline is separate inside Schedule.
                     </p>
                   </div>
                 </div>
@@ -25764,7 +25872,7 @@ const handlePhotoQuickUpload = async (event) => {
 
                 {projectsError && (
                   <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3 text-[14px] text-amber-900">
-                    Project loading failed â€” using emergency fallback projects.<br />
+                    Project loading failed — using emergency fallback projects.<br />
                     <span className="text-[13px] text-amber-800">{projectsError}</span>
                   </div>
                 )}
@@ -26996,7 +27104,7 @@ const handlePhotoQuickUpload = async (event) => {
                 ) : null}
                 {timesheetsLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600 mb-3">
-                    Loading timesheetsâ€¦
+                    Loading timesheets…
                   </div>
                 )}
                 {timesheetsError && (
@@ -27418,7 +27526,6 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
                       Filters
                     </p>
-                    <span className="rounded-full bg-[#F3E8FF] px-2.5 py-1 text-[10px] font-black text-[#7C3AED]">Photos</span>
                   </div>
                   <DateRangeButton
                     label="Date range"
@@ -27426,7 +27533,7 @@ const handlePhotoQuickUpload = async (event) => {
                     presetLabel={mediaSelectedRangeLabel}
                     onClick={openMediaDatePicker}
                   />
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     {renderRoyalNavyFilterSelect({
                       label: "Project",
                       icon: "folder",
@@ -27859,7 +27966,6 @@ const handlePhotoQuickUpload = async (event) => {
                       <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
                       Filters
                     </p>
-                    <span className="rounded-full bg-[#FFF7E6] px-2.5 py-1 text-[10px] font-black text-[#F59E0B]">Receipts</span>
                   </div>
                   <DateRangeButton
                     label="Date range"
@@ -27867,7 +27973,7 @@ const handlePhotoQuickUpload = async (event) => {
                     presetLabel={mediaSelectedRangeLabel}
                     onClick={openMediaDatePicker}
                   />
-                  <div className="grid grid-cols-1 gap-3">
+                  <div className="grid grid-cols-2 gap-3">
                     {renderRoyalNavyFilterSelect({
                       label: "Project",
                       icon: "folder",
@@ -27996,13 +28102,15 @@ const handlePhotoQuickUpload = async (event) => {
                                     {receiptDisplayHst != null ? (
                                       <p className="mt-0.5 truncate">HST {formatMoney(receiptDisplayHst)}</p>
                                     ) : null}
-                                    {receiptDateTime ? (
+                                    {receiptDisplayDate ? (
+                                      <p className="mt-0.5 truncate">{formatDate(receiptDisplayDate, companyTimeZone)}</p>
+                                    ) : receiptDateTime ? (
                                       <p className="mt-0.5 truncate">{formatDate(receiptDateTime, companyTimeZone)} - {formatTime(receiptDateTime, companyTimeZone)}</p>
                                     ) : null}
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                       {receiptStatus ? (
                                         <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-700 ring-1 ring-slate-200">
-                                          {receiptStatus}
+                                          {humanizeReceiptStatus(receiptStatus)}
                                         </span>
                                       ) : null}
                                       {receipt.location ? (
@@ -28287,7 +28395,7 @@ const handlePhotoQuickUpload = async (event) => {
                         >
                           {listShowCompleted ? (
                             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
-                              âœ“
+                              ✓
                             </span>
                           ) : (
                             <input
@@ -28351,7 +28459,7 @@ const handlePhotoQuickUpload = async (event) => {
                     disabled={markingAllNotifs || inAppNotifUnread === 0}
                     onClick={() => void handleMarkAllNotificationsRead()}
                   >
-                    {markingAllNotifs ? "â€¦" : "Mark all read"}
+                    {markingAllNotifs ? "…" : "Mark all read"}
                   </Button>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-2">
@@ -28374,7 +28482,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ? "Not supported"
                             : mobileNotifPermissionUi === "default"
                               ? "Not yet enabled"
-                              : "â€”"}
+                              : "—"}
                     </span>
                   </p>
                   <p className="text-[10px] text-slate-500 leading-snug">
@@ -28403,7 +28511,7 @@ const handlePhotoQuickUpload = async (event) => {
                               ? "Error"
                               : backgroundPushUi === "default"
                                 ? "Not yet enabled"
-                                : "â€”"}
+                                : "—"}
                     </span>
                   </p>
                   {backgroundPushError && (
@@ -28426,8 +28534,8 @@ const handlePhotoQuickUpload = async (event) => {
                   {inAppNotifications.map((n) => {
                     const unread = n.read_at == null && n.is_read !== true;
                     const ts = n.created_at
-                      ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} Â· ${formatTime(n.created_at, companyTimeZone)}`
-                      : "â€”";
+                      ? `${formatDate(parseStoredInstant(n.created_at), companyTimeZone)} · ${formatTime(n.created_at, companyTimeZone)}`
+                      : "—";
                     return (
                       <div
                         key={n.id}
@@ -28443,7 +28551,7 @@ const handlePhotoQuickUpload = async (event) => {
                             disabled={markingNotifId === String(n.id)}
                             onClick={() => void handleMarkNotificationRead(n)}
                           >
-                            {markingNotifId === String(n.id) ? "â€¦" : "Mark as read"}
+                            {markingNotifId === String(n.id) ? "…" : "Mark as read"}
                           </Button>
                         )}
                       </div>
@@ -28976,8 +29084,20 @@ const handlePhotoQuickUpload = async (event) => {
                           {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
                       </div>
-                      <div className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Labour</p>
+                      <div
+                        className={`rounded-[16px] border px-3 py-3 ${
+                          Number(dashboardActiveTeamSummary.totalCost || 0) > 0
+                            ? "border-emerald-100 bg-emerald-50"
+                            : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <p
+                          className={`text-[10px] font-semibold uppercase tracking-wide ${
+                            Number(dashboardActiveTeamSummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
+                          }`}
+                        >
+                          Labour
+                        </p>
                         <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
                           {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
                         </p>
@@ -29095,8 +29215,20 @@ const handlePhotoQuickUpload = async (event) => {
                           {dashboardWorkedTodaySummary.shiftCount}
                         </span>
                       </span>
-                      <span className="rounded-[16px] border border-emerald-100 bg-emerald-50 px-3 py-2.5">
-                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-emerald-700">Labour</span>
+                      <span
+                        className={`rounded-[16px] border px-3 py-2.5 ${
+                          Number(dashboardWorkedTodaySummary.totalCost || 0) > 0
+                            ? "border-emerald-100 bg-emerald-50"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                      >
+                        <span
+                          className={`block text-[9px] font-semibold uppercase tracking-wide ${
+                            Number(dashboardWorkedTodaySummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
+                          }`}
+                        >
+                          Labour
+                        </span>
                         <span className="mt-1 block text-[clamp(15px,4vw,20px)] font-semibold tabular-nums leading-none text-slate-950">
                           {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
                         </span>
@@ -29104,21 +29236,13 @@ const handlePhotoQuickUpload = async (event) => {
                     </button>
                     <button
                       type="button"
-                      className="mb-3 w-full rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-left active:scale-[0.99]"
+                      className="mb-3 flex w-full items-center justify-between gap-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-left active:scale-[0.99]"
                       onClick={openDashboardTodayTimesheets}
                       aria-label="Open today's completed time and cost"
                     >
-                      <span className="flex items-center justify-between gap-3 pb-2">
-                        <span className="text-[13px] font-medium text-slate-500">Total hours</span>
-                        <span className="text-[18px] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
-                        </span>
-                      </span>
-                      <span className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
-                        <span className="text-[13px] font-medium text-slate-500">Labour cost</span>
-                        <span className="text-[18px] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatMoney(dashboardWorkedTodaySummary.totalCost)}
-                        </span>
+                      <span className="text-[13px] font-medium text-slate-500">Total hours</span>
+                      <span className="text-[18px] font-semibold leading-none tabular-nums text-slate-950">
+                        {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
                       </span>
                     </button>
                     {dashboardTodayWorkedCards.length === 0 ? (
@@ -29184,7 +29308,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 </div>
                 {!userCompany?.id || !companyChecked ? (
-                  <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please waitâ€¦</p>
+                  <p className="text-[15px] text-slate-600 rounded-xl border border-slate-200 bg-slate-50 p-3">Company not loaded. Please wait…</p>
                 ) : null}
                 {dashboardActionFeedback && (
                   <div
@@ -29204,18 +29328,18 @@ const handlePhotoQuickUpload = async (event) => {
                       <p className="hidden">
                         <span className="text-slate-600 font-medium">Currently Working: </span>
                         <span className="font-bold tabular-nums text-slate-900">
-                          {dashboardLoading ? "â€”" : (dashboardLiveWorkingCards || []).length}
+                          {dashboardLoading ? "—" : (dashboardLiveWorkingCards || []).length}
                         </span>
                       </p>
                     </div>
                     {dashboardLiveLocationsLoading ? (
-                      <p className="text-[14px] text-slate-600">Refreshing live GPSâ€¦</p>
+                      <p className="text-[14px] text-slate-600">Refreshing live GPS…</p>
                     ) : null}
                     {dashboardLiveLocationsError ? (
                       <p className="text-[14px] text-amber-800">{String(dashboardLiveLocationsError)}</p>
                     ) : null}
                     {dashboardLoading ? (
-                      <p className="text-[14px] text-slate-600">Loading active employeesâ€¦</p>
+                      <p className="text-[14px] text-slate-600">Loading active employees…</p>
                     ) : null}
                     <div className="grid grid-cols-3 gap-2.5">
                       <div className="flex min-h-[82px] flex-col justify-between rounded-[22px] bg-[#0B1F33] p-3 text-white shadow-[0_14px_28px_rgba(15,23,42,0.24)]">
@@ -29257,7 +29381,7 @@ const handlePhotoQuickUpload = async (event) => {
                               )
                             )
                           : 0;
-                        const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "â€”";
+                        const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "—";
                         const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
                         const latRaw = liveLoc?.latitude ?? liveLoc?.lat;
                         const lngRaw = liveLoc?.longitude ?? liveLoc?.lng;
@@ -29275,7 +29399,7 @@ const handlePhotoQuickUpload = async (event) => {
                           >
                             <div className="min-w-0">
                               <p className="text-[17px] font-black text-slate-950 leading-snug break-words flex items-start justify-between gap-3">
-                                {displayName || "â€”"}
+                                {displayName || "—"}
                                 <span className="shrink-0 rounded-full bg-[#0B1F33] px-3 py-1.5 text-[13px] font-black tabular-nums text-white shadow-[0_8px_16px_rgba(15,23,42,0.20)]">{formatTimer(timerSeconds)}</span>
                               </p>
                               <p className="mt-1 text-[14px] font-bold text-slate-500 leading-snug tabular-nums">
@@ -29441,7 +29565,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {dashboardLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[14px] text-slate-600">
-                    Loading dashboardâ€¦
+                    Loading dashboard…
                   </div>
                 )}
                 {dashboardError && (
@@ -29546,16 +29670,16 @@ const handlePhotoQuickUpload = async (event) => {
                             </div>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-xs">
                               {isRowClockedIn ? (
-                                <span className="inline-flex items-center gap-1 font-semibold text-green-700">
-                                  <span className="text-green-600" aria-hidden>
-                                    â—
+                                <span className="inline-flex items-center gap-1 font-semibold text-emerald-700">
+                                  <span className="text-emerald-600" aria-hidden>
+                                    ●
                                   </span>
                                   Clocked In
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 font-semibold text-red-700">
-                                  <span className="text-red-600" aria-hidden>
-                                    â—
+                                <span className="inline-flex items-center gap-1 font-semibold text-slate-500">
+                                  <span className="text-slate-400" aria-hidden>
+                                    ●
                                   </span>
                                   Not Clocked In
                                 </span>
@@ -29563,7 +29687,7 @@ const handlePhotoQuickUpload = async (event) => {
                               {hasLiveMap && (
                                 <>
                                   <span className="text-slate-300 select-none" aria-hidden>
-                                    Â·
+                                    ·
                                   </span>
                                   <button
                                     type="button"
@@ -29651,7 +29775,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         }
                                       >
                                         {centresForPick.length === 0 ? (
-                                          <option value="">â€”</option>
+                                          <option value="">—</option>
                                         ) : (
                                           centresForPick.map((c) => (
                                             <option key={c} value={c}>
@@ -29684,7 +29808,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     disabled={dashRowSaving || dashClockInBlocked}
                                     onClick={() => void handleDashboardEmployeeClockIn(row)}
                                   >
-                                    {dashRowSaving ? "â€¦" : "Clock In"}
+                                    {dashRowSaving ? "…" : "Clock In"}
                                   </Button>
                                 </>
                               )}
@@ -29695,7 +29819,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={dashRowSaving || !rep?.supabaseTimesheetId}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
                                 >
-                                  {dashRowSaving ? "â€¦" : "Clock Out"}
+                                  {dashRowSaving ? "…" : "Clock Out"}
                                 </Button>
                               )}
                               {showDashFixOut && (
@@ -29705,7 +29829,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={dashRowSaving || !rep?.supabaseTimesheetId}
                                   onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "fix")}
                                 >
-                                  {dashRowSaving ? "â€¦" : "Fix Clock Out"}
+                                  {dashRowSaving ? "…" : "Fix Clock Out"}
                                 </Button>
                               )}
                             </div>
@@ -29770,7 +29894,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="min-w-0">
                       <p className="text-[16px] font-black leading-tight text-[#061426]">Daily timesheet email</p>
                       <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                        Backend Gmail preview/test route for Manager/Admin reports. Real sends require approved env setup.
+                        Send today&apos;s report by email to a manager or admin.
                       </p>
                     </div>
                     <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
@@ -29819,7 +29943,7 @@ const handlePhotoQuickUpload = async (event) => {
                     className="mt-2 h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 text-[13px] font-black text-[#061426]"
                     onClick={handleGenerateDailyReportPreview}
                   >
-                    Open local report text preview
+                    Preview report text
                   </button>
                   {dailyEmailPreviewText ? (
                     <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
@@ -29833,7 +29957,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   ) : null}
                   <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
-                    Gmail: {dailyEmailConfig.configured ? "configured" : "not configured"}. Scheduler: disabled until DAILY_REPORT_CRON_ENABLED=true and approval is complete.
+                    Email delivery is {dailyEmailConfig.configured ? "connected" : "not connected yet"}. Automatic daily sending is off until setup is complete.
                   </div>
                   {dailyReportPreviewStatus ? (
                     <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyReportPreviewStatus}</p>
@@ -29848,7 +29972,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="min-w-0">
                       <p className="text-[16px] font-black leading-tight text-[#061426]">WhatsApp Business reports</p>
                       <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                        Uses WhatsApp Cloud API templates from the backend. Preview first; no personal WhatsApp Web automation.
+                        Send today&apos;s report by WhatsApp to a manager or admin.
                       </p>
                     </div>
                     <span className="shrink-0 rounded-full border border-[#EFF6FF] bg-[#EFF6FF] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#2563EB]">
@@ -29908,8 +30032,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   ) : null}
                   <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
-                    Template: {whatsappReportConfig.templateName || "daily_timesheet_report"} / {whatsappReportConfig.templateLanguage || "en"}.
-                    {whatsappReportConfig.configured ? " WhatsApp env detected." : " WhatsApp Business is not configured yet."}
+                    WhatsApp delivery is {whatsappReportConfig.configured ? "connected" : "not connected yet"}.
                   </div>
                   {whatsappReportStatus ? (
                     <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{whatsappReportStatus}</p>
@@ -29977,9 +30100,19 @@ const handlePhotoQuickUpload = async (event) => {
                             {reportsVisibleProjectCount}
                           </span>
                         </div>
-                        <div className="col-span-2 min-w-0 bg-[linear-gradient(135deg,#FFFFFF_0%,#ECFDF5_100%)] px-3 py-4 text-center">
+                        <div
+                          className={`col-span-2 min-w-0 px-3 py-4 text-center ${
+                            Number(reportsVisibleSummary.cost || 0) > 0
+                              ? "bg-[linear-gradient(135deg,#FFFFFF_0%,#ECFDF5_100%)]"
+                              : ""
+                          }`}
+                        >
                           <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
-                          <span className="mt-1.5 block truncate text-[34px] font-black leading-none tabular-nums text-[#15803D]">
+                          <span
+                            className={`mt-1.5 block truncate text-[34px] font-black leading-none tabular-nums ${
+                              Number(reportsVisibleSummary.cost || 0) > 0 ? "text-[#15803D]" : "text-[#061426]"
+                            }`}
+                          >
                             {formatMoneyWhole(reportsVisibleSummary.cost)}
                           </span>
                         </div>
@@ -30571,7 +30704,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {reportsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Loading reportsâ€¦
+                    Loading reports…
                   </div>
                 )}
                 {reportsScreenError && (
@@ -30756,7 +30889,7 @@ const handlePhotoQuickUpload = async (event) => {
                             ].filter(Boolean).join(" / ")}
                           </p>
                           <p className="hidden">
-                          Â·{" "}
+                          ·{" "}
                           {reportsBreakdownTree.d1 === "employee"
                             ? "Employee"
                             : reportsBreakdownTree.d1 === "project"
@@ -30765,7 +30898,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {reportsBreakdownTree.d2 !== "none" && (
                             <>
                               {" "}
-                              â†’{" "}
+                              →{" "}
                               {reportsBreakdownTree.d2 === "employee"
                                 ? "Employee"
                                 : reportsBreakdownTree.d2 === "project"
@@ -30776,7 +30909,7 @@ const handlePhotoQuickUpload = async (event) => {
                           {reportsBreakdownTree.d3 !== "none" && (
                             <>
                               {" "}
-                              â†’{" "}
+                              →{" "}
                               {reportsBreakdownTree.d3 === "employee"
                                 ? "Employee"
                                 : reportsBreakdownTree.d3 === "project"
@@ -30815,7 +30948,7 @@ const handlePhotoQuickUpload = async (event) => {
                                     <div className="min-w-0 flex-1">
                                       <p className="text-sm font-bold text-slate-950 leading-snug break-words">
                                         <span className="mr-1.5 inline-block w-4 text-slate-400" aria-hidden>
-                                          {openL1 ? "â–¾" : "â–¸"}
+                                          {openL1 ? "▾" : "▸"}
                                         </span>
                                         {n1.label}
                                       </p>
@@ -30872,7 +31005,7 @@ const handlePhotoQuickUpload = async (event) => {
                                                   <div className="min-w-0 flex-1">
                                                     <p className="text-[13px] font-semibold text-slate-900 leading-snug break-words">
                                                       <span className="mr-1 inline-block w-3.5 text-slate-400 text-xs" aria-hidden>
-                                                        {openL2 ? "â–¾" : "â–¸"}
+                                                        {openL2 ? "▾" : "▸"}
                                                       </span>
                                                       {n2.label}
                                                     </p>
@@ -30992,7 +31125,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
                         }}
                       >
-                        â† Prev
+                        ← Prev
                       </button>
                       <button
                         type="button"
@@ -31018,7 +31151,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
                         }}
                       >
-                        Next â†’
+                        Next →
                       </button>
                     </div>
                   ) : null}
@@ -31029,7 +31162,7 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
                 {employeeScheduleLoading ? (
-                  <p className="text-sm text-slate-600 py-4 text-center">Loading your scheduleâ€¦</p>
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading your schedule…</p>
                 ) : employeeScheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{employeeScheduleError}</div>
                 ) : scheduleViewMode !== "list" ? (
@@ -31114,7 +31247,7 @@ const handlePhotoQuickUpload = async (event) => {
                             (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
                           );
                           if (!t) return null;
-                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "â€”";
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
                           return (
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
                               {renderEmployeeScheduleTaskCard(t, dk)}
@@ -31273,7 +31406,7 @@ const handlePhotoQuickUpload = async (event) => {
                             (x) => String(x?.id) === String(scheduleCalendarFocusTaskId)
                           );
                           if (!t) return null;
-                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "â€”";
+                          const dk = calendarDateKeyInTimeZone(t?.start_time, companyTimeZone) || "—";
                           return (
                             <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/90 p-2">
                               {renderEmployeeScheduleTaskCard(t, dk)}
@@ -31360,7 +31493,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, -step, tz));
                         }}
                       >
-                        â† Prev
+                        ← Prev
                       </button>
                       <button
                         type="button"
@@ -31386,7 +31519,7 @@ const handlePhotoQuickUpload = async (event) => {
                           setScheduleCalendarAnchor(addWallDaysInTimeZone(anchor, step, tz));
                         }}
                       >
-                        Next â†’
+                        Next →
                       </button>
                     </div>
                   ) : null}
@@ -31395,7 +31528,7 @@ const handlePhotoQuickUpload = async (event) => {
                 {scheduleMoveModeTaskId ? (
                   <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
                     <p className="text-[14px] font-semibold text-amber-950 leading-snug min-w-0 flex-1">
-                      Move mode active â€” tap a new slot or date on the calendar, or cancel.
+                      Move mode active — tap a new slot or date on the calendar, or cancel.
                     </p>
                     <button
                       type="button"
@@ -31497,7 +31630,7 @@ const handlePhotoQuickUpload = async (event) => {
                           }
                           disabled={scheduleSaving}
                         >
-                          <option value="">â€” Optional â€”</option>
+                          <option value="">— Optional —</option>
                           {(effectiveProjects || []).map((p) => (
                             <option key={String(p.id)} value={String(p.id)}>
                               {p.name}
@@ -31520,7 +31653,7 @@ const handlePhotoQuickUpload = async (event) => {
                           disabled={scheduleSaving || !scheduleDraft.projectId}
                         >
                           <option value="">
-                            {scheduleDraft.projectId ? "â€” Select task â€”" : "Pick a project first"}
+                            {scheduleDraft.projectId ? "— Select task —" : "Pick a project first"}
                           </option>
                           {(scheduleCostCentreOptions || []).map((name) => (
                             <option key={String(name)} value={String(name)}>
@@ -31622,7 +31755,7 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                     <div className="hidden">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="sched-dur">
-                        Duration (minutes) â€” if end time is not used
+                        Duration (minutes) — if end time is not used
                       </label>
                       <input
                         id="sched-dur"
@@ -31638,7 +31771,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="space-y-1.5">
                       <p className="schedule-form-label">Assign employees</p>
                       {schedulePickMembersLoading ? (
-                        <p className="text-[11px] text-slate-500">Loading team membersâ€¦</p>
+                        <p className="text-[11px] text-slate-500">Loading team members…</p>
                       ) : schedulePickMembersError ? (
                         <p className="text-[11px] text-red-700 leading-snug">{schedulePickMembersError}</p>
                       ) : (schedulePickMembers || []).length === 0 ? (
@@ -31761,14 +31894,14 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                     <div className="flex gap-2 pt-0.5">
                       <Button type="submit" className="flex-1 rounded-2xl h-12 text-[16px] font-black shadow-[0_12px_22px_rgba(15,23,42,0.16)]" disabled={scheduleSaving}>
-                        {scheduleSaving ? "Savingâ€¦" : "Save job"}
+                        {scheduleSaving ? "Saving…" : "Save job"}
                       </Button>
                     </div>
                   </form>
                 )}
 
                 {scheduleLoading ? (
-                  <p className="text-sm text-slate-600 py-4 text-center">Loading scheduleâ€¦</p>
+                  <p className="text-sm text-slate-600 py-4 text-center">Loading schedule…</p>
                 ) : scheduleError ? (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">{scheduleError}</div>
                 ) : scheduleViewMode !== "list" ? (
@@ -32084,10 +32217,10 @@ const handlePhotoQuickUpload = async (event) => {
                               const projLine = proj.length > 0 ? proj : "No project selected";
                               const cc = String(task?.cost_centre ?? "").trim();
                               const ccLine = cc.length > 0 ? cc : "No task";
-                              const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "â€”";
+                              const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
                               const endRaw = task?.end_time;
                               const durRaw = task?.duration_minutes;
-                              let windowLabel = "â€”";
+                              let windowLabel = "—";
                               if (endRaw) windowLabel = formatScheduleListTime(endRaw);
                               else if (durRaw != null && String(durRaw).trim() !== "" && Number.isFinite(Number(durRaw)))
                                 windowLabel = `${Number(durRaw)} min`;
@@ -32164,9 +32297,14 @@ const handlePhotoQuickUpload = async (event) => {
                                         ) : null}
                                       </div>
                                       {!isEditingThis ? (
-                                        <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
-                                          {startDisp} - {windowLabel}
-                                        </p>
+                                        <>
+                                          <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
+                                            {startDisp} - {windowLabel}
+                                          </p>
+                                          <p className="mt-0.5 truncate text-[11px] font-semibold text-[#94A3B8]">
+                                            {projLine} / {ccLine}
+                                          </p>
+                                        </>
                                       ) : null}
                                     </div>
                                     {!isEditingThis ? renderScheduleChevron() : null}
@@ -32193,7 +32331,7 @@ const handlePhotoQuickUpload = async (event) => {
                                         onClick={() => void handleScheduleDeleteTask(task?.id)}
                                         className="rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[10px] font-semibold text-red-800 disabled:opacity-50"
                                       >
-                                        {scheduleDeleteSavingId === tidKey ? "â€¦" : "Delete"}
+                                        {scheduleDeleteSavingId === tidKey ? "…" : "Delete"}
                                       </button>
                                     </div>
                                   </div>
@@ -32289,7 +32427,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             }
                                             disabled={scheduleEditSaving}
                                           >
-                                            <option value="">â€” Optional â€”</option>
+                                            <option value="">— Optional —</option>
                                             {(effectiveProjects || []).map((p) => (
                                               <option key={String(p.id)} value={String(p.id)}>
                                                 {p.name}
@@ -32313,7 +32451,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             disabled={scheduleEditSaving || !scheduleEditDraft.projectId}
                                           >
                                             <option value="">
-                                              {scheduleEditDraft.projectId ? "â€” Select â€”" : "Pick a project first"}
+                                              {scheduleEditDraft.projectId ? "— Select —" : "Pick a project first"}
                                             </option>
                                             {(scheduleEditCostCentreOptions || []).map((name) => (
                                               <option key={String(name)} value={String(name)}>
@@ -32455,7 +32593,7 @@ const handlePhotoQuickUpload = async (event) => {
                                       <div className="space-y-1">
                                         <p className="schedule-form-label">Assign employees</p>
                                         {schedulePickMembersLoading ? (
-                                          <p className="text-[11px] text-slate-500">Loadingâ€¦</p>
+                                          <p className="text-[11px] text-slate-500">Loading…</p>
                                         ) : (schedulePickMembers || []).length === 0 ? (
                                           <p className="text-[11px] text-slate-600">No employees found.</p>
                                         ) : (
@@ -32577,7 +32715,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           disabled={scheduleEditSaving || Boolean(scheduleRescheduleSavingId)}
                                         >
                                           <span className="text-[#C9A227]">{renderTimesheetUiIcon("save", "h-4 w-4")}</span>
-                                          {scheduleEditSaving ? "Savingâ€¦" : "Save"}
+                                          {scheduleEditSaving ? "Saving…" : "Save"}
                                         </Button>
                                         <button
                                           type="button"
@@ -32604,7 +32742,7 @@ const handlePhotoQuickUpload = async (event) => {
                                           className="flex w-full items-center justify-center gap-2 rounded-[14px] h-11 text-[14px] font-black border border-[#FECACA] bg-[#FEF2F2] text-[#DC2626] disabled:opacity-50"
                                         >
                                           {renderTimesheetUiIcon("trash", "h-4 w-4")}
-                                          {scheduleDeleteSavingId === tidKey ? "Deletingâ€¦" : "Delete Job"}
+                                          {scheduleDeleteSavingId === tidKey ? "Deleting…" : "Delete Job"}
                                         </button>
                                       </div>
                                     </form>
@@ -32740,7 +32878,7 @@ const handlePhotoQuickUpload = async (event) => {
                         className="flex-1 rounded-lg h-9 text-xs font-semibold"
                         disabled={projectsAddSaving}
                       >
-                        {projectsAddSaving ? "Savingâ€¦" : "Save"}
+                        {projectsAddSaving ? "Saving…" : "Save"}
                       </Button>
                       <Button
                         type="button"
@@ -32940,7 +33078,7 @@ const handlePhotoQuickUpload = async (event) => {
                 </div>
                 {projectsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                    Loading projectsâ€¦
+                    Loading projects…
                   </div>
                 )}
                 {projectsScreenError && (
@@ -32961,6 +33099,11 @@ const handlePhotoQuickUpload = async (event) => {
                         : `No ${projectsListFilter === "active" ? "active" : "archived"} projects in this view.`}
                     </p>
                   )}
+                {!projectsScreenLoading && !projectsScreenError && companyAssignAllProjectsToAllEmployees && displayedProjectsScreenRows.length > 0 && (
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
+                    All employees can see and use every project.
+                  </div>
+                )}
                 {!projectsScreenLoading && !projectsScreenError && displayedProjectsScreenRows.length > 0 && (
                   <div className="space-y-2.5">
                     {displayedProjectsScreenRows.map((proj) => {
@@ -33017,7 +33160,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   Tasks
                                 </p>
                                 {projectEditDraft.lines.length === 0 && (
-                                  <p className="text-xs text-slate-500">None â€” add one below if needed.</p>
+                                  <p className="text-xs text-slate-500">None — add one below if needed.</p>
                                 )}
                                 {projectEditDraft.lines.map((line) => (
                                   <div
@@ -33252,7 +33395,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   disabled={projectEditSaving}
                                   onClick={() => void handleProjectsScreenSaveEdit()}
                                 >
-                                  {projectEditSaving ? "Savingâ€¦" : "Save"}
+                                  {projectEditSaving ? "Saving…" : "Save"}
                                 </Button>
                                 <Button
                                   type="button"
@@ -33281,7 +33424,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   <span className="inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-slate-100 text-slate-800 ring-1 ring-slate-200/80 capitalize">
                                     {proj.status != null && String(proj.status).trim() !== ""
                                       ? String(proj.status).replace(/_/g, " ")
-                                      : "â€”"}
+                                      : "—"}
                                   </span>
                                   {isAdmin ? (
                                     <Button
@@ -33311,41 +33454,35 @@ const handlePhotoQuickUpload = async (event) => {
                                 {proj.costCentres.length === 0 ? (
                                   <p className="text-xs text-slate-500">None</p>
                                 ) : (
-                                  <ul className="space-y-1.5">
-                                    {proj.costCentres.map((cc) => (
-                                      <li
-                                        key={cc.id}
-                                        className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 text-xs text-slate-800"
-                                      >
-                                        <div className="min-w-0">
-                                          <span className="block font-medium break-words">{cc.name}</span>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {proj.costCentres.map((cc) => {
+                                      const ccStatus =
+                                        cc.status != null &&
+                                        String(cc.status).trim() !== "" &&
+                                        String(cc.status).toLowerCase() !== "active"
+                                          ? String(cc.status).replace(/_/g, " ")
+                                          : "";
+                                      return (
+                                        <span
+                                          key={cc.id}
+                                          className="inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-800"
+                                          title={[cc.name, ccStatus].filter(Boolean).join(" · ")}
+                                        >
+                                          <span className="truncate">{cc.name}</span>
                                           {cc.manualContractActive ? (
-                                            <span className="mt-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">
-                                              Manual contract {formatMoney(Number(cc.manualContractFixedAmount || 0))}
+                                            <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[9px] font-black text-amber-800">
+                                              {formatMoney(Number(cc.manualContractFixedAmount || 0))}
                                             </span>
                                           ) : null}
-                                        </div>
-                                        <div className="shrink-0 text-right">
-                                          {cc.status != null &&
-                                            String(cc.status).trim() !== "" &&
-                                            String(cc.status).toLowerCase() !== "active" && (
-                                              <span className="block text-[10px] text-slate-500 capitalize">
-                                                {String(cc.status).replace(/_/g, " ")}
-                                              </span>
-                                            )}
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
+                                          {ccStatus ? (
+                                            <span className="shrink-0 text-[9px] font-semibold capitalize text-slate-500">{ccStatus}</span>
+                                          ) : null}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
                                 )}
                               </div>
-                              {companyAssignAllProjectsToAllEmployees ? (
-                                <div className="border-t border-slate-100 pt-2">
-                                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
-                                    All employees can see and use this project.
-                                  </div>
-                                </div>
-                              ) : null}
                               <div className={`border-t border-slate-100 pt-2 space-y-2 ${companyAssignAllProjectsToAllEmployees ? "hidden" : ""}`}>
                                 <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
                                   <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
@@ -33381,9 +33518,9 @@ const handlePhotoQuickUpload = async (event) => {
                                       >
                                         <span className="font-semibold text-slate-900">{s.displayName}</span>
                                         {s.costCentreLabels && s.costCentreLabels.length > 0 ? (
-                                          <span className="text-slate-600"> Â· {s.costCentreLabels.join(", ")}</span>
+                                          <span className="text-slate-600"> · {s.costCentreLabels.join(", ")}</span>
                                         ) : (
-                                          <span className="text-amber-800 font-medium"> Â· No tasks assigned</span>
+                                          <span className="text-amber-800 font-medium"> · No tasks assigned</span>
                                         )}
                                       </li>
                                     ))}
@@ -33396,7 +33533,7 @@ const handlePhotoQuickUpload = async (event) => {
                                   <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 space-y-2.5">
                                     <p className="text-xs font-semibold text-slate-900">Assignment editor</p>
                                     {assignmentsEditorLoading ? (
-                                      <p className="text-xs text-slate-600">Loading company membersâ€¦</p>
+                                      <p className="text-xs text-slate-600">Loading company members…</p>
                                     ) : (
                                       <>
                                         <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-0.5">
@@ -33512,7 +33649,7 @@ const handlePhotoQuickUpload = async (event) => {
                                             disabled={assignmentsEditorSaving || assignmentsEditorLoading}
                                             onClick={() => void handleSaveProjectAssignments()}
                                           >
-                                            {assignmentsEditorSaving ? "Savingâ€¦" : "Save"}
+                                            {assignmentsEditorSaving ? "Saving…" : "Save"}
                                           </Button>
                                           <Button
                                             type="button"
@@ -33979,7 +34116,7 @@ const handlePhotoQuickUpload = async (event) => {
                   {displayedTeamRows.map((row) => {
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
-                    const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "â€”";
+                    const emailLine = (row.profileEmailRaw && String(row.profileEmailRaw).trim()) || "—";
                     const isEditing = isAdmin && String(teamEditingMemberRowId) === String(row.memberRowId);
                     const payDisp =
                       row.hourlyRate != null && Number.isFinite(Number(row.hourlyRate))
@@ -34061,27 +34198,35 @@ const handlePhotoQuickUpload = async (event) => {
                               >
                                 {emailLine}
                               </p>
-                              <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
-                                Payroll start{" "}
-                                {row.payrollStartDate
-                                  ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true })
-                                  : "â€”"}{" "}
-                                â€¢ Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))} â€¢{" "}
-                                {payrollOpeningBalanceMeaning(Number(row.payrollOpeningBalance || 0))}
-                              </p>
-                              {row.autoPayrollEnabled ? (
-                                <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">
-                                  Auto payroll {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} â€¢{" "}
-                                  {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
-                                </p>
-                              ) : null}
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                <span
+                                  className="inline-flex max-w-full items-center truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                                  title={`Payroll start ${row.payrollStartDate ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"}`}
+                                >
+                                  Start {row.payrollStartDate ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true }) : "—"}
+                                </span>
+                                <span
+                                  className="inline-flex max-w-full items-center truncate rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                                  title={payrollOpeningBalanceMeaning(Number(row.payrollOpeningBalance || 0))}
+                                >
+                                  Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))}
+                                </span>
+                                {row.autoPayrollEnabled ? (
+                                  <span
+                                    className="inline-flex max-w-full items-center truncate rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"
+                                    title={`Auto payroll ${row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"}`}
+                                  >
+                                    Auto {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
+                                  </span>
+                                ) : null}
+                              </div>
                               {!isEditing ? (
                                 <p className="mt-1 truncate text-[12px] font-bold text-slate-700" title={teamDefaultAssignmentLine}>
                                   Default: {teamDefaultAssignmentLine}
                                 </p>
                               ) : null}
                             </div>
-                            {!isEditing ? (
+                            {!isEditing && (empArchived || activeRep) ? (
                               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ring-inset ${teamStatusClass}`}>
                                 {teamStatusLabel}
                               </span>
@@ -34405,7 +34550,7 @@ const handlePhotoQuickUpload = async (event) => {
                                 disabled={Boolean(teamSavingMemberRowId)}
                                 onClick={() => void handleTeamMemberSave(row)}
                               >
-                                {teamSavingMemberRowId === String(row.memberRowId) ? "Savingâ€¦" : "Save"}
+                                {teamSavingMemberRowId === String(row.memberRowId) ? "Saving…" : "Save"}
                               </Button>
                               <Button
                                 type="button"
@@ -34550,7 +34695,6 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <h2 className="text-[22px] font-black leading-tight text-slate-950">Settings</h2>
-                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500">Company, time tracking, projects, and account controls.</p>
                   </div>
                 </div>
                 <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
@@ -34654,7 +34798,7 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="rounded-[16px] bg-slate-50 border border-slate-100 p-3 space-y-2">
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Company</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "â€”"}</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">{userCompany?.name || "—"}</span>
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Time zone</span>
@@ -34682,39 +34826,15 @@ const handlePhotoQuickUpload = async (event) => {
                           {canCreateProjectTaskFromClock ? "Allowed from Clock" : "Off"}
                         </span>
                       </div>
-                      {payrollCurrentPeriod ? (
-                        <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3">
-                          <p className="text-[10px] font-black uppercase tracking-[0.08em] text-slate-500">Current payroll period</p>
-                          <p className="mt-1 break-words text-[13px] font-black leading-snug text-slate-900 sm:text-[14px]">
-                            {formatPayrollPeriodLabelCompact(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)}
-                          </p>
-                          <p className="mt-1 text-[12px] font-semibold text-slate-600">
-                            Pay date: {formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)}
-                          </p>
-                        </div>
-                      ) : null}
                       {isAdmin ? (
-                        <div className="flex items-center justify-between gap-3 border-t border-slate-200 pt-2">
-                          <span className="text-[14px] font-semibold text-slate-500">Company code</span>
-                          <div className="flex min-w-0 items-center gap-2">
-                            <code className="min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-[13px] font-black tracking-wide text-slate-900 truncate">
-                              {userCompany?.code || "â€”"}
-                            </code>
-                            <button
-                              type="button"
-                              className="shrink-0 rounded-xl bg-[#0B1F33] px-3 py-2 text-[13px] font-black text-white shadow-[0_10px_18px_rgba(15,23,42,0.18)]"
-                              onClick={() => void handleShareCompanyInvite()}
-                              disabled={!userCompany?.code}
-                            >
-                              Share
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-                      {companyInviteShareMessage ? (
-                        <p className="rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[12px] font-bold text-emerald-800">
-                          {companyInviteShareMessage}
-                        </p>
+                        <button
+                          type="button"
+                          className="flex w-full items-center justify-between gap-3 border-t border-slate-200 pt-2 text-left"
+                          onClick={() => setActiveTab("team")}
+                        >
+                          <span className="text-[14px] font-semibold text-slate-500">Invite code</span>
+                          <span className="text-[13px] font-black text-[#061426]">Manage in Team &gt;</span>
+                        </button>
                       ) : null}
                     </div>
                   )}
@@ -34864,7 +34984,7 @@ const handlePhotoQuickUpload = async (event) => {
                               <span className="text-[15px] font-bold text-slate-900 text-right break-words">
                                 {payrollCurrentPeriod?.payDateKey
                                   ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
-                                  : "â€”"}
+                                  : "—"}
                               </span>
                             </div>
                           </>
@@ -35061,7 +35181,7 @@ const handlePhotoQuickUpload = async (event) => {
                       </label>
                       <div className="rounded-2xl bg-slate-50 border border-slate-100 p-3">
                         <p className="text-[13px] font-semibold text-slate-500">Email</p>
-                        <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "â€”"}</p>
+                        <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "—"}</p>
                       </div>
                       {settingsProfileMessage && (
                         <div
@@ -35086,26 +35206,21 @@ const handlePhotoQuickUpload = async (event) => {
                       </div>
                       <div className="flex justify-between gap-3">
                         <span className="text-[14px] font-semibold text-slate-500">Email</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-all">{authUser?.email || "â€”"}</span>
+                        <span className="text-[15px] font-bold text-slate-900 text-right break-all">{authUser?.email || "—"}</span>
                       </div>
                     </div>
                   )}
                 </div>
 
                 {isAdmin ? (
-                  <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
-                    <div>
-                      <p className="text-[16px] font-black text-slate-900">Team Management</p>
-                      <p className="text-[12px] font-semibold text-slate-500">Manage team profiles, roles, pay rates, status, and project access.</p>
-                    </div>
-                    <Button
-                      type="button"
-                      className="w-full rounded-2xl h-12 text-[15px] font-bold"
-                      onClick={() => setActiveTab("team")}
-                    >
-                      Open Team
-                    </Button>
-                  </div>
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-white p-3 text-left shadow-sm active:bg-slate-50"
+                    onClick={() => setActiveTab("team")}
+                  >
+                    <span className="text-[14px] font-bold text-slate-900">Team management</span>
+                    <span className="text-[18px] font-black text-slate-300">&gt;</span>
+                  </button>
                 ) : null}
                 {!isAdmin ? (
                   <p className="text-xs text-slate-500">
@@ -35382,7 +35497,7 @@ const handlePhotoQuickUpload = async (event) => {
                     >
                       {clockListShowCompleted ? (
                         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[14px] font-black text-emerald-700">
-                          âœ“
+                          ✓
                         </span>
                       ) : (
                         <input
@@ -35845,7 +35960,7 @@ const handlePhotoQuickUpload = async (event) => {
                   onClick={() => setListImageViewer(null)}
                   aria-label="Close task picture"
                 >
-                  Ã—
+                  ×
                 </button>
               </div>
               <div className="bg-[#0B1F33]">
@@ -35880,7 +35995,7 @@ const handlePhotoQuickUpload = async (event) => {
                     onClick={() => setPhotoViewer(null)}
                     aria-label="Close photo viewer"
                   >
-                    Ã—
+                    ×
                   </button>
                 </div>
                 <div className="bg-[#0B1F33]">
@@ -35919,14 +36034,14 @@ const handlePhotoQuickUpload = async (event) => {
 
         {isMenuOpen && (
           <div
-            className="fixed inset-0 z-[60] bg-[#0B1F33]/45 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[60] flex justify-end bg-[#0B1F33]/45 backdrop-blur-[2px]"
             onClick={() => {
               setIsMenuOpen(false);
               setMenuPanel("main");
             }}
           >
             <div
-              className="h-full w-80 max-w-[88vw] bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)] p-3 flex flex-col gap-3"
+              className="opera-menu-drawer-in h-full w-80 max-w-[88vw] bg-[#F4F7FB] shadow-[0_8px_24px_rgba(15,23,42,0.06)] p-3 flex flex-col gap-3"
               onClick={(event) => event.stopPropagation()}
             >
               <div className="rounded-[20px] border border-slate-200 bg-white px-3 py-3 shadow-sm flex items-center justify-between gap-3">
@@ -35945,7 +36060,7 @@ const handlePhotoQuickUpload = async (event) => {
                   }}
                   aria-label="Close menu"
                 >
-                  Ã—
+                  ×
                 </button>
               </div>
 
@@ -35955,7 +36070,7 @@ const handlePhotoQuickUpload = async (event) => {
                   className="w-full rounded-[14px] border border-slate-200 bg-white px-3 py-2.5 text-left text-[13px] font-black text-slate-800 shadow-sm"
                   onClick={() => setMenuPanel("main")}
                 >
-                  â† Back
+                  ← Back
                 </button>
               )}
 
@@ -35969,9 +36084,10 @@ const handlePhotoQuickUpload = async (event) => {
                         type="button"
                         className="flex min-h-[56px] w-full items-center gap-3 rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:bg-slate-50"
                         onClick={item.onClick}
+                        aria-label={item.subtitle ? `${item.label}: ${item.subtitle}` : item.label}
                       >
-                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] text-[12px] font-black ${menuIconClassByColor[item.color] || menuIconClassByColor.slate}`}>
-                          {item.icon}
+                        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[12px] ${menuIconClassByColor[item.color] || menuIconClassByColor.slate}`}>
+                          <MenuIcon type={item.icon} />
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[15px] font-black text-slate-950">{item.label}</span>
@@ -36008,7 +36124,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => openMenuTab("timesheet")}
                     >
                       <span className="block text-[17px] font-black text-slate-950">Timesheet</span>
-                      <span className="text-slate-400">â€º</span>
+                      <span className="text-slate-400">›</span>
                     </button>
                     {isAdmin && (
                       <>
@@ -36028,7 +36144,7 @@ const handlePhotoQuickUpload = async (event) => {
                           onClick={() => openMenuTab("reports")}
                         >
                           <span className="block text-[17px] font-black text-slate-950">Reports</span>
-                          <span className="text-slate-400">â€º</span>
+                          <span className="text-slate-400">›</span>
                         </button>
                         <button
                           type="button"
@@ -36081,7 +36197,7 @@ const handlePhotoQuickUpload = async (event) => {
                       onClick={() => setMenuPanel("settings")}
                     >
                       <span>Settings</span>
-                      <span className="text-slate-400">â€º</span>
+                      <span className="text-slate-400">›</span>
                     </button>
                   </>
                 )}

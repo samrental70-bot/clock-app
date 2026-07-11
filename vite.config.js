@@ -25,6 +25,8 @@ export default defineConfig(({ command, mode }) => {
       "import.meta.env.VITE_OPERA_APP_NAME": JSON.stringify(appName),
     },
     server: {
+      port: process.env.PORT ? Number(process.env.PORT) : 5173,
+      strictPort: false,
       proxy: {
         // Local API harness (scripts/dev-api-server.mjs); dev-serve only, ignored by builds.
         "/api": {
