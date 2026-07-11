@@ -10005,6 +10005,7 @@ export default function EmployeeClockApp() {
   const [projectsAddFormOpen, setProjectsAddFormOpen] = useState(false);
   const [projectsAddName, setProjectsAddName] = useState("");
   const [projectsAddCostCentres, setProjectsAddCostCentres] = useState("");
+  const [projectsAddCostCentreDraft, setProjectsAddCostCentreDraft] = useState("");
   const [projectsAddSaving, setProjectsAddSaving] = useState(false);
   const [projectsAddError, setProjectsAddError] = useState("");
   const [projectsAddSuccess, setProjectsAddSuccess] = useState("");
@@ -15014,8 +15015,33 @@ export default function EmployeeClockApp() {
     setProjectsAddFormOpen(false);
     setProjectsAddName("");
     setProjectsAddCostCentres("");
+    setProjectsAddCostCentreDraft("");
     setProjectsAddError("");
     setProjectsAddSuccess("");
+  };
+
+  /** Chip list derived from the comma-separated `projectsAddCostCentres` string (single source of truth kept as CSV for the existing save handler). */
+  const projectsAddCostCentreChips = projectsAddCostCentres
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const commitProjectsAddCostCentreDraft = () => {
+    const value = projectsAddCostCentreDraft.trim();
+    if (!value) return;
+    const existing = projectsAddCostCentreChips;
+    if (existing.some((c) => c.toLowerCase() === value.toLowerCase())) {
+      setProjectsAddCostCentreDraft("");
+      return;
+    }
+    setProjectsAddCostCentres([...existing, value].join(", "));
+    setProjectsAddCostCentreDraft("");
+  };
+
+  const removeProjectsAddCostCentreChip = (chip) => {
+    setProjectsAddCostCentres(
+      projectsAddCostCentreChips.filter((c) => c !== chip).join(", ")
+    );
   };
 
   const cancelProjectsTaskForm = () => {
@@ -15237,6 +15263,7 @@ export default function EmployeeClockApp() {
         setProjectsScreenRefreshKey((k) => k + 1);
         setProjectsAddName("");
         setProjectsAddCostCentres("");
+        setProjectsAddCostCentreDraft("");
         setProjectsAddFormOpen(false);
         setProjectsAddError("");
         setProjectsEditSuccess("");
@@ -15256,6 +15283,7 @@ export default function EmployeeClockApp() {
       setProjectsScreenRefreshKey((k) => k + 1);
       setProjectsAddName("");
       setProjectsAddCostCentres("");
+      setProjectsAddCostCentreDraft("");
       setProjectsAddFormOpen(false);
       setProjectsAddError("");
       setProjectsEditSuccess("");
@@ -15306,6 +15334,39 @@ export default function EmployeeClockApp() {
     setProjectEditDraft(null);
     setProjectEditError("");
     setProjectEditSaving(false);
+  };
+
+  /**
+   * Renders a single project task as a compact chip: name + at most one status badge.
+   * Manual-contract takes priority as the visible badge; if a non-active status also
+   * applies, it is folded into the tooltip instead of stacking a second badge, so chips
+   * stay a predictable single-line height regardless of task state combinations.
+   */
+  const renderProjectTaskChip = (cc) => {
+    const hasManual = Boolean(cc.manualContractActive);
+    const hasStatusBadge =
+      cc.status != null && String(cc.status).trim() !== "" && String(cc.status).toLowerCase() !== "active";
+    const statusLabel = hasStatusBadge ? String(cc.status).replace(/_/g, " ") : "";
+    const manualLabel = hasManual ? `Manual contract ${formatMoney(Number(cc.manualContractFixedAmount || 0))}` : "";
+    const titleParts = [cc.name, manualLabel, hasStatusBadge ? statusLabel : ""].filter(Boolean);
+    return (
+      <span
+        key={cc.id}
+        className="inline-flex max-w-full items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-800"
+        title={titleParts.join(" · ")}
+      >
+        <span className="truncate">{cc.name}</span>
+        {hasManual ? (
+          <span className="shrink-0 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-black text-amber-800">
+            {formatMoney(Number(cc.manualContractFixedAmount || 0))}
+          </span>
+        ) : hasStatusBadge ? (
+          <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold capitalize text-slate-600">
+            {statusLabel}
+          </span>
+        ) : null}
+      </span>
+    );
   };
 
   const handleProjectsScreenSaveEdit = async () => {
@@ -32628,7 +32689,10 @@ const handlePhotoQuickUpload = async (event) => {
                 <div className="flex flex-wrap items-start justify-between gap-2 rounded-[24px] border border-slate-100 bg-gradient-to-br from-white to-slate-50 px-4 py-4 shadow-sm">
                   <div className="min-w-0">
                     <h2 className="font-black text-[23px] leading-tight text-slate-950">Projects</h2>
-                    <p className="mt-1 text-[14px] font-semibold text-slate-500">Company projects and tasks</p>
+                    <p className="mt-1 text-[13px] font-bold text-slate-500">
+                      {(projectsScreenRows || []).filter((p) => String(p.status || "").trim().toLowerCase() !== "archived").length} active ·{" "}
+                      {(projectsScreenRows || []).filter((p) => String(p.status || "").trim().toLowerCase() === "archived").length} archived
+                    </p>
                   </div>
                   {canCreateProjectTaskFromClock && (
                     <div className="flex shrink-0 flex-wrap gap-2">
@@ -32712,22 +32776,46 @@ const handlePhotoQuickUpload = async (event) => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <p className="block text-[11px] font-medium text-slate-600">Status</p>
-                      <p className="text-xs font-medium text-slate-900">active</p>
-                    </div>
-                    <div className="space-y-1">
                       <label className="block text-[11px] font-medium text-slate-600" htmlFor="projects-add-cc">
                         Tasks
                       </label>
-                      <input
-                        id="projects-add-cc"
-                        type="text"
-                        className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                        value={projectsAddCostCentres}
-                        onChange={(e) => setProjectsAddCostCentres(e.target.value)}
-                        placeholder="Uses all existing tasks. Add more with commas."
-                        disabled={projectsAddSaving}
-                      />
+                      <div className="flex w-full flex-wrap items-center gap-1.5 rounded-lg border border-slate-200 bg-white p-1.5">
+                        {projectsAddCostCentreChips.map((chip) => (
+                          <span
+                            key={chip}
+                            className="inline-flex items-center gap-1 rounded-full bg-slate-100 py-1 pl-2.5 pr-1.5 text-[11px] font-semibold text-slate-800"
+                          >
+                            {chip}
+                            <button
+                              type="button"
+                              className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-200 hover:text-slate-900"
+                              onClick={() => removeProjectsAddCostCentreChip(chip)}
+                              disabled={projectsAddSaving}
+                              aria-label={`Remove task ${chip}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                        <input
+                          id="projects-add-cc"
+                          type="text"
+                          className="min-w-[8rem] flex-1 border-0 py-1 px-1 text-xs outline-none"
+                          value={projectsAddCostCentreDraft}
+                          onChange={(e) => setProjectsAddCostCentreDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === ",") {
+                              e.preventDefault();
+                              commitProjectsAddCostCentreDraft();
+                            } else if (e.key === "Backspace" && !projectsAddCostCentreDraft && projectsAddCostCentreChips.length > 0) {
+                              removeProjectsAddCostCentreChip(projectsAddCostCentreChips[projectsAddCostCentreChips.length - 1]);
+                            }
+                          }}
+                          onBlur={commitProjectsAddCostCentreDraft}
+                          placeholder={projectsAddCostCentreChips.length === 0 ? "Uses all existing tasks. Type a name, press Enter." : "Add another..."}
+                          disabled={projectsAddSaving}
+                        />
+                      </div>
                     </div>
                     {projectsAddError && (
                       <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
@@ -32908,35 +32996,42 @@ const handlePhotoQuickUpload = async (event) => {
                     {assignmentsSuccess}
                   </div>
                 )}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
-                    {[
-                      { id: "active", label: "Active" },
-                      { id: "archived", label: "Archived" },
-                      { id: "all", label: "All" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                          projectsListFilter === opt.id
-                            ? "bg-white text-slate-900 shadow-sm"
-                            : "text-slate-600 hover:text-slate-900"
-                        }`}
-                        onClick={() => setProjectsListFilter(opt.id)}
-                        disabled={
-                          Boolean(projectEditSaving) ||
-                          Boolean(projectsAddSaving) ||
-                          Boolean(projectsTaskSaving) ||
-                          projectsTaskFormOpen ||
-                          Boolean(assignmentsEditorSaving)
-                        }
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                <div className="space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wide shrink-0">Show:</span>
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                      {[
+                        { id: "active", label: "Active" },
+                        { id: "archived", label: "Archived" },
+                        { id: "all", label: "All" },
+                      ].map((opt) => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                            projectsListFilter === opt.id
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                          onClick={() => setProjectsListFilter(opt.id)}
+                          disabled={
+                            Boolean(projectEditSaving) ||
+                            Boolean(projectsAddSaving) ||
+                            Boolean(projectsTaskSaving) ||
+                            projectsTaskFormOpen ||
+                            Boolean(assignmentsEditorSaving)
+                          }
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  {companyAssignAllProjectsToAllEmployees && displayedProjectsScreenRows.length > 0 ? (
+                    <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
+                      All employees can see and use every project.
+                    </div>
+                  ) : null}
                 </div>
                 {projectsScreenLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
@@ -32964,308 +33059,11 @@ const handlePhotoQuickUpload = async (event) => {
                 {!projectsScreenLoading && !projectsScreenError && displayedProjectsScreenRows.length > 0 && (
                   <div className="space-y-2.5">
                     {displayedProjectsScreenRows.map((proj) => {
-                      const isEditing = editingProjectId != null && String(editingProjectId) === String(proj.id);
                       return (
                         <div
                           key={proj.id}
                           className="rounded-xl border border-slate-200 bg-white p-3 space-y-2 shadow-sm"
                         >
-                          {isEditing && projectEditDraft ? (
-                            <div className="space-y-2.5">
-                              <p className="text-xs font-semibold text-slate-800">Edit project</p>
-                              <div className="space-y-1">
-                                <label className="block text-[11px] font-medium text-slate-600" htmlFor={`pe-name-${proj.id}`}>
-                                  Project name
-                                </label>
-                                <input
-                                  id={`pe-name-${proj.id}`}
-                                  type="text"
-                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                                  value={projectEditDraft.name}
-                                  onChange={(e) =>
-                                    setProjectEditDraft((d) => (d ? { ...d, name: e.target.value } : d))
-                                  }
-                                  disabled={projectEditSaving}
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <label className="block text-[11px] font-medium text-slate-600" htmlFor={`pe-st-${proj.id}`}>
-                                  Project status
-                                </label>
-                                <select
-                                  id={`pe-st-${proj.id}`}
-                                  className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
-                                  value={projectEditDraft.status}
-                                  onChange={(e) =>
-                                    setProjectEditDraft((d) =>
-                                      d
-                                        ? {
-                                            ...d,
-                                            status: e.target.value === "archived" ? "archived" : "active",
-                                          }
-                                        : d
-                                    )
-                                  }
-                                  disabled={projectEditSaving}
-                                >
-                                  <option value="active">active</option>
-                                  <option value="archived">archived</option>
-                                </select>
-                              </div>
-                              <div className="space-y-1.5">
-                                <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                                  Tasks
-                                </p>
-                                {projectEditDraft.lines.length === 0 && (
-                                  <p className="text-xs text-slate-500">None â€” add one below if needed.</p>
-                                )}
-                                {projectEditDraft.lines.map((line) => (
-                                  <div
-                                    key={line.key}
-                                    className="flex flex-col gap-1.5 rounded-lg border border-slate-100 bg-slate-50/80 p-2"
-                                  >
-                                    <div className="flex flex-wrap items-end gap-2">
-                                      <div className="min-w-0 flex-1 space-y-0.5">
-                                        <label className="text-[10px] font-medium text-slate-600">Name</label>
-                                        <input
-                                          type="text"
-                                          className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                          value={line.name}
-                                          onChange={(e) =>
-                                            setProjectEditDraft((d) => {
-                                              if (!d) return d;
-                                              return {
-                                                ...d,
-                                                lines: d.lines.map((l) =>
-                                                  l.key === line.key ? { ...l, name: e.target.value } : l
-                                                ),
-                                              };
-                                            })
-                                          }
-                                          disabled={projectEditSaving}
-                                        />
-                                      </div>
-                                      <div className="w-full min-w-0 sm:w-32 space-y-0.5">
-                                        <label className="text-[10px] font-medium text-slate-600">Status</label>
-                                        <select
-                                          className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                          value={line.status}
-                                          onChange={(e) =>
-                                            setProjectEditDraft((d) => {
-                                              if (!d) return d;
-                                              return {
-                                                ...d,
-                                                lines: d.lines.map((l) =>
-                                                  l.key === line.key
-                                                    ? {
-                                                        ...l,
-                                                        status: e.target.value === "archived" ? "archived" : "active",
-                                                      }
-                                                    : l
-                                                ),
-                                              };
-                                            })
-                                          }
-                                          disabled={projectEditSaving}
-                                        >
-                                          <option value="active">active</option>
-                                          <option value="archived">archived</option>
-                                        </select>
-                                      </div>
-                                    </div>
-                                    <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
-                                      <input
-                                        type="checkbox"
-                                        className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
-                                        checked={Boolean(line.manualContractActive)}
-                                        onChange={(e) =>
-                                          setProjectEditDraft((d) => {
-                                            if (!d) return d;
-                                            return {
-                                              ...d,
-                                              lines: d.lines.map((l) =>
-                                                l.key === line.key
-                                                  ? { ...l, manualContractActive: e.target.checked }
-                                                  : l
-                                              ),
-                                            };
-                                          })
-                                        }
-                                        disabled={projectEditSaving}
-                                      />
-                                      <span>Manual contract</span>
-                                    </label>
-                                    {line.manualContractActive ? (
-                                      <div className="grid gap-2 sm:grid-cols-2">
-                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
-                                          Fixed amount
-                                          <input
-                                            type="number"
-                                            inputMode="decimal"
-                                            step="0.01"
-                                            min={0}
-                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                            value={line.manualContractFixedAmount}
-                                            onChange={(e) =>
-                                              setProjectEditDraft((d) => {
-                                                if (!d) return d;
-                                                return {
-                                                  ...d,
-                                                  lines: d.lines.map((l) =>
-                                                    l.key === line.key
-                                                      ? { ...l, manualContractFixedAmount: e.target.value }
-                                                      : l
-                                                  ),
-                                                };
-                                              })
-                                            }
-                                            disabled={projectEditSaving}
-                                          />
-                                        </label>
-                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
-                                          Start date
-                                          <input
-                                            type="date"
-                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                            value={line.manualContractStartDate}
-                                            onChange={(e) =>
-                                              setProjectEditDraft((d) => {
-                                                if (!d) return d;
-                                                return {
-                                                  ...d,
-                                                  lines: d.lines.map((l) =>
-                                                    l.key === line.key
-                                                      ? { ...l, manualContractStartDate: e.target.value }
-                                                      : l
-                                                  ),
-                                                };
-                                              })
-                                            }
-                                            disabled={projectEditSaving}
-                                          />
-                                        </label>
-                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
-                                          End date
-                                          <input
-                                            type="date"
-                                            className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                            value={line.manualContractEndDate}
-                                            onChange={(e) =>
-                                              setProjectEditDraft((d) => {
-                                                if (!d) return d;
-                                                return {
-                                                  ...d,
-                                                  lines: d.lines.map((l) =>
-                                                    l.key === line.key
-                                                      ? { ...l, manualContractEndDate: e.target.value }
-                                                      : l
-                                                  ),
-                                                };
-                                              })
-                                            }
-                                            disabled={projectEditSaving}
-                                          />
-                                        </label>
-                                        <label className="block space-y-0.5 text-[10px] font-medium text-slate-600 sm:col-span-2">
-                                          Notes
-                                          <textarea
-                                            className="min-h-[60px] w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
-                                            value={line.manualContractNotes}
-                                            onChange={(e) =>
-                                              setProjectEditDraft((d) => {
-                                                if (!d) return d;
-                                                return {
-                                                  ...d,
-                                                  lines: d.lines.map((l) =>
-                                                    l.key === line.key
-                                                      ? { ...l, manualContractNotes: e.target.value }
-                                                      : l
-                                                  ),
-                                                };
-                                              })
-                                            }
-                                            disabled={projectEditSaving}
-                                          />
-                                        </label>
-                                      </div>
-                                    ) : null}
-                                    <div className="flex justify-end">
-                                      <button
-                                        type="button"
-                                        className="text-[11px] font-semibold text-slate-600"
-                                        disabled={projectEditSaving}
-                                        onClick={() =>
-                                          setProjectEditDraft((d) => {
-                                            if (!d) return d;
-                                            return {
-                                              ...d,
-                                              lines: d.lines.filter((l) => l.key !== line.key),
-                                            };
-                                          })
-                                        }
-                                      >
-                                        - Remove from list
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                                <Button
-                                  type="button"
-                                  className="w-full rounded-lg h-8 text-[11px] font-semibold !bg-white !text-slate-900 border border-slate-300"
-                                  disabled={projectEditSaving}
-                                  onClick={() =>
-                                    setProjectEditDraft((d) => {
-                                      if (!d) return d;
-                                      return {
-                                        ...d,
-                                        lines: [
-                                          ...d.lines,
-                                          {
-                                            key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-                                            dbId: null,
-                                            name: "",
-                                            status: "active",
-                                            manualContractActive: false,
-                                            manualContractFixedAmount: "",
-                                            manualContractStartDate: "",
-                                            manualContractEndDate: "",
-                                            manualContractNotes: "",
-                                            isNew: true,
-                                          },
-                                        ],
-                                      };
-                                    })
-                                  }
-                                >
-                                  + Add task
-                                </Button>
-                              </div>
-                              {projectEditError && (
-                                <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
-                                  {projectEditError}
-                                </div>
-                              )}
-                              <div className="flex gap-2 pt-0.5">
-                                <Button
-                                  type="button"
-                                  className="flex-1 rounded-lg h-9 text-xs font-semibold"
-                                  disabled={projectEditSaving}
-                                  onClick={() => void handleProjectsScreenSaveEdit()}
-                                >
-                                  {projectEditSaving ? "Savingâ€¦" : "Save"}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
-                                  disabled={projectEditSaving}
-                                  onClick={cancelProjectEdit}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <>
                               <div className="flex flex-wrap items-start justify-between gap-2 min-w-0">
                                 <div className="min-w-0 flex-1">
                                   <h3 className="font-semibold text-sm text-slate-900 leading-snug break-words">
@@ -33304,48 +33102,39 @@ const handlePhotoQuickUpload = async (event) => {
                                   ) : null}
                                 </div>
                               </div>
-                              <div className="border-t border-slate-100 pt-2 space-y-1">
+                              <div className="border-t border-slate-100 pt-2 space-y-1.5">
                                 <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
                                   Tasks
                                 </p>
                                 {proj.costCentres.length === 0 ? (
                                   <p className="text-xs text-slate-500">None</p>
-                                ) : (
-                                  <ul className="space-y-1.5">
-                                    {proj.costCentres.map((cc) => (
-                                      <li
-                                        key={cc.id}
-                                        className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1 text-xs text-slate-800"
+                                ) : companyAssignAllTasksToAllProjects ? (
+                                  <details className="group/tasks">
+                                    <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] font-semibold text-slate-600">
+                                      Uses all {proj.costCentres.length} company tasks
+                                      <svg
+                                        viewBox="0 0 24 24"
+                                        className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open/tasks:rotate-180"
+                                        aria-hidden="true"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="2"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
                                       >
-                                        <div className="min-w-0">
-                                          <span className="block font-medium break-words">{cc.name}</span>
-                                          {cc.manualContractActive ? (
-                                            <span className="mt-0.5 inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">
-                                              Manual contract {formatMoney(Number(cc.manualContractFixedAmount || 0))}
-                                            </span>
-                                          ) : null}
-                                        </div>
-                                        <div className="shrink-0 text-right">
-                                          {cc.status != null &&
-                                            String(cc.status).trim() !== "" &&
-                                            String(cc.status).toLowerCase() !== "active" && (
-                                              <span className="block text-[10px] text-slate-500 capitalize">
-                                                {String(cc.status).replace(/_/g, " ")}
-                                              </span>
-                                            )}
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
+                                        <path d="M6 9l6 6 6-6" />
+                                      </svg>
+                                    </summary>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      {proj.costCentres.map((cc) => renderProjectTaskChip(cc))}
+                                    </div>
+                                  </details>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {proj.costCentres.map((cc) => renderProjectTaskChip(cc))}
+                                  </div>
                                 )}
                               </div>
-                              {companyAssignAllProjectsToAllEmployees ? (
-                                <div className="border-t border-slate-100 pt-2">
-                                  <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[11px] font-bold text-blue-950">
-                                    All employees can see and use this project.
-                                  </div>
-                                </div>
-                              ) : null}
                               <div className={`border-t border-slate-100 pt-2 space-y-2 ${companyAssignAllProjectsToAllEmployees ? "hidden" : ""}`}>
                                 <div className="flex flex-wrap items-center justify-between gap-2 min-w-0">
                                   <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
@@ -33381,159 +33170,470 @@ const handlePhotoQuickUpload = async (event) => {
                                       >
                                         <span className="font-semibold text-slate-900">{s.displayName}</span>
                                         {s.costCentreLabels && s.costCentreLabels.length > 0 ? (
-                                          <span className="text-slate-600"> Â· {s.costCentreLabels.join(", ")}</span>
+                                          <span className="text-slate-600"> · {s.costCentreLabels.join(", ")}</span>
                                         ) : (
-                                          <span className="text-amber-800 font-medium"> Â· No tasks assigned</span>
+                                          <span className="text-amber-800 font-medium"> · No tasks assigned</span>
                                         )}
                                       </li>
                                     ))}
                                   </ul>
                                 )}
                               </div>
-                              {!companyAssignAllProjectsToAllEmployees &&
-                                assignmentsManageProjectId != null &&
-                                String(assignmentsManageProjectId) === String(proj.id) && (
-                                  <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3 space-y-2.5">
-                                    <p className="text-xs font-semibold text-slate-900">Assignment editor</p>
-                                    {assignmentsEditorLoading ? (
-                                      <p className="text-xs text-slate-600">Loading company membersâ€¦</p>
-                                    ) : (
-                                      <>
-                                        <div className="space-y-2 max-h-[28rem] overflow-y-auto pr-0.5">
-                                          {assignmentsEditorMembers.map((m) => {
-                                            const uid = String(m.userId);
-                                            const projectAssigned = Boolean(assignmentsEditorChecks[uid]);
-                                            const anyCcChecked =
-                                              companyAssignAllTasksToAllProjects ||
-                                              assignmentsEditorCostCentres.some((cc) =>
-                                                Boolean(assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)])
-                                              );
-                                            return (
-                                              <div
-                                                key={uid}
-                                                className="rounded-lg bg-white/95 border border-slate-200 px-2.5 py-2 space-y-2"
-                                              >
-                                                <label className="flex items-start gap-2.5 cursor-pointer">
-                                                  <input
-                                                    type="checkbox"
-                                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
-                                                    checked={projectAssigned}
-                                                    disabled={assignmentsEditorSaving}
-                                                    onChange={(e) => {
-                                                      const checked = e.target.checked;
-                                                      setAssignmentsEditorChecks((prev) => ({
-                                                        ...prev,
-                                                        [uid]: checked,
-                                                      }));
-                                                      if (!checked) {
-                                                        setAssignmentsEditorCcChecks((prev) => {
-                                                          const next = { ...prev };
-                                                          for (const cc of assignmentsEditorCostCentres) {
-                                                            next[pccaKey(m.userId, cc.id)] = false;
-                                                          }
-                                                          return next;
-                                                        });
-                                                      }
-                                                    }}
-                                                  />
-                                                  <span className="min-w-0 flex-1">
-                                                    <span className="block text-xs font-semibold text-slate-900 break-words">
-                                                      {m.displayName}
-                                                    </span>
-                                                    <span className="block text-[10px] text-slate-500 capitalize mt-0.5">
-                                                      {m.role || "employee"}
-                                                    </span>
-                                                  </span>
-                                                </label>
-                                                {projectAssigned && companyAssignAllTasksToAllProjects && (
-                                                  <p className="text-[10px] text-blue-950 leading-snug pl-6">
-                                                    All active tasks are available for this project.
-                                                  </p>
-                                                )}
-                                                {projectAssigned && !companyAssignAllTasksToAllProjects && assignmentsEditorCostCentres.length > 0 && (
-                                                  <div className="pl-6 space-y-1.5 border-t border-slate-100 pt-2">
-                                                    <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
-                                                      Tasks
-                                                    </p>
-                                                    {assignmentsEditorCostCentres.map((cc) => (
-                                                      <label
-                                                        key={String(cc.id)}
-                                                        className="flex items-center gap-2 cursor-pointer"
-                                                      >
-                                                        <input
-                                                          type="checkbox"
-                                                          className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
-                                                          checked={Boolean(
-                                                            assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)]
-                                                          )}
-                                                          disabled={assignmentsEditorSaving}
-                                                          onChange={(e) => {
-                                                            const k = pccaKey(m.userId, cc.id);
-                                                            setAssignmentsEditorCcChecks((prev) => ({
-                                                              ...prev,
-                                                              [k]: e.target.checked,
-                                                            }));
-                                                          }}
-                                                        />
-                                                        <span className="text-[11px] text-slate-800">{cc.name}</span>
-                                                      </label>
-                                                    ))}
-                                                  </div>
-                                                )}
-                                                {projectAssigned &&
-                                                  !companyAssignAllTasksToAllProjects &&
-                                                  assignmentsEditorCostCentres.length > 0 &&
-                                                  !anyCcChecked && (
-                                                    <p className="text-[10px] text-amber-800 leading-snug pl-6">
-                                                      No tasks assigned
-                                                    </p>
-                                                  )}
-                                                {projectAssigned && assignmentsEditorCostCentres.length === 0 && (
-                                                  <p className="text-[10px] text-slate-500 leading-snug pl-6">
-                                                    No active tasks on this project.
-                                                  </p>
-                                                )}
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                        {assignmentsEditorMembers.length === 0 && (
-                                          <p className="text-xs text-slate-500">No active employees in this company.</p>
-                                        )}
-                                        {assignmentsEditorError && (
-                                          <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
-                                            {assignmentsEditorError}
-                                          </div>
-                                        )}
-                                        <div className="flex gap-2 pt-0.5">
-                                          <Button
-                                            type="button"
-                                            className="flex-1 rounded-lg h-9 text-xs font-semibold"
-                                            disabled={assignmentsEditorSaving || assignmentsEditorLoading}
-                                            onClick={() => void handleSaveProjectAssignments()}
-                                          >
-                                            {assignmentsEditorSaving ? "Savingâ€¦" : "Save"}
-                                          </Button>
-                                          <Button
-                                            type="button"
-                                            className="flex-1 rounded-lg h-9 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
-                                            disabled={assignmentsEditorSaving || assignmentsEditorLoading}
-                                            onClick={closeAssignmentsEditor}
-                                          >
-                                            Cancel
-                                          </Button>
-                                        </div>
-                                      </>
-                                    )}
-                                  </div>
-                                )}
-                            </>
-                          )}
                         </div>
                       );
                     })}
                   </div>
                 )}
+                {editingProjectId != null && projectEditDraft ? (
+                  <div className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+                    <div className="flex max-h-[88dvh] w-full max-w-sm flex-col rounded-t-[24px] rounded-b-[18px] border border-slate-200 bg-white shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+                      <div className="shrink-0 px-4 pt-3">
+                        <div className="mx-auto mb-2 h-1 w-12 rounded-full bg-slate-300" aria-hidden="true" />
+                        <p className="text-sm font-black text-slate-950">Edit project</p>
+                      </div>
+                      <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto px-4 py-3">
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="pe-name">
+                            Project name
+                          </label>
+                          <input
+                            id="pe-name"
+                            type="text"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={projectEditDraft.name}
+                            onChange={(e) =>
+                              setProjectEditDraft((d) => (d ? { ...d, name: e.target.value } : d))
+                            }
+                            disabled={projectEditSaving}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="block text-[11px] font-medium text-slate-600" htmlFor="pe-st">
+                            Project status
+                          </label>
+                          <select
+                            id="pe-st"
+                            className="w-full rounded-lg border border-slate-200 bg-white py-2 px-2 text-xs"
+                            value={projectEditDraft.status}
+                            onChange={(e) =>
+                              setProjectEditDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      status: e.target.value === "archived" ? "archived" : "active",
+                                    }
+                                  : d
+                              )
+                            }
+                            disabled={projectEditSaving}
+                          >
+                            <option value="active">active</option>
+                            <option value="archived">archived</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                            Tasks
+                          </p>
+                          {projectEditDraft.lines.length === 0 && (
+                            <p className="text-xs text-slate-500">None â€” add one below if needed.</p>
+                          )}
+                          {projectEditDraft.lines.map((line) => (
+                            <div
+                              key={line.key}
+                              className="flex flex-col gap-1.5 rounded-lg border border-slate-100 bg-slate-50/80 p-2"
+                            >
+                              <div className="flex flex-wrap items-end gap-2">
+                                <div className="min-w-0 flex-1 space-y-0.5">
+                                  <label className="text-[10px] font-medium text-slate-600">Name</label>
+                                  <input
+                                    type="text"
+                                    className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                    value={line.name}
+                                    onChange={(e) =>
+                                      setProjectEditDraft((d) => {
+                                        if (!d) return d;
+                                        return {
+                                          ...d,
+                                          lines: d.lines.map((l) =>
+                                            l.key === line.key ? { ...l, name: e.target.value } : l
+                                          ),
+                                        };
+                                      })
+                                    }
+                                    disabled={projectEditSaving}
+                                  />
+                                </div>
+                                <div className="w-full min-w-0 sm:w-32 space-y-0.5">
+                                  <label className="text-[10px] font-medium text-slate-600">Status</label>
+                                  <select
+                                    className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                    value={line.status}
+                                    onChange={(e) =>
+                                      setProjectEditDraft((d) => {
+                                        if (!d) return d;
+                                        return {
+                                          ...d,
+                                          lines: d.lines.map((l) =>
+                                            l.key === line.key
+                                              ? {
+                                                  ...l,
+                                                  status: e.target.value === "archived" ? "archived" : "active",
+                                                }
+                                              : l
+                                          ),
+                                        };
+                                      })
+                                    }
+                                    disabled={projectEditSaving}
+                                  >
+                                    <option value="active">active</option>
+                                    <option value="archived">archived</option>
+                                  </select>
+                                </div>
+                              </div>
+                              <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                                  checked={Boolean(line.manualContractActive)}
+                                  onChange={(e) =>
+                                    setProjectEditDraft((d) => {
+                                      if (!d) return d;
+                                      return {
+                                        ...d,
+                                        lines: d.lines.map((l) =>
+                                          l.key === line.key
+                                            ? { ...l, manualContractActive: e.target.checked }
+                                            : l
+                                        ),
+                                      };
+                                    })
+                                  }
+                                  disabled={projectEditSaving}
+                                />
+                                <span>Manual contract</span>
+                              </label>
+                              {line.manualContractActive ? (
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                  <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                    Fixed amount
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      step="0.01"
+                                      min={0}
+                                      className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                      value={line.manualContractFixedAmount}
+                                      onChange={(e) =>
+                                        setProjectEditDraft((d) => {
+                                          if (!d) return d;
+                                          return {
+                                            ...d,
+                                            lines: d.lines.map((l) =>
+                                              l.key === line.key
+                                                ? { ...l, manualContractFixedAmount: e.target.value }
+                                                : l
+                                            ),
+                                          };
+                                        })
+                                      }
+                                      disabled={projectEditSaving}
+                                    />
+                                  </label>
+                                  <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                    Start date
+                                    <input
+                                      type="date"
+                                      className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                      value={line.manualContractStartDate}
+                                      onChange={(e) =>
+                                        setProjectEditDraft((d) => {
+                                          if (!d) return d;
+                                          return {
+                                            ...d,
+                                            lines: d.lines.map((l) =>
+                                              l.key === line.key
+                                                ? { ...l, manualContractStartDate: e.target.value }
+                                                : l
+                                            ),
+                                          };
+                                        })
+                                      }
+                                      disabled={projectEditSaving}
+                                    />
+                                  </label>
+                                  <label className="block space-y-0.5 text-[10px] font-medium text-slate-600">
+                                    End date
+                                    <input
+                                      type="date"
+                                      className="w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                      value={line.manualContractEndDate}
+                                      onChange={(e) =>
+                                        setProjectEditDraft((d) => {
+                                          if (!d) return d;
+                                          return {
+                                            ...d,
+                                            lines: d.lines.map((l) =>
+                                              l.key === line.key
+                                                ? { ...l, manualContractEndDate: e.target.value }
+                                                : l
+                                            ),
+                                          };
+                                        })
+                                      }
+                                      disabled={projectEditSaving}
+                                    />
+                                  </label>
+                                  <label className="block space-y-0.5 text-[10px] font-medium text-slate-600 sm:col-span-2">
+                                    Notes
+                                    <textarea
+                                      className="min-h-[60px] w-full rounded-lg border border-slate-200 bg-white py-1.5 px-2 text-xs"
+                                      value={line.manualContractNotes}
+                                      onChange={(e) =>
+                                        setProjectEditDraft((d) => {
+                                          if (!d) return d;
+                                          return {
+                                            ...d,
+                                            lines: d.lines.map((l) =>
+                                              l.key === line.key
+                                                ? { ...l, manualContractNotes: e.target.value }
+                                                : l
+                                            ),
+                                          };
+                                        })
+                                      }
+                                      disabled={projectEditSaving}
+                                    />
+                                  </label>
+                                </div>
+                              ) : null}
+                              <div className="flex justify-end">
+                                <button
+                                  type="button"
+                                  className="text-[11px] font-semibold text-slate-600"
+                                  disabled={projectEditSaving}
+                                  onClick={() =>
+                                    setProjectEditDraft((d) => {
+                                      if (!d) return d;
+                                      return {
+                                        ...d,
+                                        lines: d.lines.filter((l) => l.key !== line.key),
+                                      };
+                                    })
+                                  }
+                                >
+                                  - Remove from list
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          <Button
+                            type="button"
+                            className="w-full rounded-lg h-8 text-[11px] font-semibold !bg-white !text-slate-900 border border-slate-300"
+                            disabled={projectEditSaving}
+                            onClick={() =>
+                              setProjectEditDraft((d) => {
+                                if (!d) return d;
+                                return {
+                                  ...d,
+                                  lines: [
+                                    ...d.lines,
+                                    {
+                                      key: `new-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                                      dbId: null,
+                                      name: "",
+                                      status: "active",
+                                      manualContractActive: false,
+                                      manualContractFixedAmount: "",
+                                      manualContractStartDate: "",
+                                      manualContractEndDate: "",
+                                      manualContractNotes: "",
+                                      isNew: true,
+                                    },
+                                  ],
+                                };
+                              })
+                            }
+                          >
+                            + Add task
+                          </Button>
+                        </div>
+                        {projectEditError && (
+                          <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                            {projectEditError}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2 border-t border-slate-100 px-4 py-3">
+                        <Button
+                          type="button"
+                          className="flex-1 rounded-lg h-10 text-xs font-semibold"
+                          disabled={projectEditSaving}
+                          onClick={() => void handleProjectsScreenSaveEdit()}
+                        >
+                          {projectEditSaving ? "Savingâ€¦" : "Save"}
+                        </Button>
+                        <Button
+                          type="button"
+                          className="flex-1 rounded-lg h-10 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                          disabled={projectEditSaving}
+                          onClick={cancelProjectEdit}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+                {assignmentsManageProjectId != null ? (
+                  <div className="fixed inset-0 z-[85] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+                    <div className="flex max-h-[88dvh] w-full max-w-sm flex-col rounded-t-[24px] rounded-b-[18px] border border-slate-200 bg-white shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+                      <div className="shrink-0 px-4 pt-3">
+                        <div className="mx-auto mb-2 h-1 w-12 rounded-full bg-slate-300" aria-hidden="true" />
+                        <p className="text-sm font-black text-slate-900">
+                          Assignments{" "}
+                          {(() => {
+                            const p = displayedProjectsScreenRows.find(
+                              (row) => String(row.id) === String(assignmentsManageProjectId)
+                            );
+                            return p ? `· ${p.name}` : "";
+                          })()}
+                        </p>
+                      </div>
+                      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                        {assignmentsEditorLoading ? (
+                          <p className="text-xs text-slate-600">Loading company membersâ€¦</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {assignmentsEditorMembers.map((m) => {
+                              const uid = String(m.userId);
+                              const projectAssigned = Boolean(assignmentsEditorChecks[uid]);
+                              const anyCcChecked =
+                                companyAssignAllTasksToAllProjects ||
+                                assignmentsEditorCostCentres.some((cc) =>
+                                  Boolean(assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)])
+                                );
+                              return (
+                                <div
+                                  key={uid}
+                                  className="rounded-lg bg-white border border-slate-200 px-2.5 py-2 space-y-2"
+                                >
+                                  <label className="flex items-start gap-2.5 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300"
+                                      checked={projectAssigned}
+                                      disabled={assignmentsEditorSaving}
+                                      onChange={(e) => {
+                                        const checked = e.target.checked;
+                                        setAssignmentsEditorChecks((prev) => ({
+                                          ...prev,
+                                          [uid]: checked,
+                                        }));
+                                        if (!checked) {
+                                          setAssignmentsEditorCcChecks((prev) => {
+                                            const next = { ...prev };
+                                            for (const cc of assignmentsEditorCostCentres) {
+                                              next[pccaKey(m.userId, cc.id)] = false;
+                                            }
+                                            return next;
+                                          });
+                                        }
+                                      }}
+                                    />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block text-xs font-semibold text-slate-900 break-words">
+                                        {m.displayName}
+                                      </span>
+                                      <span className="block text-[10px] text-slate-500 capitalize mt-0.5">
+                                        {m.role || "employee"}
+                                      </span>
+                                    </span>
+                                  </label>
+                                  {projectAssigned && companyAssignAllTasksToAllProjects && (
+                                    <p className="text-[10px] text-blue-950 leading-snug pl-6">
+                                      All active tasks are available for this project.
+                                    </p>
+                                  )}
+                                  {projectAssigned && !companyAssignAllTasksToAllProjects && assignmentsEditorCostCentres.length > 0 && (
+                                    <div className="pl-6 space-y-1.5 border-t border-slate-100 pt-2">
+                                      <p className="text-[10px] font-medium text-slate-500 uppercase tracking-wide">
+                                        Tasks
+                                      </p>
+                                      {assignmentsEditorCostCentres.map((cc) => (
+                                        <label
+                                          key={String(cc.id)}
+                                          className="flex items-center gap-2 cursor-pointer"
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="h-3.5 w-3.5 shrink-0 rounded border-slate-300"
+                                            checked={Boolean(
+                                              assignmentsEditorCcChecks[pccaKey(m.userId, cc.id)]
+                                            )}
+                                            disabled={assignmentsEditorSaving}
+                                            onChange={(e) => {
+                                              const k = pccaKey(m.userId, cc.id);
+                                              setAssignmentsEditorCcChecks((prev) => ({
+                                                ...prev,
+                                                [k]: e.target.checked,
+                                              }));
+                                            }}
+                                          />
+                                          <span className="text-[11px] text-slate-800">{cc.name}</span>
+                                        </label>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {projectAssigned &&
+                                    !companyAssignAllTasksToAllProjects &&
+                                    assignmentsEditorCostCentres.length > 0 &&
+                                    !anyCcChecked && (
+                                      <p className="text-[10px] text-amber-800 leading-snug pl-6">
+                                        No tasks assigned
+                                      </p>
+                                    )}
+                                  {projectAssigned && assignmentsEditorCostCentres.length === 0 && (
+                                    <p className="text-[10px] text-slate-500 leading-snug pl-6">
+                                      No active tasks on this project.
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {assignmentsEditorMembers.length === 0 && (
+                              <p className="text-xs text-slate-500">No active employees in this company.</p>
+                            )}
+                            {assignmentsEditorError && (
+                              <div className="rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[11px] text-red-900 leading-snug">
+                                {assignmentsEditorError}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 gap-2 border-t border-slate-100 px-4 py-3">
+                        <Button
+                          type="button"
+                          className="flex-1 rounded-lg h-10 text-xs font-semibold"
+                          disabled={assignmentsEditorSaving || assignmentsEditorLoading}
+                          onClick={() => void handleSaveProjectAssignments()}
+                        >
+                          {assignmentsEditorSaving ? "Savingâ€¦" : "Save"}
+                        </Button>
+                        <Button
+                          type="button"
+                          className="flex-1 rounded-lg h-10 text-xs font-semibold !bg-white !text-slate-900 border-2 border-slate-400 shadow-sm hover:!bg-slate-100"
+                          disabled={assignmentsEditorSaving || assignmentsEditorLoading}
+                          onClick={closeAssignmentsEditor}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           )}
@@ -33613,11 +33713,23 @@ const handlePhotoQuickUpload = async (event) => {
                     </div>
                   </div>
                 )}
-                <div className="rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-                  <div className="flex items-center justify-between gap-3">
+                <details className="group/invite rounded-[18px] border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 select-none">
                     <p className="text-[14px] font-black text-slate-950">Invite employees</p>
-                  </div>
-                  <div className="flex items-center gap-2">
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/invite:rotate-180"
+                      aria-hidden="true"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </summary>
+                  <div className="mt-2 flex items-center gap-2">
                     <span className="shrink-0 text-[12px] font-semibold text-slate-500">Code:</span>
                     <button
                       type="button"
@@ -33638,11 +33750,11 @@ const handlePhotoQuickUpload = async (event) => {
                     </Button>
                   </div>
                   {companyInviteShareMessage ? (
-                    <p className="rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[12px] font-bold text-emerald-800">
+                    <p className="mt-2 rounded-xl border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-[12px] font-bold text-emerald-800">
                       {companyInviteShareMessage}
                     </p>
                   ) : null}
-                </div>
+                </details>
                 {teamLoading && (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">Loading employees...</div>
                 )}
@@ -33975,7 +34087,7 @@ const handlePhotoQuickUpload = async (event) => {
                     )}
                   </div>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   {displayedTeamRows.map((row) => {
                     const rowRoleNorm = normalizeMemberRole(row.role);
                     const isOwnerMember = rowRoleNorm === "owner";
@@ -34018,6 +34130,9 @@ const handlePhotoQuickUpload = async (event) => {
                       !clockPickProjectId ||
                       clockPickCentres.length === 0;
                     const teamStatusLabel = empArchived ? "Archived" : activeRep ? "Working" : "Clocked out";
+                    // Intentional: emerald is kept here (and on the "Working since" panel /
+                    // Auto-payroll chip below) as a deliberate semantic "positive/active" signal,
+                    // distinct from the app's navy/gold brand chrome used for structural UI.
                     const teamStatusClass = empArchived
                       ? "bg-slate-100 text-slate-700 ring-slate-200"
                       : activeRep
@@ -34033,14 +34148,14 @@ const handlePhotoQuickUpload = async (event) => {
                     return (
                       <div
                         key={row.memberRowId}
-                        className={`rounded-[18px] border p-3 space-y-2.5 ${
+                        className={`rounded-[18px] border overflow-hidden ${
                           empArchived
                             ? "border-slate-300 bg-slate-50"
                             : "border-slate-200 bg-white shadow-sm"
                         }`}
                       >
-                        <div className="space-y-3">
-                          <div className="flex items-start justify-between gap-3 min-w-0">
+                        <details className="group/teamcard" open={isEditing || undefined}>
+                          <summary className="flex cursor-pointer list-none items-center gap-2 p-2.5 select-none">
                             <div className="min-w-0 flex-1">
                               <p
                                 className={`truncate text-[15px] font-black leading-snug ${
@@ -34050,18 +34165,61 @@ const handlePhotoQuickUpload = async (event) => {
                               >
                                 {row.displayName}
                               </p>
-                              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px] font-bold text-slate-600">
+                              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12px] font-bold text-slate-600">
                                 <span className="capitalize">{rowRoleNorm}</span>
-                                <span className="text-slate-300">|</span>
+                                <span className="text-slate-300">·</span>
                                 <span>{payDisp}</span>
+                                {!isEditing && (empArchived || activeRep) ? (
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ring-inset ${teamStatusClass}`}>
+                                    {teamStatusLabel}
+                                  </span>
+                                ) : null}
                               </div>
+                            </div>
+                            {isAdmin && !isEditing ? (
+                              <button
+                                type="button"
+                                className={`shrink-0 h-8 rounded-[10px] px-2.5 text-[11px] font-black ${
+                                  activeRep
+                                    ? "!bg-[#0B1F33] text-white"
+                                    : "border border-slate-200 bg-white text-slate-900"
+                                }`}
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  activeRep
+                                    ? void handleDashboardEmployeeClockOutOrFix(row, activeRep, "clock_out")
+                                    : void handleDashboardEmployeeClockIn(row);
+                                }}
+                                disabled={rowSaving || (!activeRep && clockActionBlocked)}
+                              >
+                                {rowSaving ? "..." : activeRep ? "Clock Out" : "Clock In"}
+                              </button>
+                            ) : null}
+                            <svg
+                              viewBox="0 0 24 24"
+                              className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open/teamcard:rotate-180"
+                              aria-hidden="true"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M6 9l6 6 6-6" />
+                            </svg>
+                          </summary>
+                          <div className="space-y-2 border-t border-slate-100 px-2.5 pb-2.5 pt-2">
+                            {!isEditing ? (
                               <p
-                                className="mt-0.5 block max-w-full truncate whitespace-nowrap text-[12px] font-semibold text-slate-500"
+                                className="block max-w-full truncate whitespace-nowrap text-[12px] font-semibold text-slate-500"
                                 title={emailLine}
                               >
                                 {emailLine}
                               </p>
-                              <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                            ) : null}
+                            {!isEditing ? (
+                              <p className="text-[11px] font-semibold text-slate-600">
                                 Payroll start{" "}
                                 {row.payrollStartDate
                                   ? formatPayrollDateKeyShort(row.payrollStartDate, companyTimeZone, { includeYear: true })
@@ -34069,51 +34227,33 @@ const handlePhotoQuickUpload = async (event) => {
                                 â€¢ Opening {formatPayrollAbsoluteMoney(Number(row.payrollOpeningBalance || 0))} â€¢{" "}
                                 {payrollOpeningBalanceMeaning(Number(row.payrollOpeningBalance || 0))}
                               </p>
-                              {row.autoPayrollEnabled ? (
-                                <p className="mt-0.5 text-[11px] font-semibold text-emerald-700">
-                                  Auto payroll {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} â€¢{" "}
-                                  {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
-                                </p>
-                              ) : null}
-                              {!isEditing ? (
-                                <p className="mt-1 truncate text-[12px] font-bold text-slate-700" title={teamDefaultAssignmentLine}>
-                                  Default: {teamDefaultAssignmentLine}
-                                </p>
-                              ) : null}
-                            </div>
-                            {!isEditing ? (
-                              <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ring-inset ${teamStatusClass}`}>
-                                {teamStatusLabel}
+                            ) : null}
+                            {!isEditing && row.autoPayrollEnabled ? (
+                              <span className="inline-flex rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700">
+                                Auto {row.autoPayrollStartDate ? `from ${formatPayrollDateKeyShort(row.autoPayrollStartDate, companyTimeZone, { includeYear: true })}` : "enabled"} â€¢{" "}
+                                {formatPayrollAbsoluteMoney(Number(row.autoPayrollAmount || 0))}
                               </span>
                             ) : null}
-                          </div>
-                          {isAdmin && !isEditing && (
-                            <div className="grid grid-cols-2 gap-2">
-                              <Button
-                                type="button"
-                                className={`h-9 rounded-[12px] px-3 text-[12px] font-black ${
-                                  activeRep ? "!bg-[#0B1F33] !text-white" : ""
-                                }`}
-                                onClick={() =>
-                                  activeRep
-                                    ? void handleDashboardEmployeeClockOutOrFix(row, activeRep, "clock_out")
-                                    : void handleDashboardEmployeeClockIn(row)
-                                }
-                                disabled={rowSaving || (!activeRep && clockActionBlocked)}
-                              >
-                                {rowSaving ? "..." : activeRep ? "Clock Out" : "Clock In"}
-                              </Button>
-                              <Button
-                                type="button"
-                                className="h-9 rounded-[12px] px-3 text-[12px] font-black !bg-white !text-slate-900 border border-slate-200"
-                                onClick={() => beginTeamMemberEdit(row)}
-                                disabled={Boolean(teamSavingMemberRowId)}
-                              >
-                                Edit
-                              </Button>
-                            </div>
-                          )}
-                        </div>
+                            {!isEditing ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <p
+                                  className="min-w-0 flex-1 truncate text-[11px] font-bold text-slate-700"
+                                  title={teamDefaultAssignmentLine}
+                                >
+                                  Default: {teamDefaultAssignmentLine}
+                                </p>
+                                {isAdmin ? (
+                                  <Button
+                                    type="button"
+                                    className="h-8 shrink-0 rounded-[10px] px-3 text-[11px] font-black !bg-white !text-slate-900 border border-slate-200"
+                                    onClick={() => beginTeamMemberEdit(row)}
+                                    disabled={Boolean(teamSavingMemberRowId)}
+                                  >
+                                    Edit
+                                  </Button>
+                                ) : null}
+                              </div>
+                            ) : null}
                         {isEditing && teamEditDraft ? (
                           <div className="space-y-2 border-t border-slate-100 pt-2">
                             {teamEditInlineError && (
@@ -34431,9 +34571,20 @@ const handlePhotoQuickUpload = async (event) => {
                             ) : null}
                             {isAdmin && !activeRep && !empArchived ? (
                               <details className="group rounded-[14px] border border-slate-200 bg-white p-2">
-                                <summary className="cursor-pointer list-none text-[11px] font-black text-slate-700">
+                                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[11px] font-black text-slate-700">
                                   Default assignment
-                                  <span className="float-right text-slate-400 group-open:rotate-180">v</span>
+                                  <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+                                    aria-hidden="true"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  >
+                                    <path d="M6 9l6 6 6-6" />
+                                  </svg>
                                 </summary>
                                 <div className="mt-2 space-y-2 rounded-[12px] bg-slate-50 p-2">
                                 <div className="grid grid-cols-2 gap-2">
@@ -34501,9 +34652,20 @@ const handlePhotoQuickUpload = async (event) => {
                               </details>
                             ) : null}
                             <details className="group rounded-[14px] border border-slate-200 bg-slate-50 p-2">
-                              <summary className="cursor-pointer list-none text-[11px] font-black text-slate-700">
+                              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[11px] font-black text-slate-700">
                                 More details
-                                <span className="float-right text-slate-400 group-open:rotate-180">v</span>
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  className="h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform group-open:rotate-180"
+                                  aria-hidden="true"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M6 9l6 6 6-6" />
+                                </svg>
                               </summary>
                               <div className="mt-2 grid grid-cols-2 gap-2">
                                 <div className="min-w-0 rounded-[12px] bg-white px-2.5 py-2">
@@ -34518,6 +34680,8 @@ const handlePhotoQuickUpload = async (event) => {
                             </details>
                           </div>
                         )}
+                          </div>
+                        </details>
                       </div>
                     );
                   })}
