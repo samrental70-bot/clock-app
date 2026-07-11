@@ -7573,6 +7573,42 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
 
 export default function EmployeeClockApp() {
   const [activeTab, setActiveTab] = useState("clock");
+  // --- TEMP PERF DEBUG: click-to-render timer (remove once slowness is diagnosed) ---
+  // Measures EVERY click on a button/link/tab/icon anywhere in the app, not just
+  // bottom-nav tab switches: records performance.now() at click time, then uses a
+  // double requestAnimationFrame (first fires before the browser paints the next
+  // frame, second fires right after) to capture real click-to-painted-screen
+  // time, and logs every single measurement to the console (not just the latest)
+  // so a full history can be reviewed, plus shows the latest one in a small
+  // on-screen badge for quick visual reference.
+  const [lastClickDebug, setLastClickDebug] = useState(null);
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    const handleClick = (event) => {
+      const target =
+        event.target instanceof Element
+          ? event.target.closest("button, a, [role='button'], [role='tab']")
+          : null;
+      if (!target) return;
+      const label =
+        (target.getAttribute("aria-label") || target.textContent || target.tagName || "?")
+          .trim()
+          .replace(/\s+/g, " ")
+          .slice(0, 40);
+      const clickedAt = performance.now();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const elapsedMs = Math.round(performance.now() - clickedAt);
+          const entry = { label, ms: elapsedMs, at: new Date().toLocaleTimeString() };
+          console.log(`[PERF DEBUG] click "${label}" -> ${elapsedMs}ms`, entry);
+          setLastClickDebug(entry);
+        });
+      });
+    };
+    document.addEventListener("click", handleClick, true);
+    return () => document.removeEventListener("click", handleClick, true);
+  }, []);
+  // --- END TEMP PERF DEBUG ---
   const [chatViewMode, setChatViewMode] = useState("list");
   const [projectId, setProjectId] = useState("");
   const [costCenter, setCostCenter] = useState("");
@@ -25520,6 +25556,14 @@ const handlePhotoQuickUpload = async (event) => {
   return (
     <div className="opera-shell min-h-[100dvh] max-h-[100dvh] h-[100dvh] bg-[#F4F7FB] flex justify-center text-slate-900 overflow-hidden">
       <div className="w-full max-w-sm h-full min-h-0 max-h-[100dvh] bg-[#F4F7FB] border-x border-slate-200/80 shadow-[0_8px_24px_rgba(15,23,42,0.06)] relative flex flex-col overflow-hidden">
+        {lastClickDebug ? (
+          <div
+            className="pointer-events-none fixed left-1/2 top-2 z-[999] -translate-x-1/2 truncate rounded-full border border-[#C9A227]/60 bg-[#061426]/95 px-3 py-1 text-[11px] font-black tabular-nums text-white shadow-lg"
+            style={{ fontFamily: "monospace", maxWidth: "92vw" }}
+          >
+            DEBUG "{lastClickDebug.label}": {lastClickDebug.ms}ms @ {lastClickDebug.at}
+          </div>
+        ) : null}
         <div
           className={`opera-scroll flex-1 min-h-0 overflow-y-auto overscroll-y-contain ${
             isChatImmersiveView
