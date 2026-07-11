@@ -1298,6 +1298,14 @@ const SCHEDULE_FORM_EMPTY = {
   status: "scheduled",
 };
 
+/** Options for the in-app calendar-range dropdown (replaces native OS <select> for schedule calendar view). */
+const SCHEDULE_CAL_RANGE_OPTIONS = [
+  { value: "cal1", label: "1 Day" },
+  { value: "cal3", label: "3 Day" },
+  { value: "cal7", label: "7 Day" },
+  { value: "cal30", label: "30 Day" },
+];
+
 /** Day timeline: first labeled hour (inclusive) and last (exclusive) for grid height. */
 const SCHEDULE_GRID_HOUR_START = 6;
 const SCHEDULE_GRID_HOUR_END = 22;
@@ -2318,6 +2326,34 @@ function mediaItemProjectName(item) {
 
 function mediaItemEmployeeName(item) {
   return String(item?.employee || item?.employeeName || item?.employee_name || "Employee").trim() || "Employee";
+}
+
+function mediaItemInitials(item) {
+  const name = mediaItemEmployeeName(item);
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  return initials || "?";
+}
+
+/** Groups arbitrary items into day buckets (newest day first) keyed by capturedAt in the given time zone. */
+function groupMediaItemsByDayKey(items, timeZone, getCapturedAt = (item) => item?.capturedAt || item?.captured_at) {
+  const groups = {};
+  for (const item of Array.isArray(items) ? items : []) {
+    const raw = getCapturedAt(item);
+    const key = raw ? calendarDateKeyInTimeZone(raw, timeZone) : "";
+    const groupKey = key || "unknown";
+    if (!groups[groupKey]) groups[groupKey] = [];
+    groups[groupKey].push(item);
+  }
+  return Object.keys(groups)
+    .sort((a, b) => (a === b ? 0 : a < b ? 1 : -1))
+    .map((dayKey) => ({ dayKey, items: groups[dayKey] }));
 }
 
 function projectMediaRowToLocalItem(row) {
@@ -3875,7 +3911,9 @@ function scheduleShortEmployeeSummary(assignRows, fallbackNames) {
     }
   }
   const unique = [...new Set(names)];
-  return unique.length > 0 ? unique.join(", ") : "Unassigned";
+  if (unique.length === 0) return "Unassigned";
+  if (unique.length === 1) return unique[0];
+  return `${unique[0]} +${unique.length - 1}`;
 }
 
 async function createCompanyNotifications(supabase, params) {
@@ -7800,6 +7838,8 @@ export default function EmployeeClockApp() {
   const [projectMediaSyncError, setProjectMediaSyncError] = useState("");
   const [selectedPhotoIdsByFolder, setSelectedPhotoIdsByFolder] = useState({});
   const [photoSelectionMode, setPhotoSelectionMode] = useState(false);
+  /** itemIds whose grid-tile <img>/<video> has fired onLoad, used to swap out the skeleton placeholder. */
+  const [loadedPhotoTileIds, setLoadedPhotoTileIds] = useState(() => new Set());
   const [photoViewer, setPhotoViewer] = useState(null);
   const [photoShareMessage, setPhotoShareMessage] = useState("");
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -8217,6 +8257,8 @@ export default function EmployeeClockApp() {
   const [scheduleViewMode, setScheduleViewMode] = useState("list");
   /** First day (YYYY-MM-DD) of the visible calendar range in company TZ. */
   const [scheduleCalendarAnchor, setScheduleCalendarAnchor] = useState("");
+  /** Whether the in-app calendar-range dropdown (1/3/7/30 day) is open, replacing the native OS select. */
+  const [scheduleCalRangeMenuOpen, setScheduleCalRangeMenuOpen] = useState(false);
   /** List/compact: which task id is expanded for full detail (accept/decline) below the grid. */
   const [scheduleCalendarFocusTaskId, setScheduleCalendarFocusTaskId] = useState(null);
   /** Selected wall day for calendar headers / month highlighting (timeline + month). */
@@ -9272,6 +9314,11 @@ export default function EmployeeClockApp() {
     const keys = sortScheduleDateKeysTodayFirst(Object.keys(groups), scheduleWallTodayKey);
     return keys.map((dateKey) => ({ dateKey, tasks: Array.isArray(groups[dateKey]) ? groups[dateKey] : [] }));
   }, [scheduledTasks, companyTimeZone, scheduleWallTodayKey]);
+
+  const scheduleTasksTotalCount = useMemo(
+    () => (scheduleTasksGroupedByDate || []).reduce((sum, group) => sum + (Array.isArray(group.tasks) ? group.tasks.length : 0), 0),
+    [scheduleTasksGroupedByDate],
+  );
 
   const adminScheduledTaskById = useMemo(() => {
     const m = {};
@@ -21850,6 +21897,13 @@ const handlePhotoQuickUpload = async (event) => {
         </svg>
       );
     }
+    if (type === "check") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m5 12.5 4.5 4.5L19 7" />
+        </svg>
+      );
+    }
     if (type === "rate") {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -23778,22 +23832,42 @@ const handlePhotoQuickUpload = async (event) => {
         </button>
       </div>
       {scheduleViewMode !== "list" ? (
-        <>
-          <label className="sr-only" htmlFor={selectId}>
-            Calendar range
-          </label>
-          <select
+        <div className="relative">
+          <button
+            type="button"
             id={selectId}
-            className="h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[13px] font-black text-[#061426]"
-            value={scheduleViewMode}
-            onChange={(e) => setScheduleViewMode(e.target.value)}
+            aria-haspopup="listbox"
+            aria-expanded={scheduleCalRangeMenuOpen}
+            className="flex h-10 w-full items-center justify-between rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[13px] font-black text-[#061426]"
+            onClick={() => setScheduleCalRangeMenuOpen((v) => !v)}
           >
-            <option value="cal1">1 Day</option>
-            <option value="cal3">3 Day</option>
-            <option value="cal7">7 Day</option>
-            <option value="cal30">30 Day</option>
-          </select>
-        </>
+            <span>{SCHEDULE_CAL_RANGE_OPTIONS.find((o) => o.value === scheduleViewMode)?.label || "7 Day"}</span>
+            <svg viewBox="0 0 24 24" className={`h-4 w-4 text-[#C9A227] transition-transform ${scheduleCalRangeMenuOpen ? "rotate-180" : ""}`} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          {scheduleCalRangeMenuOpen ? (
+            <div role="listbox" className="absolute left-0 right-0 top-full z-30 mt-1 overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white shadow-[0_16px_30px_rgba(6,20,38,0.14)]">
+              {SCHEDULE_CAL_RANGE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={scheduleViewMode === opt.value}
+                  className={`block w-full px-3 py-2.5 text-left text-[13px] font-black ${
+                    scheduleViewMode === opt.value ? "bg-[#061426] text-white" : "text-[#061426] active:bg-[#F8FAFC]"
+                  }`}
+                  onClick={() => {
+                    setScheduleViewMode(opt.value);
+                    setScheduleCalRangeMenuOpen(false);
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -23856,11 +23930,19 @@ const handlePhotoQuickUpload = async (event) => {
     </div>
   );
 
-  const renderScheduleRowIcon = () => (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
-      {renderTimesheetUiIcon("task", "h-4 w-4")}
-    </span>
-  );
+  const renderScheduleRowIcon = (statusLabel) => {
+    const clean = String(statusLabel || "").trim().toLowerCase();
+    const isDone = clean === "accepted" || clean === "completed" || clean === "done";
+    return (
+      <span
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] ${
+          isDone ? "bg-[#15803D]" : "bg-[#061426]"
+        }`}
+      >
+        {renderTimesheetUiIcon(isDone ? "check" : "task", "h-4 w-4")}
+      </span>
+    );
+  };
 
   const renderScheduleChevron = () => (
     <span className="flex h-7 w-5 shrink-0 items-center justify-center text-[#C9A227]" aria-hidden="true">
@@ -24027,17 +24109,18 @@ const handlePhotoQuickUpload = async (event) => {
     const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
     const linkRow =
       task?.id != null ? employeeScheduleLinkByTaskId?.[String(task.id)] : undefined;
-    const fromTaskNames = scheduleShortEmployeeSummary([], task?.assigned_employee_name);
-    const employeeSummary =
-      fromTaskNames !== "Unassigned"
-        ? fromTaskNames
-        : scheduleShortEmployeeSummary(linkRow ? [linkRow] : [], "");
     const respStatus = normalizeScheduleAssigneeResponseStatus(linkRow?.response_status);
     const assigneeRowId = linkRow?.id != null ? String(linkRow.id) : "";
     const savingThis = assigneeRowId && scheduleResponseSavingAssigneeId === assigneeRowId;
     const tidStr = task?.id != null ? String(task.id) : "";
     const declineOpen = tidStr && scheduleEmployeeDeclineTaskId === tidStr;
     const responseLabel = scheduleAssigneeResponseLabel(respStatus);
+    const empProj = String(task?.project_name ?? "").trim();
+    const empCc = String(task?.cost_centre ?? "").trim();
+    const empProjCcLine =
+      empProj.length === 0 && empCc.length === 0
+        ? "No project or task assigned"
+        : `${empProj.length > 0 ? empProj : "No project selected"} / ${empCc.length > 0 ? empCc : "No task"}`;
 
     return (
       <div
@@ -24045,19 +24128,20 @@ const handlePhotoQuickUpload = async (event) => {
         className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-3 shadow-[0_8px_22px_rgba(6,20,38,0.06)] min-w-0"
       >
         <div className="flex min-w-0 items-center gap-3">
-          {renderScheduleRowIcon()}
+          {renderScheduleRowIcon(respStatus)}
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-start justify-between gap-2">
-              <p className="min-w-0 truncate text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
+              <p className="min-w-0 line-clamp-2 text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
               <span
                 className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black leading-none ${scheduleAssignmentChipClass(responseLabel)}`}
               >
                 {responseLabel}
               </span>
             </div>
-            <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
-              {formatScheduleListWindow(task)}
-              {employeeSummary && employeeSummary !== "Unassigned" ? ` - ${employeeSummary}` : ""}
+            <p className="mt-0.5 truncate text-[12px] font-semibold text-[#475569]">
+              <span className="tabular-nums">{formatScheduleListWindow(task)}</span>
+              {" · "}
+              {empProjCcLine}
             </p>
           </div>
           {renderScheduleChevron()}
@@ -24821,6 +24905,8 @@ const handlePhotoQuickUpload = async (event) => {
   const reportsDateRangeLabel = formatReportDateRangeLabel(reportsDateFrom, reportsDateTo);
   const mediaDateRangeLabel = formatReportDateRangeLabel(mediaFilterDateFrom, mediaFilterDateTo);
   const mediaSelectedRangeLabel = standardDateRangePresetLabel(mediaRangePreset);
+  /** True when the active Photos date-range filter covers more than one calendar day, to trigger day sub-grouping. */
+  const mediaDateRangeSpansMultipleDays = Boolean(mediaFilterDateFrom) && Boolean(mediaFilterDateTo) && mediaFilterDateFrom !== mediaFilterDateTo;
   const timesheetDateRangeLabel = formatReportDateRangeLabel(timesheetRangeBounds.from, timesheetRangeBounds.to);
   const timesheetSelectedRangeLabel = standardDateRangePresetLabel(timesheetRangePreset);
   const timesheetEmployeeFilterLabel =
@@ -27549,15 +27635,9 @@ const handlePhotoQuickUpload = async (event) => {
                       ),
                     })}
                     {isEmployeeRole ? (
-                      <div className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#64748B]">
-                        Employee
-                        <div className="flex h-12 items-center gap-3 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[14px] font-black normal-case tracking-normal text-[#061426]">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[#061426]">
-                            {renderTimesheetUiIcon("user", "h-4 w-4")}
-                          </span>
-                          <span className="truncate">My media</span>
-                        </div>
-                      </div>
+                      <p className="flex items-center gap-1.5 bg-transparent px-0.5 py-1 text-[12px] font-semibold text-[#64748B]">
+                        Showing only your uploads
+                      </p>
                     ) : renderRoyalNavyFilterSelect({
                       label: "Employee",
                       icon: "user",
@@ -27668,135 +27748,6 @@ const handlePhotoQuickUpload = async (event) => {
                     ) : null}
                   </div>
                 ) : null}
-                {false && projectDocsView === "projects" ? (
-                  <div className="space-y-3">
-                    {projectDocumentationRows.map((row) => (
-                      <div key={row.folder} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-[18px] font-black text-slate-950">{row.projectName}</p>
-                            <p className="mt-0.5 text-[13px] font-bold text-slate-500">
-                              {row.latestAt ? `Latest ${formatDate(new Date(row.latestAt), companyTimeZone)}` : "No uploads yet"}
-                            </p>
-                          </div>
-                          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[12px] font-black text-slate-700">
-                            {row.total} items
-                          </span>
-                        </div>
-                        <div className="mt-3 grid grid-cols-4 gap-2">
-                          {[
-                            ["Photo", row.photos],
-                            ["Video", row.videos],
-                            ["Receipt", row.receipts],
-                            ["Other", row.documents],
-                          ].map(([label, count]) => (
-                            <div key={label} className="rounded-2xl bg-slate-50 px-2 py-2 text-center">
-                              <p className="text-[16px] font-black text-slate-950">{count}</p>
-                              <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">{label}</p>
-                            </div>
-                          ))}
-                        </div>
-                        {row.employees.length > 0 ? (
-                          <p className="mt-3 truncate text-[13px] font-bold text-slate-600">
-                            Uploaded by {row.employees.slice(0, 4).join(", ")}{row.employees.length > 4 ? ` +${row.employees.length - 4}` : ""}
-                          </p>
-                        ) : null}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {false && projectDocsView === "timeline" ? (
-                  <div className="space-y-3">
-                    {projectDocumentationTimeline.map((item, index) => {
-                      const type = mediaItemMediaType(item);
-                      const url = mediaItemUrl(item);
-                      const isVideoMedia = type === "video";
-                      const isReceiptMedia = type === "receipt";
-                      const key = `${item?._itemId || mediaItemId(item, index)}-${index}`;
-                      return (
-                        <div key={key} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm">
-                          <div className="flex gap-3">
-                            <button
-                              type="button"
-                              className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-slate-100"
-                              onClick={() => {
-                                if (!isReceiptMedia) openPhotoItemInViewer(item);
-                              }}
-                            >
-                              {url ? (
-                                isVideoMedia ? (
-                                  <video src={url} className="h-full w-full object-cover bg-[#0B1F33]" muted playsInline preload="metadata" />
-                                ) : (
-                                  <img src={url} alt="" className="h-full w-full object-cover" />
-                                )
-                              ) : (
-                                <span className="flex h-full w-full items-center justify-center text-[12px] font-black text-slate-500">{mediaTypeLabel(type)}</span>
-                              )}
-                            </button>
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0">
-                                  <p className="truncate text-[16px] font-black text-slate-950">{mediaItemProjectName(item)}</p>
-                                  <p className="truncate text-[13px] font-bold text-slate-600">{item.costCenter || item.cost_centre || "No task"}</p>
-                                </div>
-                                <span className="shrink-0 rounded-full bg-[#0B1F33] px-2 py-1 text-[10px] font-black uppercase tracking-wide text-white">
-                                  {documentationTypeLabel(mediaItemDocumentationType(item), type)}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-[12px] font-bold text-slate-500">
-                                {mediaItemEmployeeName(item)} - {item.capturedAt ? formatDate(new Date(item.capturedAt), companyTimeZone) : ""}
-                              </p>
-                              {isReceiptMedia ? (
-                                <p className="mt-1 text-[13px] font-black text-slate-900">
-                                  {item.supplier || "Receipt"} {item.amount != null ? `- ${formatMoney(Number(item.amount || 0))}` : ""}
-                                </p>
-                              ) : isVideoMedia && (item.durationSeconds || item.duration_seconds) ? (
-                                <p className="mt-1 text-[13px] font-bold text-slate-600">
-                                  Duration {formatVideoDuration(item.durationSeconds || item.duration_seconds)}
-                                </p>
-                              ) : null}
-                              {aiTagsForItem(item).length > 0 ? (
-                                <p className="mt-1 truncate text-[12px] font-bold text-blue-700">
-                                  {aiTagsForItem(item).join(", ")}
-                                </p>
-                              ) : null}
-                            </div>
-                          </div>
-                          {isAdmin ? (
-                            <div className="mt-2 grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-black text-slate-900 disabled:opacity-50"
-                                onClick={() => void runFieldAiForMedia(item, "tag")}
-                                disabled={Boolean(fieldAiWorkingKey)}
-                              >
-                                AI Tag
-                              </button>
-                              {isReceiptMedia ? (
-                                <button
-                                  type="button"
-                                  className="rounded-2xl bg-[#0B1F33] px-3 py-2 text-[12px] font-black text-white disabled:opacity-50"
-                                  onClick={() => void runFieldAiForMedia(item, "receipt")}
-                                  disabled={Boolean(fieldAiWorkingKey)}
-                                >
-                                  AI Read Receipt
-                                </button>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-700"
-                                  onClick={() => openPhotoItemInViewer(item)}
-                                >
-                                  Open
-                                </button>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
                 {visiblePhotoFolders.length === 0 && (
                   <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
                     <p className="text-[15px] font-black text-slate-950">No media found</p>
@@ -27818,6 +27769,104 @@ const handlePhotoQuickUpload = async (event) => {
                     const showSelectionControls = selectedCount > 0;
                     const showPhotoCheckboxes = photoSelectionMode || selectedCount > 0;
                     const projectLabel = pictureProjectOptions.find((project) => project.folder === folder)?.label || folder;
+                    const indexedItems = folderItems.map((photo, idx) => ({ photo, idx }));
+                    const dayGroups = mediaDateRangeSpansMultipleDays
+                      ? groupMediaItemsByDayKey(indexedItems, companyTimeZone, (w) => w.photo?.capturedAt || w.photo?.captured_at)
+                      : [{ dayKey: null, items: indexedItems }];
+
+                    const renderPhotoTile = ({ photo, idx: index }) => {
+                      const itemId = mediaItemId(photo, index);
+                      const selected = selectedIds.has(itemId);
+                      const isVideoMedia = isVideoMediaItem(photo);
+                      const mediaUrl = mediaItemUrl(photo);
+                      const capturedAtRaw = photo?.capturedAt || photo?.captured_at;
+                      let captionDateLabel = "";
+                      if (capturedAtRaw) {
+                        try {
+                          captionDateLabel = new Intl.DateTimeFormat("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+                          }).format(new Date(capturedAtRaw));
+                        } catch {
+                          captionDateLabel = "";
+                        }
+                      }
+                      const durationLabel = isVideoMedia
+                        ? formatVideoDuration(photo?.durationSeconds || photo?.duration_seconds)
+                        : "";
+                      const isLoaded = loadedPhotoTileIds.has(itemId);
+                      const markLoaded = () =>
+                        setLoadedPhotoTileIds((prev) => (prev.has(itemId) ? prev : new Set(prev).add(itemId)));
+                      return (
+                        <div key={itemId} className={`relative aspect-square overflow-hidden rounded-[12px] border bg-slate-100 ${selected ? "border-[#0B1F33] ring-2 ring-slate-950/15" : "border-slate-200"}`}>
+                          {!isLoaded ? (
+                            <div className="absolute inset-0 animate-pulse rounded-[12px] bg-slate-100" aria-hidden="true" />
+                          ) : null}
+                          <button
+                            type="button"
+                            className="block h-full w-full text-left"
+                            onClick={() => {
+                              if (showPhotoCheckboxes) {
+                                togglePhotoSelected(folder, itemId);
+                                return;
+                              }
+                              openPhotoViewer(folder, index);
+                            }}
+                          >
+                            {isVideoMedia ? (
+                              <video
+                                src={mediaUrl}
+                                className={`h-full w-full bg-[#0B1F33] object-cover transition-opacity ${isLoaded ? "opacity-100" : "opacity-0"}`}
+                                muted
+                                playsInline
+                                preload="metadata"
+                                onLoadedData={markLoaded}
+                              />
+                            ) : (
+                              <img
+                                src={mediaUrl}
+                                alt="Job site"
+                                className={`h-full w-full object-cover transition-opacity ${isLoaded ? "opacity-100" : "opacity-0"}`}
+                                onLoad={markLoaded}
+                              />
+                            )}
+                          </button>
+                          {isVideoMedia ? (
+                            <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#061426]/55">
+                                <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 translate-x-[1px] text-white" aria-hidden="true" fill="currentColor">
+                                  <path d="M8 5v14l11-7z" />
+                                </svg>
+                              </span>
+                            </span>
+                          ) : null}
+                          {isVideoMedia && durationLabel ? (
+                            <span className="pointer-events-none absolute bottom-2 right-2 rounded-full bg-[#061426]/70 px-1.5 py-0.5 text-[9px] font-black text-white">
+                              {durationLabel}
+                            </span>
+                          ) : null}
+                          <span className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-1 rounded-b-[12px] bg-[#061426]/60 px-1.5 py-1 backdrop-blur-sm">
+                            <span className="text-[10px] font-black text-white">{mediaItemInitials(photo)}</span>
+                            {captionDateLabel ? (
+                              <span className="truncate text-[10px] font-bold text-white/80">· {captionDateLabel}</span>
+                            ) : null}
+                          </span>
+                          {showPhotoCheckboxes ? (
+                            <label className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[9px] bg-white/95 shadow-sm">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 accent-slate-950"
+                                checked={selected}
+                                onChange={() => togglePhotoSelected(folder, itemId)}
+                                aria-label="Select photo"
+                              />
+                            </label>
+                          ) : null}
+                        </div>
+                      );
+                    };
+
                     return (
                       <div key={folder} className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                         <div className="mb-3 flex items-start justify-between gap-3">
@@ -27828,17 +27877,45 @@ const handlePhotoQuickUpload = async (event) => {
                             </p>
                           </div>
                           {!showSelectionControls ? (
-                            <button
-                              type="button"
-                              className="shrink-0 rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-900 shadow-sm active:bg-slate-50"
-                              onClick={() => setPhotoSelectionMode((current) => !current)}
-                            >
-                              Select
-                            </button>
+                            <div className="flex shrink-0 gap-1.5">
+                              {photoSelectionMode ? (
+                                <button
+                                  type="button"
+                                  className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-900 shadow-sm active:bg-slate-50"
+                                  onClick={() =>
+                                    setSelectedPhotoIdsByFolder((prev) => ({
+                                      ...prev,
+                                      [folder]: folderItems.map((photo, index) => mediaItemId(photo, index)),
+                                    }))
+                                  }
+                                >
+                                  Select all ({folderItems.length})
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="rounded-[14px] border border-slate-200 bg-white px-3 py-2 text-[12px] font-black text-slate-900 shadow-sm active:bg-slate-50"
+                                onClick={() => setPhotoSelectionMode((current) => !current)}
+                              >
+                                {photoSelectionMode ? "Cancel" : "Select"}
+                              </button>
+                            </div>
                           ) : (
                             <div className="shrink-0 text-right">
                               <p className="mb-1 text-[12px] font-black text-slate-700">{selectedCount} selected</p>
                               <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  className="rounded-[12px] border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-slate-600"
+                                  onClick={() =>
+                                    setSelectedPhotoIdsByFolder((prev) => ({
+                                      ...prev,
+                                      [folder]: folderItems.map((photo, index) => mediaItemId(photo, index)),
+                                    }))
+                                  }
+                                >
+                                  Select all
+                                </button>
                                 <button
                                   type="button"
                                   className="rounded-[12px] bg-[#0B1F33] px-2.5 py-1.5 text-[11px] font-black text-white disabled:border disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
@@ -27861,56 +27938,21 @@ const handlePhotoQuickUpload = async (event) => {
                             </div>
                           )}
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          {folderItems.map((photo, index) => {
-                            const itemId = mediaItemId(photo, index);
-                            const selected = selectedIds.has(itemId);
-                            const isVideoMedia = isVideoMediaItem(photo);
-                            const mediaUrl = mediaItemUrl(photo);
-                            return (
-                              <div key={itemId} className={`relative aspect-square overflow-hidden rounded-[12px] border bg-slate-100 ${selected ? "border-[#0B1F33] ring-2 ring-slate-950/15" : "border-slate-200"}`}>
-                                <button
-                                  type="button"
-                                  className="block h-full w-full text-left"
-                                  onClick={() => {
-                                    if (showPhotoCheckboxes) {
-                                      togglePhotoSelected(folder, itemId);
-                                      return;
-                                    }
-                                    openPhotoViewer(folder, index);
-                                  }}
-                                >
-                                  {isVideoMedia ? (
-                                    <video
-                                      src={mediaUrl}
-                                      className="h-full w-full bg-[#0B1F33] object-cover"
-                                      muted
-                                      playsInline
-                                      preload="metadata"
-                                    />
-                                  ) : (
-                                    <img src={mediaUrl} alt="Job site" className="h-full w-full object-cover" />
-                                  )}
-                                </button>
-                                {isVideoMedia ? (
-                                  <span className="absolute bottom-2 right-2 rounded-full bg-[#0B1F33]/85 px-2 py-0.5 text-[10px] font-black text-white">
-                                    Video
-                                  </span>
-                                ) : null}
-                                {showPhotoCheckboxes ? (
-                                  <label className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center rounded-[9px] bg-white/95 shadow-sm">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 accent-slate-950"
-                                      checked={selected}
-                                      onChange={() => togglePhotoSelected(folder, itemId)}
-                                      aria-label="Select photo"
-                                    />
-                                  </label>
-                                ) : null}
+                        <div className="space-y-3">
+                          {dayGroups.map((group) => (
+                            <div key={group.dayKey || "flat"} className="space-y-1.5">
+                              {group.dayKey ? (
+                                <p className="sticky top-0 z-10 -mx-1 bg-white/95 px-1 py-0.5 text-[10px] font-black uppercase tracking-[0.06em] text-[#64748B]">
+                                  {group.dayKey === scheduleWallTodayKey
+                                    ? "Today"
+                                    : formatReportDateKey(group.dayKey) || group.dayKey}
+                                </p>
+                              ) : null}
+                              <div className="grid grid-cols-2 gap-2">
+                                {group.items.map((entry) => renderPhotoTile(entry))}
                               </div>
-                            );
-                          })}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );
@@ -31444,11 +31486,13 @@ const handlePhotoQuickUpload = async (event) => {
               <CardContent className="p-4 space-y-4">
                 <div className="space-y-3">
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-2">
                       <h2 className="text-[28px] font-black leading-tight tracking-normal text-[#061426]">
                         Schedule
                       </h2>
-                      <p className="mt-0.5 truncate text-[13px] font-semibold text-[#64748B]">Team work plan</p>
+                      <span className="mt-0.5 shrink-0 rounded-full bg-[#F4F7FB] px-2.5 py-1 text-[11px] font-black text-[#475569]">
+                        {scheduleTasksTotalCount} {scheduleTasksTotalCount === 1 ? "job" : "jobs"} this week
+                      </span>
                     </div>
                     {!scheduleFormOpen && (
                       <Button
@@ -32200,7 +32244,7 @@ const handlePhotoQuickUpload = async (event) => {
                         setScheduleFormOpen(true);
                       }}
                     >
-                      New Job
+                      New job
                     </button>
                   </div>
                 ) : (
@@ -32214,9 +32258,12 @@ const handlePhotoQuickUpload = async (event) => {
                             {taskList.map((task) => {
                               const ttitle = String(task?.task_title ?? "").trim() || "Untitled task";
                               const proj = String(task?.project_name ?? "").trim();
-                              const projLine = proj.length > 0 ? proj : "No project selected";
                               const cc = String(task?.cost_centre ?? "").trim();
-                              const ccLine = cc.length > 0 ? cc : "No task";
+                              const projCcLine =
+                                proj.length === 0 && cc.length === 0
+                                  ? "No project or task assigned"
+                                  : `${proj.length > 0 ? proj : "No project selected"} / ${cc.length > 0 ? cc : "No task"}`;
+                              const taskStatusVal = String(task?.status ?? "").trim().toLowerCase();
                               const startDisp = task?.start_time ? formatScheduleListTime(task.start_time) : "—";
                               const endRaw = task?.end_time;
                               const durRaw = task?.duration_minutes;
@@ -32284,10 +32331,10 @@ const handlePhotoQuickUpload = async (event) => {
                                 >
                                   {!isEditingThis ? (
                                   <div className="flex min-w-0 items-center gap-3">
-                                    {renderScheduleRowIcon()}
+                                    {renderScheduleRowIcon(taskStatusVal)}
                                     <div className="min-w-0 flex-1">
                                       <div className="flex min-w-0 items-start justify-between gap-2">
-                                        <p className="min-w-0 truncate text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
+                                        <p className="min-w-0 line-clamp-2 text-[15px] font-black leading-snug text-[#061426]">{ttitle}</p>
                                         {!isEditingThis ? (
                                           <span
                                             className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black leading-none ${scheduleAssignmentChipClass(employeeSummary)}`}
@@ -32297,14 +32344,11 @@ const handlePhotoQuickUpload = async (event) => {
                                         ) : null}
                                       </div>
                                       {!isEditingThis ? (
-                                        <>
-                                          <p className="mt-0.5 truncate text-[12px] font-semibold tabular-nums text-[#475569]">
-                                            {startDisp} - {windowLabel}
-                                          </p>
-                                          <p className="mt-0.5 truncate text-[11px] font-semibold text-[#94A3B8]">
-                                            {projLine} / {ccLine}
-                                          </p>
-                                        </>
+                                        <p className="mt-0.5 truncate text-[12px] font-semibold text-[#475569]">
+                                          <span className="tabular-nums">{startDisp} - {windowLabel}</span>
+                                          {" · "}
+                                          {projCcLine}
+                                        </p>
                                       ) : null}
                                     </div>
                                     {!isEditingThis ? renderScheduleChevron() : null}
