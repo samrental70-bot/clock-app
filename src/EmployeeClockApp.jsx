@@ -162,7 +162,7 @@ const AppHeader = ({
   );
 };
 
-const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onChat, onTimesheets, onMore }) => {
+const BottomNav = React.memo(function BottomNav({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, onHome, onSchedule, onClock, onChat, onTimesheets, onMore }) {
   const NavIcon = ({ type }) => {
     if (type === "home") {
       return (
@@ -282,7 +282,7 @@ const BottomNav = ({ isAdmin, isEmployeeRole, activeTab, visibleCurrentShift, on
       </div>
     </div>
   );
-};
+});
 
 const DateRangeButton = ({ label = "Date range", rangeLabel, presetLabel = "Range", onClick }) => (
   <button
@@ -3666,6 +3666,27 @@ function notificationNavigationUrl(notificationRow) {
   return "/";
 }
 
+/**
+ * Add a value to a ref-held Set used for "have we already shown this
+ * notification" de-dup, capping its size so it doesn't grow unbounded for the
+ * lifetime of a long session (e.g. an admin watching a crew over an 8-hour
+ * shift). JS Sets preserve insertion order, so once over the cap we drop the
+ * oldest entries and keep only the most recent `maxSize`.
+ */
+function addBoundedSetEntry(setRef, value, maxSize = 500) {
+  const set = setRef.current;
+  set.add(value);
+  if (set.size > maxSize) {
+    const overflow = set.size - maxSize;
+    let i = 0;
+    for (const entry of set) {
+      if (i >= overflow) break;
+      set.delete(entry);
+      i += 1;
+    }
+  }
+}
+
 /** Browser/PWA Notification API for supported app notifications; never throws. */
 function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   const id = String(notificationRow?.id ?? "");
@@ -3675,7 +3696,7 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   if (typeof window === "undefined" || !window.Notification) return;
   if (window.Notification.permission !== "granted") return;
   try {
-    shownIdsRef.current.add(id);
+    addBoundedSetEntry(shownIdsRef, id);
     const notification = new window.Notification(String(notificationRow.title || "OPERA.AI"), {
       body: String(notificationRow.message || ""),
       icon: OPERA_APP_ICON,
@@ -4277,6 +4298,16 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
     [chatAssigneeById, memberById]
   );
   const chatTimelineRows = useMemo(() => buildChatTimelineRows(messages, []), [messages]);
+  // O(1) lookup for the "replying to" message instead of a per-row Array.find,
+  // which turned every ChatScreen render (e.g. one per composer keystroke)
+  // into an O(n^2) scan of the whole message history.
+  const messagesById = useMemo(() => {
+    const map = new Map();
+    for (const row of Array.isArray(messages) ? messages : []) {
+      if (row && row.id != null) map.set(String(row.id), row);
+    }
+    return map;
+  }, [messages]);
   const chatTimelineGroups = useMemo(() => {
     const groups = [];
     for (const entry of chatTimelineRows) {
@@ -5118,10 +5149,16 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
 
   useEffect(() => {
     if (!active) return;
+    // The postgres_changes realtime subscription below already keeps the open
+    // conversation's messages current instantly, so this poll only needs to
+    // exist as a fallback for a dropped realtime connection and to catch
+    // conversation-list changes (new conversations/unread counts) that the
+    // per-conversation realtime channel doesn't cover. Lengthened from 9s to
+    // reduce redundant network/render churn while chat is open.
     const timer = window.setInterval(() => {
       void loadConversations({ silent: true });
       if (selectedConversationId && !selectedConversation?.pendingSetup) void loadMessages({ silent: true });
-    }, 9000);
+    }, 45000);
     return () => window.clearInterval(timer);
   }, [active, loadConversations, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
 
@@ -5970,7 +6007,7 @@ function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNo
     const attachmentRows = Array.isArray(message.attachments) ? message.attachments : [];
     const statusNode = renderChatMessageStatus(message);
     const replyToMessage = replyBody
-      ? (messages || []).find((row) => String(row.id) === String(message?.metadata?.reply_to_message_id))
+      ? messagesById.get(String(message?.metadata?.reply_to_message_id)) || null
       : null;
     const messageBody = String(message.body || "").trim();
     const hideBodyForPhoto = message.message_type === "photo" && (!messageBody || /^photo$/i.test(messageBody));
@@ -8172,6 +8209,11 @@ export default function EmployeeClockApp() {
   const employeeScheduleBootstrappedRef = useRef(false);
   const employeeScheduleRefreshInFlightRef = useRef(false);
   const shownAssignmentRowIdsRef = useRef(new Set());
+  // Re-entrancy guards so overlapping poll/interval/focus/visibility triggers
+  // for the same background check never run more than one request in flight
+  // at a time (defensive hardening against effect re-fire storms).
+  const checkPendingPayDetailsInFlightRef = useRef(false);
+  const pollInAppNotificationsInFlightRef = useRef(false);
   /** Clock tab: this user's assigned tasks (assignee = auth user) for today / tomorrow â€” Scheduled Task dropdown. */
   const [clockEmployeeScheduledTasks, setClockEmployeeScheduledTasks] = useState([]);
   const [clockEmployeeScheduleLoading, setClockEmployeeScheduleLoading] = useState(false);
@@ -8531,6 +8573,8 @@ export default function EmployeeClockApp() {
       }
     };
     const checkPendingPayDetails = async () => {
+      if (checkPendingPayDetailsInFlightRef.current) return;
+      checkPendingPayDetailsInFlightRef.current = true;
       try {
         const { data: members, error: mErr } = await supabase
           .from("company_members")
@@ -8589,18 +8633,28 @@ export default function EmployeeClockApp() {
         }
       } catch (err) {
         console.warn("[TEAM] pending pay details check failed", err);
+      } finally {
+        checkPendingPayDetailsInFlightRef.current = false;
       }
     };
     void checkPendingPayDetails();
-    const interval = window.setInterval(() => void checkPendingPayDetails(), 30000);
+    const interval = window.setInterval(() => {
+      // Skip while backgrounded so an idle admin session doesn't keep
+      // polling every 30s indefinitely.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void checkPendingPayDetails();
+    }, 30000);
     const onFocus = () => void checkPendingPayDetails();
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") void checkPendingPayDetails();
+    };
     window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [isAdmin, userCompany?.id, authUser?.id, companyChecked, teamRefreshKey]);
 
@@ -9067,9 +9121,9 @@ export default function EmployeeClockApp() {
           projectName: display.projectName,
           costCentre: display.costCentre,
         };
-        shownAssignmentRowIdsRef.current.add(assignmentId);
-        if (popupRow.id) shownAssignNotifIdsRef.current.add(String(popupRow.id));
-        shownAssignMessageSignaturesRef.current.add(scheduleAssignmentMessageSignature(popupRow));
+        addBoundedSetEntry(shownAssignmentRowIdsRef, assignmentId);
+        if (popupRow.id) addBoundedSetEntry(shownAssignNotifIdsRef, String(popupRow.id));
+        addBoundedSetEntry(shownAssignMessageSignaturesRef, scheduleAssignmentMessageSignature(popupRow));
         setActiveAssignNotif(popupRow);
       } catch (err) {
         setEmployeeScheduleError(getErrorMessage(err));
@@ -12649,6 +12703,8 @@ export default function EmployeeClockApp() {
 
   const pollInAppNotifications = useCallback(async () => {
     if (!authUser?.id || !userCompany?.id) return;
+    if (pollInAppNotificationsInFlightRef.current) return;
+    pollInAppNotificationsInFlightRef.current = true;
     try {
       const uid = authUser.id;
       const [listRes, countRes] = await Promise.all([
@@ -12701,6 +12757,8 @@ export default function EmployeeClockApp() {
     } catch (e) {
       console.warn("[NOTIFY] poll failed", e);
       setInAppNotifError(getErrorMessage(e));
+    } finally {
+      pollInAppNotificationsInFlightRef.current = false;
     }
   }, [authUser?.id, userCompany?.id, isAdmin]);
 
@@ -12722,9 +12780,9 @@ export default function EmployeeClockApp() {
     });
     if (!first) return;
     const nid = String(first.id);
-    shownAssignNotifIdsRef.current.add(nid);
+    addBoundedSetEntry(shownAssignNotifIdsRef, nid);
     const popupRow = { ...first, title: "New task assigned" };
-    shownAssignMessageSignaturesRef.current.add(scheduleAssignmentMessageSignature(popupRow));
+    addBoundedSetEntry(shownAssignMessageSignaturesRef, scheduleAssignmentMessageSignature(popupRow));
     setActiveAssignNotif(popupRow);
     // Trigger background refresh so the Schedule tab updates even if user stays on another tab.
     setScheduleRefreshKey((k) => k + 1);
@@ -12745,8 +12803,23 @@ export default function EmployeeClockApp() {
       return;
     }
     void pollInAppNotifications();
-    const interval = setInterval(() => void pollInAppNotifications(), 15000);
-    return () => clearInterval(interval);
+    const interval = setInterval(() => {
+      // Skip the poll while the tab/app is backgrounded (screen off, tab
+      // hidden) so a signed-in but idle session doesn't keep hitting
+      // Supabase every 15s indefinitely.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void pollInAppNotifications();
+    }, 15000);
+    const onVisibility = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        void pollInAppNotifications();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [authUser?.id, userCompany?.id, pollInAppNotifications]);
 
   useEffect(() => {
@@ -12755,9 +12828,16 @@ export default function EmployeeClockApp() {
     const refresh = () => {
       void refreshEmployeeAssignedSchedule({ detectNew: true, showLoading: false });
     };
+    const refreshIfVisible = () => {
+      // Skip while backgrounded so an idle session doesn't keep polling every
+      // 7s indefinitely; the focus/visibilitychange listeners below already
+      // resume refreshing as soon as the tab is foregrounded again.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      refresh();
+    };
 
     refresh();
-    const interval = setInterval(refresh, 7000);
+    const interval = setInterval(refreshIfVisible, 7000);
     const onFocus = () => refresh();
     const onVisibility = () => {
       if (typeof document === "undefined" || document.visibilityState === "visible") refresh();
@@ -13116,8 +13196,35 @@ export default function EmployeeClockApp() {
   }, [companyTimeZone]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
+    // The live elapsed-shift timer (Clock tab and Home/Activities tab) needs
+    // real per-second updates. Every other consumer of `now` in this component
+    // only reads it to derive the current calendar day (today's date key), so
+    // outside of those two contexts we can skip the setState (and the resulting
+    // full-tree re-render) unless the calendar day has actually rolled over.
+    // This avoids re-rendering the entire ~28k-line component tree once a
+    // second while the user is on any other tab (Chat, Timesheets, etc.).
+    const needsLiveTick = (activeTab === "clock" || activeTab === "activities") && Boolean(visibleCurrentShift);
+    const timer = setInterval(() => {
+      setNow((prev) => {
+        const next = new Date();
+        if (needsLiveTick) return next;
+        return prev.toDateString() === next.toDateString() ? prev : next;
+      });
+    }, 1000);
     return () => clearInterval(timer);
+  }, [activeTab, visibleCurrentShift]);
+
+  // Stable handlers for BottomNav (memoized below) so its props don't change
+  // identity on every EmployeeClockApp render, which would otherwise defeat
+  // the React.memo bailout.
+  const handleBottomNavHome = useCallback(() => setActiveTab(isAdmin ? "dashboard" : "activities"), [isAdmin]);
+  const handleBottomNavSchedule = useCallback(() => setActiveTab("schedule"), []);
+  const handleBottomNavClock = useCallback(() => setActiveTab("clock"), []);
+  const handleBottomNavChat = useCallback(() => setActiveTab("chat"), []);
+  const handleBottomNavTimesheets = useCallback(() => setActiveTab("timesheet"), []);
+  const handleBottomNavMore = useCallback(() => {
+    setMenuPanel("main");
+    setIsMenuOpen(true);
   }, []);
 
   useEffect(() => {
@@ -28854,7 +28961,7 @@ const handlePhotoQuickUpload = async (event) => {
                             </p>
                           </div>
                           <svg viewBox={`0 0 ${width} ${height}`} className="h-36 max-h-[160px] w-full overflow-visible" role="img" aria-label="Employees Logged by Hour line graph">
-                            {[0, Math.ceil(maxCount / 2), maxCount].map((tick) => {
+                            {[...new Set([0, Math.ceil(maxCount / 2), maxCount])].map((tick) => {
                               const y = top + graphH - (tick / maxCount) * graphH;
                               return (
                                 <g key={`tick-${tick}`}>
@@ -36182,15 +36289,12 @@ const handlePhotoQuickUpload = async (event) => {
             isEmployeeRole={isEmployeeRole}
             activeTab={activeTab}
             visibleCurrentShift={visibleCurrentShift}
-            onHome={() => setActiveTab(isAdmin ? "dashboard" : "activities")}
-            onSchedule={() => setActiveTab("schedule")}
-            onClock={() => setActiveTab("clock")}
-            onChat={() => setActiveTab("chat")}
-            onTimesheets={() => setActiveTab("timesheet")}
-            onMore={() => {
-              setMenuPanel("main");
-              setIsMenuOpen(true);
-            }}
+            onHome={handleBottomNavHome}
+            onSchedule={handleBottomNavSchedule}
+            onClock={handleBottomNavClock}
+            onChat={handleBottomNavChat}
+            onTimesheets={handleBottomNavTimesheets}
+            onMore={handleBottomNavMore}
           />
         ) : null}
       </div>
