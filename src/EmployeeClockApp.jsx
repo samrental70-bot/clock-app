@@ -40,6 +40,23 @@ const Button = ({ children, className, ...props }) => (
   </button>
 );
 
+const SettingsInlineMessage = ({ message, successKeywords = ["saved"] }) => {
+  if (!message) return null;
+  const lower = message.toLowerCase();
+  const isSuccess = successKeywords.some((keyword) => lower.includes(keyword));
+  return (
+    <div
+      className={`rounded-2xl border p-3 text-[13px] font-semibold ${
+        isSuccess
+          ? "border-[#C9A227]/30 bg-[#F2C14E]/10 text-[#0B1F33]"
+          : "border-red-100 bg-red-50 text-red-700"
+      }`}
+    >
+      {message}
+    </div>
+  );
+};
+
 const PageCard = ({ children, className = "", style }) => (
   <div className={`opera-page-card ${className}`} style={style}>{children}</div>
 );
@@ -1927,6 +1944,20 @@ function payrollFrequencyLabel(value) {
   if (key === "weekly_friday") return "Every Friday";
   if (key === "monthly") return "Monthly";
   return "Alternate Friday";
+}
+
+function companyAssignmentSummaryLabel(assignAllProjects, assignAllTasks, canCreateFromClock) {
+  let label;
+  if (assignAllProjects && assignAllTasks) {
+    label = "All employees & tasks";
+  } else if (!assignAllProjects && !assignAllTasks) {
+    label = "Manual";
+  } else if (assignAllProjects && !assignAllTasks) {
+    label = "All employees, manual tasks";
+  } else {
+    label = "All tasks, manual employees";
+  }
+  return canCreateFromClock ? `${label} + Clock adds` : label;
 }
 
 function payrollFrequencyCycleDays(value) {
@@ -34697,11 +34728,11 @@ const handlePhotoQuickUpload = async (event) => {
                     <h2 className="text-[22px] font-black leading-tight text-slate-950">Settings</h2>
                   </div>
                 </div>
+                <p className="px-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Company</p>
                 <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[16px] font-black text-slate-900">Company</p>
-                      <p className="text-[12px] font-semibold text-slate-500">Profile, invite, and time tracking settings.</p>
                     </div>
                     {isAdmin ? (
                       <button
@@ -34773,23 +34804,13 @@ const handlePhotoQuickUpload = async (event) => {
                           </span>
                         </span>
                       </label>
-                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-[14px] font-bold text-emerald-950">
+                      <div className="rounded-2xl border border-[#C9A227]/30 bg-[#F2C14E]/10 p-3 text-[14px] font-bold text-[#0B1F33]">
                         <span className="block">Employee project/task creation</span>
-                        <span className="block pt-0.5 text-[12px] font-semibold text-emerald-700">
+                        <span className="block pt-0.5 text-[12px] font-semibold text-[#9A6B12]">
                           Active employees can add project/task names from Clock. Assignment rules still control who sees each project and task.
                         </span>
                       </div>
-                      {settingsTzMessage && (
-                        <div
-                          className={`rounded-2xl border p-3 text-xs ${
-                            settingsTzMessage.includes("saved")
-                              ? "bg-green-50 border-green-100 text-green-800"
-                              : "bg-red-50 border-red-100 text-red-700"
-                          }`}
-                        >
-                          {settingsTzMessage}
-                        </div>
-                      )}
+                      <SettingsInlineMessage message={settingsTzMessage} />
                       <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsTzSaving}>
                         {settingsTzSaving ? "Saving..." : "Save Company Profile"}
                       </Button>
@@ -34809,21 +34830,13 @@ const handlePhotoQuickUpload = async (event) => {
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">{formatAutoClockOutTimeText(companyAutoClockOutTime)}</span>
                       </div>
                       <div className="flex justify-between gap-3">
-                        <span className="text-[14px] font-semibold text-slate-500">Projects</span>
+                        <span className="text-[14px] font-semibold text-slate-500">Assignment</span>
                         <span className="text-[15px] font-bold text-slate-900 text-right break-words">
-                          {companyAssignAllProjectsToAllEmployees ? "All employees" : "Manual assignment"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <span className="text-[14px] font-semibold text-slate-500">Tasks</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">
-                          {companyAssignAllTasksToAllProjects ? "All projects" : "Manual assignment"}
-                        </span>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <span className="text-[14px] font-semibold text-slate-500">Employee adds</span>
-                        <span className="text-[15px] font-bold text-slate-900 text-right break-words">
-                          {canCreateProjectTaskFromClock ? "Allowed from Clock" : "Off"}
+                          {companyAssignmentSummaryLabel(
+                            companyAssignAllProjectsToAllEmployees,
+                            companyAssignAllTasksToAllProjects,
+                            canCreateProjectTaskFromClock
+                          )}
                         </span>
                       </div>
                       {isAdmin ? (
@@ -34845,7 +34858,6 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[16px] font-black text-slate-900">Payroll</p>
-                        <p className="text-[12px] font-semibold text-slate-500">Alternate Friday payroll periods and payment tracking.</p>
                       </div>
                       <button
                         type="button"
@@ -34934,17 +34946,7 @@ const handlePhotoQuickUpload = async (event) => {
                             Choose the first payroll Friday. Pay date becomes the period end plus the offset days.
                           </p>
                         </div>
-                        {payrollSettingsMessage ? (
-                          <div
-                            className={`rounded-2xl border p-3 text-[13px] font-semibold ${
-                              payrollSettingsMessage.toLowerCase().includes("saved")
-                                ? "border-emerald-100 bg-emerald-50 text-emerald-800"
-                                : "border-red-100 bg-red-50 text-red-700"
-                            }`}
-                          >
-                            {payrollSettingsMessage}
-                          </div>
-                        ) : null}
+                        <SettingsInlineMessage message={payrollSettingsMessage} />
                         <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={payrollSettingsSaving}>
                           {payrollSettingsSaving ? "Saving..." : "Save Payroll Settings"}
                         </Button>
@@ -34959,12 +34961,6 @@ const handlePhotoQuickUpload = async (event) => {
                               <span className="text-[14px] font-semibold text-slate-500">Frequency</span>
                               <span className="text-[15px] font-bold text-slate-900 text-right break-words">
                                 {payrollFrequencyLabel(payrollSettings.frequency)}
-                              </span>
-                            </div>
-                            <div className="flex justify-between gap-3">
-                              <span className="text-[14px] font-semibold text-slate-500">Payroll day</span>
-                              <span className="text-[15px] font-bold text-slate-900 text-right break-words capitalize">
-                                {(payrollSettings.payroll_day || "friday").toLowerCase()}
                               </span>
                             </div>
                             <div className="flex justify-between gap-3">
@@ -35012,7 +35008,6 @@ const handlePhotoQuickUpload = async (event) => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[16px] font-black text-slate-900">Special Projects</p>
-                        <p className="text-[12px] font-semibold text-slate-500">Projects that pay a special hourly rate.</p>
                       </div>
                       <Button
                         type="button"
@@ -35028,17 +35023,7 @@ const handlePhotoQuickUpload = async (event) => {
                         {specialProjectError}
                       </div>
                     ) : null}
-                    {specialProjectMessage ? (
-                      <div
-                        className={`rounded-2xl border px-3 py-2 text-[12px] font-semibold ${
-                          specialProjectMessage.includes("saved") || specialProjectMessage.includes("added")
-                            ? "border-emerald-100 bg-emerald-50 text-emerald-900"
-                            : "border-slate-200 bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        {specialProjectMessage}
-                      </div>
-                    ) : null}
+                    <SettingsInlineMessage message={specialProjectMessage} successKeywords={["saved", "added"]} />
                     {specialProjectFormOpen && specialProjectDraft ? (
                       <form onSubmit={handleSaveSpecialProject} className="space-y-3 rounded-[18px] border border-slate-200 bg-slate-50 p-3">
                         <label className="block space-y-1 text-[13px] font-semibold text-slate-700">
@@ -35129,25 +35114,29 @@ const handlePhotoQuickUpload = async (event) => {
                                   {project.specialProjectActive ? "Active special rate" : "Inactive special rate"}
                                 </p>
                               </div>
-                              <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-800">
-                                {formatMoney(project.specialHourlyRate)}
-                              </span>
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-black text-amber-800">
+                                  {formatMoney(project.specialHourlyRate)}
+                                </span>
+                                <button
+                                  type="button"
+                                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-300 bg-white text-slate-900"
+                                  onClick={() => openSpecialProjectForm(project)}
+                                  disabled={specialProjectSaving}
+                                  aria-label={`Edit ${project.name}`}
+                                >
+                                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                                  </svg>
+                                </button>
+                              </div>
                             </div>
                             {project.specialProjectNotes ? (
-                              <p className="mt-2 text-[12px] font-semibold leading-snug text-slate-600">
+                              <p className="mt-2 truncate text-[12px] font-semibold text-slate-600">
                                 {project.specialProjectNotes}
                               </p>
                             ) : null}
-                            <div className="mt-3 flex gap-2">
-                              <Button
-                                type="button"
-                                className="flex-1 rounded-xl h-9 text-[12px] font-bold"
-                                onClick={() => openSpecialProjectForm(project)}
-                                disabled={specialProjectSaving}
-                              >
-                                Edit
-                              </Button>
-                            </div>
                           </div>
                         ))}
                       </div>
@@ -35155,11 +35144,11 @@ const handlePhotoQuickUpload = async (event) => {
                   </div>
                 ) : null}
 
+                <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Your account</p>
                 <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <p className="text-[16px] font-black text-slate-900">Account</p>
-                      <p className="text-[12px] font-semibold text-slate-500">Your name and login email.</p>
                     </div>
                     <button
                       type="button"
@@ -35183,17 +35172,7 @@ const handlePhotoQuickUpload = async (event) => {
                         <p className="text-[13px] font-semibold text-slate-500">Email</p>
                         <p className="text-[15px] font-bold text-slate-900 break-all">{authUser?.email || "—"}</p>
                       </div>
-                      {settingsProfileMessage && (
-                        <div
-                          className={`rounded-2xl border p-3 text-xs ${
-                            settingsProfileMessage.includes("saved")
-                              ? "bg-green-50 border-green-100 text-green-800"
-                              : "bg-red-50 border-red-100 text-red-700"
-                          }`}
-                        >
-                          {settingsProfileMessage}
-                        </div>
-                      )}
+                      <SettingsInlineMessage message={settingsProfileMessage} />
                       <Button type="submit" className="w-full rounded-2xl h-12 text-[15px] font-bold" disabled={settingsProfileSaving}>
                         {settingsProfileSaving ? "Saving..." : "Save Employee Profile"}
                       </Button>
@@ -35223,9 +35202,11 @@ const handlePhotoQuickUpload = async (event) => {
                   </button>
                 ) : null}
                 {!isAdmin ? (
-                  <p className="text-xs text-slate-500">
-                    Ask a supervisor or owner to update company profile details.
-                  </p>
+                  <div className="rounded-[18px] border border-slate-200 bg-slate-50 p-3 shadow-sm">
+                    <p className="text-[13px] font-semibold text-slate-500">
+                      Ask a supervisor or owner to update company profile details.
+                    </p>
+                  </div>
                 ) : null}
               </CardContent>
             </Card>
