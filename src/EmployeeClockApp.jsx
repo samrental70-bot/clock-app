@@ -4248,6 +4248,9 @@ export default function EmployeeClockApp() {
   const uploadClockOutPhotoAndFinishRef = useRef(null);
   const handleClockOutRef = useRef(null);
   const projectMediaLocalSyncAttemptedRef = useRef(false);
+  // Delta-sync bookkeeping for the project_media poll (see loadProjectMediaFromSupabase).
+  const projectMediaSyncWatermarkRef = useRef("");
+  const projectMediaLastFullFetchMsRef = useRef(0);
   const clockSetupWarningTimerRef = useRef(null);
   const latestLocationStatusRef = useRef("");
   const currentShiftRef = useRef(currentShift);
@@ -6080,21 +6083,83 @@ export default function EmployeeClockApp() {
     }
     setTimesheetsError("");
     try {
-      let query = supabase
-        .from("timesheets")
-        .select("*")
-        .eq("company_id", userCompany.id)
-        .order("clock_in", { ascending: false });
+      // Delta sync: when we have a cached snapshot with a server watermark,
+      // ask only for rows whose updated_at moved past it (a few KB) plus an
+      // id-only scan to notice server-side deletes, instead of re-downloading
+      // the entire company timesheet table (hundreds of KB) on every refresh.
+      const cachedRecordsForMerge = cachedTimesheets?.value?.records ? normalizeArray(cachedTimesheets.value.records) : [];
+      const cachedSyncedAt = String(cachedTimesheets?.value?.syncedAt || "").trim();
+      let mapped = null;
+      let syncedAtNext = cachedSyncedAt;
 
-      if (isEmployeeRole) {
-        query = query.eq("user_id", authUser.id);
+      if (cachedRecordsForMerge.length > 0 && cachedSyncedAt) {
+        const sinceMs = parseStoredInstant(cachedSyncedAt).getTime();
+        if (Number.isFinite(sinceMs)) {
+          // 60s overlap absorbs commit-order/clock skew at the cost of
+          // occasionally re-fetching a handful of already-seen rows.
+          const sinceIso = new Date(sinceMs - 60000).toISOString();
+          let deltaQuery = supabase
+            .from("timesheets")
+            .select("*")
+            .eq("company_id", userCompany.id)
+            .gt("updated_at", sinceIso)
+            .order("clock_in", { ascending: false });
+          let idQuery = supabase.from("timesheets").select("id").eq("company_id", userCompany.id);
+          if (isEmployeeRole) {
+            deltaQuery = deltaQuery.eq("user_id", authUser.id);
+            idQuery = idQuery.eq("user_id", authUser.id);
+          }
+          const [deltaRes, idRes] = await Promise.all([deltaQuery, idQuery]);
+          if (!deltaRes.error && !idRes.error) {
+            const changedRows = normalizeArray(deltaRes.data);
+            const liveIds = new Set(
+              normalizeArray(idRes.data)
+                .map((row) => String(row?.id ?? "").trim())
+                .filter(Boolean)
+            );
+            const keptCached = cachedRecordsForMerge.filter((record) => {
+              const key = String(record?.supabaseTimesheetId ?? "").trim();
+              // Rows without a server id (e.g. queued offline entries) always stay.
+              return !key || liveIds.has(key);
+            });
+            // Cached first so an equal-timestamp tie resolves to the fresh server row.
+            mapped = dedupeTimesheetRowsByStableId([...keptCached, ...changedRows.map(mapTimesheetRowFromSupabase)])
+              .filter((record) => !isEmployeeRole || timesheetRecordBelongsToUser(record, authUser))
+              .sort(
+                (a, b) => parseStoredInstant(b?.clockIn || "").getTime() - parseStoredInstant(a?.clockIn || "").getTime()
+              );
+            for (const row of changedRows) {
+              const rowUpdated = String(row?.updated_at || "").trim();
+              if (rowUpdated && rowUpdated > syncedAtNext) syncedAtNext = rowUpdated;
+            }
+          }
+        }
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
+      if (!mapped) {
+        // First load (or delta unavailable/failed): full snapshot, and derive
+        // the watermark from the rows themselves so it's server-clock based.
+        let query = supabase
+          .from("timesheets")
+          .select("*")
+          .eq("company_id", userCompany.id)
+          .order("clock_in", { ascending: false });
 
-      const mapped = dedupeTimesheetRowsByStableId((data || []).map(mapTimesheetRowFromSupabase))
-        .filter((record) => !isEmployeeRole || timesheetRecordBelongsToUser(record, authUser));
+        if (isEmployeeRole) {
+          query = query.eq("user_id", authUser.id);
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+
+        mapped = dedupeTimesheetRowsByStableId((data || []).map(mapTimesheetRowFromSupabase))
+          .filter((record) => !isEmployeeRole || timesheetRecordBelongsToUser(record, authUser));
+        syncedAtNext = "";
+        for (const row of normalizeArray(data)) {
+          const rowUpdated = String(row?.updated_at || "").trim();
+          if (rowUpdated && rowUpdated > syncedAtNext) syncedAtNext = rowUpdated;
+        }
+      }
       const uids = mapped.map((r) => r.userId).filter(Boolean);
       const pmap = await fetchProfilesByTimesheetUserIds(supabase, uids);
       const enriched = mapped.map((rec) => {
@@ -6137,7 +6202,7 @@ export default function EmployeeClockApp() {
       });
       writeLocalFirstCache(
         timesheetsCacheKey,
-        { records: enriched },
+        { records: enriched, syncedAt: syncedAtNext },
         { source: "remote", updatedAt: new Date().toISOString(), currentShiftLoaded: Boolean(latestOwnActive) }
       );
     } catch (err) {
@@ -7828,18 +7893,41 @@ export default function EmployeeClockApp() {
       if (!authUser?.id || !userCompany?.id || !companyChecked) return false;
       if (!silent) setProjectMediaLoading(true);
       try {
+        // Delta sync: the 10s Photos/Receipts poll only asks for rows whose
+        // updated_at moved past the last-seen watermark (usually zero rows)
+        // instead of re-downloading up to 1000 media rows every tick. A full
+        // fetch still runs on first load and at most once a minute so rows
+        // deleted on the server age out of local state.
+        const watermark = projectMediaSyncWatermarkRef.current;
+        const fullFetchDue = !watermark || Date.now() - projectMediaLastFullFetchMsRef.current > 60000;
         let query = supabase
           .from("project_media")
           .select("*")
           .eq("company_id", userCompany.id)
           .order("captured_at", { ascending: false })
           .limit(1000);
+        if (!fullFetchDue) query = query.gt("updated_at", watermark);
         if (!isAdmin) query = query.eq("user_id", authUser.id);
         const { data, error } = await query;
         if (error) {
           console.warn("[PROJECT_MEDIA] load failed", error);
           setProjectMediaSyncError("Shared media database is not ready. Run the project_media SQL migration in Supabase.");
           return false;
+        }
+
+        if (fullFetchDue) projectMediaLastFullFetchMsRef.current = Date.now();
+        let nextWatermark = watermark;
+        for (const row of normalizeArray(data)) {
+          const rowUpdated = String(row?.updated_at || "").trim();
+          if (rowUpdated && rowUpdated > nextWatermark) nextWatermark = rowUpdated;
+        }
+        projectMediaSyncWatermarkRef.current = nextWatermark;
+
+        if (!fullFetchDue && (!data || data.length === 0)) {
+          // Nothing changed since the last poll: skip the state updates so the
+          // component tree doesn't re-render every 10 seconds for no reason.
+          setProjectMediaSyncError("");
+          return true;
         }
 
         const split = splitProjectMediaRows(data || []);
@@ -10374,6 +10462,8 @@ export default function EmployeeClockApp() {
 
   useEffect(() => {
     projectMediaLocalSyncAttemptedRef.current = false;
+    projectMediaSyncWatermarkRef.current = "";
+    projectMediaLastFullFetchMsRef.current = 0;
   }, [authUser?.id, userCompany?.id]);
 
   useEffect(() => {
