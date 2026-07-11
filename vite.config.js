@@ -33,6 +33,24 @@ export default defineConfig(({ command, mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          // Keep third-party vendor code (react/react-dom/supabase client) in its own
+          // chunk, separate from app code, so it stays cached across the team's
+          // frequent hotfix deploys instead of being re-downloaded on every release.
+          manualChunks(id) {
+            if (
+              id.includes("node_modules/react/") ||
+              id.includes("node_modules/react-dom/") ||
+              id.includes("node_modules/@supabase/supabase-js/")
+            ) {
+              return "vendor";
+            }
+          },
+        },
+      },
+    },
     plugins: [
       react(),
       tailwindcss(),

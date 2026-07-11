@@ -1,0 +1,3473 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "./supabaseClient";
+import {
+  enqueueLocalFirstQueueItem,
+  readLocalFirstCacheEnvelope,
+  readLocalFirstQueue,
+  removeLocalFirstQueueItem,
+  replaceLocalFirstQueueItem,
+  writeLocalFirstCache,
+} from "./lib/localFirstCache";
+import {
+  DEFAULT_COMPANY_TIME_ZONE,
+  EmptyState,
+  PageCard,
+  buildChatListHierarchy,
+  buildChatListItemFallbackKey,
+  buildChatListItemMergeKey,
+  buildChatTimelineRows,
+  calendarDateKeyInTimeZone,
+  compareChatCreatedAtAscending,
+  formatChatTimelineLabel,
+  getErrorMessage,
+  getOperaApiUrl,
+  makeAppCacheKey,
+  makeAppQueueKey,
+  mergeChatMessageCollections,
+  normalizeChatListItemDraftText,
+  parseChatListComposerItems,
+  requestSendPushForNotificationIds,
+  safeGetSession,
+  synthesizeQueuedChatMessage,
+} from "./EmployeeClockApp.jsx";
+
+function useImmersiveViewportHeight(refs, isImmersivePane) {
+  const isImmersiveRef = useRef(isImmersivePane);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const applyHeight = () => {
+      if (!isImmersiveRef.current) return;
+      const height = window.visualViewport?.height || window.innerHeight;
+      const px = `${height}px`;
+      for (const ref of refs) {
+        if (ref.current) {
+          ref.current.style.height = px;
+          ref.current.style.maxHeight = px;
+        }
+      }
+    };
+    applyHeight();
+    const viewport = window.visualViewport;
+    if (viewport) {
+      viewport.addEventListener("resize", applyHeight);
+      viewport.addEventListener("scroll", applyHeight);
+      return () => {
+        viewport.removeEventListener("resize", applyHeight);
+        viewport.removeEventListener("scroll", applyHeight);
+      };
+    }
+    window.addEventListener("resize", applyHeight);
+    return () => window.removeEventListener("resize", applyHeight);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    isImmersiveRef.current = isImmersivePane;
+    if (typeof window === "undefined") return;
+    const px = isImmersivePane ? `${window.visualViewport?.height || window.innerHeight}px` : "";
+    for (const ref of refs) {
+      if (ref.current) {
+        ref.current.style.height = px;
+        ref.current.style.maxHeight = px;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isImmersivePane]);
+}
+
+export default function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNotifications, onViewModeChange, onBack }) {
+  const chatGridRef = useRef(null);
+  const chatSectionRef = useRef(null);
+  const [conversations, setConversations] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [selectedConversationId, setSelectedConversationId] = useState("");
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [messageDraft, setMessageDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [listBusy, setListBusy] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(null);
+  const [groupName, setGroupName] = useState("");
+  const [groupMemberIds, setGroupMemberIds] = useState([]);
+  const [creatingChat, setCreatingChat] = useState(false);
+  const [chatUploading, setChatUploading] = useState(false);
+  const [chatLists, setChatLists] = useState([]);
+  const [selectedChatListId, setSelectedChatListId] = useState("");
+  const [listComposerOpen, setListComposerOpen] = useState(false);
+  const [listTitle, setListTitle] = useState("");
+  const [listItemsText, setListItemsText] = useState("");
+  const [listItemDraft, setListItemDraft] = useState("");
+  const [subItemDraft, setSubItemDraft] = useState("");
+  const [addingSubItemParentId, setAddingSubItemParentId] = useState("");
+  const [editingListItemId, setEditingListItemId] = useState("");
+  const [editingListItemText, setEditingListItemText] = useState("");
+  const [selectedChatListShowCompleted, setSelectedChatListShowCompleted] = useState(false);
+  const [selectedChatListSnapshot, setSelectedChatListSnapshot] = useState(null);
+  const [chatListFocusRestoreTick, setChatListFocusRestoreTick] = useState(0);
+  const [assigningListItemId, setAssigningListItemId] = useState("");
+  const [manageOpen, setManageOpen] = useState(false);
+  const [chatSearch, setChatSearch] = useState("");
+  const [chatFilter, setChatFilter] = useState("all");
+  const [chatPane, setChatPane] = useState("list");
+  const [chatUtilityMenuOpen, setChatUtilityMenuOpen] = useState(false);
+  const [conversationMembers, setConversationMembers] = useState([]);
+  const [chatReplyTarget, setChatReplyTarget] = useState(null);
+  const [chatActiveMessage, setChatActiveMessage] = useState(null);
+  const [chatForwardMessage, setChatForwardMessage] = useState(null);
+  const [chatImageViewer, setChatImageViewer] = useState(null);
+  const [chatForwardSearch, setChatForwardSearch] = useState("");
+  const chatImageInputRef = useRef(null);
+  const chatMessageInputRef = useRef(null);
+  const chatListTitleInputRef = useRef(null);
+  const chatListItemInputRef = useRef(null);
+  const chatSubItemInputRef = useRef(null);
+  const chatListEditInputRef = useRef(null);
+  const chatListInputPointerAtRef = useRef(0);
+  const chatSubItemInputPointerAtRef = useRef(0);
+  const chatListSwipeStateRef = useRef({});
+  const chatThreadScrollRef = useRef(null);
+  const chatMessagePressTimerRef = useRef(null);
+  const chatMessagePressTargetRef = useRef(null);
+  const chatForwardSearchRef = useRef(null);
+  const messagesRef = useRef([]);
+  const chatListsRef = useRef([]);
+  const conversationMembersRef = useRef([]);
+  const [threadCacheHydrated, setThreadCacheHydrated] = useState(false);
+  const isImmersivePane = chatPane !== "list";
+  useImmersiveViewportHeight(
+    useMemo(() => [chatGridRef, chatSectionRef], []),
+    isImmersivePane
+  );
+
+  const companyId = userCompany?.id || "";
+  const currentUserId = authUser?.id || "";
+  const currentUserDisplayName = useMemo(
+    () =>
+      String(
+        authUser?.user_metadata?.full_name ||
+          authUser?.user_metadata?.name ||
+          authUser?.user_metadata?.user_name ||
+          authUser?.email ||
+          "User"
+      ).trim() || "User",
+    [authUser]
+  );
+  const chatConversationsCacheKey = useMemo(
+    () => makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "conversations"),
+    [companyId, currentUserId]
+  );
+  const chatMessagesCacheKey = useMemo(
+    () => (selectedConversationId ? makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", selectedConversationId) : ""),
+    [companyId, currentUserId, selectedConversationId]
+  );
+  const chatPendingQueueKey = useMemo(
+    () => makeAppQueueKey("chat", companyId || "company", currentUserId || "user", "pending_messages"),
+    [companyId, currentUserId]
+  );
+  const chatErrorMessage = useCallback((err) => {
+    const message = getErrorMessage(err);
+    return /failed to fetch/i.test(message)
+      ? "Company chat is not connected in this local build yet."
+      : message;
+  }, []);
+
+  const memberById = useMemo(
+    () => Object.fromEntries((members || []).map((member) => [String(member.user_id), member])),
+    [members]
+  );
+  const availableMembers = useMemo(
+    () => members.filter((member) => String(member.user_id) !== String(currentUserId)),
+    [currentUserId, members]
+  );
+  const conversationRows = useMemo(() => {
+    const rows = [...(conversations || [])].sort((a, b) => {
+      const aCompany = a?.type === "company" && a?.is_default;
+      const bCompany = b?.type === "company" && b?.is_default;
+      if (aCompany !== bCompany) return aCompany ? -1 : 1;
+      if (Boolean(a?.pinned) !== Boolean(b?.pinned)) return a?.pinned ? -1 : 1;
+      return String(b?.last_message_at || "").localeCompare(String(a?.last_message_at || ""));
+    });
+    const hasCompanyChat = rows.some((conversation) => conversation?.type === "company" && conversation?.is_default);
+    if (!hasCompanyChat && companyId) {
+      rows.unshift({
+        id: "__company_all_employees__",
+        type: "company",
+        name: "All employees",
+        is_default: true,
+        last_message: "Company-wide chat",
+        last_message_at: "",
+        member_user_ids: members.map((member) => member.user_id).filter(Boolean),
+        pendingSetup: true,
+      });
+    }
+    return rows;
+  }, [companyId, conversations, members]);
+  const selectedConversation = useMemo(
+    () =>
+      conversationRows.find((conversation) => String(conversation.id) === String(selectedConversationId)) ||
+      conversationRows[0] ||
+      null,
+    [conversationRows, selectedConversationId]
+  );
+  const selectedConversationMembers = useMemo(
+    () =>
+      (conversationMembers.length
+        ? conversationMembers
+        : (selectedConversation?.member_user_ids || []).map((userId) => ({
+            user_id: userId,
+            ...(memberById[String(userId)] || {}),
+          }))),
+    [conversationMembers, memberById, selectedConversation]
+  );
+  const selectedCanManage = Boolean(selectedConversation?.can_manage);
+  const selectedCanLeave = Boolean(selectedConversation?.can_leave);
+  const selectedCanArchive = Boolean(selectedConversation?.can_archive);
+  const selectedChatList = useMemo(
+    () => chatLists.find((list) => String(list.id) === String(selectedChatListId)) || null,
+    [chatLists, selectedChatListId]
+  );
+  const selectedChatListResolved = selectedChatList || selectedChatListSnapshot || null;
+  const selectedChatListItems = useMemo(() => {
+    const rows = Array.isArray(selectedChatListResolved?.items) ? [...selectedChatListResolved.items] : [];
+    rows.sort((a, b) => {
+      const sortDiff = Number(a?.sort_order || 0) - Number(b?.sort_order || 0);
+      if (sortDiff !== 0) return sortDiff;
+      const levelDiff = Number(a?.item_level || 0) - Number(b?.item_level || 0);
+      if (levelDiff !== 0) return levelDiff;
+      const childDiff = Number(a?.child_order || 0) - Number(b?.child_order || 0);
+      if (childDiff !== 0) return childDiff;
+      return String(a?.created_at || "").localeCompare(String(b?.created_at || ""));
+    });
+    return rows;
+  }, [selectedChatListResolved, selectedChatListShowCompleted]);
+  const selectedChatListHierarchy = useMemo(
+    () => buildChatListHierarchy(selectedChatListItems, { showCompleted: selectedChatListShowCompleted }),
+    [selectedChatListItems, selectedChatListShowCompleted]
+  );
+  const selectedChatAssignableMembers = useMemo(
+    () =>
+      (selectedConversationMembers.length ? selectedConversationMembers : members)
+        .filter((member) => member?.user_id)
+        .map((member) => ({
+          user_id: String(member.user_id),
+          name: String(member.name || member.email || "User").trim() || "User",
+          email: String(member.email || "").trim(),
+        })),
+    [members, selectedConversationMembers]
+  );
+  const chatAssigneeById = useMemo(
+    () => Object.fromEntries(selectedChatAssignableMembers.map((member) => [String(member.user_id), member])),
+    [selectedChatAssignableMembers]
+  );
+  const getChatListAssigneeMeta = useCallback(
+    (item) => {
+      const assignedUserId = String(item?.assigned_user_id || "").trim();
+      if (!assignedUserId) return null;
+      const member = chatAssigneeById[assignedUserId] || memberById[assignedUserId] || null;
+      if (!member) return { user_id: assignedUserId, name: "Assigned", initial: "A" };
+      const label = String(member.name || member.email || "Assigned").trim() || "Assigned";
+      return {
+        user_id: assignedUserId,
+        name: label,
+        initial: label.slice(0, 1).toUpperCase(),
+      };
+    },
+    [chatAssigneeById, memberById]
+  );
+  const chatTimelineRows = useMemo(() => buildChatTimelineRows(messages, []), [messages]);
+  // O(1) lookup for the "replying to" message instead of a per-row Array.find,
+  // which turned every ChatScreen render (e.g. one per composer keystroke)
+  // into an O(n^2) scan of the whole message history.
+  const messagesById = useMemo(() => {
+    const map = new Map();
+    for (const row of Array.isArray(messages) ? messages : []) {
+      if (row && row.id != null) map.set(String(row.id), row);
+    }
+    return map;
+  }, [messages]);
+  const chatTimelineGroups = useMemo(() => {
+    const groups = [];
+    for (const entry of chatTimelineRows) {
+      const dayKey = calendarDateKeyInTimeZone(entry?.created_at || new Date(), companyTimeZone);
+      const lastGroup = groups[groups.length - 1];
+      if (!lastGroup || lastGroup.dayKey !== dayKey) {
+        groups.push({
+          dayKey,
+          label: formatChatTimelineLabel(dayKey, companyTimeZone),
+          rows: [entry],
+        });
+      } else {
+        lastGroup.rows.push(entry);
+      }
+    }
+    return groups;
+  }, [chatTimelineRows, companyTimeZone]);
+  const selectedConversationSubtitle = useMemo(() => {
+    if (!selectedConversation) return "";
+    if (selectedConversation.pendingSetup) return "Setting up company chat";
+    const memberNames = selectedConversationMembers
+      .map((member) => {
+        if (!member?.user_id) return "";
+        if (String(member.user_id) === String(currentUserId)) return "You";
+        return member.name || member.email || "User";
+      })
+      .filter(Boolean);
+    if (selectedConversation.type === "direct") {
+      return memberNames.find((name) => name !== "You") || "Direct message";
+    }
+    if (!memberNames.length) {
+      return selectedConversation.type === "company" ? "Company-wide chat" : "Group chat";
+    }
+    if (memberNames.length <= 3) return memberNames.join(", ");
+    return `${memberNames.slice(0, 3).join(", ")} +${memberNames.length - 3}`;
+  }, [currentUserId, selectedConversation, selectedConversationMembers]);
+
+  const resizeChatComposer = useCallback(() => {
+    const input = chatMessageInputRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    const nextHeight = Math.min(Math.max(input.scrollHeight, 20), 112);
+    const nextHeightPx = `${nextHeight}px`;
+    if (input.style.height !== nextHeightPx) input.style.height = nextHeightPx;
+    input.style.overflowY = input.scrollHeight > nextHeight ? "auto" : "hidden";
+  }, []);
+
+  useEffect(() => {
+    messagesRef.current = Array.isArray(messages) ? messages : [];
+  }, [messages]);
+
+  useEffect(() => {
+    chatListsRef.current = Array.isArray(chatLists) ? chatLists : [];
+  }, [chatLists]);
+
+  useEffect(() => {
+    conversationMembersRef.current = Array.isArray(conversationMembers) ? conversationMembers : [];
+  }, [conversationMembers]);
+
+  useEffect(() => {
+    setChatUtilityMenuOpen(false);
+  }, [chatPane, selectedConversationId]);
+
+  useEffect(() => {
+    if (typeof onViewModeChange !== "function") return undefined;
+    onViewModeChange(chatPane);
+  }, [chatPane, onViewModeChange]);
+
+  useEffect(() => {
+    if (typeof onViewModeChange !== "function") return undefined;
+    return () => onViewModeChange("list");
+  }, [onViewModeChange]);
+
+  useLayoutEffect(() => {
+    resizeChatComposer();
+  }, [messageDraft, resizeChatComposer, selectedConversationId]);
+
+  const openChatListDetail = useCallback((listId) => {
+    setSelectedChatListId(String(listId || ""));
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setAssigningListItemId("");
+    setListItemDraft("");
+    setSelectedChatListShowCompleted(false);
+    setChatPane("list-detail");
+  }, []);
+
+  const summarizeChatListItems = useCallback((items) => {
+    const rows = Array.isArray(items) ? [...items] : [];
+    rows.sort((left, right) => {
+      const sortDiff = Number(left?.sort_order || 0) - Number(right?.sort_order || 0);
+      if (sortDiff !== 0) return sortDiff;
+      const levelDiff = Number(left?.item_level || 0) - Number(right?.item_level || 0);
+      if (levelDiff !== 0) return levelDiff;
+      const itemNumberDiff = Number(left?.item_number || 0) - Number(right?.item_number || 0);
+      if (itemNumberDiff !== 0) return itemNumberDiff;
+      const childOrderDiff = Number(left?.child_order || 0) - Number(right?.child_order || 0);
+      if (childOrderDiff !== 0) return childOrderDiff;
+      return String(left?.created_at || "").localeCompare(String(right?.created_at || ""));
+    });
+    const deduped = [];
+    const byId = new Map();
+    const byFallback = new Map();
+    for (const row of rows) {
+      const persistedId = String(row?.id || "").trim();
+      const hasPersistedId = Boolean(persistedId && !persistedId.startsWith("temp-"));
+      const fallbackKey = buildChatListItemFallbackKey(row);
+      const existingIndex =
+        (hasPersistedId && byId.has(persistedId) ? byId.get(persistedId) : null) ??
+        (byFallback.has(fallbackKey) ? byFallback.get(fallbackKey) : null);
+      if (existingIndex == null) {
+        const nextIndex = deduped.push(row) - 1;
+        if (hasPersistedId) byId.set(persistedId, nextIndex);
+        byFallback.set(fallbackKey, nextIndex);
+        continue;
+      }
+      const existing = deduped[existingIndex];
+      const existingPersistedId = String(existing?.id || "").trim();
+      const existingHasPersistedId = Boolean(existingPersistedId && !existingPersistedId.startsWith("temp-"));
+      const preferredRow =
+        hasPersistedId && !existingHasPersistedId
+          ? { ...existing, ...row, __optimistic: false }
+          : !hasPersistedId && existingHasPersistedId
+            ? existing
+            : row?.__optimistic && !existing?.__optimistic
+              ? existing
+              : { ...existing, ...row };
+      deduped[existingIndex] = preferredRow;
+      const preferredPersistedId = String(preferredRow?.id || "").trim();
+      if (preferredPersistedId && !preferredPersistedId.startsWith("temp-")) {
+        byId.set(preferredPersistedId, existingIndex);
+      }
+      byFallback.set(buildChatListItemFallbackKey(preferredRow), existingIndex);
+    }
+    return deduped;
+  }, []);
+
+  const summarizeChatListRow = useCallback(
+    (list, items) => {
+      const rows = summarizeChatListItems(items);
+      return {
+        ...list,
+        pinned: false,
+        items: rows,
+        open_count: rows.filter((item) => !item.is_done).length,
+        total_count: rows.length,
+      };
+    },
+    [summarizeChatListItems]
+  );
+
+  const buildQueuedConversationMessages = useCallback(
+    (conversationId) =>
+      readLocalFirstQueue(chatPendingQueueKey, [])
+        .filter((item) => String(item?.conversation_id || item?.conversationId || "") === String(conversationId || ""))
+        .map((item) =>
+          synthesizeQueuedChatMessage(
+            {
+              ...item,
+              sender_user_id: item?.sender_user_id || item?.senderUserId || currentUserId,
+            },
+            currentUserDisplayName
+          )
+        ),
+    [chatPendingQueueKey, currentUserDisplayName, currentUserId]
+  );
+
+  const mergeChatListsWithLocalState = useCallback(
+    (remoteLists, localLists = chatListsRef.current) => {
+      const remoteById = new Map((Array.isArray(remoteLists) ? remoteLists : []).map((list) => [String(list?.id || ""), list]));
+      const localById = new Map((Array.isArray(localLists) ? localLists : []).map((list) => [String(list?.id || ""), list]));
+      const mergedIds = new Set([...remoteById.keys(), ...localById.keys()].filter(Boolean));
+      return [...mergedIds]
+        .map((listId) => {
+          const remoteList = remoteById.get(listId) || null;
+          const localList = localById.get(listId) || null;
+          const baseList = remoteList || localList;
+          if (!baseList) return null;
+          const remoteItems = Array.isArray(remoteList?.items) ? remoteList.items : [];
+          const localItems = Array.isArray(localList?.items) ? localList.items : [];
+          const mergedItems = [...remoteItems];
+          const knownItemKeys = new Set(remoteItems.map((item) => buildChatListItemMergeKey(item)));
+          for (const item of localItems) {
+            const itemKey = buildChatListItemMergeKey(item);
+            if (item?.__optimistic && !knownItemKeys.has(itemKey)) {
+              mergedItems.push(item);
+              knownItemKeys.add(itemKey);
+            }
+          }
+          return summarizeChatListRow(
+            {
+              ...baseList,
+              pinned: false,
+            },
+            mergedItems
+          );
+        })
+        .filter(Boolean)
+        .sort((a, b) => compareChatCreatedAtAscending(a?.created_at, b?.created_at));
+    },
+    [summarizeChatListRow]
+  );
+
+  const mergeChatMessagesWithLocalState = useCallback(
+    (remoteMessages, conversationId, localMessages = messagesRef.current) =>
+      mergeChatMessageCollections({
+        remoteMessages,
+        localMessages,
+        queuedMessages: buildQueuedConversationMessages(conversationId),
+      }),
+    [buildQueuedConversationMessages]
+  );
+
+  const scrollChatThreadToBottom = useCallback((behavior = "auto") => {
+    const node = chatThreadScrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
+  }, []);
+
+  const restoreChatListInputFocus = useCallback(() => {
+    const focusInput = () => {
+      const input = chatListItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    focusInput();
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => focusInput());
+      window.setTimeout(() => focusInput(), 80);
+      window.setTimeout(() => focusInput(), 220);
+    }
+    setChatListFocusRestoreTick((tick) => tick + 1);
+  }, []);
+
+  const restoreChatSubItemInputFocus = useCallback(() => {
+    const focusInput = () => {
+      const input = chatSubItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    focusInput();
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => focusInput());
+      window.setTimeout(() => focusInput(), 80);
+      window.setTimeout(() => focusInput(), 220);
+    }
+  }, []);
+
+  const shouldPreserveTouchedInputFocus = useCallback((lastPointerAt) => Date.now() - Number(lastPointerAt || 0) < 500, []);
+
+  const updateSelectedChatListRows = useCallback(
+    (updater) => {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== String(selectedChatListId)) return list;
+          const currentRows = Array.isArray(list.items) ? list.items : [];
+          const nextRows = updater(currentRows, list) || currentRows;
+          const nextList = summarizeChatListRow(list, nextRows);
+          setSelectedChatListSnapshot(nextList);
+          return nextList;
+        })
+      );
+    },
+    [selectedChatListId, summarizeChatListRow]
+  );
+
+  const cacheChatConversationState = useCallback(
+    (payload, meta = {}) => {
+      if (!chatConversationsCacheKey) return payload;
+      return writeLocalFirstCache(chatConversationsCacheKey, payload, {
+        ...meta,
+        companyId,
+        userId: currentUserId,
+        scope: "chat_conversations",
+      });
+    },
+    [chatConversationsCacheKey, companyId, currentUserId]
+  );
+
+  const cacheChatMessageState = useCallback(
+    (conversationId, payload, meta = {}) => {
+      if (!conversationId) return payload;
+      const key =
+        String(conversationId) === String(selectedConversationId) && chatMessagesCacheKey
+          ? chatMessagesCacheKey
+          : makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", conversationId);
+      return writeLocalFirstCache(key, payload, {
+        ...meta,
+        companyId,
+        conversationId,
+        userId: currentUserId,
+        scope: "chat_messages",
+      });
+    },
+    [chatMessagesCacheKey, companyId, currentUserId, selectedConversationId]
+  );
+
+  const readCachedChatMessages = useCallback(
+    (conversationId) => {
+      if (!conversationId) return null;
+      const key =
+        String(conversationId) === String(selectedConversationId) && chatMessagesCacheKey
+          ? chatMessagesCacheKey
+          : makeAppCacheKey("chat", companyId || "company", currentUserId || "user", "messages", conversationId);
+      return readLocalFirstCacheEnvelope(key, null);
+    },
+    [chatMessagesCacheKey, companyId, currentUserId, selectedConversationId]
+  );
+
+  const hydrateCachedChatThread = useCallback(
+    (conversationId) => {
+      if (!conversationId || String(conversationId).startsWith("__company_")) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+        setThreadCacheHydrated(false);
+        return false;
+      }
+      const cached = readCachedChatMessages(conversationId);
+      const hasCachedThreadState = Boolean(cached?.savedAt || cached?.value);
+      setThreadCacheHydrated(hasCachedThreadState);
+      if (!cached?.value) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+        return false;
+      }
+      const cachedMessages = Array.isArray(cached.value.messages) ? cached.value.messages : [];
+      const cachedLists = Array.isArray(cached.value.lists) ? cached.value.lists : [];
+      setMessages(mergeChatMessagesWithLocalState(cachedMessages, conversationId, []));
+      setChatLists(mergeChatListsWithLocalState(cachedLists, []));
+      setConversationMembers(Array.isArray(cached.value.conversation_members) ? cached.value.conversation_members : []);
+      setMessagesLoading(false);
+      return true;
+    },
+    [mergeChatListsWithLocalState, mergeChatMessagesWithLocalState, readCachedChatMessages]
+  );
+
+  const openChatConversation = useCallback(
+    (conversationId) => {
+      setManageOpen(false);
+      setSelectedChatListId("");
+      setSelectedChatListSnapshot(null);
+      setEditingListItemId("");
+      setEditingListItemText("");
+      setListItemDraft("");
+      setSelectedChatListShowCompleted(false);
+      hydrateCachedChatThread(conversationId);
+      setSelectedConversationId(conversationId);
+      setChatPane("thread");
+    },
+    [hydrateCachedChatThread]
+  );
+
+  const markConversationRead = useCallback(
+    async (conversationId) => {
+      if (!conversationId || String(conversationId).startsWith("__company_") || selectedConversation?.pendingSetup) return;
+      try {
+        await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "mark_read",
+            company_id: companyId,
+            conversation_id: conversationId,
+          }),
+        });
+      } catch (err) {
+        console.warn("[CHAT] mark_read failed", err);
+      }
+    },
+    [companyId, selectedConversation?.pendingSetup]
+  );
+
+  const messageStatusForRow = useCallback(
+    (message) => {
+      if (!message) return "sent";
+      if (message.__optimistic) return String(message.__sync_state || "sending");
+      if (String(message.sender_user_id) !== String(currentUserId)) return "";
+      const readMembers = (conversationMembers || []).filter((member) => String(member.user_id) !== String(currentUserId));
+      const hasAnyoneRead = readMembers.some((member) => {
+        const readAt = String(member.last_read_at || member.lastReadAt || "").trim();
+        return Boolean(readAt) && new Date(readAt).getTime() >= new Date(message.created_at || 0).getTime();
+      });
+      return hasAnyoneRead ? "read" : "delivered";
+    },
+    [conversationMembers, currentUserId]
+  );
+
+  const clearChatMessagePressTimer = useCallback(() => {
+    if (chatMessagePressTimerRef.current && typeof window !== "undefined") {
+      window.clearTimeout(chatMessagePressTimerRef.current);
+    }
+    chatMessagePressTimerRef.current = null;
+    chatMessagePressTargetRef.current = null;
+  }, []);
+
+  const openChatMessageMenu = useCallback(
+    (message) => {
+      if (!message) return;
+      clearChatMessagePressTimer();
+      setChatActiveMessage(message);
+    },
+    [clearChatMessagePressTimer]
+  );
+
+  const beginChatMessagePress = useCallback(
+    (message) => {
+      if (!message) return;
+      clearChatMessagePressTimer();
+      chatMessagePressTargetRef.current = message;
+      chatMessagePressTimerRef.current = window.setTimeout(() => {
+        setChatActiveMessage(chatMessagePressTargetRef.current);
+        clearChatMessagePressTimer();
+      }, 450);
+    },
+    [clearChatMessagePressTimer]
+  );
+
+  const clearChatMessageActions = useCallback(() => {
+    setChatActiveMessage(null);
+  }, []);
+
+  const renderChatMessageStatus = useCallback(
+    (message) => {
+      const status = messageStatusForRow(message);
+      if (String(message?.sender_user_id || "") !== String(currentUserId)) return null;
+      const iconClass = status === "read" ? "text-[#F2C14E]" : "text-white/55";
+      if (status === "sending" || status === "queued") {
+        return (
+          <span className={`inline-flex items-center gap-[1px] ${iconClass}`} aria-label="Message sending">
+            <svg viewBox="0 0 18 18" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 9l3 3 9-9" />
+            </svg>
+          </span>
+        );
+      }
+      if (status === "delivered" || status === "read") {
+        return (
+          <span className={`inline-flex items-center gap-[1px] ${iconClass}`} aria-label={status === "read" ? "Read" : "Delivered"}>
+            <svg viewBox="0 0 18 18" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2.5 9.5 5.8 13 15 4" />
+            </svg>
+            <svg viewBox="0 0 18 18" className="h-3 w-3 -ml-[3px]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M6 9.5 9.3 13 18 4" />
+            </svg>
+          </span>
+        );
+      }
+      return null;
+    },
+    [currentUserId, messageStatusForRow]
+  );
+
+  const getToken = useCallback(async () => {
+    const { data, error: sessionError } = await safeGetSession();
+    if (sessionError) throw sessionError;
+    const token = data?.session?.access_token;
+    if (!token) throw new Error("Sign in again to use chat.");
+    return token;
+  }, []);
+
+  const chatFetch = async (path, options = {}) => {
+    const token = await getToken();
+    const response = await fetch(getOperaApiUrl(path), {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data?.error || "Chat request failed");
+    return data;
+  };
+
+  const formatChatTime = useCallback(
+    (value) => {
+      if (!value) return "";
+      try {
+        return new Intl.DateTimeFormat("en-CA", {
+          timeZone: companyTimeZone || DEFAULT_COMPANY_TIME_ZONE,
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(value));
+      } catch {
+        return "";
+      }
+    },
+    [companyTimeZone]
+  );
+
+  const displayConversationName = useCallback(
+    (conversation) => {
+      if (!conversation) return "Chat";
+      if (conversation.type === "company") return "All employees";
+      if (conversation.type === "direct") {
+        const otherUserId = (conversation.member_user_ids || []).find((userId) => String(userId) !== String(currentUserId));
+        return memberById[String(otherUserId)]?.name || conversation.name || "Direct message";
+      }
+      return conversation.name || "Group chat";
+    },
+    [currentUserId, memberById]
+  );
+  const visibleConversationRows = useMemo(() => {
+    const term = chatSearch.trim().toLowerCase();
+    return conversationRows.filter((conversation) => {
+      if (chatFilter === "pinned" && !conversation.pinned) return false;
+      if (chatFilter === "groups" && conversation.type !== "group") return false;
+      if (!term) return true;
+      const name = displayConversationName(conversation).toLowerCase();
+      const preview = String(conversation.last_message || "").toLowerCase();
+      return name.includes(term) || preview.includes(term);
+    });
+  }, [chatFilter, chatSearch, conversationRows, displayConversationName]);
+  const chatFilterCounts = useMemo(
+    () => ({
+      all: conversationRows.length,
+      pinned: conversationRows.filter((conversation) => Boolean(conversation?.pinned)).length,
+      groups: conversationRows.filter((conversation) => conversation?.type === "group").length,
+    }),
+    [conversationRows]
+  );
+
+  const safeChatFileName = useCallback((file) => {
+    const raw = String(file?.name || "chat-photo.jpg").toLowerCase();
+    const base = raw.replace(/[^a-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+    return base || "chat-photo.jpg";
+  }, []);
+
+  const loadConversations = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!companyId || !currentUserId) return;
+      const cached = readLocalFirstCacheEnvelope(chatConversationsCacheKey, null);
+      if (cached?.value) {
+        const cachedConversations = Array.isArray(cached.value.conversations) ? cached.value.conversations : [];
+        const cachedMembers = Array.isArray(cached.value.members) ? cached.value.members : [];
+        setConversations(cachedConversations);
+        setMembers(cachedMembers);
+        if (cachedConversations.length) {
+          setSelectedConversationId((previous) => previous || cachedConversations[0]?.id || "");
+        }
+      }
+      if (!silent && !cached?.savedAt) setLoading(true);
+      setError("");
+      try {
+        const query = new URLSearchParams({ action: "list", company_id: companyId });
+        const data = await chatFetch(`/api/chat?${query.toString()}`);
+        const nextConversations = data.conversations || [];
+        setConversations(nextConversations);
+        setMembers(data.members || []);
+        cacheChatConversationState(
+          {
+            conversations: nextConversations,
+            members: data.members || [],
+          },
+          { source: "remote" }
+        );
+        setSelectedConversationId((previous) => {
+          if (previous && nextConversations.some((conversation) => String(conversation.id) === String(previous))) {
+            return previous;
+          }
+          return nextConversations[0]?.id || "";
+        });
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [cacheChatConversationState, chatConversationsCacheKey, chatErrorMessage, companyId, currentUserId]
+  );
+
+  const loadMessages = useCallback(
+    async ({ silent = false } = {}) => {
+      if (!companyId || !selectedConversationId || String(selectedConversationId).startsWith("__company_")) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+        setThreadCacheHydrated(false);
+        return;
+      }
+      const cached = readCachedChatMessages(selectedConversationId);
+      const hasCachedThreadState = Boolean(cached?.savedAt || cached?.value);
+      setThreadCacheHydrated(hasCachedThreadState);
+      if (!cached?.value) {
+        setMessages([]);
+        setChatLists([]);
+        setConversationMembers([]);
+      }
+      if (cached?.value) {
+        const cachedMessages = Array.isArray(cached.value.messages) ? cached.value.messages : [];
+        const cachedLists = Array.isArray(cached.value.lists) ? cached.value.lists : [];
+        setMessages(mergeChatMessagesWithLocalState(cachedMessages, selectedConversationId));
+        setChatLists(mergeChatListsWithLocalState(cachedLists, chatListsRef.current));
+        setConversationMembers(Array.isArray(cached.value.conversation_members) ? cached.value.conversation_members : []);
+        setMessagesLoading(false);
+      }
+      if (!silent && !hasCachedThreadState) setMessagesLoading(true);
+      setError("");
+      try {
+        const query = new URLSearchParams({
+          action: "messages",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          limit: "60",
+        });
+        const data = await chatFetch(`/api/chat?${query.toString()}`);
+        const nextMessages = mergeChatMessagesWithLocalState(
+          data.messages || [],
+          selectedConversationId,
+          hasCachedThreadState ? messagesRef.current : []
+        );
+        const nextLists = mergeChatListsWithLocalState(data.lists || [], hasCachedThreadState ? chatListsRef.current : []);
+        const nextConversationMembers = Array.isArray(data.conversation_members) ? data.conversation_members : [];
+        setMessages(nextMessages);
+        setChatLists(nextLists);
+        setConversationMembers(nextConversationMembers);
+        cacheChatMessageState(
+          selectedConversationId,
+          {
+            messages: nextMessages,
+            lists: nextLists,
+            conversation_members: nextConversationMembers,
+          },
+          { source: "remote" }
+        );
+        void markConversationRead(selectedConversationId);
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      } finally {
+        if (!silent) setMessagesLoading(false);
+      }
+    },
+    [
+      cacheChatMessageState,
+      chatErrorMessage,
+      companyId,
+      markConversationRead,
+      mergeChatListsWithLocalState,
+      mergeChatMessagesWithLocalState,
+      readCachedChatMessages,
+      selectedConversationId,
+    ]
+  );
+
+  const flushPendingChatQueue = useCallback(async () => {
+    if (!companyId || !currentUserId || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    const queued = readLocalFirstQueue(chatPendingQueueKey, []).filter(
+      (item) => String(item?.conversation_id || item?.conversationId || "") === String(selectedConversationId)
+    );
+    if (!queued.length) return;
+    let flushed = false;
+    for (const item of queued) {
+      try {
+        const data = await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send",
+            company_id: companyId,
+            conversation_id: selectedConversationId,
+            body: item.body,
+            client_id: item.client_id || item.clientId,
+            message_type: item.message_type || item.messageType || "text",
+            attachments: item.attachments || [],
+            checklist_items: item.checklist_items || item.checklistItems || [],
+            metadata: item.metadata || {},
+          }),
+        });
+        if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+          void requestSendPushForNotificationIds(data.notification_ids);
+        }
+        removeLocalFirstQueueItem(
+          chatPendingQueueKey,
+          (queueItem) => String(queueItem?.client_id || queueItem?.clientId || "") === String(item.client_id || item.clientId)
+        );
+        flushed = true;
+      } catch (err) {
+        console.warn("[CHAT] queued message retry failed", err);
+      }
+    }
+    if (flushed) {
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    }
+  }, [
+    chatPendingQueueKey,
+    companyId,
+    currentUserId,
+    loadConversations,
+    loadMessages,
+    selectedConversation?.pendingSetup,
+    selectedConversationId,
+  ]);
+
+  useEffect(() => {
+    if (!active) return;
+    void loadConversations();
+  }, [active, loadConversations]);
+
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    void loadMessages();
+  }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    hydrateCachedChatThread(selectedConversationId);
+  }, [hydrateCachedChatThread, selectedConversationId]);
+
+  useEffect(() => {
+    if (selectedChatList) {
+      setSelectedChatListSnapshot(selectedChatList);
+    } else if (!selectedChatListId) {
+      setSelectedChatListSnapshot(null);
+    }
+  }, [selectedChatList, selectedChatListId]);
+
+  useEffect(() => {
+    setSelectedChatListShowCompleted(false);
+    setEditingListItemId("");
+    setEditingListItemText("");
+    setAssigningListItemId("");
+    setListItemDraft("");
+  }, [selectedChatListId]);
+
+  useEffect(() => {
+    if (!active || !companyId || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search || "");
+    if (params.get("tab") !== "chat") return;
+    const routeConversationId = String(params.get("conversationId") || "").trim();
+    if (
+      routeConversationId &&
+      routeConversationId !== String(selectedConversationId) &&
+      conversationRows.some((conversation) => String(conversation.id) === routeConversationId)
+    ) {
+      openChatConversation(routeConversationId);
+    }
+    const notificationId = String(params.get("notificationId") || "").trim();
+    if (!notificationId || !authUser?.id) return;
+    const ts = new Date().toISOString();
+    void supabase
+      .from("notifications")
+      .update({ read_at: ts, is_read: true })
+      .eq("id", notificationId)
+      .eq("recipient_user_id", authUser.id)
+      .then(({ error }) => {
+        if (error) {
+          console.warn("[CHAT] mark notification read failed", error);
+          return;
+        }
+        setInAppNotifications((prev) =>
+          (Array.isArray(prev) ? prev : []).map((row) =>
+            String(row?.id) === notificationId ? { ...row, read_at: ts, is_read: true } : row
+          )
+        );
+        params.delete("notificationId");
+        const nextQuery = params.toString();
+        const nextUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash || ""}`;
+        window.history.replaceState({}, "", nextUrl);
+      });
+  }, [active, authUser?.id, companyId, conversationRows, selectedConversationId]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "thread") return;
+    requestAnimationFrame(() => {
+      chatMessageInputRef.current?.focus?.();
+    });
+  }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (chatPane !== "thread") return;
+    const node = chatThreadScrollRef.current;
+    if (!node) return;
+    const distanceFromBottom = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (distanceFromBottom > 160 && chatTimelineRows.length > 1) return;
+    requestAnimationFrame(() => scrollChatThreadToBottom(chatTimelineRows.length > 1 ? "smooth" : "auto"));
+  }, [chatPane, chatTimelineRows.length, scrollChatThreadToBottom]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "list-detail") return;
+    requestAnimationFrame(() => {
+      chatListItemInputRef.current?.focus?.();
+    });
+  }, [chatPane, selectedChatListId]);
+
+  useEffect(() => {
+    if (!selectedChatListId || chatPane !== "list-detail" || chatListFocusRestoreTick <= 0 || typeof window === "undefined") {
+      return;
+    }
+    const focusInput = () => {
+      const input = chatListItemInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(valueLength, valueLength);
+    };
+    requestAnimationFrame(() => focusInput());
+    const timeoutIds = [80, 220, 420].map((delay) => window.setTimeout(focusInput, delay));
+    return () => timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
+  }, [chatListFocusRestoreTick, chatPane, selectedChatListId, selectedChatListResolved?.items?.length]);
+
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    void flushPendingChatQueue();
+    const intervalId = window.setInterval(() => {
+      void flushPendingChatQueue();
+    }, 12000);
+    return () => window.clearInterval(intervalId);
+  }, [active, flushPendingChatQueue, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    if (!listComposerOpen) return;
+    setListTitle("");
+    setListItemsText("");
+    requestAnimationFrame(() => {
+      chatListTitleInputRef.current?.focus?.();
+      chatListTitleInputRef.current?.select?.();
+    });
+  }, [listComposerOpen]);
+
+  useEffect(() => {
+    if (!editingListItemId) return;
+    const selectAll = () => {
+      const input = chatListEditInputRef.current;
+      if (!input) return;
+      input.focus?.();
+      const valueLength = String(input.value || "").length;
+      input.setSelectionRange?.(0, valueLength);
+    };
+    selectAll();
+    requestAnimationFrame(() => selectAll());
+    const timeoutId = window.setTimeout(() => selectAll(), 90);
+    return () => window.clearTimeout(timeoutId);
+  }, [editingListItemId]);
+
+  useEffect(() => {
+    if (!active) return;
+    // The postgres_changes realtime subscription below already keeps the open
+    // conversation's messages current instantly, so this poll only needs to
+    // exist as a fallback for a dropped realtime connection and to catch
+    // conversation-list changes (new conversations/unread counts) that the
+    // per-conversation realtime channel doesn't cover. Lengthened from 9s to
+    // reduce redundant network/render churn while chat is open.
+    const timer = window.setInterval(() => {
+      void loadConversations({ silent: true });
+      if (selectedConversationId && !selectedConversation?.pendingSetup) void loadMessages({ silent: true });
+    }, 45000);
+    return () => window.clearInterval(timer);
+  }, [active, loadConversations, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    if (!active || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    let channel = null;
+    try {
+      channel = supabase
+        .channel(`opera-chat-live-${selectedConversationId}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "chat_messages",
+            filter: `conversation_id=eq.${selectedConversationId}`,
+          },
+          () => {
+            void loadMessages({ silent: true });
+          }
+        )
+        .subscribe();
+    } catch {
+      channel = null;
+    }
+    return () => {
+      if (channel) void supabase.removeChannel(channel);
+    };
+  }, [active, loadMessages, selectedConversation?.pendingSetup, selectedConversationId]);
+
+  useEffect(() => {
+    return () => clearChatMessagePressTimer();
+  }, [clearChatMessagePressTimer]);
+
+  async function sendChatMessage() {
+    const body = messageDraft.trim();
+    if (!body || !selectedConversationId || selectedConversation?.pendingSetup) return;
+    const createdAt = new Date().toISOString();
+    const clientId = `${currentUserId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const replyMetadata = chatReplyTarget
+      ? {
+          reply_to_message_id: chatReplyTarget.id || null,
+          reply_to_body: String(chatReplyTarget.body || "").slice(0, 300),
+          reply_to_sender_name: String(chatReplyTarget.sender_name || "").slice(0, 120),
+          reply_to_created_at: chatReplyTarget.created_at || null,
+        }
+      : {};
+    const optimisticMessage = {
+      id: clientId,
+      client_id: clientId,
+      sender_user_id: currentUserId,
+      sender_name: currentUserDisplayName,
+      body,
+      message_type: "text",
+      metadata: replyMetadata,
+      attachments: [],
+      checklist_items: [],
+      deleted: false,
+      pinned: false,
+      can_delete: true,
+      can_pin: false,
+      created_at: createdAt,
+      __optimistic: true,
+      __sync_state: "sending",
+    };
+    const optimisticMessages = [...messages, optimisticMessage];
+    setMessages(optimisticMessages);
+    cacheChatMessageState(
+      selectedConversationId,
+      {
+        messages: optimisticMessages,
+        lists: chatLists,
+        conversation_members: conversationMembers,
+      },
+      { source: "optimistic_send" }
+    );
+    enqueueLocalFirstQueueItem(
+      chatPendingQueueKey,
+      {
+        conversation_id: selectedConversationId,
+        company_id: companyId,
+        body,
+        client_id: clientId,
+        created_at: createdAt,
+        message_type: "text",
+        sender_user_id: currentUserId,
+        metadata: replyMetadata,
+      },
+      { dedupeKey: clientId }
+    );
+    setMessageDraft("");
+    setChatReplyTarget(null);
+    setSending(true);
+    setError("");
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "send",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          body,
+          client_id: clientId,
+          metadata: replyMetadata,
+        }),
+      });
+      if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+        void requestSendPushForNotificationIds(data.notification_ids);
+      }
+      setMessages((current) =>
+        current.map((message) =>
+          String(message.client_id || message.id) === String(clientId)
+            ? {
+                ...message,
+                id: data?.message?.id || data?.message?.created_at || message.id,
+                created_at: data?.message?.created_at || message.created_at,
+                __optimistic: false,
+                __sync_state: "delivered",
+              }
+            : message
+        )
+      );
+      removeLocalFirstQueueItem(chatPendingQueueKey, (item) => String(item?.client_id || item?.clientId || "") === String(clientId));
+      void loadMessages({ silent: true }).catch(() => {});
+      void loadConversations({ silent: true }).catch(() => {});
+    } catch (err) {
+      setMessages((current) =>
+        current.map((message) =>
+          String(message.client_id || message.id) === String(clientId)
+            ? { ...message, __optimistic: true, __sync_state: "queued" }
+            : message
+        )
+      );
+      replaceLocalFirstQueueItem(
+        chatPendingQueueKey,
+        (item) => String(item?.client_id || item?.clientId || "") === String(clientId),
+        {
+          failed_at: new Date().toISOString(),
+          error: chatErrorMessage(err),
+        }
+      );
+      setError("Message saved locally. It will retry in the background.");
+    } finally {
+      setSending(false);
+      requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
+    }
+  };
+
+  const copyChatMessageText = useCallback(async (message) => {
+    const text = String(message?.body || "").trim();
+    if (!text) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      }
+    } catch (err) {
+      console.warn("[CHAT] copy failed", err);
+    }
+  }, []);
+
+  const saveChatMessageMedia = useCallback((message) => {
+    const url = message?.attachments?.[0]?.public_url;
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
+  const openChatImageViewer = useCallback((attachment, message) => {
+    if (!attachment?.public_url) return;
+    setChatImageViewer({
+      attachment,
+      message,
+    });
+  }, []);
+
+  const startChatReply = useCallback((message) => {
+    if (!message) return;
+    setChatReplyTarget(message);
+    setChatActiveMessage(null);
+    requestAnimationFrame(() => chatMessageInputRef.current?.focus?.());
+  }, []);
+
+  const openChatForwardTarget = useCallback((message) => {
+    if (!message) return;
+    setChatForwardMessage(message);
+    setChatActiveMessage(null);
+    setChatForwardSearch("");
+    requestAnimationFrame(() => {
+      chatForwardSearchRef.current?.focus?.();
+    });
+  }, []);
+
+  const sendForwardedChatMessage = useCallback(
+    async (targetConversationId) => {
+      const targetId = String(targetConversationId || "").trim();
+      if (!chatForwardMessage || !targetId || targetId === String(selectedConversationId)) return;
+      const body = chatForwardMessage?.body || "";
+      const attachments = Array.isArray(chatForwardMessage?.attachments) ? chatForwardMessage.attachments : [];
+      try {
+        const data = await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({
+            action: "send",
+            company_id: companyId,
+            conversation_id: targetId,
+            body: body || "Forwarded message",
+            message_type: attachments.length ? "photo" : "text",
+            attachments,
+            metadata: {
+              forwarded_from_conversation_id: selectedConversationId,
+              forwarded_from_message_id: chatForwardMessage?.id || null,
+              forwarded_body: body,
+            },
+          }),
+        });
+        if (Array.isArray(data?.notification_ids) && data.notification_ids.length > 0) {
+          void requestSendPushForNotificationIds(data.notification_ids);
+        }
+        setChatForwardMessage(null);
+        setChatForwardSearch("");
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      }
+    },
+    [chatErrorMessage, chatForwardMessage, companyId, selectedConversationId]
+  );
+
+  const createDirectChat = async (targetUserId) => {
+    setError("");
+    setCreatingChat(true);
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "create_direct", company_id: companyId, target_user_id: targetUserId }),
+      });
+      setComposerOpen(null);
+      await loadConversations({ silent: true });
+      setSelectedConversationId(data?.conversation?.id || "");
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
+  const createGroupChat = async () => {
+    if (creatingChat) return;
+    setError("");
+    setCreatingChat(true);
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create_group",
+          company_id: companyId,
+          name: groupName,
+          member_user_ids: groupMemberIds,
+        }),
+      });
+      setComposerOpen(null);
+      setGroupName("");
+      setGroupMemberIds([]);
+      await loadConversations({ silent: true });
+      setSelectedConversationId(data?.conversation?.id || "");
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setCreatingChat(false);
+    }
+  };
+
+  const toggleGroupMember = (userId) => {
+    setGroupMemberIds((previous) =>
+      previous.includes(userId) ? previous.filter((id) => id !== userId) : [...previous, userId]
+    );
+  };
+
+  const deleteChatMessage = async (message) => {
+    if (!message?.id || !message.can_delete) return;
+    const ok = window.confirm("Delete this message?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "delete_message", company_id: companyId, message_id: message.id }),
+      });
+      clearChatMessageActions();
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const toggleChecklistItem = async (item) => {
+    if (!item?.id) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_checklist_item",
+          company_id: companyId,
+          item_id: item.id,
+          checked: !item.is_checked,
+        }),
+      });
+      await loadMessages({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const toggleConversationPin = async () => {
+    if (!selectedConversationId || selectedConversation?.pendingSetup) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "toggle_pin", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const toggleMessagePin = async (message) => {
+    if (!message?.id || !selectedConversationId) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_pin",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          message_id: message.id,
+        }),
+      });
+      clearChatMessageActions();
+      await loadMessages({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  }
+
+  const leaveSelectedConversation = async () => {
+    if (!selectedCanLeave || !selectedConversationId) return;
+    const ok = window.confirm("Leave this group chat?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "leave_conversation", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      setSelectedConversationId("");
+      setMessages([]);
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const archiveSelectedConversation = async () => {
+    if (!selectedCanArchive || !selectedConversationId) return;
+    const ok = window.confirm("Archive this chat for everyone?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "archive_conversation", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      setSelectedConversationId("");
+      setMessages([]);
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const removeChatMember = async (member) => {
+    if (!selectedCanManage || !selectedConversationId || !member?.user_id) return;
+    const ok = window.confirm(`Remove ${member.name || "this member"} from this group?`);
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "remove_member",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          target_user_id: member.user_id,
+        }),
+      });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const handleChatImagePick = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !selectedConversationId || selectedConversation?.pendingSetup || chatUploading) return;
+    if (!String(file.type || "").startsWith("image/")) {
+      setError("Choose an image file.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setError("Choose a photo under 8 MB.");
+      return;
+    }
+    setChatUploading(true);
+    setError("");
+    try {
+      const fileName = safeChatFileName(file);
+      const filePath = `chat/${companyId}/${selectedConversationId}/${currentUserId}/${Date.now()}-${fileName}`;
+      const upload = await supabase.storage.from("project-photos").upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || "image/jpeg",
+      });
+      if (upload.error) throw upload.error;
+      const { data } = supabase.storage.from("project-photos").getPublicUrl(filePath);
+      const chatData = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "send",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          message_type: "photo",
+          body: messageDraft.trim() || file.name || "Photo",
+          client_id: `${currentUserId}-photo-${Date.now()}`,
+          attachments: [
+            {
+              storage_bucket: "project-photos",
+              storage_path: filePath,
+              public_url: data?.publicUrl || "",
+              mime_type: file.type || "image/jpeg",
+              file_name: file.name || fileName,
+              file_size: file.size,
+            },
+          ],
+        }),
+      });
+      if (Array.isArray(chatData?.notification_ids) && chatData.notification_ids.length > 0) {
+        void requestSendPushForNotificationIds(chatData.notification_ids);
+      }
+      setMessageDraft("");
+      await loadMessages({ silent: true });
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setChatUploading(false);
+    }
+  };
+
+  const createChatList = async () => {
+    const items = parseChatListComposerItems(listItemsText);
+    const title = listTitle.trim();
+    if (!selectedConversationId || selectedConversation?.pendingSetup || listBusy || !title) return;
+    setListBusy(true);
+    setError("");
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "create_list",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          title,
+          items,
+        }),
+      });
+      setListTitle("");
+      setListItemsText("");
+      setListComposerOpen(false);
+      setSelectedChatListId(data?.list?.id || "");
+      setChatPane("thread");
+      setSelectedChatListShowCompleted(false);
+      void loadMessages({ silent: true }).catch(() => {});
+      void loadConversations({ silent: true }).catch(() => {});
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setListBusy(false);
+    }
+  };
+
+  const refreshSelectedChatLists = async () => {
+    await loadMessages({ silent: true });
+    await loadConversations({ silent: true });
+  };
+
+  const addChatListItem = async (parentItem = null) => {
+    const parentId = String(parentItem?.id || addingSubItemParentId || "");
+    const usingSubItemDraft = Boolean(parentId);
+    const sourceDraft = usingSubItemDraft ? subItemDraft : listItemDraft;
+    const text = normalizeChatListItemDraftText(sourceDraft);
+    if (!selectedChatListResolved?.id || !text || listBusy) return;
+    setListBusy(true);
+    setError("");
+    const listId = String(selectedChatListResolved.id);
+    const now = new Date().toISOString();
+    const rows = summarizeChatListItems(selectedChatListResolved.items || []);
+    const nextNumber = rows.reduce((max, item) => Math.max(max, Number(item.item_number || 0)), 0) + 1;
+    const siblingChildren = parentId
+      ? rows.filter((row) => String(row?.parent_item_id || "") === parentId && Number(row?.item_level || 0) === 1)
+      : [];
+    const nextChildOrder = siblingChildren.reduce((max, item) => Math.max(max, Number(item?.child_order || 0)), 0) + 1;
+    const parentBranchMaxSort = parentId
+      ? rows
+          .filter((row) => String(row?.id || "") === parentId || String(row?.parent_item_id || "") === parentId)
+          .reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), Number(parentItem?.sort_order || 0))
+      : rows.reduce((max, row) => Math.max(max, Number(row?.sort_order || 0)), 0);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const optimisticItem = {
+      id: tempId,
+      item_number: parentId ? Number(parentItem?.item_number || 0) : nextNumber,
+      text,
+      parent_item_id: parentId || null,
+      item_level: parentId ? 1 : 0,
+      child_order: parentId ? nextChildOrder : 0,
+      sort_order: parentId ? parentBranchMaxSort + 1 : rows.length + 1,
+      is_done: false,
+      completed_at: null,
+      completed_by: null,
+      assigned_user_id: null,
+      created_by: currentUserId,
+      created_at: now,
+      updated_at: now,
+      __optimistic: true,
+    };
+    updateSelectedChatListRows((currentRows) => {
+      if (!parentId) return [...currentRows, optimisticItem];
+      return [...currentRows]
+        .map((row) =>
+          Number(row?.sort_order || 0) >= optimisticItem.sort_order ? { ...row, sort_order: Number(row.sort_order || 0) + 1 } : row
+        )
+        .concat(optimisticItem);
+    });
+    if (usingSubItemDraft) {
+      setSubItemDraft("");
+      restoreChatSubItemInputFocus();
+    } else {
+      setListItemDraft("");
+      restoreChatListInputFocus();
+    }
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add_list_item",
+          company_id: companyId,
+          list_id: listId,
+          text,
+          parent_item_id: parentId || null,
+        }),
+      });
+      void refreshSelectedChatLists();
+      if (!usingSubItemDraft) restoreChatListInputFocus();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          const nextItems = (Array.isArray(list.items) ? list.items : []).filter((item) => String(item.id) !== tempId);
+          return summarizeChatListRow(list, nextItems);
+        })
+      );
+      setError(chatErrorMessage(err));
+      if (usingSubItemDraft) restoreChatSubItemInputFocus();
+      if (!usingSubItemDraft) restoreChatListInputFocus();
+    } finally {
+      setListBusy(false);
+    }
+  };
+
+  const toggleChatListItem = async (item) => {
+    if (!item?.id) return;
+    setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => {
+        const shouldToggle =
+          String(row.id) === itemId || (!item.is_done && String(row.parent_item_id || "") === itemId);
+        if (!shouldToggle) return row;
+        return {
+          ...row,
+          is_done: !item.is_done,
+          completed_at: !item.is_done ? new Date().toISOString() : null,
+          completed_by: !item.is_done ? currentUserId : null,
+        };
+      })
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "toggle_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          done: !item.is_done,
+        }),
+      });
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const saveChatListItemEdit = async (item) => {
+    const liveInputValue = chatListEditInputRef.current?.value;
+    const text = normalizeChatListItemDraftText(
+      typeof liveInputValue === "string" && liveInputValue.length ? liveInputValue : editingListItemText
+    );
+    if (!item?.id || !text) return;
+    const originalText = normalizeChatListItemDraftText(item?.text || "");
+    if (text === originalText) {
+      setEditingListItemId("");
+      setEditingListItemText("");
+      return;
+    }
+    setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousItem = { ...item };
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => (String(row.id) === itemId ? { ...row, text } : row))
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "update_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          text,
+        }),
+      });
+      setEditingListItemId("");
+      setEditingListItemText("");
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          const nextItems = (Array.isArray(list.items) ? list.items : []).map((row) =>
+            String(row.id) === itemId ? previousItem : row
+          );
+          return summarizeChatListRow(list, nextItems);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const deleteChatListItem = async (item) => {
+    if (!item?.id) return;
+    const ok = window.confirm("Delete this list item?");
+    if (!ok) return;
+    setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.filter(
+        (row) => String(row.id) !== itemId && String(row.parent_item_id || "") !== itemId
+      )
+    );
+    if (String(editingListItemId) === itemId) {
+      setEditingListItemId("");
+      setEditingListItemText("");
+    }
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "delete_list_item", company_id: companyId, item_id: item.id }),
+      });
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const reparentChatListItemAction = async (item, parentItemId) => {
+    if (!item?.id) return;
+    setError("");
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => {
+        if (String(row.id) !== itemId) return row;
+        return {
+          ...row,
+          parent_item_id: parentItemId || null,
+          item_level: parentItemId ? 1 : 0,
+        };
+      })
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "reparent_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          parent_item_id: parentItemId || null,
+        }),
+      });
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const assignChatListItem = async (item, assignedUserId) => {
+    if (!item?.id) return;
+    const nextAssignedUserId = String(assignedUserId || "").trim();
+    const listId = String(selectedChatListResolved?.id || "");
+    const itemId = String(item.id);
+    const previousRows = summarizeChatListItems(selectedChatListResolved?.items || []);
+    setError("");
+    updateSelectedChatListRows((currentRows) =>
+      currentRows.map((row) => (String(row.id) === itemId ? { ...row, assigned_user_id: nextAssignedUserId || null } : row))
+    );
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "assign_list_item",
+          company_id: companyId,
+          item_id: item.id,
+          assigned_user_id: nextAssignedUserId || null,
+        }),
+      });
+      setAssigningListItemId("");
+      void refreshSelectedChatLists();
+    } catch (err) {
+      setChatLists((previous) =>
+        previous.map((list) => {
+          if (String(list.id) !== listId) return list;
+          return summarizeChatListRow(list, previousRows);
+        })
+      );
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const indentChatListItem = useCallback(
+    (item) => {
+      if (!item || Number(item?.item_level || 0) !== 0) return;
+      const currentIndex = selectedChatListHierarchy.findIndex((candidate) => String(candidate.id) === String(item.id));
+      if (currentIndex <= 0) return;
+      if (Array.isArray(item.children) && item.children.length) {
+        setError("Move or complete sub-items before indenting this main item.");
+        return;
+      }
+      const previousMain = [...selectedChatListHierarchy.slice(0, currentIndex)].reverse().find((candidate) => Number(candidate?.item_level || 0) === 0);
+      if (!previousMain?.id) return;
+      void reparentChatListItemAction(item, previousMain.id);
+    },
+    [reparentChatListItemAction, selectedChatListHierarchy]
+  );
+
+  const outdentChatListItem = useCallback(
+    (item) => {
+      if (!item || Number(item?.item_level || 0) !== 1) return;
+      void reparentChatListItemAction(item, "");
+    },
+    [reparentChatListItemAction]
+  );
+
+  const beginChatListSwipe = useCallback((itemId, x, y) => {
+    chatListSwipeStateRef.current[String(itemId)] = { startX: Number(x || 0), startY: Number(y || 0) };
+  }, []);
+
+  const endChatListSwipe = useCallback(
+    (item, x, y) => {
+      const key = String(item?.id || "");
+      const swipeState = chatListSwipeStateRef.current[key];
+      delete chatListSwipeStateRef.current[key];
+      if (!swipeState || !item?.id) return;
+      const deltaX = Number(x || 0) - Number(swipeState.startX || 0);
+      const deltaY = Math.abs(Number(y || 0) - Number(swipeState.startY || 0));
+      if (deltaY > 36 || Math.abs(deltaX) < 56) return;
+      if (deltaX > 0 && Number(item?.item_level || 0) === 0) {
+        indentChatListItem(item);
+      } else if (deltaX < 0 && Number(item?.item_level || 0) === 1) {
+        outdentChatListItem(item);
+      }
+    },
+    [indentChatListItem, outdentChatListItem]
+  );
+
+  const archiveChatList = async () => {
+    if (!selectedChatListResolved?.id || !selectedChatListResolved.can_archive) return;
+    const ok = window.confirm("Archive this list?");
+    if (!ok) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: selectedChatListResolved.id }),
+      });
+      setSelectedChatListId("");
+      setSelectedChatListSnapshot(null);
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  const hasDraftMessage = Boolean(messageDraft.trim());
+
+  const renderChatMessageRow = (message) => {
+    const mine = String(message.sender_user_id) === String(currentUserId);
+    const replyBody = String(message?.metadata?.reply_to_body || "").trim();
+    const replySender = String(message?.metadata?.reply_to_sender_name || "").trim();
+    const replyCreatedAt = String(message?.metadata?.reply_to_created_at || "").trim();
+    const attachmentRows = Array.isArray(message.attachments) ? message.attachments : [];
+    const statusNode = renderChatMessageStatus(message);
+    const replyToMessage = replyBody
+      ? messagesById.get(String(message?.metadata?.reply_to_message_id)) || null
+      : null;
+    const messageBody = String(message.body || "").trim();
+    const hideBodyForPhoto = message.message_type === "photo" && (!messageBody || /^photo$/i.test(messageBody));
+    return (
+      <div key={message.id || message.client_id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+        <div
+          className="max-w-[82%] md:max-w-[72%]"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            openChatMessageMenu(message);
+          }}
+          onTouchStart={() => beginChatMessagePress(message)}
+          onTouchEnd={clearChatMessagePressTimer}
+          onTouchCancel={clearChatMessagePressTimer}
+        >
+          <div
+            className={`overflow-hidden rounded-[18px] border px-3 py-2.5 ${
+              mine
+                ? "rounded-br-[6px] border-[#0B1F33] bg-[#0B1F33] text-white shadow-[0_2px_6px_rgba(6,20,38,0.18)]"
+                : "rounded-bl-[6px] border-[#E6EAF1] bg-white text-[#061426] shadow-[0_1px_2px_rgba(6,20,38,0.06)]"
+            }`}
+          >
+            {!mine ? <p className="mb-1 text-[11px] font-black text-[#9A6B12]">{message.sender_name}</p> : null}
+            {replyBody ? (
+              <button
+                type="button"
+                className={`mb-2 block w-full rounded-[14px] border px-3 py-2 text-left ${
+                  mine ? "border-white/20 bg-white/10" : "border-[#E2E8F0] bg-[#F8FAFC]"
+                }`}
+                onClick={() => {
+                  if (replyToMessage) openChatMessageMenu(replyToMessage);
+                }}
+              >
+                <span className={`block text-[10px] font-black uppercase tracking-[0.08em] ${mine ? "text-[#F2C14E]" : "text-[#9A6B12]"}`}>
+                  Replying to {replySender || "message"}
+                </span>
+                <span className={`mt-0.5 block truncate text-[12px] font-semibold ${mine ? "text-white/85" : "text-[#475569]"}`}>{replyBody}</span>
+                {replyCreatedAt ? (
+                  <span className={`mt-0.5 block text-[10px] font-bold ${mine ? "text-white/55" : "text-[#94A3B8]"}`}>{formatChatTime(replyCreatedAt)}</span>
+                ) : null}
+              </button>
+            ) : null}
+            {message.deleted ? (
+              <p className={`text-[13px] font-semibold italic ${mine ? "text-white/65" : "text-[#64748B]"}`}>Message deleted</p>
+            ) : (
+              <>
+                {message.message_type === "checklist" ? (
+                  <div className="space-y-2">
+                    <p className="whitespace-pre-wrap break-words text-[14px] font-black leading-snug">{messageBody}</p>
+                    <div className="space-y-1">
+                      {(message.checklist_items || []).map((item) => (
+                        <label key={item.id} className={`flex items-center gap-2.5 rounded-[12px] px-2.5 py-1.5 ${mine ? "bg-white/12" : "bg-[#F4F7FB]"}`}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item.is_checked)}
+                            onChange={() => void toggleChecklistItem(item)}
+                            className={`shrink-0 ${mine ? "accent-[#F2C14E]" : "accent-[#061426]"}`}
+                            style={{ width: 16, height: 16 }}
+                          />
+                          <span className={`min-w-0 flex-1 text-left text-[13px] font-semibold leading-snug ${item.is_checked ? "line-through opacity-70" : ""}`}>
+                            {item.text}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {attachmentRows.length ? (
+                      <div className="grid gap-2">
+                        {attachmentRows.map((attachment) => (
+                          <button
+                            key={attachment.id}
+                            type="button"
+                            className="group relative block overflow-hidden rounded-[14px] border border-black/5 bg-white text-left"
+                            onClick={() => openChatImageViewer(attachment, message)}
+                          >
+                            {attachment.public_url ? (
+                              <img
+                                src={attachment.public_url}
+                                alt={attachment.file_name || "Chat attachment"}
+                                className="max-h-72 w-full object-cover"
+                              />
+                            ) : (
+                              <span className="block p-3 text-[12px] font-bold">Photo attachment</span>
+                            )}
+                            <span className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full bg-black/35 text-white shadow-md backdrop-blur-sm">
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M9 7h8v8" />
+                                <path d="m8 16 9-9" />
+                              </svg>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {!hideBodyForPhoto && messageBody ? (
+                      <p className={`whitespace-pre-wrap break-words text-[14px] leading-snug ${attachmentRows.length ? "mt-2 font-medium" : "font-semibold"}`}>
+                        {messageBody}
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </>
+            )}
+            <div className={`mt-1.5 flex items-center justify-end gap-1.5 text-[10px] font-medium ${mine ? "text-white/60" : "text-[#94A3B8]"}`}>
+              <span>{formatChatTime(message.created_at)}</span>
+              {mine ? statusNode : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderChatListRibbonChip = (list) => {
+    const listId = String(list?.id || "");
+    const isSelected = String(selectedChatListId) === listId && chatPane === "list-detail";
+    const openCount = Number(list?.open_count || 0);
+    return (
+      <button
+        key={listId}
+        type="button"
+        className={`flex h-11 shrink-0 items-center gap-2 rounded-full border pl-2 pr-3.5 transition ${
+          isSelected ? "border-[#163B5C] bg-[#163B5C] text-white" : "border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+        }`}
+        onClick={() => openChatListDetail(list.id)}
+      >
+        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${isSelected ? "bg-white/15" : "bg-[#FBF6EA] text-[#9A6B12]"}`}>
+          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M8 6h13M8 12h13M8 18h13" />
+            <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+          </svg>
+        </span>
+        <span className="max-w-[120px] truncate text-[13px] font-bold">{list.title}</span>
+        {openCount > 0 ? (
+          <span className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1.5 text-[10px] font-black ${
+            isSelected ? "bg-white/20 text-white" : "bg-[#F2F5FA] text-[#64748B]"
+          }`}>
+            {openCount}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  /* eslint-disable react-hooks/refs */
+  const renderChatListDetailView = (list) => {
+    const hierarchy = selectedChatListHierarchy;
+    const assignableMembers = selectedChatAssignableMembers;
+    const handleMainInputPointer = () => {
+      chatListInputPointerAtRef.current = Date.now();
+    };
+    const handleSubInputPointer = () => {
+      chatSubItemInputPointerAtRef.current = Date.now();
+    };
+    const handleMainInputBlur = (event) => {
+      if (!shouldPreserveTouchedInputFocus(chatListInputPointerAtRef.current)) return;
+      if (event.relatedTarget) return;
+      if (typeof window === "undefined") return;
+      requestAnimationFrame(() => restoreChatListInputFocus());
+    };
+    const handleSubInputBlur = (event) => {
+      if (!shouldPreserveTouchedInputFocus(chatSubItemInputPointerAtRef.current)) return;
+      if (event.relatedTarget) return;
+      if (typeof window === "undefined") return;
+      requestAnimationFrame(() => restoreChatSubItemInputFocus());
+    };
+    return (
+      <div className="flex h-full min-h-0 flex-1 flex-col bg-white overflow-hidden">
+        <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-white px-3 py-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+              onClick={() => {
+                setChatPane("thread");
+                setEditingListItemId("");
+                setEditingListItemText("");
+                setAssigningListItemId("");
+                setListItemDraft("");
+              }}
+              aria-label="Back to chat"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8 6h13M8 12h13M8 18h13" />
+                <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
+              </div>
+              <p className="truncate text-[11px] font-semibold text-[#64748B]">
+                {list.open_count} open / {list.total_count} total
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+                  selectedChatListShowCompleted
+                    ? "border-[#061426] bg-[#061426] text-white"
+                    : "border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+                }`}
+                onClick={() => setSelectedChatListShowCompleted((prev) => !prev)}
+                aria-pressed={selectedChatListShowCompleted}
+                aria-label={selectedChatListShowCompleted ? "Hide completed items" : "Show completed items"}
+              >
+                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {selectedChatListShowCompleted ? (
+                    <>
+                      <path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z" />
+                      <path d="M9.5 12a2.5 2.5 0 1 0 5 0 2.5 2.5 0 0 0-5 0Z" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M3 3l18 18" />
+                      <path d="M10.6 10.6a2.5 2.5 0 0 0 3.5 3.5" />
+                      <path d="M6.2 6.8C3.9 8.4 2 12 2 12s4 6 10 6c1.2 0 2.4-.2 3.5-.6" />
+                      <path d="M14.8 5.1C16.9 5.8 18.9 7.3 22 12c0 0-.8 1.2-2.1 2.5" />
+                    </>
+                  )}
+                </svg>
+              </button>
+              {list.can_archive ? (
+                <button
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+                  onClick={() => void archiveChatList()}
+                  aria-label="Archive list"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 7h16" />
+                    <path d="M6 7v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7" />
+                    <path d="M9 11h6" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 space-y-3 overflow-y-auto bg-white px-3 py-3 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
+          {hierarchy.length === 0 ? (
+            <EmptyState
+              title={list.total_count > 0 ? "Completed items hidden" : "No list items"}
+              body={list.total_count > 0 ? "Tap the eye to show completed items." : "Add the first item below."}
+            />
+          ) : (
+            hierarchy.map((item) => {
+              const editingThis = String(editingListItemId) === String(item.id);
+              const assigningThis = String(assigningListItemId) === String(item.id);
+              const assignee = getChatListAssigneeMeta(item);
+              const legacySubitems = item.legacySubitems || [];
+              return (
+                <div
+                  key={item.id}
+                  className={`rounded-[18px] border px-3 py-3 shadow-sm ${
+                    item.is_done ? "border-[#DDE7DD] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-[#F8FAFC]"
+                  }`}
+                  style={{ touchAction: "pan-y" }}
+                  onTouchStart={(event) => beginChatListSwipe(item.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                  onTouchEnd={(event) => endChatListSwipe(item, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                >
+                  <div className="flex items-start gap-2">
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={Boolean(item.is_done)}
+                      aria-label={`${item.is_done ? "Mark open" : "Mark complete"}: ${item.text}`}
+                      onClick={() => void toggleChatListItem(item)}
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                        item.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#CBD5E1] bg-white"
+                      }`}
+                    >
+                      {item.is_done ? (
+                        <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m3.2 8.3 3 3 6.5-6.6" />
+                        </svg>
+                      ) : null}
+                    </button>
+                    <button
+                      type="button"
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                        assignee ? "border-[#E7D9B0] bg-[#FBF6EA] text-[#9A6B12]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                      }`}
+                      onClick={() => {
+                        setAssigningListItemId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
+                        setEditingListItemId("");
+                        setEditingListItemText("");
+                      }}
+                      aria-label={assignee ? `Assigned to ${assignee.name}` : `Assign employee to item ${item.item_number}`}
+                    >
+                      {assignee ? (
+                        assignee.initial
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                          <path d="M4 20a8 8 0 0 1 16 0" />
+                        </svg>
+                      )}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      {editingThis ? (
+                        <div className="space-y-2">
+                          <input
+                            ref={chatListEditInputRef}
+                            className="h-10 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                            value={editingListItemText}
+                            onChange={(event) => setEditingListItemText(event.target.value)}
+                            onFocus={(event) => {
+                              const valueLength = String(event.target.value || "").length;
+                              event.target.setSelectionRange?.(0, valueLength);
+                            }}
+                            autoFocus
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void saveChatListItemEdit(item);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingListItemId("");
+                                setEditingListItemText("");
+                              }
+                            }}
+                            onBlur={() => {
+                              const liveValue = normalizeChatListItemDraftText(chatListEditInputRef.current?.value || editingListItemText);
+                              if (!liveValue) {
+                                setEditingListItemId("");
+                                setEditingListItemText("");
+                                return;
+                              }
+                              void saveChatListItemEdit(item);
+                            }}
+                          />
+                          <select
+                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={String(item?.assigned_user_id || "")}
+                            onChange={(event) => void assignChatListItem(item, event.target.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            {assignableMembers.map((member) => (
+                              <option key={`assign-${item.id}-${member.user_id}`} value={member.user_id}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full border border-[#E2E8F0] bg-white px-3 py-1 text-[11px] font-bold text-[#061426]"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => void reparentChatListItemAction(item, "")}
+                            >
+                              Main item
+                            </button>
+                            {hierarchy
+                              .filter((candidate) => String(candidate.id) !== String(item.id))
+                              .slice(0, 4)
+                              .map((candidate) => (
+                                <button
+                                  key={`parent-${candidate.id}`}
+                                  type="button"
+                                  className="rounded-full border border-[#E2E8F0] bg-white px-3 py-1 text-[11px] font-bold text-[#163B5C]"
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onClick={() => void reparentChatListItemAction(item, candidate.id)}
+                                >
+                                  Under {candidate.item_number}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`block w-full rounded-[12px] px-1 py-0.5 text-left text-[15px] font-bold leading-snug text-[#061426] ${
+                            item.is_done ? "opacity-60" : ""
+                          }`}
+                          onClick={() => {
+                            setAssigningListItemId("");
+                            setEditingListItemId(item.id);
+                            setEditingListItemText(normalizeChatListItemDraftText(item.text || ""));
+                          }}
+                          aria-label={`Edit item ${item.item_number}`}
+                        >
+                          <span className="mr-1 text-[#64748B]">{item.item_number}.</span>
+                          <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
+                        </button>
+                      )}
+                      {assigningThis && !editingThis ? (
+                        <div className="mt-2">
+                          <select
+                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={String(item?.assigned_user_id || "")}
+                            onChange={(event) => void assignChatListItem(item, event.target.value)}
+                          >
+                            <option value="">Unassigned</option>
+                            {assignableMembers.map((member) => (
+                              <option key={`inline-assign-${item.id}-${member.user_id}`} value={member.user_id}>
+                                {member.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+                      {item.is_done ? (
+                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">
+                          Completed
+                        </p>
+                      ) : null}
+                      {legacySubitems.length ? (
+                        <div className="mt-2 space-y-2 pl-3">
+                          {legacySubitems.map((subitem, legacyIndex) => (
+                            <div key={`${item.id}-legacy-${legacyIndex}`} className="flex items-center gap-2 border-t border-[#EEF2F7] pt-2 first:border-t-0 first:pt-0">
+                              <span className="h-4 w-4 rounded-full border border-[#C4D2E3]" />
+                              <span className="text-[13px] font-medium text-[#64748B]">{subitem}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {(item.children || []).length ? (
+                        <div className="mt-2 space-y-2 pl-3">
+                          {item.children.map((child) => {
+                            const editingChild = String(editingListItemId) === String(child.id);
+                            return (
+                              <div
+                                key={child.id}
+                                className="flex items-start gap-2 rounded-[14px] border border-[#ECE8FF] bg-white px-2.5 py-2"
+                                style={{ touchAction: "pan-y" }}
+                                onTouchStart={(event) => beginChatListSwipe(child.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                                onTouchEnd={(event) => endChatListSwipe(child, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                              >
+                                <button
+                                  type="button"
+                                  role="checkbox"
+                                  aria-checked={Boolean(child.is_done)}
+                                  onClick={() => void toggleChatListItem(child)}
+                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                                    child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
+                                  }`}
+                                >
+                                  {child.is_done ? (
+                                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                      <path d="m3.2 8.3 3 3 6.5-6.6" />
+                                    </svg>
+                                  ) : null}
+                                </button>
+                                <div className="min-w-0 flex-1">
+                                  {editingChild ? (
+                                    <div className="space-y-2">
+                                      <input
+                                        ref={chatListEditInputRef}
+                                        className="h-9 w-full rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                                        value={editingListItemText}
+                                        onChange={(event) => setEditingListItemText(event.target.value)}
+                                        autoFocus
+                                        onKeyDown={(event) => {
+                                          if (event.key === "Enter") {
+                                            event.preventDefault();
+                                            void saveChatListItemEdit(child);
+                                          }
+                                          if (event.key === "Escape") {
+                                            setEditingListItemId("");
+                                            setEditingListItemText("");
+                                          }
+                                        }}
+                                        onBlur={() => void saveChatListItemEdit(child)}
+                                      />
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="block w-full text-left text-[13px] font-medium text-[#475569]"
+                                      onClick={() => {
+                                        setAssigningListItemId("");
+                                        setEditingListItemId(child.id);
+                                        setEditingListItemText(normalizeChatListItemDraftText(child.text || ""));
+                                      }}
+                                    >
+                                      {normalizeChatListItemDraftText(child.text)}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                      {String(addingSubItemParentId) === String(item.id) ? (
+                        <div className="mt-2 flex gap-2 pl-3">
+                          <input
+                            ref={chatSubItemInputRef}
+                            className="chat-mobile-safe-input h-10 min-w-0 flex-1 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            value={subItemDraft}
+                            autoComplete="off"
+                            inputMode="text"
+                            enterKeyHint="done"
+                            onPointerDown={handleSubInputPointer}
+                            onMouseDown={handleSubInputPointer}
+                            onTouchStart={handleSubInputPointer}
+                            onChange={(event) => setSubItemDraft(event.target.value)}
+                            placeholder="Add sub-item"
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void addChatListItem(item);
+                              }
+                              if (event.key === "Escape") {
+                                setAddingSubItemParentId("");
+                                setSubItemDraft("");
+                              }
+                            }}
+                            onBlur={handleSubInputBlur}
+                          />
+                          <button
+                            type="button"
+                            className="h-10 rounded-[12px] bg-[#061426] px-3 text-[12px] font-black text-white disabled:bg-[#CBD5E1]"
+                            disabled={!subItemDraft.trim() || listBusy}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => void addChatListItem(item)}
+                          >
+                            Add
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[20px] font-black leading-none text-[#061426] shadow-[0_4px_12px_rgba(6,20,38,0.08)] active:bg-[#F8FAFC]"
+                        onClick={() => {
+                          setAddingSubItemParentId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
+                          setSubItemDraft("");
+                          setAssigningListItemId("");
+                        }}
+                        aria-label={`Add sub-item under item ${item.item_number}`}
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div className="sticky bottom-0 border-t border-[#E2E8F0] bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
+          <div className="flex gap-2" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()}>
+            <input
+              ref={chatListItemInputRef}
+              className="chat-mobile-safe-input h-11 min-w-0 flex-1 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+              value={listItemDraft}
+              autoComplete="off"
+              inputMode="text"
+              enterKeyHint="done"
+              onPointerDown={handleMainInputPointer}
+              onMouseDown={handleMainInputPointer}
+              onTouchStart={handleMainInputPointer}
+              onChange={(event) => setListItemDraft(event.target.value)}
+              placeholder="Add main item"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void addChatListItem();
+                }
+              }}
+              onBlur={handleMainInputBlur}
+            />
+            <button
+              type="button"
+              className="h-11 rounded-[14px] bg-[#061426] px-4 text-[13px] font-black text-white disabled:bg-[#CBD5E1]"
+              disabled={!listItemDraft.trim() || listBusy}
+              onPointerDown={(event) => event.preventDefault()}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => void addChatListItem()}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  /* eslint-enable react-hooks/refs */
+
+
+  return (
+    <PageCard
+      className={`overflow-hidden ${
+        isImmersivePane ? "min-h-full h-full border-0 rounded-none bg-transparent shadow-none" : ""
+      }`}
+    >
+      <div
+        ref={chatGridRef}
+        className={`overflow-hidden bg-white ${
+          isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
+        }`}
+      >
+        <aside className={`${chatPane === "thread" || chatPane === "list-detail" ? "hidden" : "flex"} min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB] px-3 pb-3 pt-3`}>
+          <div className="rounded-[24px] bg-white px-3.5 pb-3 pt-3 shadow-[0_12px_30px_rgba(6,20,38,0.06)]">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    if (typeof onBack === "function") onBack();
+                  }}
+                  aria-label="Back"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <h1 className="truncate text-[20px] font-black leading-tight text-[#061426]">Chats</h1>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+                  onClick={() => setChatFilter((current) => (current === "groups" ? "all" : "groups"))}
+                  aria-label="Filter group chats"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M4 6h16" />
+                    <path d="M7 12h10" />
+                    <path d="M10 18h4" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                  onClick={() => setComposerOpen("direct")}
+                  aria-label="Start chat"
+                >
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 12a8 8 0 0 1-8 8H8l-5 2 1.8-4.6A8 8 0 1 1 21 12Z" />
+                    <path d="M12 8v8M8 12h8" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <label className="mt-2.5 flex h-11 items-center gap-3 rounded-[16px] border border-[#E6EAF1] bg-[#F8FAFC] px-3.5">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                value={chatSearch}
+                onChange={(event) => setChatSearch(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                placeholder="Search chats..."
+              />
+            </label>
+            <div className="opera-hide-scrollbar mt-2.5 flex items-center gap-2 overflow-x-auto">
+              {[
+                { key: "all", label: "All", count: chatFilterCounts.all },
+                { key: "pinned", label: "Pinned", count: chatFilterCounts.pinned },
+                { key: "groups", label: "Groups", count: chatFilterCounts.groups },
+              ].map((filter) => (
+                <button
+                  key={filter.key}
+                  type="button"
+                  className={`flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3.5 text-[12px] font-black ${
+                    chatFilter === filter.key
+                      ? "bg-[#061426] text-white shadow-[0_12px_24px_rgba(6,20,38,0.15)]"
+                      : "border border-[#E2E8F0] bg-white text-[#061426]"
+                  }`}
+                  onClick={() => setChatFilter(filter.key)}
+                >
+                  <span>{filter.label}</span>
+                  <span className={`inline-flex min-w-[20px] items-center justify-center rounded-full px-1 py-0.5 text-[10px] ${
+                    chatFilter === filter.key ? "bg-white/18 text-white" : "bg-[#F2F5FA] text-[#64748B]"
+                  }`}>
+                    {filter.count}
+                  </span>
+                </button>
+              ))}
+              <button
+                type="button"
+                className="flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[#E2E8F0] bg-white px-3.5 text-[12px] font-black text-[#061426]"
+                onClick={() => void loadConversations()}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 0 1-15.5 6.4" />
+                  <path d="M3 12A9 9 0 0 1 18.5 5.6" />
+                  <path d="M8 17H5v3" />
+                  <path d="M16 7h3V4" />
+                </svg>
+                <span>Sync</span>
+              </button>
+            </div>
+            {error ? (
+              <div className="mt-3 rounded-[16px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
+                {error}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="opera-scroll min-h-0 flex-1 overflow-y-auto pt-3">
+            {loading ? (
+              <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chats...</p>
+            ) : visibleConversationRows.length === 0 ? (
+              <EmptyState title="No chats found" body="Start a direct chat or create a group." className="m-3" />
+            ) : (
+              visibleConversationRows.map((conversation) => {
+                const activeConversation =
+                  String(conversation.id) === String(selectedConversationId) ||
+                  (!selectedConversationId && String(conversation.id).startsWith("__company_"));
+                const name = displayConversationName(conversation);
+                const initials = name.slice(0, 2).toUpperCase();
+                const preview =
+                  conversation.pendingSetup
+                    ? "Company-wide chat"
+                    : conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet");
+                const unreadCount = Number(conversation?.unread_count || conversation?.unreadCount || 0);
+                return (
+                  <button
+                    key={conversation.id}
+                    type="button"
+                    className={`mx-0.5 mb-1.5 flex w-[calc(100%-0.25rem)] items-center gap-3 rounded-[18px] border px-3 py-2.5 text-left transition active:scale-[0.995] ${
+                      activeConversation ? "border-[#BCD2E8] bg-[#F3F7FC]" : "border-transparent bg-white active:bg-[#F8FAFC]"
+                    }`}
+                    onClick={() => {
+                      openChatConversation(conversation.id);
+                    }}
+                  >
+                    <span className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-[14px] font-black text-white ${
+                      conversation.type === "company" ? "bg-[#0B1F33]" : "bg-[#163B5C]"
+                    }`}>
+                      {initials}
+                      {conversation.type === "company" ? <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-[#22C55E]" /> : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="min-w-0 flex-1 truncate text-[15px] font-black text-[#061426]">{name}</span>
+                        {conversation.type === "group" ? <span className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-[9px] font-black text-[#2563EB]">Group</span> : null}
+                        {conversation.pinned ? (
+                          <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0 text-[#9A6B12]" fill="currentColor" stroke="none" aria-hidden="true">
+                            <path d="m12 17 4 4v-7l4-4V5H9l-5 5h7v11Z" />
+                          </svg>
+                        ) : null}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[13px] font-semibold text-[#64748B]">
+                        {preview}
+                      </span>
+                    </span>
+                    <span className="flex shrink-0 flex-col items-end gap-1 text-[11px] font-bold text-[#94A3B8]">
+                      <span>{formatChatTime(conversation.last_message_at)}</span>
+                      {unreadCount > 0 ? (
+                        <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-[#061426] px-1.5 text-[10px] font-black text-white">
+                          {unreadCount > 99 ? "99+" : unreadCount}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+
+        <section
+          ref={chatSectionRef}
+          className={`${chatPane === "list" ? "hidden" : "flex"} relative flex-col bg-[#F4F7FB] ${
+            isImmersivePane ? "min-h-full h-full" : "min-h-[calc(100dvh-150px)]"
+          }`}
+        >
+          {selectedConversation ? (
+            <>
+              <div className="sticky top-0 z-10 border-b border-[#E6EAF1] bg-white/96 px-3 pb-2 pt-3 backdrop-blur">
+                <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_8px_18px_rgba(6,20,38,0.08)] active:bg-[#F8FAFC]"
+                  onClick={() => setChatPane("list")}
+                  aria-label="Back to chats"
+                >
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <span className={`relative flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-full ${
+                  selectedConversation.type === "direct" ? "bg-[#0B1F33] text-white" : "bg-[#163B5C] text-white"
+                }`}>
+                  {selectedConversation.type === "direct" ? (
+                    <span className="text-[14px] font-black">{displayConversationName(selectedConversation).slice(0, 2).toUpperCase()}</span>
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+                        <path d="M17 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" />
+                        <path d="M4.5 18a4.5 4.5 0 0 1 9 0" />
+                        <path d="M14 18a3.5 3.5 0 0 1 6 0" />
+                      </svg>
+                      <span className="absolute bottom-0 right-0 flex h-5 w-5 items-center justify-center rounded-full bg-[#22C55E] text-white shadow-sm">
+                        +
+                      </span>
+                    </>
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <h2 className="truncate text-[17px] font-black leading-tight text-[#061426]">{displayConversationName(selectedConversation)}</h2>
+                  <p className="truncate text-[12px] font-semibold leading-tight text-[#64748B]">
+                    {selectedConversationSubtitle}
+                  </p>
+                </div>
+                {!selectedConversation.pendingSetup ? (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_8px_18px_rgba(6,20,38,0.08)]"
+                      onClick={() => setManageOpen((value) => !value)}
+                      aria-label="More chat options"
+                    >
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none" />
+                        <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                        <circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none" />
+                      </svg>
+                    </button>
+                  </div>
+                ) : null}
+                </div>
+              </div>
+
+              {manageOpen && !selectedConversation.pendingSetup ? (
+                <div className="absolute right-3 top-[74px] z-20 w-[min(310px,calc(100%-1.5rem))] rounded-[18px] border border-[#E2E8F0] bg-white p-3 shadow-[0_18px_48px_rgba(6,20,38,0.2)]">
+                  <div className="space-y-2">
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                      onClick={() => void toggleConversationPin()}
+                    >
+                      {selectedConversation.pinned ? "Unpin chat" : "Pin chat"}
+                    </button>
+                    {selectedCanLeave ? (
+                      <button
+                        type="button"
+                        className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                        onClick={() => void leaveSelectedConversation()}
+                      >
+                        Leave group
+                      </button>
+                    ) : null}
+                    {selectedCanArchive ? (
+                      <button
+                        type="button"
+                        className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#DC2626] active:bg-[#FEF2F2]"
+                        onClick={() => void archiveSelectedConversation()}
+                      >
+                        Archive chat
+                      </button>
+                    ) : null}
+                  </div>
+                  {selectedCanManage && selectedConversation.type === "group" ? (
+                    <div className="mt-2 border-t border-[#E2E8F0] pt-2">
+                      <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Members</p>
+                      <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {selectedConversationMembers.map((member) => (
+                          <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-[12px] px-2 py-2">
+                            <span className="min-w-0 text-[12px] font-bold text-[#061426]">
+                              <span className="block truncate">{member.name || member.email || "User"}</span>
+                              <span className="block truncate text-[10px] text-[#64748B]">{member.email || member.role || ""}</span>
+                            </span>
+                            {String(member.user_id) !== String(currentUserId) ? (
+                              <button
+                                type="button"
+                                className="h-8 rounded-full bg-[#FEF2F2] px-3 text-[11px] font-black text-[#DC2626]"
+                                onClick={() => void removeChatMember(member)}
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {selectedChatListResolved && chatPane === "list-detail" ? (
+                renderChatListDetailView(selectedChatListResolved)
+              ) : (
+                <>
+              {chatLists.length > 0 && !selectedConversation.pendingSetup ? (
+                <div className="opera-hide-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#E6EAF1] bg-white px-3 py-2.5">
+                  {chatLists.map((list) => renderChatListRibbonChip(list))}
+                </div>
+              ) : null}
+              <div
+                ref={chatThreadScrollRef}
+                className="opera-hide-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3"
+                    style={{
+                      backgroundColor: "#EFF3F8",
+                      backgroundImage:
+                        "radial-gradient(rgba(6,20,38,0.05) 1px, transparent 1px), radial-gradient(rgba(6,20,38,0.02) 1px, transparent 1px)",
+                      backgroundSize: "24px 24px",
+                      backgroundPosition: "0 0, 12px 12px",
+                    }}
+                  >
+                {selectedConversation.pendingSetup ? (
+                  <EmptyState title="All employees" body="Company-wide chat will appear here once the chat service is connected." />
+                ) : messagesLoading && !threadCacheHydrated ? (
+                  <p className="pt-10 text-center text-[13px] font-semibold text-[#64748B]">Loading messages...</p>
+                ) : (
+                  <>
+                    {chatTimelineGroups.length === 0 ? (
+                      <EmptyState title="No messages yet" body="Send the first update to this chat." className="mt-8" />
+                    ) : (
+                      <div className="space-y-4">
+                        {chatTimelineGroups.map((group) => (
+                          <div key={group.dayKey} className="space-y-3">
+                            <div className="mx-auto flex w-fit rounded-full bg-white/92 px-3 py-1 text-[11px] font-bold text-[#5B6576] shadow-[0_1px_2px_rgba(0,0,0,0.08)]">
+                              {group.label}
+                            </div>
+                            <div className="space-y-2.5">
+                              {group.rows.map((entry) => renderChatMessageRow(entry.row))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+
+              <div className="border-t border-[#E6EAF1] bg-white/96 px-2.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
+                <input
+                  ref={chatImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(event) => void handleChatImagePick(event)}
+                />
+                {chatReplyTarget ? (
+                  <div className="mb-2 rounded-[18px] border border-[#E2E8F0] bg-white px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">
+                          Replying to {chatReplyTarget.sender_name || "message"}
+                        </p>
+                        <p className="mt-0.5 line-clamp-2 text-[12px] font-semibold text-[#475569]">
+                          {String(chatReplyTarget.body || "").trim() || "Attachment"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[16px] font-black text-[#061426]"
+                        onClick={() => setChatReplyTarget(null)}
+                        aria-label="Cancel reply"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M6 6 18 18" />
+                          <path d="M18 6 6 18" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="relative flex items-center gap-1.5">
+                  {chatUtilityMenuOpen ? (
+                    <button
+                      type="button"
+                      className="fixed inset-0 z-10 cursor-default"
+                      aria-label="Close menu"
+                      onClick={() => setChatUtilityMenuOpen(false)}
+                    />
+                  ) : null}
+                  {chatUtilityMenuOpen ? (
+                    <div
+                      className="absolute bottom-[calc(100%+8px)] left-0 z-20 w-44 overflow-hidden rounded-[16px] border border-[#E6EAF1] bg-white shadow-[0_18px_44px_rgba(6,20,38,0.16)]"
+                      role="menu"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex h-11 w-full items-center gap-3 px-3.5 text-left text-[13px] font-bold text-[#061426] active:bg-[#F8FAFC]"
+                        disabled={selectedConversation.pendingSetup || chatUploading}
+                        onClick={() => {
+                          setChatUtilityMenuOpen(false);
+                          chatImageInputRef.current?.click();
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M4 7a2 2 0 0 1 2-2h2l1.5-2h5L16 5h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z" />
+                          <circle cx="12" cy="12" r="3.2" />
+                        </svg>
+                        {chatUploading ? "Uploading..." : "Camera"}
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="flex h-11 w-full items-center gap-3 border-t border-[#F1F5F9] px-3.5 text-left text-[13px] font-bold text-[#061426] active:bg-[#F8FAFC]"
+                        disabled={selectedConversation.pendingSetup}
+                        onClick={() => {
+                          setChatUtilityMenuOpen(false);
+                          setListComposerOpen(true);
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4.5 w-4.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M8 6h13M8 12h13M8 18h13" />
+                          <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+                        </svg>
+                        List
+                      </button>
+                    </div>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.08)] disabled:text-[#94A3B8]"
+                    disabled={selectedConversation.pendingSetup}
+                    onClick={() => setChatUtilityMenuOpen((value) => !value)}
+                    aria-label="Attach"
+                    aria-expanded={chatUtilityMenuOpen}
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 5v14" />
+                      <path d="M5 12h14" />
+                    </svg>
+                  </button>
+                  <div className="flex min-h-11 flex-1 items-center rounded-[24px] border border-[#E6EAF1] bg-white px-4 py-2 shadow-[0_6px_16px_rgba(6,20,38,0.06)]">
+                    <textarea
+                      ref={chatMessageInputRef}
+                      rows={1}
+                      className="chat-mobile-safe-input max-h-28 min-h-[20px] w-full resize-none self-center bg-transparent text-[16px] font-medium leading-[20px] text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                      value={messageDraft}
+                      maxLength={2000}
+                      placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
+                      disabled={selectedConversation.pendingSetup}
+                      onChange={(event) => setMessageDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {
+                          event.preventDefault();
+                          void sendChatMessage();
+                        }
+                      }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.24)] active:bg-[#0B1F33] disabled:bg-[#CBD5E1]"
+                    disabled={selectedConversation.pendingSetup || !hasDraftMessage}
+                    onClick={() => void sendChatMessage()}
+                    aria-label="Send message"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m22 2-7 20-4-9-9-4Z" />
+                      <path d="M22 2 11 13" />
+                    </svg>
+                  </button>
+                </div>
+                {chatUploading ? <p className="mt-1 px-3 text-[11px] font-bold text-[#64748B]">Uploading photo...</p> : null}
+              </div>
+                </>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-1 items-center justify-center p-4">
+              <EmptyState title="Select a chat" body="Choose a conversation from the list." />
+            </div>
+          )}
+        </section>
+
+      {chatActiveMessage ? (
+        <div
+          className="fixed inset-0 z-[94] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10"
+          role="dialog"
+          aria-modal="true"
+          onClick={clearChatMessageActions}
+        >
+          <div className="w-full max-w-sm space-y-3" onClick={(event) => event.stopPropagation()}>
+            <div className="mx-auto flex w-fit items-center gap-2 rounded-full bg-white px-3 py-2 shadow-[0_24px_70px_rgba(6,20,38,0.18)]">
+              {["👍", "❤️", "😂", "😮", "😢", "🙏"].map((reaction) => (
+                <button
+                  key={reaction}
+                  type="button"
+                  className="flex h-9 w-9 items-center justify-center rounded-full text-[22px] transition active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setError("Reactions are coming soon in development.");
+                    clearChatMessageActions();
+                  }}
+                  aria-label={`React ${reaction}`}
+                >
+                  {reaction}
+                </button>
+              ))}
+              <button
+                type="button"
+                className="flex h-10 w-10 items-center justify-center rounded-full bg-[#F8FAFC] text-[24px] font-medium text-[#061426]"
+                onClick={() => setError("More reactions are coming soon in development.")}
+                aria-label="More reactions"
+              >
+                +
+              </button>
+            </div>
+            <div className="overflow-hidden rounded-[26px] border border-[#E2E8F0] bg-white shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+              <div className="border-b border-[#EEF2F7] px-4 py-3">
+                <div className="min-w-0">
+                  <h3 className="truncate text-[18px] font-black text-[#061426]">
+                    {String(chatActiveMessage.sender_name || "Message").trim()}
+                  </h3>
+                  <p className="mt-0.5 line-clamp-2 text-[12px] font-semibold text-[#64748B]">
+                    {String(chatActiveMessage.body || "").trim() || "Attachment"}
+                  </p>
+                </div>
+              </div>
+              <div className="py-1">
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => startChatReply(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m10 9-5 5 5 5" />
+                      <path d="M20 4v7a4 4 0 0 1-4 4H5" />
+                    </svg>
+                  </span>
+                  Reply
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => openChatForwardTarget(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m14 6 6 6-6 6" />
+                      <path d="M20 12H8a4 4 0 0 0-4 4v2" />
+                    </svg>
+                  </span>
+                  Forward
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void copyChatMessageText(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="9" y="9" width="10" height="10" rx="2" />
+                      <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+                    </svg>
+                  </span>
+                  Copy
+                </button>
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void toggleMessagePin(chatActiveMessage)}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="m12 17 4 4v-7l4-4V5H9l-5 5h7v11Z" />
+                    </svg>
+                  </span>
+                  {chatActiveMessage.pinned ? "Unstar" : "Star"}
+                </button>
+                {Array.isArray(chatActiveMessage.attachments) && chatActiveMessage.attachments.length ? (
+                  <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={() => void saveChatMessageMedia(chatActiveMessage)}>
+                    <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 4v10" />
+                        <path d="M7.5 10.5 12 15l4.5-4.5" />
+                        <path d="M5 20h14" />
+                      </svg>
+                    </span>
+                    Save media
+                  </button>
+                ) : null}
+                {chatActiveMessage.can_delete ? (
+                  <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#DC2626] active:bg-[#FEF2F2]" onClick={() => void deleteChatMessage(chatActiveMessage)}>
+                    <span className="flex h-8 w-8 items-center justify-center text-[#DC2626]">
+                      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M3 6h18" />
+                        <path d="M8 6V4h8v2" />
+                        <path d="M7 6l1 13h8l1-13" />
+                        <path d="M10 10v6M14 10v6" />
+                      </svg>
+                    </span>
+                    Delete
+                  </button>
+                ) : null}
+                <div className="mx-4 my-1 h-px bg-[#EEF2F7]" />
+                <button type="button" className="flex h-12 w-full items-center gap-3 px-4 text-left text-[16px] font-semibold text-[#061426] active:bg-[#F8FAFC]" onClick={clearChatMessageActions}>
+                  <span className="flex h-8 w-8 items-center justify-center text-[#061426]">
+                    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="12" r="1" />
+                      <circle cx="19" cy="12" r="1" />
+                      <circle cx="5" cy="12" r="1" />
+                    </svg>
+                  </span>
+                  More...
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {chatForwardMessage ? (
+        <div
+          className="fixed inset-0 z-[95] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => {
+            setChatForwardMessage(null);
+            setChatForwardSearch("");
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Forward</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">Choose chat</h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => {
+                  setChatForwardMessage(null);
+                  setChatForwardSearch("");
+                }}
+                aria-label="Close forward dialog"
+              >
+                x
+              </button>
+            </div>
+            <label className="mt-4 flex h-11 items-center gap-2 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-3">
+              <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0 text-[#64748B]" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+              <input
+                ref={chatForwardSearchRef}
+                value={chatForwardSearch}
+                onChange={(event) => setChatForwardSearch(event.target.value)}
+                className="h-full min-w-0 flex-1 bg-transparent text-[14px] font-semibold text-[#061426] outline-none placeholder:text-[#94A3B8]"
+                placeholder="Search chats"
+              />
+            </label>
+            <div className="mt-3 max-h-[42dvh] space-y-2 overflow-y-auto">
+              {visibleConversationRows
+                .filter((conversation) => String(conversation.id) !== String(selectedConversationId))
+                .filter((conversation) => {
+                  const query = chatForwardSearch.trim().toLowerCase();
+                  if (!query) return true;
+                  const name = displayConversationName(conversation).toLowerCase();
+                  const preview = String(conversation.last_message || "").toLowerCase();
+                  return name.includes(query) || preview.includes(query);
+                })
+                .map((conversation) => {
+                  const name = displayConversationName(conversation);
+                  const preview = conversation.last_message || (conversation.type === "company" ? "Company-wide chat" : "No messages yet");
+                  return (
+                    <button
+                      key={conversation.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-3 text-left active:bg-[#F8FAFC]"
+                      onClick={() => void sendForwardedChatMessage(conversation.id)}
+                    >
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#061426] text-[12px] font-black text-white">
+                        {name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-black text-[#061426]">{name}</span>
+                        <span className="block truncate text-[12px] font-semibold text-[#64748B]">{preview}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {chatImageViewer ? (
+        <div className="fixed inset-0 z-[96] flex flex-col bg-[#061426] text-white" role="dialog" aria-modal="true">
+          <div className="flex items-center gap-3 border-b border-white/10 px-3 py-3">
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
+              onClick={() => setChatImageViewer(null)}
+              aria-label="Close image viewer"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[11px] font-black uppercase tracking-[0.12em] text-white/70">
+                {chatImageViewer?.message?.sender_name || "Photo"}
+              </p>
+              <p className="truncate text-[14px] font-bold text-white/90">
+                {String(chatImageViewer?.attachment?.file_name || "Attachment").trim()}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/10 text-white"
+              onClick={() => window.open(chatImageViewer?.attachment?.public_url || "", "_blank", "noopener,noreferrer")}
+              aria-label="Open image in new tab"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M7 17 17 7" />
+                <path d="M9 7h8v8" />
+              </svg>
+            </button>
+          </div>
+          <div className="flex flex-1 items-center justify-center p-4">
+            {chatImageViewer?.attachment?.public_url ? (
+              <img
+                src={chatImageViewer.attachment.public_url}
+                alt={chatImageViewer?.attachment?.file_name || "Chat attachment"}
+                className="max-h-[80dvh] max-w-full rounded-[22px] object-contain shadow-[0_18px_60px_rgba(0,0,0,0.35)]"
+              />
+            ) : (
+              <EmptyState title="No image" body="The selected image could not be opened." />
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {listComposerOpen && selectedConversation && !selectedConversation.pendingSetup ? (
+        <div className="fixed inset-0 z-[92] flex items-end justify-center bg-[#0B1F33]/55 px-2 pb-2 pt-10" role="dialog" aria-modal="true">
+          <div className="max-h-[88dvh] w-full max-w-[430px] overflow-y-auto rounded-t-[24px] rounded-b-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="mx-auto mb-3 h-1 w-12 rounded-full bg-[#CBD5E1]" aria-hidden="true" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Chat list</p>
+                <h3 className="mt-0.5 text-[20px] font-black text-[#061426]">Create list</h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => setListComposerOpen(false)}
+                aria-label="Close list composer"
+              >
+                x
+              </button>
+            </div>
+            <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+              Title
+              <input
+                ref={chatListTitleInputRef}
+                inputMode="text"
+                autoComplete="off"
+                enterKeyHint="next"
+                className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
+                style={{ fontSize: 16 }}
+                value={listTitle}
+                maxLength={120}
+                onChange={(event) => setListTitle(event.target.value)}
+                placeholder="List name"
+              />
+            </label>
+            <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+              Items
+              <textarea
+                className="chat-mobile-safe-input min-h-[108px] w-full resize-none rounded-[14px] border border-[#CBD5E1] bg-white px-3 py-2.5 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
+                style={{ fontSize: 16 }}
+                value={listItemsText}
+                onChange={(event) => setListItemsText(event.target.value)}
+                placeholder={"One main item per line\n  Indent sub-items with spaces"}
+              />
+            </label>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                onClick={() => setListComposerOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
+                disabled={!listTitle.trim() || listBusy}
+                onClick={() => void createChatList()}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {composerOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Chat</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">
+                  {composerOpen === "direct" ? "New chat" : "New group"}
+                </h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => setComposerOpen(null)}
+                aria-label="Close chat composer"
+              >
+                x
+              </button>
+            </div>
+
+            {composerOpen === "group" ? (
+              <label className="mt-4 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                Group name
+                <input
+                  className="h-12 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                  value={groupName}
+                  maxLength={80}
+                  onChange={(event) => setGroupName(event.target.value)}
+                  placeholder="Crew chat"
+                />
+              </label>
+            ) : null}
+
+            <div className="mt-4 max-h-[45dvh] space-y-2 overflow-y-auto">
+              {availableMembers.length === 0 ? (
+                <EmptyState title="No team members" body="Add employees before starting a chat." />
+              ) : (
+                availableMembers.map((member) => {
+                  const selected = groupMemberIds.includes(member.user_id);
+                  return (
+                    <button
+                      key={member.user_id}
+                      type="button"
+                      className={`flex w-full items-center gap-3 rounded-[16px] border px-3 py-2.5 text-left ${
+                        selected ? "border-[#061426] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-white"
+                      }`}
+                      onClick={() =>
+                        composerOpen === "direct" ? void createDirectChat(member.user_id) : toggleGroupMember(member.user_id)
+                      }
+                      disabled={creatingChat}
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#061426] text-[12px] font-black text-white">
+                        {member.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-black text-[#061426]">{member.name}</span>
+                        <span className="block truncate text-[12px] font-semibold text-[#64748B]">{member.email || member.role}</span>
+                      </span>
+                      {composerOpen === "group" ? (
+                        <span
+                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                            selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#CBD5E1]"
+                          }`}
+                        >
+                          {selected ? "OK" : ""}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {composerOpen === "group" ? (
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                  onClick={() => setComposerOpen(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
+                  disabled={!groupName.trim() || groupMemberIds.length === 0}
+                  onClick={() => void createGroupChat()}
+                >
+                  {creatingChat ? "Creating..." : "Create"}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      </div>
+    </PageCard>
+  );
+}
