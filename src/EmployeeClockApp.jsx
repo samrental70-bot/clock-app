@@ -3031,6 +3031,66 @@ function workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEn
   return Math.max(0, total - breakTotal);
 }
 
+/** Normalize a timesheet's breaks column (jsonb array of {start, end} ISO pairs) into a sorted, validated array. */
+function normalizeTimesheetBreaks(value) {
+  let list = value;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = [];
+    }
+  }
+  if (!Array.isArray(list)) list = [];
+  return list
+    .map((entry) => ({
+      start: String(entry?.start || entry?.break_start || "").trim() || null,
+      end: String(entry?.end || entry?.break_end || "").trim() || null,
+    }))
+    .filter((entry) => entry.start)
+    .sort((a, b) => String(a.start).localeCompare(String(b.start)));
+}
+
+/**
+ * Timestamp-value comparison for break dedup: the jsonb breaks array keeps the
+ * ISO string the client wrote ("...Z") while timestamptz columns come back
+ * from PostgREST as "+00:00", so string equality would produce phantom
+ * duplicate breaks.
+ */
+function isSameBreakInstant(aIso, bIso) {
+  const a = new Date(aIso || "").getTime();
+  const b = new Date(bIso || "").getTime();
+  return Number.isFinite(a) && Number.isFinite(b) && a === b;
+}
+
+/**
+ * Total break minutes for a shift, across ALL breaks.
+ * Priority: breaks[] array (multi-break) + legacy single-break fields when they
+ * describe a break not already in the array; falls back to the stored
+ * break_minutes number for legacy rows with no explicit break timestamps.
+ */
+function totalBreakMinutesForShift(clockInIso, clockOutIso, record) {
+  const breaks = normalizeTimesheetBreaks(record?.breaks);
+  const legacyStart = record?.breakStart || record?.break_start_at || null;
+  const legacyEnd = record?.breakEnd || record?.break_end_at || null;
+  let total = 0;
+  let counted = false;
+  for (const entry of breaks) {
+    if (!entry.end) continue;
+    total += breakMinutesBetween(clockInIso, clockOutIso, entry.start, entry.end);
+    counted = true;
+  }
+  if (legacyStart && legacyEnd && !breaks.some((entry) => isSameBreakInstant(entry.start, legacyStart))) {
+    total += breakMinutesBetween(clockInIso, clockOutIso, legacyStart, legacyEnd);
+    counted = true;
+  }
+  if (!counted) {
+    const stored = Number(record?.breakMinutes ?? record?.break_minutes ?? 0);
+    return Number.isFinite(stored) ? Math.max(0, stored) : 0;
+  }
+  return total;
+}
+
 function breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso) {
   if (!breakStartIso || !breakEndIso) return 0;
   const shiftStart = new Date(clockInIso).getTime();
@@ -3077,7 +3137,7 @@ function isAutoClockOutDue(record, nowMs = Date.now(), timeZone = DEFAULT_COMPAN
 /**
  * Build Supabase timesheets update for clock-out with effective-date pay-rate fallback.
  */
-async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZone, clockInIso, clockOutIso, timesheetHourlyRate, breakStartIso, breakEndIso, status = "Submitted" }) {
+async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZone, clockInIso, clockOutIso, timesheetHourlyRate, breakStartIso, breakEndIso, breaks = null, status = "Submitted" }) {
   const rate = await getEffectiveHourlyRate(supabase, {
     companyId,
     employeeId: userId,
@@ -3085,18 +3145,28 @@ async function buildTimesheetClockOutUpdate(supabase, { userId, companyId, timeZ
     timeZone,
     fallbackRate: timesheetHourlyRate,
   });
-  const workedMinutes = workedMinutesWithBreaks(clockInIso, clockOutIso, breakStartIso, breakEndIso);
-  const breakMinutes = breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso);
+  // Multi-break aware: when a breaks array is provided it is the source of
+  // truth; the legacy single-break args cover rows that never used the array.
+  const normalizedBreaks = breaks != null ? normalizeTimesheetBreaks(breaks) : null;
+  const breakMinutes =
+    normalizedBreaks != null
+      ? totalBreakMinutesForShift(clockInIso, clockOutIso, { breaks: normalizedBreaks })
+      : breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso);
+  const workedMinutes = Math.max(0, minutesBetween(clockInIso, clockOutIso) - breakMinutes);
   const hours = workedMinutes / 60;
   const labourCost = hours * rate;
+  const lastBreak = normalizedBreaks != null ? normalizedBreaks[normalizedBreaks.length - 1] || null : null;
   const update = {
     clock_out: clockOutIso,
     status,
     labour_cost: labourCost,
-    break_start_at: breakStartIso || null,
-    break_end_at: breakEndIso || null,
+    break_start_at: normalizedBreaks != null ? lastBreak?.start || null : breakStartIso || null,
+    break_end_at: normalizedBreaks != null ? lastBreak?.end || null : breakEndIso || null,
     break_minutes: breakMinutes,
   };
+  if (normalizedBreaks != null) {
+    update.breaks = normalizedBreaks;
+  }
   const rawTs = Number(timesheetHourlyRate);
   if ((!Number.isFinite(rawTs) || rawTs <= 0 || Math.abs(rawTs - rate) > 0.0001) && rate >= 0) {
     update.hourly_rate = rate;
@@ -3145,6 +3215,7 @@ function mapTimesheetRowFromSupabase(row) {
     breakStart: row.break_start_at || row.break_start || null,
     breakEnd: row.break_end_at || row.break_end || null,
     breakMinutes: Number.isFinite(Number(row.break_minutes)) ? Math.max(0, Number(row.break_minutes)) : 0,
+    breaks: normalizeTimesheetBreaks(row.breaks),
     breakNote: row.break_note || "",
     employeeId: row.user_id,
     projectFolder: projectName ? getProjectFolderName(projectName) : "",
@@ -3377,6 +3448,8 @@ function mapTimesheetChangeRequestFromSupabase(row) {
     requestedClockOut: row.requested_clock_out,
     requestedBreakStartAt: row.requested_break_start_at || null,
     requestedBreakEndAt: row.requested_break_end_at || null,
+    // null = legacy request (fall back to the single pair above); [] = explicitly no breaks.
+    requestedBreaks: row.requested_breaks == null ? null : normalizeTimesheetBreaks(row.requested_breaks),
     requestedBreakMinutes: Number.isFinite(Number(row.requested_break_minutes)) ? Math.max(0, Number(row.requested_break_minutes)) : 0,
     requestedBreakNote: row.requested_break_note || "",
     requestedProjectId: row.requested_project_id || "",
@@ -3481,7 +3554,8 @@ function isMissingOptionalTimesheetColumnError(error) {
       m.includes("break_start_at") ||
       m.includes("break_end_at") ||
       m.includes("break_minutes") ||
-      m.includes("break_note"))
+      m.includes("break_note") ||
+      m.includes("breaks"))
   );
 }
 
@@ -3493,6 +3567,7 @@ function removeOptionalTimesheetColumns(payload) {
   delete rest.break_end_at;
   delete rest.break_minutes;
   delete rest.break_note;
+  delete rest.breaks;
   return rest;
 }
 
@@ -3507,7 +3582,8 @@ async function supabaseInsertTimesheetRow(supabase, row) {
       "break_start_at" in payload ||
       "break_end_at" in payload ||
       "break_minutes" in payload ||
-      "break_note" in payload)
+      "break_note" in payload ||
+      "breaks" in payload)
   ) {
     const rest = removeOptionalTimesheetColumns(payload);
     ({ data, error } = await supabase.from("timesheets").insert([rest]).select());
@@ -3526,7 +3602,8 @@ async function supabaseUpdateTimesheetRow(supabase, id, partial) {
       "break_start_at" in payload ||
       "break_end_at" in payload ||
       "break_minutes" in payload ||
-      "break_note" in payload)
+      "break_note" in payload ||
+      "breaks" in payload)
   ) {
     const rest = removeOptionalTimesheetColumns(payload);
     ({ data, error } = await supabase.from("timesheets").update(rest).eq("id", id).select());
@@ -4248,10 +4325,8 @@ export default function EmployeeClockApp() {
   const [editClockInTime, setEditClockInTime] = useState("");
   const [editClockOutDate, setEditClockOutDate] = useState("");
   const [editClockOutTime, setEditClockOutTime] = useState("");
-  const [editBreakStartDate, setEditBreakStartDate] = useState("");
-  const [editBreakStartTime, setEditBreakStartTime] = useState("");
-  const [editBreakEndDate, setEditBreakEndDate] = useState("");
-  const [editBreakEndTime, setEditBreakEndTime] = useState("");
+  /** Multi-break editor rows: [{ startDate, startTime, endDate, endTime }] — as many breaks as the shift had. */
+  const [editBreaks, setEditBreaks] = useState([]);
   const [editProjectId, setEditProjectId] = useState("");
   const [editCostCenter, setEditCostCenter] = useState("");
   const [editTimesheetSaving, setEditTimesheetSaving] = useState(false);
@@ -7353,10 +7428,7 @@ export default function EmployeeClockApp() {
         clockOut = Number.isFinite(dueMs) && nowMs >= dueMs ? dueIso : new Date(nowMs).toISOString();
       }
       const total = minutesBetween(record.clockIn, clockOut);
-      const breakTotal =
-        record.breakStart && record.breakEnd
-          ? breakMinutesBetween(record.clockIn, clockOut, record.breakStart, record.breakEnd)
-          : Math.max(0, Number(record.breakMinutes || 0));
+      const breakTotal = totalBreakMinutesForShift(record.clockIn, clockOut, record);
       return Math.max(0, total - breakTotal);
     },
     [companyTimeZone, companyAutoClockOutTime]
@@ -7375,10 +7447,7 @@ export default function EmployeeClockApp() {
       if (!isCompletedReportTimesheet(record)) return 0;
       if (isVacationTimesheetRecord(record)) return 0;
       const total = minutesBetween(record.clockIn, record.clockOut);
-      const breakTotal =
-        record.breakStart && record.breakEnd
-          ? breakMinutesBetween(record.clockIn, record.clockOut, record.breakStart, record.breakEnd)
-          : Math.max(0, Number(record.breakMinutes || 0));
+      const breakTotal = totalBreakMinutesForShift(record.clockIn, record.clockOut, record);
       return Math.max(0, total - breakTotal);
     },
     [isCompletedReportTimesheet]
@@ -13075,14 +13144,18 @@ const handleClockIn = async () => {
   const handleBreak = async () => {
     if (!visibleCurrentShift) return;
     const nowIso = new Date().toISOString();
-    if (!visibleCurrentShift.breakStart) {
-      const nextShift = { ...visibleCurrentShift, breakStart: nowIso, breakEnd: null, breakMinutes: 0 };
+    const priorBreaks = normalizeTimesheetBreaks(visibleCurrentShift.breaks);
+    const hasActiveBreak = Boolean(visibleCurrentShift.breakStart) && !visibleCurrentShift.breakEnd;
+
+    if (!hasActiveBreak) {
+      // Start a new break (first break of the shift, or another one after a
+      // previous break already ended — unlimited breaks per shift).
+      const nextShift = { ...visibleCurrentShift, breakStart: nowIso, breakEnd: null, breaks: priorBreaks };
       setCurrentShift(nextShift);
       if (visibleCurrentShift.supabaseTimesheetId) {
         const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
           break_start_at: nowIso,
           break_end_at: null,
-          break_minutes: 0,
         });
         if (error) {
           console.warn("[CLOCK] break start persistence failed", error);
@@ -13091,24 +13164,26 @@ const handleClockIn = async () => {
       }
       return;
     }
-    if (!visibleCurrentShift.breakEnd) {
-      const breakMinutes = breakMinutesBetween(
-        visibleCurrentShift.clockIn,
-        nowIso,
-        visibleCurrentShift.breakStart,
-        nowIso
-      );
-      const nextShift = { ...visibleCurrentShift, breakEnd: nowIso, breakMinutes };
-      setCurrentShift(nextShift);
-      if (visibleCurrentShift.supabaseTimesheetId) {
-        const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
-          break_end_at: nowIso,
-          break_minutes: breakMinutes,
-        });
-        if (error) {
-          console.warn("[CLOCK] break end persistence failed", error);
-          setLocationStatus("Break ended on this device, but server update failed.");
-        }
+
+    // End the active break: append it to the breaks array and keep
+    // break_minutes as the running total across ALL breaks (it stays the
+    // canonical number for payroll and the auto clock-out server).
+    const completedBreaks = [...priorBreaks, { start: visibleCurrentShift.breakStart, end: nowIso }];
+    const totalBreakMinutes = completedBreaks.reduce(
+      (sum, entry) => sum + breakMinutesBetween(visibleCurrentShift.clockIn, nowIso, entry.start, entry.end),
+      0
+    );
+    const nextShift = { ...visibleCurrentShift, breakEnd: nowIso, breakMinutes: totalBreakMinutes, breaks: completedBreaks };
+    setCurrentShift(nextShift);
+    if (visibleCurrentShift.supabaseTimesheetId) {
+      const { error } = await supabaseUpdateTimesheetRow(supabase, visibleCurrentShift.supabaseTimesheetId, {
+        break_end_at: nowIso,
+        break_minutes: totalBreakMinutes,
+        breaks: completedBreaks,
+      });
+      if (error) {
+        console.warn("[CLOCK] break end persistence failed", error);
+        setLocationStatus("Break ended on this device, but server update failed.");
       }
     }
   };
@@ -14417,6 +14492,17 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     const clockOutTime = new Date().toISOString();
     let didSaveClockOut = false;
 
+    // A break still running at clock-out ends at the clock-out instant.
+    const clockOutBreaks = (() => {
+      const list = normalizeTimesheetBreaks(visibleCurrentShift.breaks);
+      if (visibleCurrentShift.breakStart && !visibleCurrentShift.breakEnd) {
+        list.push({ start: visibleCurrentShift.breakStart, end: clockOutTime });
+      } else if (visibleCurrentShift.breakStart && visibleCurrentShift.breakEnd && !list.some((entry) => isSameBreakInstant(entry.start, visibleCurrentShift.breakStart))) {
+        list.push({ start: visibleCurrentShift.breakStart, end: visibleCurrentShift.breakEnd });
+      }
+      return list;
+    })();
+
     if (visibleCurrentShift.supabaseTimesheetId) {
       const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
         userId: authUser.id,
@@ -14427,6 +14513,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         timesheetHourlyRate: visibleCurrentShift.hourlyRate,
         breakStartIso: visibleCurrentShift.breakStart,
         breakEndIso: visibleCurrentShift.breakEnd,
+        breaks: clockOutBreaks,
       });
       console.log("[LABOUR] clockOut", {
         clockIn: labourDebug.clockInIso,
@@ -15080,6 +15167,16 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     setDashboardSavingUserId(String(row.userId));
     setDashboardActionFeedback(null);
     const clockOutTime = new Date().toISOString();
+    const adminClockOutBreaks = (() => {
+      const list = normalizeTimesheetBreaks(rep.breaks);
+      if (rep.breakStart && !rep.breakEnd) {
+        // Break still running: it ends at the admin-forced clock-out instant.
+        list.push({ start: rep.breakStart, end: clockOutTime });
+      } else if (rep.breakStart && rep.breakEnd && !list.some((entry) => isSameBreakInstant(entry.start, rep.breakStart))) {
+        list.push({ start: rep.breakStart, end: rep.breakEnd });
+      }
+      return list;
+    })();
     const { update: labourUpdate, debug: labourDebug } = await buildTimesheetClockOutUpdate(supabase, {
       userId: row.userId,
       companyId: userCompany?.id,
@@ -15089,6 +15186,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       timesheetHourlyRate: rep.hourlyRate,
       breakStartIso: rep.breakStart,
       breakEndIso: rep.breakEnd,
+      breaks: adminClockOutBreaks,
     });
     console.log("[LABOUR] clockOut", {
       clockIn: labourDebug.clockInIso,
@@ -15144,22 +15242,26 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       setEditClockOutDate(inParts.dateStr);
       setEditClockOutTime("");
     }
-    if (record.breakStart) {
-      const breakStartParts = wallClockPartsInTimeZone(record.breakStart, companyTimeZone);
-      setEditBreakStartDate(breakStartParts.dateStr);
-      setEditBreakStartTime(breakStartParts.timeStr.slice(0, 5));
-    } else {
-      setEditBreakStartDate(inParts.dateStr);
-      setEditBreakStartTime("");
-    }
-    if (record.breakEnd) {
-      const breakEndParts = wallClockPartsInTimeZone(record.breakEnd, companyTimeZone);
-      setEditBreakEndDate(breakEndParts.dateStr);
-      setEditBreakEndTime(breakEndParts.timeStr.slice(0, 5));
-    } else {
-      setEditBreakEndDate(inParts.dateStr);
-      setEditBreakEndTime("");
-    }
+    const existingBreaks = (() => {
+      const list = [...normalizeTimesheetBreaks(record.breaks)];
+      if (record.breakStart && !list.some((entry) => isSameBreakInstant(entry.start, record.breakStart))) {
+        list.push({ start: record.breakStart, end: record.breakEnd || null });
+        list.sort((a, b) => String(a.start || "").localeCompare(String(b.start || "")));
+      }
+      return list;
+    })();
+    setEditBreaks(
+      existingBreaks.map((entry) => {
+        const startParts = entry.start ? wallClockPartsInTimeZone(entry.start, companyTimeZone) : null;
+        const endParts = entry.end ? wallClockPartsInTimeZone(entry.end, companyTimeZone) : null;
+        return {
+          startDate: startParts?.dateStr || inParts.dateStr,
+          startTime: startParts ? startParts.timeStr.slice(0, 5) : "",
+          endDate: endParts?.dateStr || startParts?.dateStr || inParts.dateStr,
+          endTime: endParts ? endParts.timeStr.slice(0, 5) : "",
+        };
+      })
+    );
     const pidStr = record.projectId != null ? String(record.projectId) : "";
     const matchProj = effectiveProjects.find((p) => String(p.id) === pidStr);
     const resolvedPid = matchProj ? String(matchProj.id) : String(effectiveProjects[0]?.id ?? "");
@@ -15195,31 +15297,44 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       alert("Clock out must be after clock in.");
       return;
     }
-    const hasAnyBreakInput =
-      Boolean(editBreakStartDate || editBreakStartTime || editBreakEndDate || editBreakEndTime);
-    const hasCompleteBreakInput =
-      Boolean(editBreakStartDate && editBreakStartTime && editBreakEndDate && editBreakEndTime);
-    if (hasAnyBreakInput && !hasCompleteBreakInput) {
-      alert("Break start and break stop are both required.");
-      return;
-    }
-    const breakStartIso = hasCompleteBreakInput ? wallDateTimeToUtcIso(editBreakStartDate, editBreakStartTime, companyTimeZone) : null;
-    const breakEndIso = hasCompleteBreakInput ? wallDateTimeToUtcIso(editBreakEndDate, editBreakEndTime, companyTimeZone) : null;
-    if (hasCompleteBreakInput) {
-      const breakStartMs = new Date(breakStartIso).getTime();
-      const breakEndMs = new Date(breakEndIso).getTime();
-      const clockInMs = new Date(clockInIso).getTime();
-      const clockOutMs = new Date(clockOutIso).getTime();
-      if (!breakStartIso || !breakEndIso || !Number.isFinite(breakStartMs) || !Number.isFinite(breakEndMs) || breakEndMs <= breakStartMs) {
-        alert("Break stop must be after break start.");
+    // Validate and convert every break row; a shift can have any number of breaks.
+    const clockInMs = new Date(clockInIso).getTime();
+    const clockOutMs = new Date(clockOutIso).getTime();
+    const editedBreaksList = [];
+    for (let breakIndex = 0; breakIndex < editBreaks.length; breakIndex += 1) {
+      const row = editBreaks[breakIndex];
+      const hasAny = Boolean(row.startDate || row.startTime || row.endDate || row.endTime);
+      if (!hasAny) continue;
+      const complete = Boolean(row.startDate && row.startTime && row.endDate && row.endTime);
+      if (!complete) {
+        alert(`Break ${breakIndex + 1}: start and stop are both required (remove the break if not needed).`);
         return;
       }
-      if (breakStartMs < clockInMs || breakEndMs > clockOutMs) {
-        alert("Break must be inside the shift.");
+      const startIso = wallDateTimeToUtcIso(row.startDate, row.startTime, companyTimeZone);
+      const endIso = wallDateTimeToUtcIso(row.endDate, row.endTime, companyTimeZone);
+      const startMs = startIso ? new Date(startIso).getTime() : NaN;
+      const endMs = endIso ? new Date(endIso).getTime() : NaN;
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+        alert(`Break ${breakIndex + 1}: stop must be after start.`);
+        return;
+      }
+      if (startMs < clockInMs || endMs > clockOutMs) {
+        alert(`Break ${breakIndex + 1}: must be inside the shift.`);
+        return;
+      }
+      editedBreaksList.push({ start: startIso, end: endIso });
+    }
+    editedBreaksList.sort((a, b) => String(a.start).localeCompare(String(b.start)));
+    for (let i = 1; i < editedBreaksList.length; i += 1) {
+      if (new Date(editedBreaksList[i].start).getTime() < new Date(editedBreaksList[i - 1].end).getTime()) {
+        alert(`Breaks ${i} and ${i + 1} overlap. Adjust the times.`);
         return;
       }
     }
-    const breakMinutes = breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso);
+    const lastEditedBreak = editedBreaksList[editedBreaksList.length - 1] || null;
+    const breakStartIso = lastEditedBreak?.start || null;
+    const breakEndIso = lastEditedBreak?.end || null;
+    const breakMinutes = totalBreakMinutesForShift(clockInIso, clockOutIso, { breaks: editedBreaksList });
     const proj = effectiveProjects.find((p) => String(p.id) === String(editProjectId));
     if (!proj) {
       alert("Please select a project.");
@@ -15262,6 +15377,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           requested_break_start_at: breakStartIso,
           requested_break_end_at: breakEndIso,
           requested_break_minutes: breakMinutes,
+          requested_breaks: editedBreaksList,
           requested_project_id: String(proj.id),
           requested_project_name: proj.name || "",
           requested_cost_centre: editCostCenter || "",
@@ -15288,6 +15404,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         timesheetHourlyRate: record.hourlyRate,
         breakStartIso,
         breakEndIso,
+        breaks: editedBreaksList,
       });
       const { error } = await supabaseUpdateTimesheetRow(supabase, rowId, {
         clock_in: clockInIso,
@@ -15295,9 +15412,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         project_id: proj.id,
         project_name: proj.name,
         cost_centre: editCostCenter || "",
-        break_start_at: breakStartIso,
-        break_end_at: breakEndIso,
-        break_minutes: breakMinutes,
         ...labourUpdate,
       });
       if (error) throw error;
@@ -15316,10 +15430,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     setEditClockInTime("");
     setEditClockOutDate("");
     setEditClockOutTime("");
-    setEditBreakStartDate("");
-    setEditBreakStartTime("");
-    setEditBreakEndDate("");
-    setEditBreakEndTime("");
+    setEditBreaks([]);
     setEditProjectId("");
     setEditCostCenter("");
   };
@@ -15361,7 +15472,15 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       const clockOutIso = request.requestedClockOut;
       const requestBreakStartIso = request.requestedBreakStartAt || null;
       const requestBreakEndIso = request.requestedBreakEndAt || null;
-      const requestBreakMinutes = breakMinutesBetween(clockInIso, clockOutIso, requestBreakStartIso, requestBreakEndIso);
+      // Multi-break requests carry the full list; legacy requests fall back to
+      // the single requested break pair.
+      const requestedBreaksList =
+        request.requestedBreaks != null
+          ? request.requestedBreaks
+          : requestBreakStartIso && requestBreakEndIso
+            ? [{ start: requestBreakStartIso, end: requestBreakEndIso }]
+            : [];
+      const requestBreakMinutes = totalBreakMinutesForShift(clockInIso, clockOutIso, { breaks: requestedBreaksList });
       const isClockInOnlyRequest =
         request.requestType === "edit_time" &&
         !request.originalSnapshot?.clock_out &&
@@ -15376,6 +15495,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           request.requestType === "edit_time" ? request.originalSnapshot?.hourly_rate : 0,
         breakStartIso: requestBreakStartIso,
         breakEndIso: requestBreakEndIso,
+        breaks: requestedBreaksList,
       });
 
       if (request.requestType === "manual_time") {
@@ -18851,13 +18971,20 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     const projectTaskLabel = `${record.project || "Unassigned"} / ${record.costCenter || "Unassigned"}`;
     const timesheetAmountDisplay = formatMoney(Number.isFinite(totalCostDisplay) ? totalCostDisplay : getLabourCost(record));
     const timesheetTotalDisplay = formatHoursMinutes(getWorkedMinutes(record));
-    const recordBreakMinutes = record.breakStart && record.breakEnd
-      ? breakMinutesBetween(record.clockIn, record.clockOut || new Date().toISOString(), record.breakStart, record.breakEnd)
-      : Number(record.breakMinutes || 0);
-    const showBreakLine = Boolean(record.breakStart || record.breakEnd || recordBreakMinutes > 0);
-    const breakStartText = record.breakStart ? formatTime(record.breakStart, companyTimeZone) : "-";
-    const breakEndText = record.breakEnd ? formatTime(record.breakEnd, companyTimeZone) : "-";
-    const breakDurationText = formatHoursMinutes(Math.max(0, Number(recordBreakMinutes || 0)));
+    // All of this record's breaks: the multi-break array plus the legacy
+    // single-break fields when they describe a break the array doesn't have
+    // (covers old rows and the currently-active break, whose end is null).
+    const recordBreaksList = (() => {
+      const list = [...normalizeTimesheetBreaks(record.breaks)];
+      if (record.breakStart && !list.some((entry) => isSameBreakInstant(entry.start, record.breakStart))) {
+        list.push({ start: record.breakStart, end: record.breakEnd || null });
+        list.sort((a, b) => String(a.start || "").localeCompare(String(b.start || "")));
+      }
+      return list;
+    })();
+    const breakShiftEndIso = record.clockOut || new Date().toISOString();
+    const recordBreakMinutes = totalBreakMinutesForShift(record.clockIn, breakShiftEndIso, record);
+    const breakTotalDurationText = formatHoursMinutes(Math.max(0, Number(recordBreakMinutes || 0)));
     const canShowMoreMenu = isAdmin || record.clockInLocation || record.clockOutLocation;
 
     const isHighlightedTimesheet = String(timesheetHighlightedRecordId || "") === String(recordRowId || "");
@@ -18925,43 +19052,78 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           </div>
           </div>
           <div className="rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] p-2">
-            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break</p>
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.08em] text-[#64748B]">Breaks</p>
+            {editBreaks.length === 0 ? (
+              <p className="mb-2 text-[12px] font-semibold text-slate-500">No breaks on this shift.</p>
+            ) : null}
             <div className="grid grid-cols-1 gap-2">
-              <div className="space-y-1">
-                <label className="text-[12px] font-bold text-slate-500">Break start</label>
-                <div className="flex gap-1">
-                  <input
-                    type="date"
-                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
-                    value={editBreakStartDate}
-                    onChange={(e) => setEditBreakStartDate(e.target.value)}
-                  />
-                  <input
-                    type="time"
-                    className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
-                    value={editBreakStartTime}
-                    onChange={(e) => setEditBreakStartTime(e.target.value)}
-                  />
+              {editBreaks.map((breakRow, breakIndex) => (
+                <div key={`edit-break-${breakIndex}`} className="rounded-[12px] border border-[#E2E8F0] bg-white p-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <p className="text-[11px] font-black uppercase tracking-[0.08em] text-[#64748B]">Break {breakIndex + 1}</p>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-2 py-0.5 text-[11px] font-black text-[#DC2626] active:bg-[#FEE2E2]"
+                      onClick={() => setEditBreaks((prev) => prev.filter((_, i) => i !== breakIndex))}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[12px] font-bold text-slate-500">Start</label>
+                    <div className="flex gap-1">
+                      <input
+                        type="date"
+                        className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
+                        value={breakRow.startDate}
+                        onChange={(e) =>
+                          setEditBreaks((prev) => prev.map((row, i) => (i === breakIndex ? { ...row, startDate: e.target.value } : row)))
+                        }
+                      />
+                      <input
+                        type="time"
+                        className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
+                        value={breakRow.startTime}
+                        onChange={(e) =>
+                          setEditBreaks((prev) => prev.map((row, i) => (i === breakIndex ? { ...row, startTime: e.target.value } : row)))
+                        }
+                      />
+                    </div>
+                    <label className="text-[12px] font-bold text-slate-500">Stop</label>
+                    <div className="flex gap-1">
+                      <input
+                        type="date"
+                        className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
+                        value={breakRow.endDate}
+                        onChange={(e) =>
+                          setEditBreaks((prev) => prev.map((row, i) => (i === breakIndex ? { ...row, endDate: e.target.value } : row)))
+                        }
+                      />
+                      <input
+                        type="time"
+                        className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
+                        value={breakRow.endTime}
+                        onChange={(e) =>
+                          setEditBreaks((prev) => prev.map((row, i) => (i === breakIndex ? { ...row, endTime: e.target.value } : row)))
+                        }
+                      />
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-[12px] font-bold text-slate-500">Break stop</label>
-                <div className="flex gap-1">
-                  <input
-                    type="date"
-                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-[14px]"
-                    value={editBreakEndDate}
-                    onChange={(e) => setEditBreakEndDate(e.target.value)}
-                  />
-                  <input
-                    type="time"
-                    className="w-[7rem] shrink-0 rounded-lg border px-2 py-1.5 text-[14px]"
-                    value={editBreakEndTime}
-                    onChange={(e) => setEditBreakEndTime(e.target.value)}
-                  />
-                </div>
-              </div>
+              ))}
             </div>
+            <button
+              type="button"
+              className="mt-2 h-9 w-full rounded-[10px] border border-[#CBD5E1] bg-white text-[12px] font-black text-[#061426] active:bg-[#F8FAFC]"
+              onClick={() =>
+                setEditBreaks((prev) => [
+                  ...prev,
+                  { startDate: editClockInDate || "", startTime: "", endDate: editClockInDate || "", endTime: "" },
+                ])
+              }
+            >
+              + Add break
+            </button>
           </div>
           <div className="space-y-1">
             <label className="text-[13px] text-slate-500">Project</label>
@@ -19064,13 +19226,38 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               Auto clock-out applied.
             </p>
           )}
-          {showBreakLine ? (
-            <div className="mt-2 flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-black text-[#061426]">
-              <span className="shrink-0 uppercase tracking-[0.08em] text-[#64748B]">Break 1</span>
-              <span className="min-w-0 flex-1 truncate">{breakStartText} - {breakEndText}</span>
-              <span className="shrink-0 tabular-nums">{breakDurationText}</span>
-            </div>
-          ) : null}
+          <div className="mt-2 space-y-1">
+            {recordBreaksList.length === 0 ? (
+              <div className="flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-black text-[#061426]">
+                <span className="shrink-0 uppercase tracking-[0.08em] text-[#64748B]">Breaks</span>
+                <span className="min-w-0 flex-1 truncate font-semibold text-[#64748B]">No break taken</span>
+                <span className="shrink-0 tabular-nums">0m</span>
+              </div>
+            ) : (
+              recordBreaksList.map((breakEntry, breakIndex) => {
+                const startText = breakEntry.start ? formatTime(breakEntry.start, companyTimeZone) : "-";
+                const endText = breakEntry.end ? formatTime(breakEntry.end, companyTimeZone) : "ongoing";
+                const entryMinutes = breakEntry.end
+                  ? breakMinutesBetween(record.clockIn, breakShiftEndIso, breakEntry.start, breakEntry.end)
+                  : 0;
+                return (
+                  <div
+                    key={`${recordRowId}-break-${breakIndex}`}
+                    className="flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-black text-[#061426]"
+                  >
+                    <span className="shrink-0 uppercase tracking-[0.08em] text-[#64748B]">Break {breakIndex + 1}</span>
+                    <span className="min-w-0 flex-1 truncate">{startText} - {endText}</span>
+                    <span className="shrink-0 tabular-nums">{breakEntry.end ? formatHoursMinutes(Math.max(0, entryMinutes)) : "..."}</span>
+                  </div>
+                );
+              })
+            )}
+            {recordBreaksList.length > 1 ? (
+              <p className="px-3 text-right text-[11px] font-black tabular-nums text-[#64748B]">
+                Total break {breakTotalDurationText}
+              </p>
+            ) : null}
+          </div>
           {showCloseShift && (
             <Button
               type="button"
@@ -19493,6 +19680,15 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   const amountLabel = formatMoney(Number(record.payrollChargeAmount || 0));
                   const duplicateNote = record.payrollChargeSource === "manual_contract_duplicate" ? "Included in fixed contract total" : "";
                   const recordKey = String(record.payrollChargeKey || record.supabaseTimesheetId || record.id || `${recordDate}-${inTime}-${taskName}`);
+                  const detailBreaksList = (() => {
+                    const list = [...normalizeTimesheetBreaks(record.breaks)];
+                    if (record.breakStart && !list.some((entry) => isSameBreakInstant(entry.start, record.breakStart))) {
+                      list.push({ start: record.breakStart, end: record.breakEnd || null });
+                      list.sort((a, b) => String(a.start || "").localeCompare(String(b.start || "")));
+                    }
+                    return list;
+                  })();
+                  const detailShiftEndIso = record.clockOut || new Date().toISOString();
                   return (
                     <div key={recordKey} className="rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3 shadow-[0_6px_18px_rgba(6,20,38,0.04)]">
                       <div className="flex items-start justify-between gap-3">
@@ -19509,6 +19705,33 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       <p className="mt-2 truncate text-[13px] font-semibold text-[#061426]">
                         {projectName} / {taskName}
                       </p>
+                      <div className="mt-2 space-y-1">
+                        {detailBreaksList.length === 0 ? (
+                          <p className="rounded-[12px] border border-[#E2E8F0] bg-white px-3 py-1.5 text-[11px] font-semibold text-[#64748B]">
+                            Breaks: none
+                          </p>
+                        ) : (
+                          detailBreaksList.map((breakEntry, breakIndex) => {
+                            const startText = breakEntry.start ? formatTime(breakEntry.start, companyTimeZone) : "-";
+                            const endText = breakEntry.end ? formatTime(breakEntry.end, companyTimeZone) : "ongoing";
+                            const entryMinutes = breakEntry.end
+                              ? breakMinutesBetween(record.clockIn, detailShiftEndIso, breakEntry.start, breakEntry.end)
+                              : 0;
+                            return (
+                              <div
+                                key={`${recordKey}-break-${breakIndex}`}
+                                className="flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-white px-3 py-1.5 text-[11px] font-black text-[#061426]"
+                              >
+                                <span className="shrink-0 uppercase tracking-[0.08em] text-[#64748B]">Break {breakIndex + 1}</span>
+                                <span className="min-w-0 flex-1 truncate">{startText} - {endText}</span>
+                                <span className="shrink-0 tabular-nums">
+                                  {breakEntry.end ? formatHoursMinutes(Math.max(0, entryMinutes)) : "..."}
+                                </span>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                       <div className="mt-3 grid grid-cols-2 gap-2">
                         <div className="rounded-[14px] border border-[#E2E8F0] bg-white px-3 py-2">
                           <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total hours</p>
@@ -23610,7 +23833,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                             {renderClockActionIcon("break")}
                           </span>
                           <span className="block leading-tight">
-                            {!visibleCurrentShift.breakStart ? "Start Break" : !visibleCurrentShift.breakEnd ? "End Break" : "Break Done"}
+                            {visibleCurrentShift.breakStart && !visibleCurrentShift.breakEnd ? "End Break" : "Start Break"}
                           </span>
                         </button>
                       </div>
