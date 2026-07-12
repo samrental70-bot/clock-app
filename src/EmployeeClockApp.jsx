@@ -19710,12 +19710,25 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     } else if (loans.length > 1) {
                       setPayrollTilePicker({ kind: "loan", period });
                     } else {
+                      // Loans are bucketed into a payroll period by their
+                      // transaction date (not an explicit period like salary),
+                      // so default the date INTO the tapped period — clamp
+                      // today into [periodStart, periodEnd] — otherwise a loan
+                      // added from an older period card would land in today's
+                      // period and never show in this period's total.
+                      const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+                      const loanDefaultDate =
+                        period.periodEnd && todayKey > period.periodEnd
+                          ? period.periodEnd
+                          : period.periodStart && todayKey < period.periodStart
+                            ? period.periodStart
+                            : todayKey;
                       openPayrollPaymentForm(null, {
                         paymentKind: "loan",
                         employeeId: payrollDetailEmployeeGroup?.employeeId,
                         periodStart: period.periodStart,
                         periodEnd: period.periodEnd,
-                        paidDate: calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                        paidDate: loanDefaultDate,
                         loanDirection: "loan_given",
                       });
                     }
