@@ -94,8 +94,13 @@ const DangerAction = ({ children, className = "", ...props }) => (
   </button>
 );
 
-export const EmptyState = ({ title, body, action, className = "" }) => (
+export const EmptyState = ({ title, body, action, icon, className = "" }) => (
   <div className={`flex flex-col items-center px-6 py-8 text-center ${className}`}>
+    {icon ? (
+      <span className="mb-3 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FBF6EA] text-[#9A6B12]">
+        {icon}
+      </span>
+    ) : null}
     <p className="text-[14px] font-bold text-[#061426]">{title}</p>
     {body ? <p className="mt-1 text-[13px] font-medium text-[#64748B]">{body}</p> : null}
     {action ? <div className="mt-3">{action}</div> : null}

@@ -77,6 +77,12 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
 }
 
 export default function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNotifications, onViewModeChange, onBack }) {
+  const chatEmptyStateIcon = (
+    <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 12a8 8 0 0 1-8 8H8l-5 2 1.8-4.6A8 8 0 1 1 21 12Z" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  );
   const chatGridRef = useRef(null);
   const chatSectionRef = useRef(null);
   const [conversations, setConversations] = useState([]);
@@ -1979,8 +1985,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
 
   const hasDraftMessage = Boolean(messageDraft.trim());
 
-  const renderChatMessageRow = (message) => {
+  const renderChatMessageRow = (message, showSenderName = true) => {
     const mine = String(message.sender_user_id) === String(currentUserId);
+    const senderNameLabel = String(message.sender_name || "").trim();
+    const senderNameIsEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderNameLabel);
     const replyBody = String(message?.metadata?.reply_to_body || "").trim();
     const replySender = String(message?.metadata?.reply_to_sender_name || "").trim();
     const replyCreatedAt = String(message?.metadata?.reply_to_created_at || "").trim();
@@ -2010,7 +2018,17 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 : "rounded-bl-[6px] border-[#E6EAF1] bg-white text-[#061426] shadow-[0_1px_2px_rgba(6,20,38,0.06)]"
             }`}
           >
-            {!mine ? <p className="mb-1 text-[11px] font-black text-[#9A6B12]">{message.sender_name}</p> : null}
+            {!mine && showSenderName ? (
+              <p
+                className={
+                  senderNameIsEmail
+                    ? "mb-1 text-[10px] font-semibold text-[#94A3B8]"
+                    : "mb-1 text-[11px] font-black text-[#9A6B12]"
+                }
+              >
+                {senderNameLabel}
+              </p>
+            ) : null}
             {replyBody ? (
               <button
                 type="button"
@@ -2596,22 +2614,21 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
         <aside className={`${chatPane === "thread" || chatPane === "list-detail" ? "hidden" : "flex"} min-h-[calc(100dvh-150px)] flex-col bg-[#F4F7FB] px-3 pb-3 pt-3`}>
           <div className="rounded-[24px] bg-white px-3.5 pb-3 pt-3 shadow-[0_12px_30px_rgba(6,20,38,0.06)]">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2.5">
+              <h1 className="truncate text-[20px] font-black leading-tight text-[#061426]">Chats</h1>
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
-                  onClick={() => {
-                    if (typeof onBack === "function") onBack();
-                  }}
-                  aria-label="Back"
+                  className="flex h-10 w-10 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
+                  onClick={() => void loadConversations()}
+                  aria-label="Sync chats"
                 >
-                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="m15 18-6-6 6-6" />
+                  <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M21 12a9 9 0 0 1-15.5 6.4" />
+                    <path d="M3 12A9 9 0 0 1 18.5 5.6" />
+                    <path d="M8 17H5v3" />
+                    <path d="M16 7h3V4" />
                   </svg>
                 </button>
-                <h1 className="truncate text-[20px] font-black leading-tight text-[#061426]">Chats</h1>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
                 <button
                   type="button"
                   className="flex h-10 w-10 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] active:bg-[#F8FAFC]"
@@ -2674,19 +2691,6 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                   </span>
                 </button>
               ))}
-              <button
-                type="button"
-                className="flex h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border border-[#E2E8F0] bg-white px-3.5 text-[12px] font-black text-[#061426]"
-                onClick={() => void loadConversations()}
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M21 12a9 9 0 0 1-15.5 6.4" />
-                  <path d="M3 12A9 9 0 0 1 18.5 5.6" />
-                  <path d="M8 17H5v3" />
-                  <path d="M16 7h3V4" />
-                </svg>
-                <span>Sync</span>
-              </button>
             </div>
             {error ? (
               <div className="mt-3 rounded-[16px] border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-bold text-red-700">
@@ -2699,7 +2703,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             {loading ? (
               <p className="p-4 text-[14px] font-semibold text-[#64748B]">Loading chats...</p>
             ) : visibleConversationRows.length === 0 ? (
-              <EmptyState title="No chats found" body="Start a direct chat or create a group." className="m-3" />
+              <EmptyState icon={chatEmptyStateIcon} title="No chats found" body="Start a direct chat or create a group." className="m-3" />
             ) : (
               visibleConversationRows.map((conversation) => {
                 const activeConversation =
@@ -2732,7 +2736,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 items-center gap-1.5">
                         <span className="min-w-0 flex-1 truncate text-[15px] font-black text-[#061426]">{name}</span>
-                        {conversation.type === "group" ? <span className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-[9px] font-black text-[#2563EB]">Group</span> : null}
+                        {conversation.type === "group" ? <span className="shrink-0 rounded-full bg-[#FBF6EA] px-1.5 py-0.5 text-[9px] font-black text-[#9A6B12]">Group</span> : null}
                         {conversation.pinned ? (
                           <svg viewBox="0 0 24 24" className="h-3 w-3 shrink-0 text-[#9A6B12]" fill="currentColor" stroke="none" aria-hidden="true">
                             <path d="m12 17 4 4v-7l4-4V5H9l-5 5h7v11Z" />
@@ -2893,7 +2897,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                     style={{
                       backgroundColor: "#EFF3F8",
                       backgroundImage:
-                        "radial-gradient(rgba(6,20,38,0.05) 1px, transparent 1px), radial-gradient(rgba(6,20,38,0.02) 1px, transparent 1px)",
+                        "radial-gradient(rgba(6,20,38,0.035) 1px, transparent 1px), radial-gradient(rgba(6,20,38,0.015) 1px, transparent 1px)",
                       backgroundSize: "24px 24px",
                       backgroundPosition: "0 0, 12px 12px",
                     }}
@@ -2905,7 +2909,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 ) : (
                   <>
                     {chatTimelineGroups.length === 0 ? (
-                      <EmptyState title="No messages yet" body="Send the first update to this chat." className="mt-8" />
+                      <EmptyState icon={chatEmptyStateIcon} title="No messages yet" body="Send the first update to this chat." className="mt-8" />
                     ) : (
                       <div className="space-y-4">
                         {chatTimelineGroups.map((group) => (
@@ -2914,7 +2918,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                               {group.label}
                             </div>
                             <div className="space-y-2.5">
-                              {group.rows.map((entry) => renderChatMessageRow(entry.row))}
+                              {group.rows.map((entry, entryIndex) => {
+                                const previousSenderId = entryIndex > 0 ? group.rows[entryIndex - 1]?.row?.sender_user_id : null;
+                                const showSenderName = String(entry?.row?.sender_user_id ?? "") !== String(previousSenderId ?? "");
+                                return renderChatMessageRow(entry.row, showSenderName);
+                              })}
                             </div>
                           </div>
                         ))}
@@ -3056,7 +3064,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center p-4">
-              <EmptyState title="Select a chat" body="Choose a conversation from the list." />
+              <EmptyState icon={chatEmptyStateIcon} title="Select a chat" body="Choose a conversation from the list." />
             </div>
           )}
         </section>
