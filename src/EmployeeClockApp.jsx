@@ -4491,6 +4491,7 @@ export default function EmployeeClockApp() {
   const [photoNotificationCount, setPhotoNotificationCount] = useState(() => safeRead("orp_photo_notification_count", 0));
   const [selectedPhotoFolder, setSelectedPhotoFolder] = useState("all");
   const [selectedReceiptFolder, setSelectedReceiptFolder] = useState("all");
+  const [receiptFiltersExpanded, setReceiptFiltersExpanded] = useState(false);
   const [mediaFilterDateFrom, setMediaFilterDateFrom] = useState("");
   const [mediaFilterDateTo, setMediaFilterDateTo] = useState("");
   const [mediaFilterEmployeeId, setMediaFilterEmployeeId] = useState("all");
@@ -5048,6 +5049,8 @@ export default function EmployeeClockApp() {
     templateName: "daily_timesheet_report",
     templateLanguage: "en",
   });
+  const [emailPanelOpen, setEmailPanelOpen] = useState(false);
+  const [whatsappPanelOpen, setWhatsappPanelOpen] = useState(false);
 
   useEffect(() => {
     setSettingsTzDraft(userCompany?.time_zone || "America/Toronto");
@@ -18787,6 +18790,21 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         </svg>
       );
     }
+    if (type === "receipt") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 3h12v17l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4Z" />
+          <path d="M8.5 8h7M8.5 11.5h7M8.5 15h4" />
+        </svg>
+      );
+    }
+    if (type === "chevron-down") {
+      return (
+        <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      );
+    }
     if (type === "rate") {
       return (
         <svg viewBox="0 0 24 24" className={className} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -21970,6 +21988,24 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   const reportsDateRangeLabel = formatReportDateRangeLabel(reportsDateFrom, reportsDateTo);
   const mediaDateRangeLabel = formatReportDateRangeLabel(mediaFilterDateFrom, mediaFilterDateTo);
   const mediaSelectedRangeLabel = standardDateRangePresetLabel(mediaRangePreset);
+  const receiptFilterProjectLabel =
+    selectedReceiptFolder === "all"
+      ? "All Projects"
+      : receiptProjectOptions.find((project) => project.folder === selectedReceiptFolder)?.label || "All Projects";
+  const receiptFilterEmployeeLabel = isEmployeeRole
+    ? "My receipts"
+    : mediaFilterEmployeeId === "all"
+    ? "All Employees"
+    : mediaFilterOptions.employees.find((employee) => employee.id === mediaFilterEmployeeId)?.name || "All Employees";
+  const receiptFilterTaskLabel = mediaFilterCostCentre === "all" ? "All Tasks" : mediaFilterCostCentre;
+  const receiptFilterSummaryLabel = [
+    mediaSelectedRangeLabel,
+    receiptFilterProjectLabel,
+    receiptFilterEmployeeLabel,
+    receiptFilterTaskLabel,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const timesheetDateRangeLabel = formatReportDateRangeLabel(timesheetRangeBounds.from, timesheetRangeBounds.to);
   const timesheetSelectedRangeLabel = standardDateRangePresetLabel(timesheetRangePreset);
   const timesheetEmployeeFilterLabel =
@@ -22090,6 +22126,13 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   const reportsDrillSummary = summarizeReportsRows(reportsDrillRows);
   const reportsUsedDims = new Set(reportsSafeDrillStack.map((step) => step.dim));
   const reportsAvailableDims = REPORT_DIMS.filter((dim) => !reportsUsedDims.has(dim));
+  const reportsBackStack = reportsSafeDrillStack.slice(0, -1);
+  const reportsBackTargetDim =
+    REPORT_DIMS.filter((dim) => !new Set(reportsBackStack.map((step) => step.dim)).has(dim))[0] || "project";
+  const reportsUnconnectedChannels = [
+    !dailyEmailConfig.configured ? "Email" : null,
+    !whatsappReportConfig.configured ? "WhatsApp" : null,
+  ].filter(Boolean);
   const reportsCurrentViewBy = reportsAvailableDims.includes(reportsDrillViewBy)
     ? reportsDrillViewBy
     : reportsAvailableDims[0] || "project";
@@ -25103,28 +25146,38 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           {activeTab === "receipts" && (
             <Card className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
               <CardContent className="p-3 space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <h2 className="text-[22px] font-black leading-tight text-slate-950">Receipts</h2>
-                    <p className="mt-0.5 truncate text-[13px] font-semibold text-slate-500">Expenses by project</p>
-                  </div>
-                </div>
                 {projectMediaSyncError ? (
                   <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] font-bold text-amber-800">
                     {projectMediaSyncError}
                   </div>
                 ) : null}
                 <div className="rounded-[18px] bg-[#0B1F33] px-4 py-3 text-white shadow-[0_8px_24px_rgba(15,23,42,0.12)]">
-                  <p className="text-[10px] font-black uppercase tracking-wide text-slate-300">Receipt total</p>
+                  <div className="min-w-0">
+                    <p className="truncate text-[15px] font-black leading-tight text-white">Receipts</p>
+                    <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-300">Expenses by project</p>
+                  </div>
+                  <p className="mt-2 text-[10px] font-black uppercase tracking-wide text-slate-300">Receipt total</p>
                   <p className="mt-1 text-[24px] font-black leading-none">{formatMoney(receiptTotal)}</p>
                 </div>
-                <div className="sticky top-2 z-20 rounded-[20px] border border-[#E2E8F0] bg-white/95 p-3 shadow-[0_10px_26px_rgba(6,20,38,0.07)] backdrop-blur space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-2 text-[13px] font-black text-[#475569]">
-                      <span className="text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
-                      Filters
+                <div className="sticky top-2 z-20 rounded-[20px] border border-[#E2E8F0] bg-white/95 shadow-[0_10px_26px_rgba(6,20,38,0.07)] backdrop-blur">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-3"
+                    onClick={() => setReceiptFiltersExpanded((expanded) => !expanded)}
+                    aria-expanded={receiptFiltersExpanded}
+                  >
+                    <p className="flex min-w-0 items-center gap-2 text-[13px] font-black text-[#475569]">
+                      <span className="shrink-0 text-[#061426]">{renderTimesheetUiIcon("filter", "h-4 w-4")}</span>
+                      <span className="truncate">{receiptFiltersExpanded ? "Filters" : receiptFilterSummaryLabel}</span>
                     </p>
-                  </div>
+                    <span
+                      className={`shrink-0 text-[#061426] transition-transform ${receiptFiltersExpanded ? "rotate-180" : ""}`}
+                    >
+                      {renderTimesheetUiIcon("chevron-down", "h-4 w-4")}
+                    </span>
+                  </button>
+                  {receiptFiltersExpanded ? (
+                  <div className="px-3 pb-3 space-y-3">
                   <DateRangeButton
                     label="Date range"
                     rangeLabel={mediaDateRangeLabel}
@@ -25151,7 +25204,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                           <span className="flex h-6 w-6 shrink-0 items-center justify-center text-[#061426]">
                             {renderTimesheetUiIcon("user", "h-4 w-4")}
                           </span>
-                          <span className="truncate">My media</span>
+                          <span className="truncate">My receipts</span>
                         </div>
                       </div>
                     ) : renderRoyalNavyFilterSelect({
@@ -25179,6 +25232,8 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       ),
                     })}
                   </div>
+                  </div>
+                  ) : null}
                 </div>
                 {visibleReceiptFolders.length === 0 && (
                   <div className="rounded-[20px] border border-slate-200 bg-slate-50 px-4 py-7 text-center">
@@ -25220,19 +25275,20 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                             const receiptEmployee = mediaItemEmployeeName(receipt);
                             const receiptDateTime = receipt.capturedAt || receipt.captured_at || receipt.receiptUploadedAt || receipt.receipt_uploaded_at || receipt.timestamp;
                             const receiptStatus = receipt.status || receipt.receiptStatus || receipt.receipt_status || "";
+                            const receiptStatusLabel = humanizeReceiptStatus(receiptStatus);
                             const receiptProject = mediaItemProjectName(receipt) || projectLabel;
                             const receiptDisplayTotal =
                               receiptMoneyNumber(receipt.receiptTotal ?? receipt.receipt_total ?? receipt.total_amount ?? receipt.amount) ?? 0;
                             const receiptDisplaySupplier =
-                              receipt.receiptSupplier || receipt.receipt_supplier || receipt.supplier || receipt.category || "Receipt";
+                              receipt.receiptSupplier || receipt.receipt_supplier || receipt.supplier || receipt.category || receiptTask || "Uncategorized expense";
                             const receiptDisplayDate = receipt.receiptDate || receipt.receipt_date || "";
                             const receiptDisplayHst = receiptMoneyNumber(receipt.receiptHst ?? receipt.receipt_hst);
                             return (
                               <div key={mediaItemId(receipt, index)} className="rounded-[16px] border border-slate-200 bg-slate-50 p-2.5">
                                 <div className="flex gap-3">
                                   <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-[12px] border border-slate-200 bg-white">
-                                    <div className="absolute inset-0 flex items-center justify-center px-2 text-center text-[11px] font-black text-slate-400">
-                                      Receipt image
+                                    <div className="absolute inset-0 flex items-center justify-center text-slate-300">
+                                      {renderTimesheetUiIcon("receipt", "h-8 w-8")}
                                     </div>
                                     {receiptUrl ? (
                                       <img
@@ -25257,18 +25313,16 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                     {receiptDisplayDate ? (
                                       <p className="mt-0.5 truncate">Receipt date {formatDate(receiptDisplayDate, companyTimeZone)}</p>
                                     ) : null}
-                                    {receiptDisplayHst != null ? (
+                                    {receiptDisplayHst != null && receiptDisplayHst !== 0 ? (
                                       <p className="mt-0.5 truncate">HST {formatMoney(receiptDisplayHst)}</p>
                                     ) : null}
-                                    {receiptDisplayDate ? (
-                                      <p className="mt-0.5 truncate">{formatDate(receiptDisplayDate, companyTimeZone)}</p>
-                                    ) : receiptDateTime ? (
-                                      <p className="mt-0.5 truncate">{formatDate(receiptDateTime, companyTimeZone)} - {formatTime(receiptDateTime, companyTimeZone)}</p>
+                                    {!receiptDisplayDate && receiptDateTime ? (
+                                      <p className="mt-0.5 truncate">Uploaded {formatDate(receiptDateTime, companyTimeZone)} · {formatTime(receiptDateTime, companyTimeZone)}</p>
                                     ) : null}
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                      {receiptStatus ? (
-                                        <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-700 ring-1 ring-slate-200">
-                                          {humanizeReceiptStatus(receiptStatus)}
+                                      {receiptStatusLabel ? (
+                                        <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black capitalize tracking-wide text-slate-700 ring-1 ring-slate-200">
+                                          {receiptStatusLabel}
                                         </span>
                                       ) : null}
                                       {receipt.location ? (
@@ -27033,7 +27087,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                         setReportsDrillViewBy(remaining[0] || "project");
                       }}
                     >
-                      Back
+                      Back to {reportsViewLabel(reportsBackTargetDim)}
                     </button>
                   ) : null}
                 </div>
@@ -27052,158 +27106,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#061426] px-3 py-2 text-[12px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)]">
                     {renderTimesheetUiIcon("calendar", "h-3.5 w-3.5")}
                     {reportsSelectedRangeLabel}
+                    {renderTimesheetUiIcon("chevron-down", "h-3.5 w-3.5")}
                   </span>
                 </button>
-
-                <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[16px] font-black leading-tight text-[#061426]">Daily timesheet email</p>
-                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                        Send today&apos;s report by email to a manager or admin.
-                      </p>
-                    </div>
-                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
-                      dailyEmailConfig.configured
-                        ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
-                        : "border-[#FFF7E6] bg-[#FFF7E6] text-[#D97706]"
-                    }`}>
-                      {dailyEmailConfig.configured ? "Configured" : "Draft"}
-                    </span>
-                  </div>
-                  <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
-                    Manager/Admin email
-                    <input
-                      type="email"
-                      className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
-                      value={dailyEmailRecipient}
-                      onChange={(event) => setDailyEmailRecipient(event.target.value)}
-                      placeholder="manager@example.com"
-                    />
-                  </label>
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      className="h-11 rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                      onClick={() => void callDailyEmailReport({ send: false })}
-                      disabled={dailyEmailLoading}
-                    >
-                      {dailyEmailLoading ? "Generating..." : "Preview email report"}
-                    </button>
-                    <button
-                      type="button"
-                      className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
-                      onClick={() => void callDailyEmailReport({ send: true })}
-                      disabled={
-                        dailyEmailLoading ||
-                        !dailyEmailConfig.configured ||
-                        !dailyEmailConfig.sendEnabled ||
-                        !String(dailyEmailRecipient || "").trim()
-                      }
-                    >
-                      {dailyEmailConfig.configured && dailyEmailConfig.sendEnabled ? "Send Email Test" : "Send test pending setup"}
-                    </button>
-                  </div>
-                  <button
-                    type="button"
-                    className="mt-2 h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 text-[13px] font-black text-[#061426]"
-                    onClick={handleGenerateDailyReportPreview}
-                  >
-                    Preview report text
-                  </button>
-                  {dailyEmailPreviewText ? (
-                    <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
-                      <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Email preview</p>
-                      {dailyEmailSubject ? (
-                        <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{dailyEmailSubject}</p>
-                      ) : null}
-                      <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
-                        {dailyEmailPreviewText}
-                      </pre>
-                    </div>
-                  ) : null}
-                  <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
-                    Email delivery is {dailyEmailConfig.configured ? "connected" : "not connected yet"}. Automatic daily sending is off until setup is complete.
-                  </div>
-                  {dailyReportPreviewStatus ? (
-                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyReportPreviewStatus}</p>
-                  ) : null}
-                  {dailyEmailStatus ? (
-                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyEmailStatus}</p>
-                  ) : null}
-                </div>
-
-                <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-3.5 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[16px] font-black leading-tight text-[#061426]">WhatsApp Business reports</p>
-                      <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                        Send today&apos;s report by WhatsApp to a manager or admin.
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded-full border border-[#EFF6FF] bg-[#EFF6FF] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#2563EB]">
-                      Preview
-                    </span>
-                  </div>
-                  <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
-                    Manager/Admin phone
-                    <input
-                      type="tel"
-                      className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
-                      value={whatsappReportPhone}
-                      onChange={(event) => setWhatsappReportPhone(event.target.value)}
-                      placeholder="+1 613 555 0100"
-                    />
-                  </label>
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <button
-                      type="button"
-                      className="h-11 rounded-[14px] bg-[#061426] px-4 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33] disabled:opacity-60"
-                      onClick={() => void callWhatsAppDailyReport({ send: false })}
-                      disabled={whatsappReportLoading}
-                    >
-                      {whatsappReportLoading ? "Generating..." : "Preview WhatsApp report"}
-                    </button>
-                    <button
-                      type="button"
-                      className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
-                      onClick={() => void callWhatsAppDailyReport({ send: true })}
-                      disabled={
-                        whatsappReportLoading ||
-                        !whatsappReportConfig.configured ||
-                        !whatsappReportConfig.sendEnabled ||
-                        !String(whatsappReportPhone || "").trim()
-                      }
-                    >
-                      {whatsappReportConfig.configured && whatsappReportConfig.sendEnabled
-                        ? "Send WhatsApp Test"
-                        : "Send test pending setup"}
-                    </button>
-                  </div>
-                  {whatsappReportPreviewText ? (
-                    <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Message preview</p>
-                        <button
-                          type="button"
-                          className="rounded-full border border-[#CBD5E1] bg-white px-3 py-1 text-[11px] font-black text-[#061426]"
-                          onClick={() => void handleCopyWhatsAppPreview()}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
-                        {whatsappReportPreviewText}
-                      </pre>
-                    </div>
-                  ) : null}
-                  <div className="mt-2 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-bold leading-snug text-[#64748B]">
-                    WhatsApp delivery is {whatsappReportConfig.configured ? "connected" : "not connected yet"}.
-                  </div>
-                  {whatsappReportStatus ? (
-                    <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{whatsappReportStatus}</p>
-                  ) : null}
-                </div>
 
                 {reportsContextCards.length ? (
                   <div className="flex flex-wrap gap-2 px-1">
@@ -27270,7 +27175,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                           className={`col-span-2 min-w-0 px-3 py-4 text-center ${
                             Number(reportsVisibleSummary.cost || 0) > 0
                               ? "bg-[linear-gradient(135deg,#FFFFFF_0%,#ECFDF5_100%)]"
-                              : ""
+                              : "bg-white"
                           }`}
                         >
                           <span className="block text-[11px] font-semibold leading-tight text-[#64748B]">Estimated Pay</span>
@@ -27283,27 +27188,37 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                           </span>
                         </div>
                       </div>
+                      {reportsVisibleEntryCount === 0 ? (
+                        <p className="border-t border-[#E2E8F0] px-4 py-2.5 text-[12px] font-semibold leading-snug text-[#64748B]">
+                          No entries recorded for {reportsDateRangeLabel}.
+                        </p>
+                      ) : null}
                     </div>
 
-                    {reportsAvailableDims.length ? (
-                      <label className="grid grid-cols-[auto_1fr] items-center gap-2 rounded-[18px] border border-[#E2E8F0] bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#64748B] shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
-                        <span>View by</span>
-                        <select
-                          className="h-10 min-w-0 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[15px] font-black normal-case tracking-normal text-[#061426] outline-none focus:border-[#CBD5E1]"
-                          value={reportsCurrentViewBy}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
-                          }}
-                        >
-                          {reportsAvailableDims.map((dim) => (
+                    <label className={`grid grid-cols-[auto_1fr] items-center gap-2 rounded-[18px] border border-[#E2E8F0] bg-white px-4 py-3 text-[11px] font-black uppercase tracking-[0.14em] text-[#64748B] shadow-[0_10px_26px_rgba(6,20,38,0.07)] ${
+                      reportsAvailableDims.length === 0 ? "opacity-60" : ""
+                    }`}>
+                      <span>View by</span>
+                      <select
+                        className="h-10 min-w-0 rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 text-[15px] font-black normal-case tracking-normal text-[#061426] outline-none focus:border-[#CBD5E1] disabled:text-[#94A3B8]"
+                        value={reportsCurrentViewBy}
+                        disabled={reportsAvailableDims.length === 0}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (reportsAvailableDims.includes(v)) setReportsDrillViewBy(v);
+                        }}
+                      >
+                        {reportsAvailableDims.length ? (
+                          reportsAvailableDims.map((dim) => (
                             <option key={dim} value={dim}>
                               {reportsViewLabel(dim)}
                             </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
+                          ))
+                        ) : (
+                          <option value={reportsCurrentViewBy}>{reportsViewLabel(reportsCurrentViewBy)}</option>
+                        )}
+                      </select>
+                    </label>
 
                     <div className="overflow-hidden rounded-[26px] border border-slate-200 bg-white shadow-[0_16px_34px_rgba(15,23,42,0.09)]">
                       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
@@ -27382,6 +27297,190 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     </div>
                   </>
                 ) : null}
+
+                {reportsUnconnectedChannels.length ? (
+                  <div className="rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-3.5 py-2.5 text-[11px] font-bold leading-snug text-[#64748B]">
+                    Delivery not connected — {reportsUnconnectedChannels.join(" · ")}
+                  </div>
+                ) : null}
+
+                <div className="overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-3.5 py-3.5 text-left active:bg-[#F8FAFC]"
+                    onClick={() => setEmailPanelOpen((open) => !open)}
+                    aria-expanded={emailPanelOpen}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F4F7FB] text-[#061426]">
+                      {renderTimesheetUiIcon("share", "h-4 w-4")}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-black text-[#061426]">Daily timesheet email</span>
+                    <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] ${
+                      dailyEmailConfig.configured
+                        ? "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]"
+                        : "border-[#FFF7E6] bg-[#FFF7E6] text-[#D97706]"
+                    }`}>
+                      {dailyEmailConfig.configured ? "Configured" : "Draft"}
+                    </span>
+                    <span className={`shrink-0 text-[#061426] transition-transform ${emailPanelOpen ? "rotate-180" : ""}`}>
+                      {renderTimesheetUiIcon("chevron-down", "h-4 w-4")}
+                    </span>
+                  </button>
+                  {emailPanelOpen ? (
+                    <div className="border-t border-[#E2E8F0] p-3.5">
+                      <p className="text-[12px] font-semibold leading-snug text-[#64748B]">
+                        Send today's report by email to a manager or admin.
+                      </p>
+                      <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
+                        Manager/Admin email
+                        <input
+                          type="email"
+                          className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                          value={dailyEmailRecipient}
+                          onChange={(event) => setDailyEmailRecipient(event.target.value)}
+                          placeholder="manager@example.com"
+                        />
+                      </label>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
+                          onClick={() => void callDailyEmailReport({ send: false })}
+                          disabled={dailyEmailLoading}
+                        >
+                          {dailyEmailLoading ? "Generating..." : "Preview email report"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`h-11 rounded-[14px] px-4 text-[14px] font-black ${
+                            dailyEmailConfig.configured && dailyEmailConfig.sendEnabled
+                              ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                              : "border border-[#CBD5E1] bg-white text-[#061426] disabled:text-[#94A3B8]"
+                          }`}
+                          onClick={() => void callDailyEmailReport({ send: true })}
+                          disabled={
+                            dailyEmailLoading ||
+                            !dailyEmailConfig.configured ||
+                            !dailyEmailConfig.sendEnabled ||
+                            !String(dailyEmailRecipient || "").trim()
+                          }
+                        >
+                          {dailyEmailConfig.configured && dailyEmailConfig.sendEnabled ? "Send Email Test" : "Send test pending setup"}
+                        </button>
+                      </div>
+                      <button
+                        type="button"
+                        className="mt-2 h-10 w-full rounded-[14px] border border-[#E2E8F0] bg-[#F8FAFC] px-4 text-[13px] font-black text-[#061426]"
+                        onClick={handleGenerateDailyReportPreview}
+                      >
+                        Preview report text
+                      </button>
+                      {dailyEmailPreviewText ? (
+                        <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                          <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Email preview</p>
+                          {dailyEmailSubject ? (
+                            <p className="mt-1 truncate text-[12px] font-black text-[#061426]">{dailyEmailSubject}</p>
+                          ) : null}
+                          <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
+                            {dailyEmailPreviewText}
+                          </pre>
+                        </div>
+                      ) : null}
+                      {dailyReportPreviewStatus ? (
+                        <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyReportPreviewStatus}</p>
+                      ) : null}
+                      {dailyEmailStatus ? (
+                        <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{dailyEmailStatus}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-3.5 py-3.5 text-left active:bg-[#F8FAFC]"
+                    onClick={() => setWhatsappPanelOpen((open) => !open)}
+                    aria-expanded={whatsappPanelOpen}
+                  >
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F4F7FB] text-[#061426]">
+                      {renderTimesheetUiIcon("share", "h-4 w-4")}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[14px] font-black text-[#061426]">WhatsApp Business reports</span>
+                    <span className="shrink-0 rounded-full border border-[#EFF6FF] bg-[#EFF6FF] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#2563EB]">
+                      Preview
+                    </span>
+                    <span className={`shrink-0 text-[#061426] transition-transform ${whatsappPanelOpen ? "rotate-180" : ""}`}>
+                      {renderTimesheetUiIcon("chevron-down", "h-4 w-4")}
+                    </span>
+                  </button>
+                  {whatsappPanelOpen ? (
+                    <div className="border-t border-[#E2E8F0] p-3.5">
+                      <p className="text-[12px] font-semibold leading-snug text-[#64748B]">
+                        WhatsApp delivery is not connected yet.
+                      </p>
+                      <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.1em] text-[#64748B]">
+                        Manager/Admin phone
+                        <input
+                          type="tel"
+                          className="h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-[#F8FAFC] px-3 text-[15px] font-bold normal-case tracking-normal text-[#061426] outline-none focus:border-[#061426]"
+                          value={whatsappReportPhone}
+                          onChange={(event) => setWhatsappReportPhone(event.target.value)}
+                          placeholder="+1 613 555 0100"
+                        />
+                      </label>
+                      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          className="h-11 rounded-[14px] border border-[#CBD5E1] bg-white px-4 text-[14px] font-black text-[#061426] disabled:text-[#94A3B8]"
+                          onClick={() => void callWhatsAppDailyReport({ send: false })}
+                          disabled={whatsappReportLoading}
+                        >
+                          {whatsappReportLoading ? "Generating..." : "Preview WhatsApp report"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`h-11 rounded-[14px] px-4 text-[14px] font-black disabled:opacity-60 ${
+                            whatsappReportConfig.configured && whatsappReportConfig.sendEnabled
+                              ? "bg-[#061426] text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                              : "border border-[#CBD5E1] bg-white text-[#061426] disabled:text-[#94A3B8]"
+                          }`}
+                          onClick={() => void callWhatsAppDailyReport({ send: true })}
+                          disabled={
+                            whatsappReportLoading ||
+                            !whatsappReportConfig.configured ||
+                            !whatsappReportConfig.sendEnabled ||
+                            !String(whatsappReportPhone || "").trim()
+                          }
+                        >
+                          {whatsappReportConfig.configured && whatsappReportConfig.sendEnabled
+                            ? "Send WhatsApp Test"
+                            : "Send test pending setup"}
+                        </button>
+                      </div>
+                      {whatsappReportPreviewText ? (
+                        <div className="mt-3 rounded-[16px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#64748B]">Message preview</p>
+                            <button
+                              type="button"
+                              className="rounded-full border border-[#CBD5E1] bg-white px-3 py-1 text-[11px] font-black text-[#061426]"
+                              onClick={() => void handleCopyWhatsAppPreview()}
+                            >
+                              Copy
+                            </button>
+                          </div>
+                          <pre className="mt-2 max-h-44 overflow-y-auto whitespace-pre-wrap text-[12px] font-semibold leading-relaxed text-[#061426]">
+                            {whatsappReportPreviewText}
+                          </pre>
+                        </div>
+                      ) : null}
+                      {whatsappReportStatus ? (
+                        <p className="mt-2 text-[12px] font-bold leading-snug text-[#475569]">{whatsappReportStatus}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
                 <StandardDateRangeModal
                   open={reportsDatePickerOpen}
                   eyebrow="Reports"
