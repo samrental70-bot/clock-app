@@ -2253,9 +2253,14 @@ function payrollPeriodOptionsForRange(settings, rangeFrom, rangeTo, timeZone) {
 }
 
 function payrollBalanceBadgeClass(balance) {
+  // Balance > 0 means the employer owes the employee - a real company liability that
+  // needs action, so it gets the stronger/warmer (red) treatment. Balance < 0 means the
+  // employee owes the company - a receivable, lower urgency for the admin - so it gets
+  // the cooler amber treatment. (Swapped from the previous amber/red mapping, which had
+  // the visual urgency backwards relative to actual financial urgency.)
   const value = Number(balance) || 0;
-  if (value > 0) return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
-  if (value < 0) return "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]";
+  if (value > 0) return "border-[#FECACA] bg-[#FEF2F2] text-[#DC2626]";
+  if (value < 0) return "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]";
   return "border-[#E2E8F0] bg-[#F8FAFC] text-[#64748B]";
 }
 
@@ -19011,7 +19016,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       const rangeLabel = formatVacationRangeLabel(record, companyTimeZone);
       const reasonLabel = String(record?.vacationReason || record?.costCenter || record?.cost_centre || "Vacation").trim() || "Vacation";
       return (
-        <div key={record.id} className="rounded-[14px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-[0_8px_22px_rgba(6,20,38,0.05)]">
+        <div key={record.id} className="rounded-[16px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <p className="truncate text-[14px] font-black leading-snug text-[#061426]">{vacationEmployee || "Vacation"}</p>
@@ -19027,20 +19032,23 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     }
     const st = normalizeStatus(record.status);
     const autoTimedOut = isAutoTimedOutStatus(record.status);
+    const submittedMissingClockOut = st === "submitted" && !record.clockOut;
     const statusBadgeLabel =
       autoTimedOut
         ? AUTO_TIMED_OUT_STATUS
         : st === "active"
         ? "Active"
         : st === "submitted"
-          ? "Completed"
+          ? (submittedMissingClockOut ? "Needs review" : "Completed")
           : (String(record.status ?? "").trim() || "Submitted");
     const statusBadgeClass =
       autoTimedOut
         ? "border-[#FDE68A] bg-[#FFF7E6] text-[#D97706]"
         : st === "admin approval required"
           ? "border-red-200 bg-[#FEF2F2] text-[#DC2626]"
-          : "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]";
+          : submittedMissingClockOut
+            ? "border-[#FDE68A] bg-[#FFF7E6] text-[#9A6B12]"
+            : "border-[#BBF7D0] bg-[#ECFDF5] text-[#15803D]";
 
     const recordRowId = record.supabaseTimesheetId ?? record.id;
     const isLiveOpen = isTimesheetLiveOpenRow(record, visibleCurrentShift, now, companyTimeZone);
@@ -19050,8 +19058,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     let outDateText = "—";
     let outTimeText = "";
     let outClass = "font-black text-[#061426]";
-    let staleActiveMissingOut = false;
-    let submittedMissingClockOut = false;
     let showCloseShift = false;
 
     if (st === "active" && !record.clockOut) {
@@ -19062,16 +19068,14 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       } else {
         outDateText = "Missing clock-out";
         outClass = "font-black text-[#D97706]";
-        staleActiveMissingOut = true;
         if (isAdmin) showCloseShift = true;
       }
     } else if (st === "submitted" && record.clockOut) {
       outDateText = formatDateParts(record.clockOut, companyTimeZone).fullDate;
       outTimeText = formatTime(record.clockOut, companyTimeZone);
-    } else if (st === "submitted" && !record.clockOut) {
+    } else if (submittedMissingClockOut) {
       outDateText = "Missing clock-out";
       outClass = "font-black text-[#D97706]";
-      submittedMissingClockOut = true;
     } else if (record.clockOut) {
       outDateText = formatDateParts(record.clockOut, companyTimeZone).fullDate;
       outTimeText = formatTime(record.clockOut, companyTimeZone);
@@ -19131,11 +19135,60 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             <span className="truncate">{projectTaskLabel}</span>
           </p>
         </div>
-        <div className="shrink-0 text-right">
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
           <p className="text-[13px] font-black leading-none text-[#061426]">{timesheetAmountDisplay}</p>
-          <span className={`mt-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-black ${statusBadgeClass}`}>
-            {statusBadgeLabel}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-black ${statusBadgeClass}`}>
+              {statusBadgeLabel}
+            </span>
+            {editingRecordId !== record.id && allowEdit && canEditTimesheetRecord(record) && (
+              <button
+                type="button"
+                className="h-6 rounded-[8px] bg-transparent px-1 text-[11px] font-black text-[#061426] active:text-[#0B1F33]"
+                disabled={busyDelete || Boolean(pendingEditRequest)}
+                onClick={() => startEditRecord(record)}
+              >
+                {isAdmin ? "Edit" : "Request edit"}
+              </button>
+            )}
+            {editingRecordId !== record.id && canShowMoreMenu && (
+              <details className="relative">
+                <summary className="flex h-6 w-6 cursor-pointer list-none items-center justify-center rounded-[8px] bg-white text-[#061426] shadow-none active:bg-[#F8FAFC]" aria-label="More timesheet actions">
+                  {renderTimesheetUiIcon("more", "h-3.5 w-3.5")}
+                </summary>
+                <div className="absolute right-0 z-30 mt-1 w-44 rounded-[16px] border border-slate-200 bg-white p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
+                  {record.clockInLocation ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
+                      onClick={() => openMap(record.clockInLocation)}
+                    >
+                      Clock-in map
+                    </button>
+                  ) : null}
+                  {record.clockOutLocation ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
+                      onClick={() => openMap(record.clockOutLocation)}
+                    >
+                      Clock-out map
+                    </button>
+                  ) : null}
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
+                      disabled={busyDelete || busyClose}
+                      onClick={() => void handleDeleteTimesheetRecord(record)}
+                    >
+                      {busyDelete ? "Deleting..." : "Delete"}
+                    </button>
+                  ) : null}
+                </div>
+              </details>
+            )}
+          </div>
         </div>
       </div>
       {editingRecordId === record.id ? (
@@ -19318,12 +19371,12 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         <>
           <div className="mt-3 border-t border-[#E2E8F0] pt-3">
             <p className="text-[11px] font-black leading-tight text-[#64748B]">{inDateText}</p>
-            <div className="mt-1.5 grid grid-cols-3">
-              <div className="min-w-0 border-r border-[#E2E8F0] pr-2">
+            <div className="mt-1.5 grid grid-cols-3 gap-3">
+              <div className="min-w-0">
                 <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">In</p>
                 {inTimeText ? <p className="mt-0.5 truncate text-[12px] font-black leading-tight text-[#061426]">{inTimeText}</p> : null}
               </div>
-              <div className="min-w-0 border-r border-[#E2E8F0] px-2">
+              <div className="min-w-0">
                 <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Out</p>
                 {outTimeText ? (
                   <>
@@ -19336,23 +19389,19 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   <p className={`mt-0.5 truncate text-[11px] leading-tight ${outClass}`}>{outDateText}</p>
                 )}
               </div>
-              <div className="min-w-0 pl-2">
+              <div className="min-w-0">
                 <p className="text-[9px] font-black uppercase tracking-[0.08em] text-[#64748B]">Total</p>
-                <p className="mt-0.5 truncate text-[12px] font-black text-[#061426]">{timesheetTotalDisplay}</p>
+                <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1 text-[12px] font-black text-[#061426]">
+                  <span className="truncate">{timesheetTotalDisplay}</span>
+                  {recordBreakMinutes > 0 ? (
+                    <span className="shrink-0 rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-1.5 py-0.5 text-[9px] font-black text-[#64748B]">
+                      Break {breakTotalDurationText}
+                    </span>
+                  ) : null}
+                </p>
               </div>
             </div>
           </div>
-          {staleActiveMissingOut && (
-            <p className="mt-1 text-[13px] text-amber-700">This shift was never clocked out.</p>
-          )}
-          {submittedMissingClockOut && (
-            <p className="mt-1 text-[13px] text-amber-700">No clock-out on file for this submitted row.</p>
-          )}
-          {autoTimedOut && (
-            <p className="mt-1 text-[13px] font-semibold text-amber-700">
-              Auto clock-out applied.
-            </p>
-          )}
           <div className="mt-2 space-y-1">
             {recordBreaksList.length === 0 ? (
               <div className="flex min-w-0 items-center gap-2 rounded-[12px] border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-[11px] font-black text-[#061426]">
@@ -19401,57 +19450,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               Edit request pending supervisor approval.
             </p>
           ) : null}
-          {((allowEdit && canEditTimesheetRecord(record)) || canShowMoreMenu) && (
-            <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#E2E8F0] pt-2">
-              {allowEdit && canEditTimesheetRecord(record) && (
-                <button
-                  type="button"
-                  className="h-8 rounded-[10px] bg-transparent px-0 text-[12px] font-black text-[#061426] active:text-[#0B1F33]"
-                  disabled={busyDelete || Boolean(pendingEditRequest)}
-                  onClick={() => startEditRecord(record)}
-                >
-                  {isAdmin ? "Edit" : "Request edit"}
-                </button>
-              )}
-              {canShowMoreMenu && (
-                <details className="relative ml-auto">
-                  <summary className="flex h-8 w-10 cursor-pointer list-none items-center justify-center rounded-[10px] bg-white text-[#061426] shadow-none active:bg-[#F8FAFC]" aria-label="More timesheet actions">
-                    {renderTimesheetUiIcon("more", "h-4 w-4")}
-                  </summary>
-                  <div className="absolute right-0 z-30 mt-1 w-44 rounded-[16px] border border-slate-200 bg-white p-1.5 shadow-[0_16px_36px_rgba(15,23,42,0.16)]">
-                    {record.clockInLocation ? (
-                      <button
-                        type="button"
-                        className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
-                        onClick={() => openMap(record.clockInLocation)}
-                      >
-                        Clock-in map
-                      </button>
-                    ) : null}
-                    {record.clockOutLocation ? (
-                      <button
-                        type="button"
-                        className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-slate-700 hover:bg-slate-50"
-                        onClick={() => openMap(record.clockOutLocation)}
-                      >
-                        Clock-out map
-                      </button>
-                    ) : null}
-                    {isAdmin ? (
-                      <button
-                        type="button"
-                        className="w-full rounded-xl px-3 py-2 text-left text-[12px] font-black text-red-600 hover:bg-red-50 disabled:opacity-60"
-                        disabled={busyDelete || busyClose}
-                        onClick={() => void handleDeleteTimesheetRecord(record)}
-                      >
-                        {busyDelete ? "Deleting..." : "Delete"}
-                      </button>
-                    ) : null}
-                  </div>
-                </details>
-              )}
-            </div>
-          )}
         </>
       )}
     </div>
@@ -19466,7 +19464,21 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     const currentPayDateLabel = payrollCurrentPeriod?.payDateKey
       ? formatPayrollDateLong(payrollCurrentPeriod.payDateKey, companyTimeZone)
       : "-";
+    const currentPayDateCompactLabel = payrollCurrentPeriod?.payDateKey
+      ? formatPayrollDateKeyShort(payrollCurrentPeriod.payDateKey, companyTimeZone, { includeYear: true })
+      : "-";
+    // "Total outstanding" is the net payroll balance owed across employees (a liability/receivable
+    // figure), a distinct concept from the Timesheets tab's "Total labour" (gross wages earned over
+    // the selected date-range filter) - the two are intentionally different metrics over different
+    // windows and are labeled distinctly here so an admin does not conflate them.
+    const payrollTotalOutstandingBalance = normalizeArray(payrollEmployeeGroups).reduce(
+      (sum, group) => sum + (Number(group?.balance) || 0),
+      0
+    );
     const payrollShowEmployeeList = isAdmin && payrollEmployeeFilter === "all";
+    // Mirrors the branching in the root-view back button's onClick/aria-label below so the visible
+    // label always matches where the button will actually take the user.
+    const payrollBackLabel = payrollShowEmployeeList ? "Close" : isAdmin ? "All employees" : "Close";
     const payrollDetailEmployeeId = payrollShowEmployeeList
       ? ""
       : String(payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : payrollEmployeeOptions[0]?.id || "").trim();
@@ -19624,6 +19636,20 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             </div>
           </div>
 
+          <div className={`rounded-[20px] border p-4 ${payrollBalanceBadgeClass(period.balance)}`}>
+            <p className="flex items-center gap-1.5 text-[11px] font-black uppercase tracking-[0.08em] opacity-80">
+              Balance
+              {Number(period.balance || 0) === 0 ? (
+                <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m5 13 4 4 10-10" />
+                </svg>
+              ) : null}
+            </p>
+            <p className="mt-1 text-[28px] font-black leading-none tabular-nums">
+              {formatMoney(period.balance || 0)}
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             {renderPayrollMetricTile({
               label: "Hours",
@@ -19642,7 +19668,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             {renderPayrollMetricTile({
               label: "Paid Cash",
               value: formatMoney(period.paidAmount || 0),
-              colorClass: "bg-[#F7FEE7] text-[#65A30D]",
+              colorClass: "bg-[#EFF6FF] text-[#2563EB]",
               icon: renderTimesheetUiIcon("wallet", "h-5 w-5"),
               onClick: isAdmin
                 ? () => {
@@ -19666,7 +19692,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             {renderPayrollMetricTile({
               label: "Loans",
               value: formatPayrollSignedMoney(period.loanNetAmount || 0),
-              colorClass: "bg-[#F5F3FF] text-[#7C3AED]",
+              colorClass: "bg-[#FBF3DE] text-[#9A6B12]",
               icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
               onClick: isAdmin
                 ? () => {
@@ -19693,13 +19719,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               value: formatMoney(period.previousBalance || 0),
               colorClass: "bg-[#FFF7E6] text-[#D97706]",
               icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
-            })}
-            {renderPayrollMetricTile({
-              label: "Balance",
-              value: formatMoney(period.balance || 0),
-              colorClass: Number(period.balance || 0) >= 0 ? "bg-[#FFF7E6] text-[#D97706]" : "bg-[#FEF2F2] text-[#DC2626]",
-              icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
-              valueClass: Number(period.balance || 0) >= 0 ? "text-[#D97706]" : "text-[#DC2626]",
             })}
           </div>
 
@@ -19751,7 +19770,12 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   {detailPeriodLabel} • Pay date {payrollDetailRow.payDate ? formatPayrollDateKeyShort(payrollDetailRow.payDate, companyTimeZone, { includeYear: true }) : "—"}
                 </p>
               </div>
-              <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(payrollDetailRow.balance)}`}>
+              <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black ${payrollBalanceBadgeClass(payrollDetailRow.balance)}`}>
+                {Number(payrollDetailRow.balance || 0) === 0 ? (
+                  <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m5 13 4 4 10-10" />
+                  </svg>
+                ) : null}
                 {formatMoney(payrollDetailRow.balance)}
               </span>
             </div>
@@ -19898,7 +19922,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             <div className="flex items-start gap-3">
               <button
                 type="button"
-                className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                className="mt-0.5 flex h-10 shrink-0 items-center gap-1 rounded-full border border-[#CBD5E1] bg-white pl-2.5 pr-3.5 text-[12px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
                 onClick={() => {
                   if (payrollShowEmployeeList) {
                     setPayrollDetailRow(null);
@@ -19924,9 +19948,10 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                 }}
                 aria-label={payrollShowEmployeeList ? "Close payroll tracker" : isAdmin ? "Back to all employees" : "Close payroll tracker"}
               >
-                <svg viewBox="0 0 24 24" className="h-4.5 w-4.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m15 18-6-6 6-6" />
                 </svg>
+                <span>{payrollBackLabel}</span>
               </button>
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
@@ -19945,20 +19970,30 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           {payrollShowEmployeeList ? (
             <>
               <div className="mt-4 px-4">
-                <div className="rounded-[24px] border border-[#E2E8F0] bg-white px-4 py-4 shadow-[0_12px_30px_rgba(6,20,38,0.08)]">
+                <div className="rounded-[16px] border border-[#E2E8F0] bg-white px-4 py-3 shadow-[0_8px_22px_rgba(6,20,38,0.05)]">
                   {payrollSettingsLoading ? (
                     <p className="text-[13px] font-semibold text-[#64748B]">Loading payroll settings...</p>
                   ) : payrollSettings ? (
-                    <div className="flex items-center gap-4">
-                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#2563EB]">
-                        {renderTimesheetUiIcon("calendar", "h-6 w-6")}
+                    <>
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EEF4FF] text-[#2563EB]">
+                          {renderTimesheetUiIcon("calendar", "h-4 w-4")}
+                        </span>
+                        <p className="min-w-0 flex-1 truncate text-[13px] font-black leading-tight text-[#061426]">
+                          {currentPayrollPeriodLabel}
+                        </p>
+                        <p className="shrink-0 text-right text-[11px] font-semibold leading-tight text-[#64748B]">
+                          Pay day<br />
+                          <span className="text-[12px] font-black text-[#061426]">{currentPayDateCompactLabel}</span>
+                        </p>
                       </div>
-                      <div className="min-w-0">
-                        <p className="text-[10px] font-black uppercase tracking-[0.08em] text-[#94A3B8]">Current payroll period</p>
-                        <p className="mt-1 text-[16px] font-black leading-tight text-[#061426]">{currentPayrollPeriodLabel}</p>
-                        <p className="mt-1 text-[13px] font-semibold text-[#64748B]">Pay date: {currentPayDateLabel}</p>
+                      <div className="mt-2 flex items-center justify-between gap-2 border-t border-[#E2E8F0] pt-2">
+                        <span className="text-[10px] font-black uppercase tracking-[0.06em] text-[#64748B]">Total outstanding</span>
+                        <span className="text-[15px] font-black tabular-nums text-[#061426]">
+                          {formatMoney(payrollTotalOutstandingBalance)}
+                        </span>
                       </div>
-                    </div>
+                    </>
                   ) : (
                     <div className="space-y-2">
                       <p className="text-[13px] font-semibold leading-snug text-[#64748B]">
@@ -19985,60 +20020,47 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               </div>
 
               <div className="mt-4 px-4">
-                <div className="grid grid-cols-[1.12fr_1.12fr_0.68fr] gap-2">
-                  {PAYROLL_RANGE_OPTIONS.map((option) => {
-                    const active = payrollRangePreset === option.id;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={`min-w-0 rounded-full border px-2 py-3 text-[12px] font-black leading-tight transition ${
-                          active
-                            ? "border-[#061426] bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)]"
-                            : "border-[#E2E8F0] bg-white text-[#64748B] shadow-[0_4px_12px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
-                        }`}
-                        onClick={() => setPayrollRangePreset(option.id)}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-4 px-4">
-                {renderRoyalNavyFilterSelect({
-                  label: "Payroll period",
-                  icon: "calendar",
-                  value: payrollPeriodFilter,
-                  onChange: (event) => setPayrollPeriodFilter(event.target.value),
-                  children: (
-                    <>
+                <div className="flex items-center gap-2">
+                  <div className="grid min-w-0 flex-1 grid-cols-3 gap-2">
+                    {PAYROLL_RANGE_OPTIONS.map((option) => {
+                      const active = payrollRangePreset === option.id;
+                      return (
+                        <button
+                          key={option.id}
+                          type="button"
+                          className={`min-w-0 rounded-full border px-2 py-3 text-[12px] font-black leading-tight transition ${
+                            active
+                              ? "border-[#061426] bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.16)]"
+                              : "border-[#E2E8F0] bg-white text-[#64748B] shadow-[0_4px_12px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
+                          }`}
+                          onClick={() => setPayrollRangePreset(option.id)}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <label className="relative block h-11 w-11 shrink-0" aria-label="Filter by payroll period">
+                    <select
+                      className="absolute inset-0 h-11 w-11 cursor-pointer appearance-none opacity-0"
+                      value={payrollPeriodFilter}
+                      onChange={(event) => setPayrollPeriodFilter(event.target.value)}
+                    >
                       <option value="all">All periods</option>
                       {payrollPeriodOptions.map((period) => (
                         <option key={period.id} value={period.id}>
                           {period.label}
                         </option>
                       ))}
-                    </>
-                  ),
-                })}
-                {renderRoyalNavyFilterSelect({
-                  label: "Employee",
-                  icon: "user",
-                  value: payrollEmployeeFilter,
-                  onChange: (event) => setPayrollEmployeeFilter(event.target.value),
-                  children: (
-                    <>
-                      <option value="all">All employees</option>
-                      {payrollEmployeeOptions.map((employee) => (
-                        <option key={employee.id} value={employee.id}>
-                          {employee.name}
-                        </option>
-                      ))}
-                    </>
-                  ),
-                })}
+                    </select>
+                    <span className="pointer-events-none flex h-11 w-11 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[#061426] shadow-[0_4px_12px_rgba(6,20,38,0.04)]">
+                      {renderTimesheetUiIcon("calendar", "h-4 w-4")}
+                    </span>
+                    {payrollPeriodFilter !== "all" ? (
+                      <span className="pointer-events-none absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[#C9A227] ring-2 ring-[#F4F7FB]" />
+                    ) : null}
+                  </label>
+                </div>
               </div>
             </>
           ) : null}
@@ -20104,19 +20126,20 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                       {group.periods.length} period{group.periods.length === 1 ? "" : "s"} · {formatHoursMinutes(group.workedMinutes)} worked · {formatMoney(group.workedAmount)} earned
                                     </p>
                                   </div>
-                                  <span className={`shrink-0 rounded-full border px-3 py-1 text-[12px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
+                                  <span className={`shrink-0 inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12px] font-black ${payrollBalanceBadgeClass(group.balance)}`}>
+                                    {Number(group.balance || 0) === 0 ? (
+                                      <svg viewBox="0 0 24 24" className="h-3 w-3" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="m5 13 4 4 10-10" />
+                                      </svg>
+                                    ) : null}
                                     {formatMoney(group.balance)}
                                   </span>
                                 </div>
-                                <div className="mt-2 flex items-start justify-between gap-3">
-                                  <p className="text-[12px] font-semibold leading-snug text-[#64748B]">
-                                    Previous balance {formatMoney(group.previousBalance)} | Loans -{formatPayrollAbsoluteMoney(group.loanGivenAmount)} +{formatPayrollAbsoluteMoney(group.loanReturnedAmount)}
-                                  </p>
-                                  <span className="shrink-0 text-[#94A3B8]">
-                                    <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                      <path d="m9 6 6 6-6 6" />
-                                    </svg>
-                                  </span>
+                                <div className="mt-1.5 flex items-center justify-end gap-1 text-[11px] font-black text-[#94A3B8]">
+                                  <span>Details</span>
+                                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m9 6 6 6-6 6" />
+                                  </svg>
                                 </div>
                               </div>
                             </div>
@@ -22171,6 +22194,12 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     timesheetTaskFilter === "all"
       ? "All Tasks"
       : timesheetTaskOptions.find((task) => String(task.id) === String(timesheetTaskFilter))?.name || "Selected Task";
+  const timesheetActiveFilterChips = [
+    !isEmployeeRole && timesheetEmployeeFilter !== "all" ? { key: "employee", label: timesheetEmployeeFilterLabel } : null,
+    timesheetProjectFilter !== "all" ? { key: "project", label: timesheetProjectFilterLabel } : null,
+    timesheetTaskFilter !== "all" ? { key: "task", label: timesheetTaskFilterLabel } : null,
+    timesheetCompletedOnly ? { key: "completed", label: "Completed only" } : null,
+  ].filter(Boolean);
 
   const reportsTotalEntries = Array.isArray(reportsRowsFilteredForUi)
     ? reportsRowsFilteredForUi.length
@@ -24261,10 +24290,22 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       <span className="block truncate text-[14px] font-black leading-tight text-[#061426]">
                         {timesheetDateRangeLabel}
                       </span>
-                      <span className="mt-1 block truncate text-[12px] font-semibold text-[#64748B]">
-                        {timesheetEmployeeFilterLabel} &bull; {timesheetProjectFilterLabel} &bull; {timesheetTaskFilterLabel}
-                        {timesheetCompletedOnly ? " &bull; Completed only" : ""}
-                      </span>
+                      {timesheetActiveFilterChips.length > 0 ? (
+                        <span className="mt-1.5 flex flex-wrap gap-1">
+                          {timesheetActiveFilterChips.map((chip) => (
+                            <span
+                              key={chip.key}
+                              className="inline-flex max-w-[9.5rem] items-center truncate rounded-full border border-[#E2E8F0] bg-[#F8FAFC] px-2 py-0.5 text-[10px] font-black text-[#475569]"
+                            >
+                              {chip.label}
+                            </span>
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="mt-1 block truncate text-[12px] font-semibold text-[#64748B]">
+                          {isEmployeeRole ? timesheetEmployeeFilterLabel : "All Employees"} &bull; All Projects &bull; All Tasks
+                        </span>
+                      )}
                     </span>
                   </span>
                   <span className="shrink-0 text-[#061426]">
@@ -24289,48 +24330,73 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                    onClick={() => void handleShareTimesheetReport()}
-                  >
-                    <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
-                    Share report
-                  </button>
-                  {isAdmin ? (
-                  <button
-                    type="button"
-                    className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
-                    onClick={() => {
-                      setPayrollEmployeeFilter("all");
-                      setPayrollPanelOpen(true);
-                    }}
-                  >
-                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
-                      <span className="truncate">Payroll</span>
-                    </button>
-                  ) : (
+                {isAdmin ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                        onClick={() => void handleShareTimesheetReport()}
+                      >
+                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
+                        Share report
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                        onClick={openVacationForm}
+                      >
+                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                        <span className="truncate">Add vacation</span>
+                      </button>
+                    </div>
                     <button
                       type="button"
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                      onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
+                      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-[10px] px-3 text-[12px] font-black text-[#061426] active:text-[#0B1F33]"
+                      onClick={() => {
+                        setPayrollEmployeeFilter("all");
+                        setPayrollPanelOpen(true);
+                      }}
                     >
-                      <span className="text-[#C9A227]">
-                        {renderTimesheetUiIcon("plus", "h-4 w-4")}
-                      </span>
-                      <span className="truncate">{manualTimeOpen ? "Close manual time" : "Add manual time"}</span>
+                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
+                      <span>Open payroll</span>
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m9 6 6 6-6 6" />
+                      </svg>
                     </button>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                  onClick={openVacationForm}
-                >
-                  <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
-                  <span className="truncate">Add vacation</span>
-                </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                      onClick={() => void handleShareTimesheetReport()}
+                    >
+                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
+                      Share report
+                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                        onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
+                      >
+                        <span className="text-[#C9A227]">
+                          {renderTimesheetUiIcon("plus", "h-4 w-4")}
+                        </span>
+                        <span className="truncate">{manualTimeOpen ? "Close manual time" : "Add manual time"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                        onClick={openVacationForm}
+                      >
+                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                        <span className="truncate">Add vacation</span>
+                      </button>
+                    </div>
+                  </>
+                )}
                 {manualTimeOpen && !isAdmin ? (
                   <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
                     <p className="text-[15px] font-black text-slate-950">Manual time request</p>
@@ -24484,16 +24550,16 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                             <button
                               key={issue.id}
                               type="button"
-                              className={`w-full rounded-[14px] border px-3 py-2 text-left transition active:scale-[0.99] ${
+                              className={`w-full rounded-[14px] border border-l-[3px] px-3 py-2 text-left transition active:scale-[0.99] ${
                                 timesheetSanityHighlightedIssueId === issue.id
                                   ? "ring-2 ring-[#C9A227] ring-offset-2 ring-offset-[#F4F7FB]"
                                   : ""
                               } ${
                                 issue.severity === "danger"
-                                  ? "border-[#FECACA] bg-[#FEF2F2]"
+                                  ? "border-[#FECACA] border-l-[#DC2626] bg-[#FEF2F2]"
                                   : issue.severity === "warning"
-                                    ? "border-[#FDE68A] bg-[#FFF7E6]"
-                                    : "border-[#BFDBFE] bg-[#EFF6FF]"
+                                    ? "border-[#FDE68A] border-l-[#D97706] bg-[#FFF7E6]"
+                                    : "border-[#BFDBFE] border-l-[#2563EB] bg-[#EFF6FF]"
                               }`}
                               onClick={() => focusTimesheetRecord(targetRecordId, issue.id)}
                             >
@@ -24515,12 +24581,26 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                         {timesheetSanityChecks.length > 5 ? (
                           <button
                             type="button"
-                            className="h-9 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[12px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-[10px] px-3 text-[12px] font-black text-[#64748B] active:bg-[#F8FAFC]"
                             onClick={() => setTimesheetSanityExpanded((value) => !value)}
                           >
+                            <svg
+                              viewBox="0 0 24 24"
+                              className={`h-3.5 w-3.5 transition-transform ${timesheetSanityExpanded ? "rotate-180" : ""}`}
+                              aria-hidden="true"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2.4"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="m6 9 6 6 6-6" />
+                            </svg>
                             {timesheetSanityExpanded
                               ? "Show fewer"
-                              : `Show all ${timesheetSanityChecks.length} issues`}
+                              : `${timesheetSanityChecks.length - visibleTimesheetSanityIssues.length} more ${
+                                  timesheetSanityChecks.length - visibleTimesheetSanityIssues.length === 1 ? "issue" : "issues"
+                                }`}
                           </button>
                         ) : null}
                       </div>
