@@ -89,6 +89,19 @@ textarea {
   -webkit-text-size-adjust: 100%;
 }
 
+/* iOS Safari auto-zooms the whole page when a focused input/select/textarea
+   has a font-size under 16px (the payroll amount fields at 15px triggered
+   this). Enforce a 16px floor on touch devices so typing never zooms the
+   screen; desktop keeps the designed sizes. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
 .opera-hide-scrollbar {
   scrollbar-width: none;
   -ms-overflow-style: none;
