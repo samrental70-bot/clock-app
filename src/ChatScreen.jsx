@@ -1076,6 +1076,18 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     requestAnimationFrame(() => scrollChatThreadToBottom(chatTimelineRows.length > 1 ? "smooth" : "auto"));
   }, [chatPane, chatTimelineRows.length, scrollChatThreadToBottom]);
 
+  // Opening a conversation must always land on the newest message. The effect
+  // above skips scrolling when the thread starts scrolled up (its distance
+  // guard exists so an incoming message doesn't yank a user reading history),
+  // but on first open that guard wrongly left the view at the top. Force a
+  // jump to the bottom whenever the selected conversation changes.
+  useEffect(() => {
+    if (chatPane !== "thread" || !selectedConversationId) return;
+    requestAnimationFrame(() => scrollChatThreadToBottom("auto"));
+    const timer = window.setTimeout(() => scrollChatThreadToBottom("auto"), 120);
+    return () => window.clearTimeout(timer);
+  }, [chatPane, selectedConversationId, scrollChatThreadToBottom]);
+
   useEffect(() => {
     if (!selectedChatListId || chatPane !== "list-detail") return;
     requestAnimationFrame(() => {
@@ -1239,6 +1251,12 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     setChatReplyTarget(null);
     setSending(true);
     setError("");
+    // Always jump to the newest message after sending, even if the user had
+    // scrolled up, so their just-sent message is on screen. Fire again shortly
+    // after to catch the height change when the silent reload swaps the
+    // optimistic row for the delivered one.
+    requestAnimationFrame(() => scrollChatThreadToBottom("smooth"));
+    window.setTimeout(() => scrollChatThreadToBottom("smooth"), 250);
     try {
       const data = await chatFetch("/api/chat", {
         method: "POST",
@@ -3048,6 +3066,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                     type="button"
                     className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.24)] active:bg-[#0B1F33] disabled:bg-[#CBD5E1]"
                     disabled={selectedConversation.pendingSetup || !hasDraftMessage}
+                    // Prevent the tap from blurring the message box: on mobile,
+                    // losing focus dismisses the keyboard. Keeping focus here
+                    // lets the user keep typing after sending; the keyboard
+                    // only closes when they dismiss it (tap outside / done).
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={() => void sendChatMessage()}
                     aria-label="Send message"
                   >
