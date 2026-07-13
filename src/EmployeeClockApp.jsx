@@ -4401,6 +4401,9 @@ export default function EmployeeClockApp() {
   );
   // Session-only dismissal for the "Turn on notifications" prompt banner.
   const [notifPromptDismissed, setNotifPromptDismissed] = useState(false);
+  // One-shot popup shown right after a clock-in when notifications aren't on yet.
+  // Reappears on every clock-in until permission is granted, then never again.
+  const [clockInNotifPromptOpen, setClockInNotifPromptOpen] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editClockInDate, setEditClockInDate] = useState("");
   const [editClockInTime, setEditClockInTime] = useState("");
@@ -13149,6 +13152,15 @@ export default function EmployeeClockApp() {
     setWatchId(id);
   }
 
+  // Show the "turn on notifications" popup after a clock-in, but only while the
+  // user hasn't granted permission yet. Once granted it never shows again.
+  const maybeOfferClockInNotifications = () => {
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (Notification.permission === "granted") return;
+    setClockInNotifPromptOpen(true);
+  };
+
 const handleClockIn = async () => {
     if (isProfileArchived) {
       setLocationStatus("Your account is archived. Please contact your supervisor.");
@@ -13353,6 +13365,7 @@ const handleClockIn = async () => {
 
         setCurrentShift({ ...newShift, supabaseTimesheetId: legacyData?.[0]?.id || null });
         setLocationStatus("");
+        maybeOfferClockInNotifications();
         void updateLiveLocationOnce({
           status: "clocked_in",
           projectName: clockSelectedProject.name,
@@ -13386,6 +13399,7 @@ const handleClockIn = async () => {
 
   setCurrentShift({ ...newShift, supabaseTimesheetId: data?.[0]?.id || null });
     setLocationStatus("");
+    maybeOfferClockInNotifications();
     void updateLiveLocationOnce({
       status: "clocked_in",
       projectName: clockSelectedProject.name,
@@ -23888,6 +23902,59 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               </Card>
             );
           })()}
+
+          {clockInNotifPromptOpen ? (() => {
+            const isiPhone =
+              typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(String(navigator.userAgent || ""));
+            const needsInstallFirst = isiPhone && !isInstalled;
+            return (
+              <div className="fixed inset-0 z-[95] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-4 pt-10" role="dialog" aria-modal="true">
+                <div className="w-full max-w-[420px] rounded-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[22px]" aria-hidden="true">🔔</span>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-[17px] font-black text-slate-950">Turn on notifications</h3>
+                      <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-600">
+                        {needsInstallFirst
+                          ? "On iPhone: tap Share → Add to Home Screen, open the installed app, then turn on notifications so you get chat and clock alerts with sound even when the app is closed."
+                          : "Get chat messages and clock-in alerts with sound even when the app is closed. You'll only be asked until you turn it on."}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                      onClick={() => setClockInNotifPromptOpen(false)}
+                    >
+                      Not now
+                    </button>
+                    {!needsInstallFirst ? (
+                      <button
+                        type="button"
+                        className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white"
+                        onClick={() => {
+                          setClockInNotifPromptOpen(false);
+                          if (isAdmin) void handleEnableBackgroundPush();
+                          else void handleEmployeeRequestNotificationPermission();
+                        }}
+                      >
+                        Turn on
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white"
+                        onClick={() => setClockInNotifPromptOpen(false)}
+                      >
+                        Got it
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })() : null}
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
             <div className="space-y-3">
