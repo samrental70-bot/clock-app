@@ -453,7 +453,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (action === "receipt_ocr" || action === "photo_tags") {
+    if (action === "receipt_ocr" || action === "photo_tags" || action === "receipt_autoread") {
       const mediaId = normalizeText(body.mediaId || body.media_id);
       if (!mediaId) {
         sendApiError(res, 400, "validation_failed", "mediaId is required");
@@ -471,6 +471,63 @@ export default async function handler(req, res) {
       }
       if (!callerIsAdmin && String(row.user_id) !== String(caller.id)) {
         sendApiError(res, 403, "forbidden_media", "Not allowed");
+        return;
+      }
+      // receipt_autoread: the background read triggered when a team member
+      // sends a receipt. Runs the same OpenAI receipt read, but PERSISTS the
+      // extracted fields + AI-review status to project_media server-side, so
+      // the manager sees the result (and the AI-reviewed tick) even if the
+      // sender closed the app immediately.
+      if (action === "receipt_autoread") {
+        const aiResult = await callOpenAi({ action: "receipt_ocr", mediaRow: row });
+        const nowIso = new Date().toISOString();
+        const patch = { ai_processed_at: nowIso };
+        if (aiResult?.ok && aiResult.json) {
+          const j = aiResult.json;
+          patch.ai_extracted_json = j.raw_extracted_json || j;
+          patch.ai_review_status = "confirmed";
+          patch.ai_confidence = normalizeNumberOrNull(j.confidence);
+          patch.ai_error = null;
+          patch.receipt_ocr_status = "reviewed";
+          patch.receipt_ocr_confidence = normalizeNumberOrNull(j.confidence);
+          patch.receipt_source = "ocr_auto";
+          if (j.supplier != null) patch.receipt_supplier = j.supplier;
+          if (j.receipt_date != null) patch.receipt_date = j.receipt_date;
+          if (j.total_amount != null) {
+            patch.receipt_total = j.total_amount;
+            patch.amount = j.total_amount;
+          }
+          if (j.subtotal != null) patch.receipt_subtotal = j.subtotal;
+          if (j.hst != null) patch.receipt_hst = j.hst;
+          if (j.currency != null) patch.receipt_currency = j.currency;
+          if (j.material_category != null) patch.receipt_material_category = j.material_category;
+          if (j.material_type != null) patch.receipt_material_type = j.material_type;
+        } else {
+          patch.ai_review_status = "failed";
+          patch.ai_error = normalizeText(aiResult?.message) || "Receipt could not be read automatically.";
+          patch.receipt_ocr_status = "failed";
+        }
+        // Tolerate projects that haven't applied the newer receipt columns yet:
+        // retry with only the always-present ai_* fields if the full patch fails.
+        let updateError = null;
+        ({ error: updateError } = await supabase.from("project_media").update(patch).eq("id", mediaId));
+        if (updateError) {
+          const minimal = {
+            ai_extracted_json: patch.ai_extracted_json ?? null,
+            ai_review_status: patch.ai_review_status,
+            ai_processed_at: patch.ai_processed_at,
+            ai_error: patch.ai_error ?? null,
+          };
+          await supabase.from("project_media").update(minimal).eq("id", mediaId);
+        }
+        sendJson(res, 200, {
+          ok: Boolean(aiResult?.ok),
+          action,
+          configured: Boolean(aiResult?.configured),
+          reviewStatus: patch.ai_review_status,
+          message: aiResult?.message || "",
+          json: aiResult?.json || null,
+        });
         return;
       }
       const result = await callOpenAi({ action, mediaRow: row });

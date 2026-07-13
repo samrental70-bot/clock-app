@@ -4442,6 +4442,11 @@ export default function EmployeeClockApp() {
   const [receiptSaving, setReceiptSaving] = useState(false);
   const [receiptOcrReview, setReceiptOcrReview] = useState(null);
   const [receiptReviewSaving, setReceiptReviewSaving] = useState(false);
+  // After snapping a receipt: preview the photo with a Send button. Sending
+  // saves it and kicks off the background AI read (no blocking OCR panel).
+  const [receiptSendPreview, setReceiptSendPreview] = useState(null); // { file, previewUrl }
+  const [receiptSending, setReceiptSending] = useState(false);
+  const [receiptReviewActionId, setReceiptReviewActionId] = useState("");
   const [materialPaymentOpen, setMaterialPaymentOpen] = useState(false);
   const [materialPaymentStep, setMaterialPaymentStep] = useState("form");
   const [materialPaymentCountdown, setMaterialPaymentCountdown] = useState(10);
@@ -14489,8 +14494,8 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         payment_flow_started_at: materialPayment?.payment_flow_started_at || materialPayment?.paymentFlowStartedAt || null,
         receiptUploadedAt: capturedAt,
         receipt_uploaded_at: capturedAt,
-        status: "Receipt Uploaded",
-        receiptStatus: "Receipt Uploaded",
+        status: details.receiptStatus || "Receipt Uploaded",
+        receiptStatus: details.receiptStatus || "Receipt Uploaded",
         location: mediaContext.liveLocation || mediaContext.clockInLocation || null,
         dataUrl: receiptUrl,
         imageUrl: receiptUrl,
@@ -14563,37 +14568,73 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     }
   };
 
-  const uploadReceiptForOcrReview = async (file) => {
-    if (!file || receiptSaving) return;
-    const pendingPayment = materialPaymentPendingRef.current;
-    setReceiptSaving(true);
-    const saved = await saveReceiptFile(file, {
-      amount: pendingPayment?.amount ?? "",
-      category: pendingPayment?.supplier || "Receipt",
-      supplier: pendingPayment?.supplier || "",
-      materialPayment: pendingPayment,
+  // Snapping a receipt no longer uploads + opens a blocking OCR panel. It shows
+  // the photo with a Send button; sending saves the receipt and fires the AI
+  // read in the background so the field crew isn't held up.
+  const openReceiptSendPreview = (file) => {
+    if (!file) return;
+    setReceiptSendPreview((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return { file, previewUrl: URL.createObjectURL(file) };
     });
-    setReceiptSaving(false);
+    stopPhotoCamera();
+  };
+
+  const cancelReceiptSendPreview = () => {
+    setReceiptSendPreview((prev) => {
+      if (prev?.previewUrl) URL.revokeObjectURL(prev.previewUrl);
+      return null;
+    });
+  };
+
+  const submitReceiptForReview = async () => {
+    const preview = receiptSendPreview;
+    if (!preview?.file || receiptSending) return;
+    const pendingPayment = materialPaymentPendingRef.current;
+    setReceiptSending(true);
+    let saved;
+    try {
+      saved = await saveReceiptFile(preview.file, {
+        amount: pendingPayment?.amount ?? "",
+        category: pendingPayment?.supplier || "Receipt",
+        supplier: pendingPayment?.supplier || "",
+        materialPayment: pendingPayment,
+        receiptStatus: "Submitted",
+      });
+    } finally {
+      setReceiptSending(false);
+    }
+    cancelReceiptSendPreview();
     if (saved) {
-      stopPhotoCamera();
-      void startReceiptOcrReview(saved);
+      setPhotoStatus("Receipt sent for review.");
+      schedulePhotoStatusClear("Receipt sent for review.", 5000);
+      // Fire-and-forget background AI read: the server reads the receipt and
+      // persists the extracted details + AI-reviewed status to project_media.
+      const mediaId = saved?.dbId;
+      if (mediaId && userCompany?.id) {
+        void fetchAuthedApiJson("/api/ai-field-docs", {
+          method: "POST",
+          body: JSON.stringify({ action: "receipt_autoread", companyId: userCompany.id, mediaId }),
+        })
+          .then(() => {
+            // Pull the persisted AI fields into the local list once ready.
+            void loadProjectMediaFromSupabase({ silent: true });
+          })
+          .catch(() => {});
+      }
     }
   };
 
-  const handleReceiptCapture = async (event) => {
+  const handleReceiptCapture = (event) => {
     const file = event.target.files?.[0];
-    try {
-      await uploadReceiptForOcrReview(file);
-    } finally {
-      event.target.value = "";
-    }
+    if (file) openReceiptSendPreview(file);
+    event.target.value = "";
   };
 
   const captureReceiptFromCamera = async () => {
-    let file;
     try {
-      file = await captureCameraFrameFile("receipt");
-      await uploadReceiptForOcrReview(file);
+      const file = await captureCameraFrameFile("receipt");
+      openReceiptSendPreview(file);
     } catch (err) {
       console.warn("Receipt capture failed:", err);
       setPhotoStatus(getErrorMessage(err));
@@ -16171,6 +16212,62 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     const review = receiptOcrReview;
     if (!review?.item || review.loading || receiptReviewSaving) return;
     void startReceiptOcrReview(review.item);
+  };
+
+  // --- Manager receipt review: approve / edit / reject ---
+  const patchLocalReceipt = useCallback((mediaId, patch) => {
+    setProjectReceipts((prev) => {
+      const next = {};
+      for (const [folder, items] of Object.entries(prev || {})) {
+        next[folder] = normalizeArray(items).map((r) =>
+          String(r?.dbId ?? r?.id) === String(mediaId) ? { ...r, ...patch } : r
+        );
+      }
+      return next;
+    });
+  }, []);
+
+  const setReceiptDecision = async (receipt, decision) => {
+    const mediaId = receipt?.dbId || receipt?.id;
+    if (!isAdmin || !mediaId || !userCompany?.id || !authUser?.id) return;
+    const nextStatus = decision === "approve" ? "Approved" : "Rejected";
+    setReceiptReviewActionId(String(mediaId));
+    try {
+      const nowIso = new Date().toISOString();
+      const fullPatch = {
+        receipt_status: nextStatus,
+        receipt_reviewed_by: authUser.id,
+        receipt_reviewed_at: nowIso,
+      };
+      let { error } = await supabase.from("project_media").update(fullPatch).eq("id", mediaId);
+      if (error) {
+        // Older schema without reviewed_by/at columns: fall back to status only.
+        ({ error } = await supabase.from("project_media").update({ receipt_status: nextStatus }).eq("id", mediaId));
+      }
+      if (error) throw error;
+      patchLocalReceipt(mediaId, {
+        status: nextStatus,
+        receiptStatus: nextStatus,
+        receipt_status: nextStatus,
+        receiptReviewedAt: nowIso,
+        receipt_reviewed_at: nowIso,
+        receiptReviewedBy: authUser.id,
+        receipt_reviewed_by: authUser.id,
+      });
+      setPhotoStatus(decision === "approve" ? "Receipt approved." : "Receipt rejected.");
+      schedulePhotoStatusClear(decision === "approve" ? "Receipt approved." : "Receipt rejected.", 4000);
+    } catch (err) {
+      setPhotoStatus(getErrorMessage(err));
+    } finally {
+      setReceiptReviewActionId("");
+    }
+  };
+
+  const openReceiptEditReview = (receipt) => {
+    if (!isAdmin) return;
+    const extracted = receipt?.aiExtractedJson || receipt?.ai_extracted_json || {};
+    const draft = buildReceiptOcrReviewDraft(receipt, extracted, { source: "manual", loading: false });
+    setReceiptOcrReview({ ...draft, loading: false });
   };
 
   const saveReceiptOcrReview = async (event) => {
@@ -25493,6 +25590,13 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                             const receiptDateTime = receipt.capturedAt || receipt.captured_at || receipt.receiptUploadedAt || receipt.receipt_uploaded_at || receipt.timestamp;
                             const receiptStatus = receipt.status || receipt.receiptStatus || receipt.receipt_status || "";
                             const receiptStatusLabel = humanizeReceiptStatus(receiptStatus);
+                            const receiptMediaId = receipt.dbId || receipt.id;
+                            const receiptAiReviewed = String(receipt.aiReviewStatus || receipt.ai_review_status || "").toLowerCase() === "confirmed";
+                            const receiptAiFailed = String(receipt.aiReviewStatus || receipt.ai_review_status || "").toLowerCase() === "failed";
+                            const receiptDecision = String(receiptStatus).toLowerCase();
+                            const receiptApproved = receiptDecision === "approved";
+                            const receiptRejected = receiptDecision === "rejected";
+                            const receiptActioning = receiptReviewActionId === String(receiptMediaId);
                             const receiptProject = mediaItemProjectName(receipt) || projectLabel;
                             const receiptDisplayTotal =
                               receiptMoneyNumber(receipt.receiptTotal ?? receipt.receipt_total ?? receipt.total_amount ?? receipt.amount) ?? 0;
@@ -25538,11 +25642,35 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                       <p className="mt-0.5 truncate">Uploaded {formatDate(receiptDateTime, companyTimeZone)} · {formatTime(receiptDateTime, companyTimeZone)}</p>
                                     ) : null}
                                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                                      {receiptStatusLabel ? (
+                                      {receiptApproved ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-black tracking-wide text-[#15803D] ring-1 ring-[#BBF7D0]">
+                                          ✓ Approved
+                                        </span>
+                                      ) : receiptRejected ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-[#FEF2F2] px-2 py-0.5 text-[10px] font-black tracking-wide text-[#DC2626] ring-1 ring-[#FECACA]">
+                                          Rejected
+                                        </span>
+                                      ) : receiptStatusLabel ? (
                                         <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black capitalize tracking-wide text-slate-700 ring-1 ring-slate-200">
                                           {receiptStatusLabel}
                                         </span>
                                       ) : null}
+                                      {receiptAiReviewed ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-[#EFF6FF] px-2 py-0.5 text-[10px] font-black tracking-wide text-[#2563EB] ring-1 ring-[#BFDBFE]" title="Read and reviewed by AI">
+                                          <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                            <path d="m5 12.5 4.5 4.5L19 7" />
+                                          </svg>
+                                          AI reviewed
+                                        </span>
+                                      ) : receiptAiFailed ? (
+                                        <span className="inline-flex rounded-full bg-[#FFF7E6] px-2 py-0.5 text-[10px] font-black tracking-wide text-[#9A6B12] ring-1 ring-[#FDE68A]" title="AI could not read this receipt">
+                                          AI: review manually
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex rounded-full bg-white px-2 py-0.5 text-[10px] font-black tracking-wide text-slate-400 ring-1 ring-slate-200" title="Not yet read by AI">
+                                          Not AI-reviewed
+                                        </span>
+                                      )}
                                       {receipt.location ? (
                                         <button
                                           type="button"
@@ -25552,17 +25680,35 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                           Map
                                         </button>
                                       ) : null}
-                                      {isAdmin ? (
+                                    </div>
+                                    {isAdmin ? (
+                                      <div className="mt-2 grid grid-cols-3 gap-1.5">
                                         <button
                                           type="button"
-                                          className="rounded-full border border-amber-200 bg-white px-2 py-1 text-[10px] font-black text-amber-700 disabled:opacity-50"
-                                          onClick={() => void startReceiptOcrReview(receipt)}
-                                          disabled={Boolean(fieldAiWorkingKey)}
+                                          className="rounded-xl border border-[#BBF7D0] bg-[#ECFDF5] py-2 text-[11px] font-black text-[#15803D] active:bg-[#DCFCE7] disabled:opacity-50"
+                                          onClick={() => void setReceiptDecision(receipt, "approve")}
+                                          disabled={receiptActioning || receiptApproved}
                                         >
-                                          AI read
+                                          {receiptActioning ? "…" : receiptApproved ? "Approved" : "Approve"}
                                         </button>
-                                      ) : null}
-                                    </div>
+                                        <button
+                                          type="button"
+                                          className="rounded-xl border border-slate-300 bg-white py-2 text-[11px] font-black text-slate-900 active:bg-slate-50 disabled:opacity-50"
+                                          onClick={() => openReceiptEditReview(receipt)}
+                                          disabled={receiptActioning}
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="rounded-xl border border-[#FECACA] bg-[#FEF2F2] py-2 text-[11px] font-black text-[#DC2626] active:bg-[#FEE2E2] disabled:opacity-50"
+                                          onClick={() => void setReceiptDecision(receipt, "reject")}
+                                          disabled={receiptActioning || receiptRejected}
+                                        >
+                                          {receiptRejected ? "Rejected" : "Reject"}
+                                        </button>
+                                      </div>
+                                    ) : null}
                                   </div>
                                 </div>
                               </div>
@@ -32629,6 +32775,50 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           </div>
         )}
 
+        {receiptSendPreview ? (
+          <div className="fixed inset-0 z-[76] flex items-center justify-center bg-[#0B1F33]/70 p-4" role="dialog" aria-modal="true">
+            <div className="flex max-h-[92dvh] w-full max-w-md flex-col overflow-hidden rounded-[24px] bg-white shadow-2xl">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4">
+                <div className="min-w-0">
+                  <p className="text-[20px] font-black leading-tight text-[#061426]">Send receipt</p>
+                  <p className="mt-0.5 text-[13px] font-semibold text-slate-500">
+                    We&rsquo;ll read the details automatically after you send it.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-full border border-slate-200 px-3 py-1.5 text-[13px] font-black text-slate-600"
+                  onClick={cancelReceiptSendPreview}
+                  disabled={receiptSending}
+                  aria-label="Cancel"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto bg-[#0B1F33] p-3">
+                <img src={receiptSendPreview.previewUrl} alt="Receipt preview" className="mx-auto max-h-[56dvh] w-full rounded-[16px] object-contain" />
+              </div>
+              <div className="grid grid-cols-2 gap-2 border-t border-slate-100 p-3">
+                <button
+                  type="button"
+                  className="rounded-2xl border border-slate-300 bg-white py-3 text-[15px] font-black text-slate-900 disabled:opacity-60"
+                  onClick={cancelReceiptSendPreview}
+                  disabled={receiptSending}
+                >
+                  Retake
+                </button>
+                <button
+                  type="button"
+                  className="rounded-2xl bg-[#061426] py-3 text-[15px] font-black text-white disabled:bg-slate-300"
+                  onClick={() => void submitReceiptForReview()}
+                  disabled={receiptSending}
+                >
+                  {receiptSending ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
         {receiptOcrReview && (() => {
           const reviewProjectOptions = (isAdmin ? effectiveProjects : clockSelectableProjects).filter((p) => p?.id != null);
           const reviewProject =
