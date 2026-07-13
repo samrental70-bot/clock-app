@@ -135,6 +135,14 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const [hdAisleDraft, setHdAisleDraft] = useState("");
   const [hdLearnBusy, setHdLearnBusy] = useState(false);
   const hdClassifyGuardRef = useRef("");
+  // Shared product catalog (learned exact names + prices) for autocomplete and
+  // the gallery product picker. Loaded per company when a Home Depot list opens.
+  const [hdCatalog, setHdCatalog] = useState([]);
+  const [hdCaptureBusy, setHdCaptureBusy] = useState(""); // item id currently being photographed for AI read
+  const [hdPickerOpen, setHdPickerOpen] = useState(false);
+  const [hdPickerDept, setHdPickerDept] = useState("");
+  const [hdPickerBusy, setHdPickerBusy] = useState(false);
+  const [hdSuggestOpen, setHdSuggestOpen] = useState(false);
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
   // Photo attach/capture on list items ("" idle, "new" while creating a photo
@@ -1882,15 +1890,153 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     }
   }, [authUser?.id, chatErrorMessage, chatFetch, companyId, hdLearnBusy, loadHdAisleMap, selectedChatListResolved]);
 
-  // Open a Home Depot list → load its store's confirmed aisles and classify
-  // any un-classified items into departments. (Placed after the HD callbacks
-  // above so their const bindings are initialized before this effect's deps.)
+  // Load the shared learned-product catalog for autocomplete + gallery picker.
+  const loadHdCatalog = useCallback(async () => {
+    if (!companyId) return;
+    try {
+      const { data, error } = await supabase
+        .from("hd_item_catalog")
+        .select("id, typed_name, normalized_typed, exact_name, department, last_price, photo_url, times_used")
+        .eq("company_id", companyId)
+        .order("times_used", { ascending: false })
+        .limit(500);
+      if (!error) setHdCatalog(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.warn("[HD] catalog load failed", err);
+    }
+  }, [companyId]);
+
+  // Tick-to-capture: photograph the actual product a crew member picked. ChatGPT
+  // reads the exact name + price (+ aisle if the shelf sign is legible); we learn
+  // it into the shared catalog and stamp the list item.
+  const captureHdItemPhoto = useCallback(async (item, file) => {
+    const list = selectedChatListResolved;
+    if (!item?.id || !file || !companyId || !authUser?.id || hdCaptureBusy) return;
+    setHdCaptureBusy(String(item.id));
+    setError("");
+    try {
+      const path = `hd-item/${companyId}/${authUser.id}-${Date.now()}.jpg`;
+      const up = await supabase.storage.from("project-photos").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+      if (up.error) throw up.error;
+      const publicUrl = supabase.storage.from("project-photos").getPublicUrl(path)?.data?.publicUrl || "";
+      // Always keep the photo on the item, even if AI is unavailable.
+      const itemUpdate = { photo_url: publicUrl, photo_storage_path: path };
+      const data = await chatFetch("/api/hd-intelligence", {
+        method: "POST",
+        body: JSON.stringify({ action: "read_item_photo", company_id: companyId, photo_url: publicUrl, hint: item.text }),
+      });
+      const exactName = String(data?.exact_name || "").trim();
+      const dept = data?.department || item.department || null;
+      const price = data?.price == null ? null : Number(data.price);
+      const aisle = String(data?.aisle_no || "").trim();
+      if (exactName) itemUpdate.hd_exact_name = exactName;
+      if (price != null && Number.isFinite(price)) itemUpdate.hd_price = price;
+      if (dept && !item.department) itemUpdate.department = dept;
+      await supabase.from("chat_list_items").update(itemUpdate).eq("id", item.id);
+      // Learn into the shared catalog (keyed by what the crew typed).
+      const typed = String(item.text || "").trim();
+      if (typed) {
+        await supabase.from("hd_item_catalog").upsert(
+          {
+            company_id: companyId,
+            typed_name: typed,
+            normalized_typed: typed.toLowerCase(),
+            exact_name: exactName || null,
+            department: dept || null,
+            last_price: price != null && Number.isFinite(price) ? price : null,
+            photo_url: publicUrl,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "company_id,normalized_typed" }
+        );
+      }
+      // Archive the photo + reading for price history / audit.
+      await supabase.from("hd_item_photos").insert([{
+        company_id: companyId, kind: "item", store_name: list?.store_name?.trim() || null,
+        department: dept || null, exact_name: exactName || null,
+        aisle_no: aisle || null, price: price != null && Number.isFinite(price) ? price : null,
+        photo_url: publicUrl, storage_path: path, captured_by: authUser.id,
+      }]);
+      // Bonus aisle intelligence: if the shelf sign gave a legible aisle, save it.
+      if (aisle && dept && list?.store_name?.trim()) {
+        const store = list.store_name.trim();
+        await supabase.from("hd_aisle_map").upsert(
+          { company_id: companyId, store_name: store, normalized_store: hdStoreKey(store), department: dept, aisle_no: aisle, source: "item_photo", confirmed_by: authUser.id, updated_at: new Date().toISOString() },
+          { onConflict: "company_id,normalized_store,department" }
+        );
+        setHdAisleByDept((prev) => ({ ...prev, [dept]: aisle }));
+      }
+      await refreshSelectedChatLists();
+      void loadHdCatalog();
+      if (!data?.ok && data?.message) setError(`Photo saved. AI read unavailable: ${data.message}`);
+      else if (exactName || price != null) setError(`Learned: ${exactName || item.text}${price != null ? ` — $${price}` : ""}.`);
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setHdCaptureBusy("");
+    }
+  }, [authUser?.id, chatErrorMessage, chatFetch, companyId, hdCaptureBusy, loadHdCatalog, refreshSelectedChatLists, selectedChatListResolved]);
+
+  // Add a learned catalog product straight onto the current list (gallery picker).
+  const addCatalogItemToList = useCallback(async (product) => {
+    const list = selectedChatListResolved;
+    if (!product || !list?.id || hdPickerBusy) return;
+    setHdPickerBusy(true);
+    setError("");
+    const text = String(product.exact_name || product.typed_name || "").trim();
+    if (!text) { setHdPickerBusy(false); return; }
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "add_list_item", company_id: companyId, list_id: list.id, text }),
+      });
+      const newId = data?.item?.id;
+      if (newId) {
+        const patch = {};
+        if (product.department) patch.department = product.department;
+        if (product.exact_name) patch.hd_exact_name = product.exact_name;
+        if (product.last_price != null) patch.hd_price = Number(product.last_price);
+        if (product.photo_url) patch.photo_url = product.photo_url;
+        if (Object.keys(patch).length) await supabase.from("chat_list_items").update(patch).eq("id", newId);
+      }
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setHdPickerBusy(false);
+    }
+  }, [chatErrorMessage, chatFetch, companyId, hdPickerBusy, refreshSelectedChatLists, selectedChatListResolved]);
+
+  // Open a Home Depot list → load its store's confirmed aisles, learned catalog,
+  // and classify any un-classified items into departments. (Placed after the HD
+  // callbacks above so their const bindings are initialized before this effect's deps.)
   useEffect(() => {
     const list = selectedChatListResolved;
     if (!list || list.list_type !== "home_depot" || chatPane !== "list-detail") return;
     void loadHdAisleMap(list.store_name);
+    void loadHdCatalog();
     void classifyHdList(list);
-  }, [selectedChatListResolved, chatPane, loadHdAisleMap, classifyHdList]);
+  }, [selectedChatListResolved, chatPane, loadHdAisleMap, loadHdCatalog, classifyHdList]);
+
+  // Autocomplete suggestions from the shared catalog as the crew types an item.
+  const hdSuggestions = useMemo(() => {
+    const q = String(listItemDraft || "").trim().toLowerCase();
+    if (!hdSuggestOpen || q.length < 2 || !hdCatalog.length) return [];
+    const seen = new Set();
+    const out = [];
+    for (const row of hdCatalog) {
+      const label = String(row.exact_name || row.typed_name || "").trim();
+      if (!label) continue;
+      const hay = `${row.typed_name || ""} ${row.exact_name || ""}`.toLowerCase();
+      if (!hay.includes(q)) continue;
+      const key = label.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(row);
+      if (out.length >= 6) break;
+    }
+    return out;
+  }, [hdCatalog, hdSuggestOpen, listItemDraft]);
 
   // Open Home Depot's site with the item pre-searched. The store the browser
   // last set as "My Store" on homedepot.ca drives the in-store aisle/bay shown.
@@ -2504,7 +2650,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       requestAnimationFrame(() => restoreChatSubItemInputFocus());
     };
     return (
-      <div className="flex h-full min-h-0 flex-1 flex-col bg-white overflow-hidden">
+      <div className="relative flex h-full min-h-0 flex-1 flex-col bg-white overflow-hidden">
         <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-white px-3 py-3">
           <div className="flex items-center gap-2">
             <button
@@ -2848,8 +2994,36 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         </div>
                       ) : null}
                       {item.is_done ? (
-                        <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">
-                          Completed
+                        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">Completed</p>
+                          {isHd && !editingThis ? (
+                            <label
+                              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-[#FDE6C8] bg-[#FFF7EC] px-2.5 py-1 text-[11px] font-black text-[#9A6B12] ${hdCaptureBusy === String(item.id) ? "opacity-60" : "active:bg-[#FDEBD5]"}`}
+                            >
+                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                                <circle cx="12" cy="13" r="4" />
+                              </svg>
+                              {hdCaptureBusy === String(item.id) ? "Reading…" : item.hd_exact_name ? "Re-scan product" : "Capture product"}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={Boolean(hdCaptureBusy)}
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  event.target.value = "";
+                                  if (file) void captureHdItemPhoto(item, file);
+                                }}
+                              />
+                            </label>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {isHd && (item.hd_exact_name || item.hd_price != null) && !editingThis ? (
+                        <p className="mt-1 text-[12px] font-bold text-[#334155]">
+                          {item.hd_exact_name || ""}
+                          {item.hd_price != null ? <span className="ml-1 text-[#15803D]">${Number(item.hd_price).toFixed(2)}</span> : null}
                         </p>
                       ) : null}
                       {isHd && !editingThis && !item.is_done ? (
@@ -3040,7 +3214,49 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
         </div>
 
         <div className="sticky bottom-0 border-t border-[#E2E8F0] bg-white px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom,0px))]">
-          <div className="flex gap-2" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()}>
+          {isHd ? (
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#CBD5E1] bg-white px-3 py-1.5 text-[12px] font-black text-[#334155] active:bg-[#F8FAFC]"
+                onClick={() => { setHdPickerDept(""); setHdPickerOpen(true); }}
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" />
+                </svg>
+                Browse products{hdCatalog.length ? ` (${hdCatalog.length})` : ""}
+              </button>
+            </div>
+          ) : null}
+          <div className="relative flex gap-2" onPointerDownCapture={(event) => event.stopPropagation()} onMouseDownCapture={(event) => event.stopPropagation()}>
+            {isHd && hdSuggestions.length ? (
+              <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white shadow-lg">
+                {hdSuggestions.map((s) => (
+                  <button
+                    key={`sugg-${s.id}`}
+                    type="button"
+                    className="flex w-full items-center gap-2 border-b border-[#F1F5F9] px-3 py-2 text-left last:border-b-0 active:bg-[#F8FAFC]"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      setListItemDraft(String(s.exact_name || s.typed_name || ""));
+                      setHdSuggestOpen(false);
+                    }}
+                  >
+                    {s.photo_url ? (
+                      <img src={s.photo_url} alt="" className="h-8 w-8 rounded-md border border-[#E2E8F0] object-cover" loading="lazy" />
+                    ) : (
+                      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-[#F1F5F9] text-[10px] font-black text-[#94A3B8]">HD</span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-bold text-[#061426]">{s.exact_name || s.typed_name}</span>
+                      <span className="block truncate text-[11px] font-semibold text-[#94A3B8]">
+                        {s.department || "Product"}{s.last_price != null ? ` · $${Number(s.last_price).toFixed(2)}` : ""}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <input
               ref={chatListItemInputRef}
               className="chat-mobile-safe-input h-11 min-w-0 flex-1 rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
@@ -3051,11 +3267,13 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               onPointerDown={handleMainInputPointer}
               onMouseDown={handleMainInputPointer}
               onTouchStart={handleMainInputPointer}
-              onChange={(event) => setListItemDraft(event.target.value)}
+              onFocus={() => { if (isHd) setHdSuggestOpen(true); }}
+              onChange={(event) => { setListItemDraft(event.target.value); if (isHd) setHdSuggestOpen(true); }}
               placeholder="Add main item"
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
+                  setHdSuggestOpen(false);
                   void addChatListItem();
                 }
               }}
@@ -3098,6 +3316,63 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             </button>
           </div>
         </div>
+        {hdPickerOpen ? (
+          <div className="absolute inset-0 z-40 flex flex-col bg-black/40" onClick={() => setHdPickerOpen(false)}>
+            <div className="mt-auto flex max-h-[80%] flex-col rounded-t-[22px] bg-white" onClick={(event) => event.stopPropagation()}>
+              <div className="flex items-center justify-between border-b border-[#E2E8F0] px-4 py-3">
+                <div>
+                  <p className="text-[15px] font-black text-[#061426]">Browse products</p>
+                  <p className="text-[12px] font-semibold text-[#94A3B8]">Tap a saved product to add it to this list.</p>
+                </div>
+                <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#64748B]" onClick={() => setHdPickerOpen(false)} aria-label="Close">✕</button>
+              </div>
+              {(() => {
+                const depts = Array.from(new Set(hdCatalog.map((r) => r.department).filter(Boolean))).sort();
+                return depts.length ? (
+                  <div className="flex gap-2 overflow-x-auto border-b border-[#F1F5F9] px-4 py-2">
+                    <button type="button" className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-black ${!hdPickerDept ? "bg-[#061426] text-white" : "bg-[#F1F5F9] text-[#64748B]"}`} onClick={() => setHdPickerDept("")}>All</button>
+                    {depts.map((d) => (
+                      <button key={`pf-${d}`} type="button" className={`shrink-0 rounded-full px-3 py-1 text-[12px] font-black ${hdPickerDept === d ? "bg-[#061426] text-white" : "bg-[#F1F5F9] text-[#64748B]"}`} onClick={() => setHdPickerDept(d)}>{d}</button>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+                {(() => {
+                  const products = hdCatalog.filter((r) => (r.exact_name || r.typed_name) && (!hdPickerDept || r.department === hdPickerDept));
+                  if (!products.length) {
+                    return <p className="py-8 text-center text-[13px] font-semibold text-[#94A3B8]">No saved products yet. Tick an item and capture its photo to learn products.</p>;
+                  }
+                  return (
+                    <div className="grid grid-cols-2 gap-2">
+                      {products.map((p) => (
+                        <button
+                          key={`pp-${p.id}`}
+                          type="button"
+                          disabled={hdPickerBusy}
+                          className="flex flex-col overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white text-left active:bg-[#F8FAFC] disabled:opacity-60"
+                          onClick={() => void addCatalogItemToList(p)}
+                        >
+                          {p.photo_url ? (
+                            <img src={p.photo_url} alt="" className="h-24 w-full object-cover" loading="lazy" />
+                          ) : (
+                            <span className="flex h-24 w-full items-center justify-center bg-[#F1F5F9] text-[12px] font-black text-[#94A3B8]">No photo</span>
+                          )}
+                          <span className="flex-1 px-2 py-1.5">
+                            <span className="block truncate text-[12px] font-bold text-[#061426]">{p.exact_name || p.typed_name}</span>
+                            <span className="block truncate text-[11px] font-semibold text-[#94A3B8]">
+                              {p.department || "Product"}{p.last_price != null ? ` · $${Number(p.last_price).toFixed(2)}` : ""}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     );
   };
