@@ -94,4 +94,12 @@ export default defineConfig([
       'react-hooks/static-components': 'off',
     },
   },
+  {
+    // CachedImage swaps its <img src> to a cached object URL from an async
+    // effect; the setState-in-effect there is the intended lifecycle, not a bug.
+    files: ['src/components/CachedImage.jsx'],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
 ])

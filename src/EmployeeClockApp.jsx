@@ -3,6 +3,12 @@ import { supabase } from "./supabaseClient";
 import { buildTimesheetSanityChecks, getVisibleTimesheetSanityIssues } from "./lib/timesheetSanity";
 import { timesheetRecordMatchesFilters } from "./lib/timesheetFilters";
 import { applyRunningPayrollBalances, summarizePayrollPeriods } from "./lib/payrollBalance";
+import CachedImage from "./components/CachedImage.jsx";
+import {
+  clearPhotoCache,
+  isPhotoCacheEnabled,
+  setPhotoCacheEnabled,
+} from "./lib/photoCache.js";
 import {
   buildLocalFirstCacheKey,
   buildLocalFirstQueueKey,
@@ -4406,6 +4412,24 @@ export default function EmployeeClockApp() {
   const [clockLocationPermissionState, setClockLocationPermissionState] = useState("unknown");
   const [photoStatus, setPhotoStatus] = useState("");
   const [uploadProgress, setUploadProgress] = useState(null);
+  // On-device photo cache (Settings toggle, default on). Keeps a local copy of
+  // photos so the Photos/Receipts grids reopen instantly and work offline.
+  const [photoCacheOn, setPhotoCacheOn] = useState(() => isPhotoCacheEnabled());
+  const [photoCacheClearing, setPhotoCacheClearing] = useState(false);
+  const handleTogglePhotoCache = useCallback(async () => {
+    const next = !photoCacheOn;
+    setPhotoCacheOn(next);
+    setPhotoCacheEnabled(next);
+    if (!next) {
+      // Turning it off frees the on-device storage immediately.
+      setPhotoCacheClearing(true);
+      try {
+        await clearPhotoCache();
+      } finally {
+        setPhotoCacheClearing(false);
+      }
+    }
+  }, [photoCacheOn]);
   const [photoDrafts, setPhotoDrafts] = useState([]);
   const [photoCameraOpen, setPhotoCameraOpen] = useState(false);
   const [photoCameraMode, setPhotoCameraMode] = useState("photo");
@@ -25175,11 +25199,12 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                 onLoadedData={markLoaded}
                               />
                             ) : (
-                              <img
-                                src={mediaUrl}
+                              <CachedImage
+                                url={mediaUrl}
+                                variant="thumb"
                                 alt="Job site"
                                 className={`h-full w-full object-cover transition-opacity ${isLoaded ? "opacity-100" : "opacity-0"}`}
-                                onLoad={markLoaded}
+                                onReady={markLoaded}
                               />
                             )}
                           </button>
@@ -25483,8 +25508,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                       {renderTimesheetUiIcon("receipt", "h-8 w-8")}
                                     </div>
                                     {receiptUrl ? (
-                                      <img
-                                        src={receiptUrl}
+                                      <CachedImage
+                                        url={receiptUrl}
+                                        variant="thumb"
                                         alt="Receipt"
                                         className="relative h-full w-full rounded-[12px] object-cover"
                                         onError={(event) => {
@@ -32119,6 +32145,34 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </div>
                 ) : null}
 
+                <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Photos</p>
+                <div className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[16px] font-black text-slate-900">Save photos on this device</p>
+                      <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-500">
+                        Keeps a copy of job-site photos on this phone so the Photos and Receipts tabs open instantly and work offline. Uses a small compressed thumbnail in the grid and the full image only when you open a photo.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={photoCacheOn}
+                      aria-label="Save photos on this device"
+                      disabled={photoCacheClearing}
+                      onClick={() => void handleTogglePhotoCache()}
+                      className={`relative mt-0.5 h-7 w-12 shrink-0 rounded-full transition-colors ${photoCacheOn ? "bg-[#061426]" : "bg-slate-300"} ${photoCacheClearing ? "opacity-60" : ""}`}
+                    >
+                      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition-all ${photoCacheOn ? "left-6" : "left-1"}`} />
+                    </button>
+                  </div>
+                  {photoCacheClearing ? (
+                    <p className="mt-2 text-[12px] font-semibold text-slate-500">Clearing saved photos…</p>
+                  ) : !photoCacheOn ? (
+                    <p className="mt-2 text-[12px] font-semibold text-slate-500">Photos will load from the network each time and won’t be kept on this device.</p>
+                  ) : null}
+                </div>
+
                 <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Your account</p>
                 <div className="rounded-[18px] border border-slate-200 bg-white p-3 space-y-3 shadow-sm">
                   <div className="flex items-start justify-between gap-3">
@@ -32958,7 +33012,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   {isVideo ? (
                     <video src={url} className="w-full max-h-[64dvh] bg-[#0B1F33]" controls playsInline />
                   ) : (
-                    <img src={url} alt="Project" className="w-full max-h-[64dvh] object-contain bg-[#0B1F33]" />
+                    <CachedImage key={url} url={url} variant="full" alt="Project" className="w-full max-h-[64dvh] object-contain bg-[#0B1F33]" />
                   )}
                 </div>
                 <div className="p-3 space-y-3">
