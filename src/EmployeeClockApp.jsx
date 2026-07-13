@@ -5052,6 +5052,8 @@ export default function EmployeeClockApp() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardError, setDashboardError] = useState("");
   const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0);
+  // "Worked today" card: collapsed to the first few rows, expandable to all.
+  const [dashboardWorkedTodayShowAll, setDashboardWorkedTodayShowAll] = useState(false);
   const [dashboardClockPick, setDashboardClockPick] = useState({});
   /** user_id -> project_id[] for active project_assignments (Dashboard manual clock-in only). */
   const [dashboardAssignmentsByUserId, setDashboardAssignmentsByUserId] = useState({});
@@ -27426,7 +27428,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       </p>
                     ) : (
                       <div className="space-y-2.5">
-                        {dashboardTodayWorkedCards.slice(0, 3).map((card) => {
+                        {(dashboardWorkedTodayShowAll ? dashboardTodayWorkedCards : dashboardTodayWorkedCards.slice(0, 3)).map((card) => {
                           const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
                             .filter(Boolean)
                             .join(" / ");
@@ -27461,6 +27463,17 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                             </button>
                           );
                         })}
+                        {dashboardTodayWorkedCards.length > 3 ? (
+                          <button
+                            type="button"
+                            className="w-full rounded-[14px] border border-slate-200 bg-slate-50 py-2.5 text-[13px] font-black text-slate-700 active:scale-[0.99]"
+                            onClick={() => setDashboardWorkedTodayShowAll((v) => !v)}
+                          >
+                            {dashboardWorkedTodayShowAll
+                              ? "Show less"
+                              : `View all worked today (${dashboardTodayWorkedCards.length})`}
+                          </button>
+                        ) : null}
                       </div>
                     )}
                   </section>
