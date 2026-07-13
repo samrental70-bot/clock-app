@@ -4399,6 +4399,8 @@ export default function EmployeeClockApp() {
   const [installHelpDismissed, setInstallHelpDismissed] = useState(() =>
     Boolean(safeRead(`orp_install_help_dismissed_${OPERA_APP_CHANNEL}`, false))
   );
+  // Session-only dismissal for the "Turn on notifications" prompt banner.
+  const [notifPromptDismissed, setNotifPromptDismissed] = useState(false);
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editClockInDate, setEditClockInDate] = useState("");
   const [editClockInTime, setEditClockInTime] = useState("");
@@ -17801,6 +17803,30 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     };
   }, [authUser?.id, userCompany?.id]);
 
+  // Keep the web-push subscription alive. Once a user has granted notification
+  // permission, silently (re)create and persist their subscription on every app
+  // open. Push subscriptions can be dropped by the browser/OS (updates, storage
+  // eviction, or a server-side deactivation after a transient send failure);
+  // without this the row was never restored, so pushes silently stopped
+  // arriving even though permission stayed "granted" — which is exactly why
+  // production had almost no active subscriptions. Runs for every role.
+  const pushAutoResubscribeRef = useRef("");
+  useEffect(() => {
+    if (!authUser?.id || !userCompany?.id) return;
+    if (typeof window === "undefined" || !("Notification" in window)) return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (Notification.permission !== "granted") return;
+    const key = `${authUser.id}:${userCompany.id}`;
+    if (pushAutoResubscribeRef.current === key) return;
+    pushAutoResubscribeRef.current = key;
+    void ensurePushSubscription().catch((err) => {
+      // Never surface this — it's a background refresh. iOS Safari (non-installed
+      // PWA) legitimately throws here; the visible "Enable notifications" flow
+      // guides those users to install first.
+      console.warn("[PUSH] auto-resubscribe skipped", err?.message || err);
+    });
+  }, [authUser?.id, userCompany?.id, ensurePushSubscription]);
+
   useEffect(() => {
     if (!isEmployeeRole) {
       setEmployeeNotifPermissionUi("unknown");
@@ -23808,6 +23834,60 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               </CardContent>
             </Card>
           )}
+
+          {(() => {
+            const notifSupported =
+              typeof window !== "undefined" &&
+              "Notification" in window &&
+              "serviceWorker" in navigator &&
+              "PushManager" in window;
+            const alreadyGranted = notifSupported && Notification.permission === "granted";
+            if (
+              isChatImmersiveView ||
+              notifPromptDismissed ||
+              !notifSupported ||
+              alreadyGranted ||
+              Notification.permission === "denied"
+            ) {
+              return null;
+            }
+            const isiPhone =
+              typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(String(navigator.userAgent || ""));
+            const needsInstallFirst = isiPhone && !isInstalled;
+            return (
+              <Card className="rounded-[20px] border border-amber-200 bg-amber-50 shadow-sm">
+                <CardContent className="p-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-[18px]" aria-hidden="true">🔔</span>
+                    <div className="min-w-0 flex-1">
+                      <h2 className="font-black text-[15px] leading-tight text-slate-950">Turn on notifications</h2>
+                      <p className="mt-0.5 text-[12px] font-semibold text-slate-600 leading-snug">
+                        {needsInstallFirst
+                          ? "On iPhone: tap Share → Add to Home Screen, open the installed app, then turn on notifications to get alerts with sound when the app is closed."
+                          : "Get chat messages and clock-in alerts with sound even when the app is closed."}
+                      </p>
+                    </div>
+                    {!needsInstallFirst ? (
+                      <Button
+                        onClick={() => (isAdmin ? handleEnableBackgroundPush() : handleEmployeeRequestNotificationPermission())}
+                        className="h-9 shrink-0 rounded-[12px] px-3 text-[12px] font-black"
+                      >
+                        Turn on
+                      </Button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setNotifPromptDismissed(true)}
+                      className="h-8 w-8 shrink-0 rounded-[12px] border border-amber-200 bg-white text-[14px] font-black text-slate-500"
+                      aria-label="Hide notifications prompt"
+                    >
+                      x
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
 
           {activeTab === "clock" && !visibleCurrentShift && !isProfileArchived && (
             <div className="space-y-3">

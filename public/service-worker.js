@@ -45,6 +45,12 @@ self.addEventListener("push", (event) => {
     icon: appIcon,
     badge: appIcon,
     tag,
+    // Pop with sound + vibration even when the app is closed. `silent: false`
+    // lets the OS play its default notification sound; `renotify` re-alerts when
+    // a newer message reuses the same tag; `vibrate` buzzes on mobile.
+    silent: false,
+    renotify: true,
+    vibrate: [200, 100, 200],
     data: { url: targetUrl, notificationId, type },
   };
   event.waitUntil(self.registration.showNotification(title, options));
