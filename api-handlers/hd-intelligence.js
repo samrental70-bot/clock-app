@@ -194,7 +194,7 @@ export default async function handler(req, res) {
         "Items:",
         ...items.map((t, i) => `${i + 1}. ${t}`),
       ].join("\n");
-      const result = await callOpenAi({ prompt });
+      const result = await callOpenAi({ prompt, model: "gpt-4o" });
       const rows = Array.isArray(result?.json?.items) ? result.json.items : [];
       const byText = new Map(rows.map((r) => [normalizeText(r?.text).toLowerCase(), normalizeDepartment(r?.department)]));
       const classifications = items.map((text) => ({ text, department: byText.get(text.toLowerCase()) || "Other" }));
