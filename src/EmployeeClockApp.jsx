@@ -2756,8 +2756,9 @@ function isTimesheetRowActiveForLiveDashboard(record) {
   if (String(record?.recordType || "").trim().toLowerCase() === "vacation") return false;
   const out = record.clockOut;
   const hasClockOut = out != null && String(out).trim() !== "";
-  if (!hasClockOut) return true;
-  return normalizeStatus(record.status) === "active";
+  // A recorded clock-out means the shift ended — never show it as "working",
+  // regardless of a stale status value.
+  return !hasClockOut;
 }
 
 function dashboardTimesheetUserKey(record) {
@@ -3175,6 +3176,33 @@ function totalBreakMinutesForShift(clockInIso, clockOutIso, record) {
     return Number.isFinite(stored) ? Math.max(0, stored) : 0;
   }
   return total;
+}
+
+/**
+ * Live break status for the manager dashboard: whether an employee is on a
+ * break right now (an open break with a start but no end), how long they've
+ * been on it, and their total completed break minutes so far this shift.
+ */
+function liveBreakStatusForShift(record, nowMs) {
+  const breaks = normalizeTimesheetBreaks(record?.breaks);
+  let onBreakSince = null;
+  for (const entry of breaks) {
+    if (entry?.start && !entry?.end) {
+      onBreakSince = entry.start;
+      break;
+    }
+  }
+  const legacyStart = record?.breakStart || record?.break_start_at || null;
+  const legacyEnd = record?.breakEnd || record?.break_end_at || null;
+  if (!onBreakSince && legacyStart && !legacyEnd) onBreakSince = legacyStart;
+  const nowIso = new Date(Number.isFinite(nowMs) ? nowMs : Date.now()).toISOString();
+  const completedMinutes = totalBreakMinutesForShift(record?.clockIn, nowIso, record);
+  let currentBreakMinutes = 0;
+  if (onBreakSince) {
+    const startMs = new Date(onBreakSince).getTime();
+    if (Number.isFinite(startMs)) currentBreakMinutes = Math.max(0, Math.round((Date.now() - startMs) / 60000));
+  }
+  return { onBreak: Boolean(onBreakSince), completedMinutes, currentBreakMinutes };
 }
 
 function breakMinutesBetween(clockInIso, clockOutIso, breakStartIso, breakEndIso) {
@@ -4544,6 +4572,10 @@ export default function EmployeeClockApp() {
   const clockSetupWarningTimerRef = useRef(null);
   const latestLocationStatusRef = useRef("");
   const currentShiftRef = useRef(currentShift);
+  // Debounce/re-entrancy guard: holds the timestamp of an in-flight clock-in so
+  // a rapid double-tap (or slow-network re-tap) can't insert a duplicate open
+  // shift. Self-expires so a stuck flag never permanently blocks clocking in.
+  const clockInFlightRef = useRef(0);
   const lastLiveLocationSavedAtRef = useRef(0);
   const materialPaymentCountdownTimerRef = useRef(null);
   const materialPaymentOpenReceiptTimerRef = useRef(null);
@@ -5751,6 +5783,30 @@ export default function EmployeeClockApp() {
     dashboardRefreshKey,
     projectsScreenRefreshKey,
   ]);
+
+  // Live team freshness: while a manager is watching the dashboard/team tab,
+  // poll the timesheets every 20s so a clock-out done on the employee's own
+  // device is reflected quickly (previously it only refetched on tab switch,
+  // focus, or 5-min cache expiry, so a clocked-out employee lingered as
+  // "working"). Skipped while backgrounded to avoid idle polling.
+  useEffect(() => {
+    if ((activeTab !== "dashboard" && activeTab !== "team") || !isAdmin || !userCompany?.id || !companyChecked) {
+      return undefined;
+    }
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      setDashboardRefreshKey((key) => key + 1);
+    };
+    const intervalId = window.setInterval(tick, 20000);
+    const onVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [activeTab, isAdmin, userCompany?.id, companyChecked]);
 
   useEffect(() => {
     if (activeTab !== "dashboard" || !isAdmin || !userCompany?.id) {
@@ -13102,6 +13158,18 @@ const handleClockIn = async () => {
       return;
     }
 
+    // Ignore rapid re-taps / re-entrant calls while a clock-in is already in
+    // flight — this is what produced duplicate open shifts (two rows a second
+    // apart). Self-expires after 15s so an aborted attempt never wedges the
+    // button. Also bail if we already believe we're on shift.
+    const clockTapMs = Date.now();
+    if (clockInFlightRef.current && clockTapMs - clockInFlightRef.current < 15000) return;
+    if (currentShiftRef.current) {
+      setLocationStatus("You are already clocked in.");
+      return;
+    }
+    clockInFlightRef.current = clockTapMs;
+
     if (!clockSelectedProject) {
       showClockSetupRequired();
       return;
@@ -13231,7 +13299,29 @@ const handleClockIn = async () => {
       ...(gps != null && gps.accuracy != null ? { clock_in_accuracy: gps.accuracy } : {}),
     };
 
+    // Server-side dedup: never open a second shift while one is already open
+    // for this user (covers rapid taps that slipped the in-flight guard and
+    // re-taps from a second device). Best-effort — a query error must not block
+    // a legitimate clock-in, so we only act on a clear positive result.
+    try {
+      const { data: openShift } = await supabase
+        .from("timesheets")
+        .select("id")
+        .eq("user_id", authUser.id)
+        .is("clock_out", null)
+        .eq("status", "Active")
+        .limit(1);
+      if (Array.isArray(openShift) && openShift.length > 0) {
+        clockInFlightRef.current = 0;
+        setLocationStatus("You already have an active shift. Clock out first.");
+        return;
+      }
+    } catch {
+      /* ignore — fall through to insert */
+    }
+
     const { data, error } = await supabaseInsertTimesheetRow(supabase, clockInInsertBase);
+    clockInFlightRef.current = 0;
 
   if (error) {
       // Backward compatibility if DB columns aren't added yet
@@ -27055,6 +27145,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                           if (!rep || !uid) return null;
                           const liveMinutes = getWorkedMinutes(rep);
                           const liveCost = getLabourCost(rep);
+                          const breakStatus = liveBreakStatusForShift(rep, now instanceof Date ? now.getTime() : Date.now());
                           const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" / ");
                           const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
                           const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
@@ -27079,9 +27170,18 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                   <p className="mt-1 text-[12px] font-medium text-slate-500 tabular-nums">
                                     Clocked in {clockInDisp}
                                   </p>
+                                  {breakStatus.onBreak ? (
+                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 tabular-nums">
+                                      On break · {formatDuration(breakStatus.currentBreakMinutes)}
+                                    </span>
+                                  ) : breakStatus.completedMinutes > 0 ? (
+                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 tabular-nums">
+                                      Break {formatDuration(breakStatus.completedMinutes)}
+                                    </span>
+                                  ) : null}
                                 </div>
                                 <div className="shrink-0 text-right">
-                                  <p className="rounded-full bg-[#0B1F33] px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm">
+                                  <p className={`rounded-full px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm ${breakStatus.onBreak ? "bg-amber-500" : "bg-[#0B1F33]"}`}>
                                     {formatDuration(liveMinutes)}
                                   </p>
                                   <p className="mt-1 text-[11px] font-semibold leading-none tabular-nums text-slate-500">
