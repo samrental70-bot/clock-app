@@ -3059,7 +3059,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                             </svg>
                             Find in store
                           </button>
-                          {hdAisleEditDept === item.department ? (
+                          {hdAisleEditDept && hdAisleEditDept === item.department ? (
                             <span className="inline-flex items-center gap-1">
                               <input
                                 inputMode="numeric"
