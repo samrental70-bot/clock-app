@@ -4467,6 +4467,11 @@ export default function EmployeeClockApp() {
   const [payrollSettingsMessage, setPayrollSettingsMessage] = useState("");
   const [payrollPayments, setPayrollPayments] = useState([]);
   const [payrollLoanTransactions, setPayrollLoanTransactions] = useState([]);
+  const [payrollContractWork, setPayrollContractWork] = useState([]);
+  // Contract-work management sheet: { period } for a period card (manager add/edit/delete).
+  const [payrollContractSheet, setPayrollContractSheet] = useState(null);
+  const [payrollContractDraft, setPayrollContractDraft] = useState(null); // { id, name, amount, date } being added/edited
+  const [payrollContractSaving, setPayrollContractSaving] = useState(false);
   const [payrollEmployeeMetaById, setPayrollEmployeeMetaById] = useState({});
   const [payrollPaymentsLoading, setPayrollPaymentsLoading] = useState(false);
   const [payrollPaymentsError, setPayrollPaymentsError] = useState("");
@@ -6661,7 +6666,15 @@ export default function EmployeeClockApp() {
           .eq("company_id", userCompany.id)
           .eq("user_id", authUser.id)
           .maybeSingle();
-        let [settingsRes, paymentsRes, loansRes, memberRes] = await Promise.all([settingsPromise, paymentsPromise, loansPromise, memberPromise]);
+        const contractPromise = supabase
+          .from("payroll_contract_work")
+          .select("id, company_id, employee_id, name, amount, work_date, note, created_by, created_at, updated_at, deleted_at")
+          .eq("company_id", userCompany.id)
+          .eq("employee_id", authUser.id)
+          .is("deleted_at", null)
+          .order("work_date", { ascending: false });
+        let [settingsRes, paymentsRes, loansRes, memberRes, contractRes] = await Promise.all([settingsPromise, paymentsPromise, loansPromise, memberPromise, contractPromise]);
+        setPayrollContractWork(contractRes?.error ? [] : (contractRes?.data || []));
         if (settingsRes.error && isMissingDbColumnError(settingsRes.error)) {
           const fallbackSettingsRes = await supabase
             .from("payroll_settings")
@@ -6765,12 +6778,20 @@ export default function EmployeeClockApp() {
         .select("id, user_id, role, created_at, auto_payroll_enabled, auto_payroll_start_date, auto_payroll_amount")
         .eq("company_id", userCompany.id)
         .order("created_at", { ascending: true });
-      let [settingsRes, paymentsRes, loansRes, membersRes] = await Promise.all([
+      const contractPromise = supabase
+        .from("payroll_contract_work")
+        .select("id, company_id, employee_id, name, amount, work_date, note, created_by, created_at, updated_at, deleted_at")
+        .eq("company_id", userCompany.id)
+        .is("deleted_at", null)
+        .order("work_date", { ascending: false });
+      let [settingsRes, paymentsRes, loansRes, membersRes, contractRes] = await Promise.all([
         settingsPromise,
         paymentsPromise,
         loansPromise,
         membersPromise,
+        contractPromise,
       ]);
+      setPayrollContractWork(contractRes?.error ? [] : (contractRes?.data || []));
       if (settingsRes.error && isMissingDbColumnError(settingsRes.error)) {
         const fallbackSettingsRes = await supabase
           .from("payroll_settings")
@@ -8801,6 +8822,10 @@ export default function EmployeeClockApp() {
     return normalizeArray(payrollLoanTransactions).filter((row) => !row?.deleted_at);
   }, [payrollLoanTransactions]);
 
+  const payrollContractWorkActive = useMemo(() => {
+    return normalizeArray(payrollContractWork).filter((row) => !row?.deleted_at);
+  }, [payrollContractWork]);
+
   const payrollPeriodRows = useMemo(() => {
     const groups = new Map();
     const ensureGroup = (employeeId, employeeName, period) => {
@@ -8817,6 +8842,7 @@ export default function EmployeeClockApp() {
           frequency: period.frequency,
           workedMinutes: 0,
           workedAmount: 0,
+          contractAmount: 0,
           paidAmount: 0,
           loanGivenAmount: 0,
           loanReturnedAmount: 0,
@@ -8825,6 +8851,7 @@ export default function EmployeeClockApp() {
           balance: 0,
           payments: [],
           loans: [],
+          contracts: [],
           records: [],
           vacations: [],
           manualContractSeenKeys: new Set(),
@@ -8925,6 +8952,23 @@ export default function EmployeeClockApp() {
       });
     }
 
+    for (const contract of payrollContractWorkActive) {
+      const employeeId = String(contract?.employee_id ?? contract?.employeeId ?? "").trim();
+      if (!employeeId) continue;
+      if (payrollEmployeeFilter !== "all" && String(payrollEmployeeFilter) !== employeeId) continue;
+      const employeeMeta = payrollEmployeeMetaById?.[employeeId] || null;
+      const payrollStartDate = String(employeeMeta?.payrollStartDate || employeeMeta?.joiningDate || "").trim();
+      const workDate = String(contract?.work_date || "").trim();
+      if (!workDate) continue;
+      if (payrollStartDate && workDate < payrollStartDate) continue;
+      const period = getPayrollPeriodWindowForDateKey(workDate, payrollEffectiveSettings, companyTimeZone);
+      if (!period) continue;
+      const employeeName = payrollEmployeeLabelById[employeeId] || shortUserLabel(employeeId);
+      const group = ensureGroup(employeeId, employeeName, period);
+      group.contractAmount += parsePayrollAmount(contract?.amount ?? 0);
+      group.contracts.push(contract);
+    }
+
     for (const vacation of payrollVacationRecords) {
       const employeeId = String(vacation?.employeeId ?? vacation?.userId ?? vacation?.employee_id ?? "").trim();
       if (!employeeId) continue;
@@ -8970,6 +9014,9 @@ export default function EmployeeClockApp() {
         loans: [...row.loans].sort((a, b) =>
           String(b?.transaction_date || b?.created_at || "").localeCompare(String(a?.transaction_date || a?.created_at || ""))
         ),
+        contracts: [...row.contracts].sort((a, b) =>
+          String(b?.work_date || b?.created_at || "").localeCompare(String(a?.work_date || a?.created_at || ""))
+        ),
       };
     });
     const rowsByEmployee = new Map();
@@ -8985,6 +9032,7 @@ export default function EmployeeClockApp() {
         const computed = computedById.get(String(row.id || ""));
         if (!computed) continue;
         row.previousBalance = computed.previousBalance;
+        row.contractAmount = computed.contractAmount;
         row.loanGivenAmount = computed.loanGivenAmount;
         row.loanReturnedAmount = computed.loanReturnedAmount;
         row.loanNetAmount = computed.loanNetAmount;
@@ -9016,6 +9064,7 @@ export default function EmployeeClockApp() {
     payrollEmployeeLabelById,
     payrollEmployeeMetaById,
     payrollLoanTransactionsActive,
+    payrollContractWorkActive,
     payrollPaymentsActive,
     payrollPeriodFilter,
     profileFullName,
@@ -18704,6 +18753,102 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     }
   };
 
+  // --- Contract work (manager-managed fixed-amount earnings) ---
+  const openPayrollContractSheet = (period) => {
+    if (!period) return;
+    setPayrollContractDraft(null);
+    setPayrollContractSheet({ period });
+  };
+
+  const startAddPayrollContract = (period) => {
+    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+    const defaultDate =
+      period?.periodEnd && todayKey > period.periodEnd
+        ? period.periodEnd
+        : period?.periodStart && todayKey < period.periodStart
+          ? period.periodStart
+          : todayKey;
+    setPayrollContractDraft({ id: "", name: "", amount: "", date: defaultDate });
+  };
+
+  const startEditPayrollContract = (contract) => {
+    setPayrollContractDraft({
+      id: contract.id,
+      name: contract.name || "",
+      amount: String(contract.amount ?? ""),
+      date: String(contract.work_date || "").slice(0, 10),
+    });
+  };
+
+  const savePayrollContract = async () => {
+    const draft = payrollContractDraft;
+    const period = payrollContractSheet?.period;
+    const employeeId = period?.employeeId;
+    if (!isAdmin || !draft || !userCompany?.id || !authUser?.id || !employeeId) return;
+    const name = String(draft.name || "").trim();
+    const amount = Number(String(draft.amount || "").replace(",", "."));
+    const date = String(draft.date || "").trim();
+    if (!name) {
+      alert("Enter a contract name.");
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      alert("Enter a contract amount greater than zero.");
+      return;
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      alert("Choose a valid date.");
+      return;
+    }
+    setPayrollContractSaving(true);
+    try {
+      const nowIso = new Date().toISOString();
+      if (draft.id) {
+        const { error } = await supabase
+          .from("payroll_contract_work")
+          .update({ name, amount, work_date: date, updated_at: nowIso, updated_by: authUser.id })
+          .eq("id", draft.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("payroll_contract_work").insert([
+          {
+            company_id: userCompany.id,
+            employee_id: employeeId,
+            name,
+            amount,
+            work_date: date,
+            created_by: authUser.id,
+          },
+        ]);
+        if (error) throw error;
+      }
+      setPayrollContractDraft(null);
+      await fetchPayrollData();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setPayrollContractSaving(false);
+    }
+  };
+
+  const deletePayrollContract = async (contract) => {
+    if (!isAdmin || !contract?.id || !authUser?.id) return;
+    if (!window.confirm("Delete this contract work entry?")) return;
+    setPayrollContractSaving(true);
+    try {
+      const { error } = await supabase
+        .from("payroll_contract_work")
+        .update({ deleted_at: new Date().toISOString(), deleted_by: authUser.id })
+        .eq("id", contract.id);
+      if (error) throw error;
+      await fetchPayrollData();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setPayrollContractSaving(false);
+    }
+  };
+
   const handleVoidPayrollPayment = async (payment) => {
     if (!isAdmin || !userCompany?.id || !authUser?.id || !payment?.id) return;
     if (!window.confirm("Void this payment? It will stay in history but be hidden from payroll totals.")) return;
@@ -18730,6 +18875,26 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     if (!payrollPaymentDraft?.id || String(payrollPaymentDraft.paymentKind || "salary") !== "salary") return;
     await handleVoidPayrollPayment({ id: payrollPaymentDraft.id });
     setPayrollPaymentFormOpen(false);
+  };
+
+  const handleDeletePayrollLoanFromModal = async () => {
+    if (!isAdmin || !payrollPaymentDraft?.id || String(payrollPaymentDraft.paymentKind || "") !== "loan") return;
+    if (!authUser?.id) return;
+    if (!window.confirm("Delete this loan? It will be removed from payroll totals.")) return;
+    setPayrollPaymentSaving(true);
+    try {
+      const { error } = await supabase
+        .from("employee_loan_transactions")
+        .update({ deleted_at: new Date().toISOString(), deleted_by: authUser.id })
+        .eq("id", payrollPaymentDraft.id);
+      if (error) throw error;
+      setPayrollPaymentFormOpen(false);
+      await fetchPayrollData();
+    } catch (err) {
+      setPayrollPaymentMessage(getErrorMessage(err));
+    } finally {
+      setPayrollPaymentSaving(false);
+    }
   };
 
   const handleEditPayrollPayment = (payment) => {
@@ -19795,6 +19960,13 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               onClick: () => openPayrollDetailRow({ ...payrollDetailEmployeeGroup, ...period }),
             })}
             {renderPayrollMetricTile({
+              label: "Contract work",
+              value: formatMoney(period.contractAmount || 0),
+              colorClass: "bg-[#F5F3FF] text-[#7C3AED]",
+              icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
+              onClick: () => openPayrollContractSheet({ ...period, employeeId: period.employeeId || payrollDetailEmployeeGroup?.employeeId }),
+            })}
+            {renderPayrollMetricTile({
               label: "Paid Cash",
               value: formatMoney(period.paidAmount || 0),
               colorClass: "bg-[#EFF6FF] text-[#2563EB]",
@@ -20469,6 +20641,152 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             </div>
           </div>
         ) : null}
+        {payrollContractSheet ? (
+          <div
+            className="fixed inset-0 z-[88] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
+            role="dialog"
+            aria-modal="true"
+            onClick={() => {
+              setPayrollContractSheet(null);
+              setPayrollContractDraft(null);
+            }}
+          >
+            <div
+              className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_28px_80px_rgba(6,20,38,0.28)]"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-[#CBD5E1]" />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Payroll</p>
+                  <h3 className="mt-1 text-[24px] font-black leading-tight text-[#061426]">Contract work</h3>
+                  <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
+                    {payrollContractSheet.period.periodLabel ||
+                      formatPayrollPeriodLabelCompact(payrollContractSheet.period.periodStart, payrollContractSheet.period.periodEnd, companyTimeZone)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.05)] active:bg-[#F8FAFC]"
+                  onClick={() => {
+                    setPayrollContractSheet(null);
+                    setPayrollContractDraft(null);
+                  }}
+                  aria-label="Close contract work"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 6 6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {payrollContractDraft && isAdmin ? (
+                <div className="mt-4 space-y-3 rounded-[18px] border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+                  <p className="text-[13px] font-black text-[#061426]">{payrollContractDraft.id ? "Edit contract" : "Add contract"}</p>
+                  <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                    Contract name
+                    <input
+                      type="text"
+                      className="h-12 w-full rounded-[13px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                      value={payrollContractDraft.name}
+                      onChange={(event) => setPayrollContractDraft((d) => ({ ...d, name: event.target.value }))}
+                      placeholder="e.g. Contract 1"
+                      maxLength={80}
+                    />
+                  </label>
+                  <label className="block space-y-1 text-[10px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                    Amount (CAD)
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="h-12 w-full rounded-[13px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-black text-[#061426] outline-none focus:border-[#061426]"
+                      value={payrollContractDraft.amount}
+                      onChange={(event) => setPayrollContractDraft((d) => ({ ...d, amount: event.target.value }))}
+                      placeholder="0.00"
+                    />
+                  </label>
+                  <DateInputField
+                    label="Date"
+                    value={payrollContractDraft.date}
+                    onChange={(value) => setPayrollContractDraft((d) => ({ ...d, date: value }))}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="h-11 rounded-[12px] border border-[#CBD5E1] bg-white text-[14px] font-black text-[#061426]"
+                      onClick={() => setPayrollContractDraft(null)}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="h-11 rounded-[12px] bg-[#061426] text-[14px] font-black text-white disabled:bg-[#CBD5E1]"
+                      disabled={payrollContractSaving}
+                      onClick={() => void savePayrollContract()}
+                    >
+                      {payrollContractSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 max-h-[46dvh] space-y-2 overflow-y-auto">
+                    {normalizeArray(payrollContractSheet.period.contracts).length === 0 ? (
+                      <p className="rounded-[16px] border border-dashed border-[#CBD5E1] bg-white px-4 py-6 text-center text-[13px] font-semibold text-[#64748B]">
+                        {isAdmin ? "No contract work yet. Add a contract with a fixed amount." : "No contract work for this period."}
+                      </p>
+                    ) : (
+                      normalizeArray(payrollContractSheet.period.contracts).map((contract) => (
+                        <div key={contract.id} className="flex items-center justify-between gap-2 rounded-[16px] border border-[#E2E8F0] bg-white px-3 py-2.5 shadow-[0_6px_16px_rgba(6,20,38,0.04)]">
+                          <div className="min-w-0">
+                            <p className="truncate text-[15px] font-black text-[#061426]">{contract.name || "Contract"}</p>
+                            <p className="mt-0.5 text-[12px] font-semibold text-[#64748B]">
+                              {contract.work_date ? formatPayrollDateKeyShort(contract.work_date, companyTimeZone, { includeYear: true }) : ""}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <span className="text-[15px] font-black tabular-nums text-[#15803D]">{formatMoney(Number(contract.amount || 0))}</span>
+                            {isAdmin ? (
+                              <>
+                                <button
+                                  type="button"
+                                  className="h-8 rounded-full border border-[#CBD5E1] bg-white px-3 text-[11px] font-black text-[#061426]"
+                                  onClick={() => startEditPayrollContract(contract)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="h-8 rounded-full border border-[#FECACA] bg-[#FEF2F2] px-3 text-[11px] font-black text-[#DC2626]"
+                                  onClick={() => void deletePayrollContract(contract)}
+                                  disabled={payrollContractSaving}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  {isAdmin ? (
+                    <button
+                      type="button"
+                      className="mt-4 h-12 w-full rounded-[14px] bg-[#061426] text-[15px] font-black text-white active:bg-[#0B1F33]"
+                      onClick={() => startAddPayrollContract(payrollContractSheet.period)}
+                    >
+                      + Add contract
+                    </button>
+                  ) : (
+                    <p className="mt-3 text-center text-[11px] font-semibold text-[#94A3B8]">Contract amounts are set by your manager.</p>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        ) : null}
         {payrollTilePicker ? (
           <div
             className="fixed inset-0 z-[87] flex items-end justify-center bg-[#0B1F33]/58 px-3 pb-3 pt-10 backdrop-blur-[2px]"
@@ -20593,6 +20911,10 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   label: "Employee",
                   icon: "user",
                   value: payrollPaymentDraft.employeeId,
+                  displayValue:
+                    payrollPaymentDraft.employeeId && payrollPaymentDraft.employeeId !== "all"
+                      ? payrollEmployeeOptions.find((employee) => String(employee.id) === String(payrollPaymentDraft.employeeId))?.name || "Employee"
+                      : "Choose employee",
                   onChange: (event) =>
                     setPayrollPaymentDraft((draft) => ({
                       ...draft,
@@ -20666,6 +20988,10 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       label: "Loan direction",
                       icon: "wallet",
                       value: payrollPaymentDraft.loanDirection,
+                      displayValue:
+                        payrollPaymentDraft.loanDirection === "loan_returned"
+                          ? "Money received from employee"
+                          : "Money given to employee",
                       onChange: (event) =>
                         setPayrollPaymentDraft((draft) => ({
                           ...draft,
@@ -20755,6 +21081,16 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     onClick={() => void handleVoidPayrollPaymentFromModal()}
                   >
                     Void payment
+                  </button>
+                ) : null}
+                {payrollPaymentDraft.id && payrollPaymentDraft.paymentKind === "loan" ? (
+                  <button
+                    type="button"
+                    className="w-full rounded-[14px] border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] font-black text-[#DC2626] shadow-[0_6px_18px_rgba(220,38,38,0.08)] active:bg-[#FFF7F7] disabled:opacity-60"
+                    disabled={payrollPaymentSaving}
+                    onClick={() => void handleDeletePayrollLoanFromModal()}
+                  >
+                    Delete loan
                   </button>
                 ) : null}
               </form>
