@@ -698,7 +698,7 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
   await assertConversationMembership(supabase, { companyId, conversationId, userId: callerId });
   const { data: lists, error } = await supabase
     .from("chat_lists")
-    .select("id, company_id, conversation_id, title, created_by, pinned, archived_at, created_at, updated_at, updated_by")
+    .select("id, company_id, conversation_id, title, list_type, store_name, created_by, pinned, archived_at, created_at, updated_at, updated_by")
     .eq("company_id", companyId)
     .eq("conversation_id", conversationId)
     .is("archived_at", null)
@@ -794,28 +794,36 @@ async function getChatListForMember(supabase, { companyId, listId, callerId }) {
   return list;
 }
 
-async function createChatList(supabase, { companyId, conversationId, callerId, title, items }) {
+async function createChatList(supabase, { companyId, conversationId, callerId, title, items, listType, storeName }) {
   const convId = cleanText(conversationId);
   const cleanTitle = cleanText(title).replace(/\s+/g, " ").slice(0, 120);
   const cleanItems = normalizeChatListItems(items);
+  const normalizedType = ["home_depot", "pending_job", "other"].includes(cleanText(listType).toLowerCase())
+    ? cleanText(listType).toLowerCase()
+    : "other";
+  const cleanStoreName = normalizedType === "home_depot" ? cleanText(storeName).slice(0, 80) || null : null;
   if (!convId || !cleanTitle) {
     const error = new Error("List title is required");
     error.status = 400;
     throw error;
   }
   await assertConversationMembership(supabase, { companyId, conversationId: convId, userId: callerId });
-  const { data: list, error } = await supabase
-    .from("chat_lists")
-    .insert({
-      company_id: companyId,
-      conversation_id: convId,
-      title: cleanTitle,
-      created_by: callerId,
-      updated_by: callerId,
-      pinned: false,
-    })
-    .select("id")
-    .single();
+  const insertRow = {
+    company_id: companyId,
+    conversation_id: convId,
+    title: cleanTitle,
+    list_type: normalizedType,
+    store_name: cleanStoreName,
+    created_by: callerId,
+    updated_by: callerId,
+    pinned: false,
+  };
+  let { data: list, error } = await supabase.from("chat_lists").insert(insertRow).select("id").single();
+  if (error && /list_type|store_name|column/i.test(String(error.message || ""))) {
+    // Tolerate a DB that hasn't applied the list-type columns yet.
+    const { list_type, store_name, ...fallbackRow } = insertRow;
+    ({ data: list, error } = await supabase.from("chat_lists").insert(fallbackRow).select("id").single());
+  }
   if (error) throw error;
   if (cleanItems.length) {
     let mainNumber = 0;
@@ -1791,6 +1799,23 @@ export default async function handler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && action === "set_list_store") {
+      const list = await getChatListForMember(supabase, {
+        companyId,
+        listId: body.list_id || body.listId,
+        callerId: user.id,
+      });
+      const storeName = cleanText(body.store_name || body.storeName).slice(0, 80) || null;
+      const { error: storeError } = await supabase
+        .from("chat_lists")
+        .update({ store_name: storeName, updated_at: new Date().toISOString(), updated_by: user.id })
+        .eq("company_id", companyId)
+        .eq("id", list.id);
+      if (storeError) throw storeError;
+      res.status(200).json({ ok: true, store_name: storeName });
+      return;
+    }
+
     if (req.method === "POST" && action === "create_list") {
       const result = await createChatList(supabase, {
         companyId,
@@ -1798,6 +1823,8 @@ export default async function handler(req, res) {
         callerId: user.id,
         title: body.title,
         items: body.items,
+        listType: body.list_type || body.listType,
+        storeName: body.store_name || body.storeName,
       });
       res.status(200).json({ ok: true, list: result });
       return;

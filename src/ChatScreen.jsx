@@ -107,6 +107,12 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const [selectedChatListId, setSelectedChatListId] = useState("");
   const [listComposerOpen, setListComposerOpen] = useState(false);
   const [listTitle, setListTitle] = useState("");
+  // List type + Home Depot store name for the composer.
+  const [listType, setListType] = useState("other"); // "home_depot" | "pending_job" | "other"
+  const [listStoreName, setListStoreName] = useState("");
+  // Inline store-name edit on an open Home Depot list.
+  const [storeNameDraft, setStoreNameDraft] = useState(null);
+  const [storeNameSaving, setStoreNameSaving] = useState(false);
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
   const [subItemDraft, setSubItemDraft] = useState("");
@@ -1675,10 +1681,14 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
           conversation_id: selectedConversationId,
           title,
           items,
+          list_type: listType,
+          store_name: listType === "home_depot" ? listStoreName.trim() : "",
         }),
       });
       setListTitle("");
       setListItemsText("");
+      setListType("other");
+      setListStoreName("");
       setListComposerOpen(false);
       setSelectedChatListId(data?.list?.id || "");
       setChatPane("thread");
@@ -1695,6 +1705,37 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const refreshSelectedChatLists = async () => {
     await loadMessages({ silent: true });
     await loadConversations({ silent: true });
+  };
+
+  // Open Home Depot's site with the item pre-searched. The store the browser
+  // last set as "My Store" on homedepot.ca drives the in-store aisle/bay shown.
+  const openHomeDepotSearch = (itemText) => {
+    const query = encodeURIComponent(String(itemText || "").trim());
+    if (!query || typeof window === "undefined") return;
+    window.open(`https://www.homedepot.ca/search?q=${query}`, "_blank", "noopener,noreferrer");
+  };
+
+  const saveListStoreName = async (list) => {
+    if (!list?.id || storeNameSaving) return;
+    setStoreNameSaving(true);
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "set_list_store",
+          company_id: companyId,
+          list_id: list.id,
+          store_name: String(storeNameDraft ?? "").trim(),
+        }),
+      });
+      setStoreNameDraft(null);
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setStoreNameSaving(false);
+    }
   };
 
   const addChatListItem = async (parentItem = null) => {
@@ -2305,6 +2346,53 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               ) : null}
             </div>
           </div>
+          {list.list_type === "home_depot" ? (
+            <div className="mt-2 flex items-center gap-2 rounded-[12px] border border-[#FDE6C8] bg-[#FFF7EC] px-3 py-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[9px] bg-[#F96302] text-[12px] font-black text-white">HD</span>
+              {storeNameDraft !== null ? (
+                <>
+                  <input
+                    inputMode="text"
+                    autoComplete="off"
+                    className="chat-mobile-safe-input h-9 min-w-0 flex-1 rounded-[10px] border border-[#F5C99A] bg-white px-2 text-[15px] font-semibold text-[#061426] outline-none"
+                    style={{ fontSize: 16 }}
+                    value={storeNameDraft}
+                    maxLength={80}
+                    onChange={(event) => setStoreNameDraft(event.target.value)}
+                    placeholder="Store (e.g. Nepean)"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="h-9 shrink-0 rounded-[10px] bg-[#061426] px-3 text-[12px] font-black text-white disabled:bg-[#CBD5E1]"
+                    disabled={storeNameSaving}
+                    onClick={() => void saveListStoreName(list)}
+                  >
+                    {storeNameSaving ? "…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    className="h-9 shrink-0 rounded-[10px] border border-[#CBD5E1] bg-white px-2 text-[12px] font-black text-[#64748B]"
+                    onClick={() => setStoreNameDraft(null)}
+                  >
+                    ✕
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left"
+                  onClick={() => setStoreNameDraft(list.store_name || "")}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-[10px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">Home Depot store</span>
+                    <span className="block truncate text-[15px] font-black text-[#061426]">{list.store_name || "Tap to set store"}</span>
+                  </span>
+                  <span className="shrink-0 text-[11px] font-black text-[#9A6B12]">Edit</span>
+                </button>
+              )}
+            </div>
+          ) : null}
         </div>
 
         <div className="flex-1 space-y-3 overflow-y-auto bg-white px-3 py-3 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
@@ -2474,6 +2562,19 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         <p className="mt-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#15803D]">
                           Completed
                         </p>
+                      ) : null}
+                      {list.list_type === "home_depot" && !editingThis && !item.is_done ? (
+                        <button
+                          type="button"
+                          className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-[#FDE6C8] bg-[#FFF7EC] px-2.5 py-1 text-[11px] font-black text-[#9A6B12] active:bg-[#FDEBD5]"
+                          onClick={() => openHomeDepotSearch(item.text)}
+                        >
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M20 20l-3.5-3.5" />
+                            <circle cx="11" cy="11" r="6" />
+                          </svg>
+                          Find in store · aisle &amp; bay
+                        </button>
                       ) : null}
                       {legacySubitems.length ? (
                         <div className="mt-2 space-y-2 pl-3">
@@ -3411,6 +3512,44 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 x
               </button>
             </div>
+            <div className="mt-3 space-y-1">
+              <p className="text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">List type</p>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: "home_depot", label: "Home Depot" },
+                  { id: "pending_job", label: "Pending job" },
+                  { id: "other", label: "Other" },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`h-11 rounded-[12px] border px-1 text-[12px] font-black transition ${
+                      listType === option.id
+                        ? "border-[#061426] bg-[#061426] text-white"
+                        : "border-[#CBD5E1] bg-white text-[#061426]"
+                    }`}
+                    onClick={() => setListType(option.id)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {listType === "home_depot" ? (
+              <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                Home Depot store
+                <input
+                  inputMode="text"
+                  autoComplete="off"
+                  className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C]"
+                  style={{ fontSize: 16 }}
+                  value={listStoreName}
+                  maxLength={80}
+                  onChange={(event) => setListStoreName(event.target.value)}
+                  placeholder="e.g. Nepean, Barrhaven"
+                />
+              </label>
+            ) : null}
             <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
               Title
               <input
