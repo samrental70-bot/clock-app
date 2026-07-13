@@ -198,7 +198,7 @@ export default async function handler(req, res) {
       const rows = Array.isArray(result?.json?.items) ? result.json.items : [];
       const byText = new Map(rows.map((r) => [normalizeText(r?.text).toLowerCase(), normalizeDepartment(r?.department)]));
       const classifications = items.map((text) => ({ text, department: byText.get(text.toLowerCase()) || "Other" }));
-      sendJson(res, 200, { ok: Boolean(result?.ok), configured: Boolean(result?.configured), classifications });
+      sendJson(res, 200, { ok: Boolean(result?.ok), configured: Boolean(result?.configured), classifications, debug: result?.message || "", raw: result?.text || "" });
       return;
     }
 
