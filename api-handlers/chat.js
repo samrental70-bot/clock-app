@@ -584,7 +584,6 @@ async function listMessages(supabase, { companyId, conversationId, callerId, cal
     .eq("conversation_id", conversationId)
     .is("left_at", null);
   if (readError) throw readError;
-  const readById = Object.fromEntries((readRows || []).map((row) => [String(row.user_id), row]));
 
   let attachmentRows = [];
   let checklistRows = [];
@@ -648,13 +647,16 @@ async function listMessages(supabase, { companyId, conversationId, callerId, cal
     });
   }
   const pinByMessage = new Map(pinRows.map((pin) => [String(pin.message_id), pin]));
-  const conversationMembers = activeMembers.map((member) => {
-    const row = readById[String(member.user_id)] || {};
+  // Only THIS conversation's active members (readRows), not the whole company
+  // roster — otherwise every group would look like it contains everyone. The
+  // company-wide chat still lists everyone because all members are enrolled in it.
+  const conversationMembers = (readRows || []).map((row) => {
+    const info = memberByIdSafe(activeMembers, row.user_id) || {};
     return {
-      user_id: member.user_id,
-      role: row.role || member.role || "member",
-      name: member.name || memberByIdSafe(activeMembers, member.user_id)?.name || "User",
-      email: member.email || memberByIdSafe(activeMembers, member.user_id)?.email || "",
+      user_id: row.user_id,
+      role: row.role || info.role || "member",
+      name: info.name || "User",
+      email: info.email || "",
       last_read_at: row.last_read_at || null,
     };
   });
@@ -1609,6 +1611,45 @@ async function removeMember(supabase, { companyId, callerId, callerRole, convers
   return { removed: true, user_id: target };
 }
 
+async function addMembers(supabase, { companyId, callerId, conversationId, memberUserIds }) {
+  const convId = cleanText(conversationId);
+  const conversation = await getConversation(supabase, { companyId, conversationId: convId });
+  if (conversation.type !== "group" || conversation.is_default) {
+    const error = new Error("Members can only be added to group chats");
+    error.status = 400;
+    throw error;
+  }
+  // Any active member of the group can add more people (removal stays
+  // manager-only, handled in removeMember).
+  await assertConversationMembership(supabase, { companyId, conversationId: convId, userId: callerId });
+  const requested = uniqueStrings(memberUserIds);
+  if (!requested.length) {
+    const error = new Error("Choose at least one team member to add");
+    error.status = 400;
+    throw error;
+  }
+  const activeCompany = await fetchActiveCompanyMembers(supabase, companyId);
+  const activeIds = new Set(activeCompany.map((member) => member.user_id));
+  const currentMembers = await getConversationMembers(supabase, { companyId, conversationId: convId });
+  const currentIds = new Set(currentMembers.map((row) => String(row.user_id)));
+  // Only people who are active in the company and not already in the group.
+  const toAdd = requested.filter((id) => activeIds.has(id) && !currentIds.has(String(id)));
+  if (!toAdd.length) {
+    const error = new Error("Selected people are already in the group or not active");
+    error.status = 400;
+    throw error;
+  }
+  if (currentIds.size + toAdd.length > MAX_GROUP_MEMBERS) {
+    const error = new Error(`Groups can include up to ${MAX_GROUP_MEMBERS} members`);
+    error.status = 400;
+    throw error;
+  }
+  // ownerId null → all added as plain members; upsert resets left_at so a
+  // previously-removed person can be re-added.
+  await upsertMembers(supabase, { companyId, conversationId: convId, userIds: toAdd, ownerId: null });
+  return { added: toAdd };
+}
+
 async function archiveConversation(supabase, { companyId, callerId, callerRole, conversationId }) {
   const convId = cleanText(conversationId);
   const conversation = await getConversation(supabase, { companyId, conversationId: convId });
@@ -1868,6 +1909,20 @@ export default async function handler(req, res) {
         companyId,
         callerId: user.id,
         conversationId: body.conversation_id || body.conversationId,
+      });
+      res.status(200).json({ ok: true, ...result });
+      return;
+    }
+
+    if (req.method === "POST" && action === "add_member") {
+      const result = await addMembers(supabase, {
+        companyId,
+        callerId: user.id,
+        conversationId: body.conversation_id || body.conversationId,
+        memberUserIds:
+          body.member_user_ids ||
+          body.memberUserIds ||
+          (body.target_user_id || body.targetUserId ? [body.target_user_id || body.targetUserId] : []),
       });
       res.status(200).json({ ok: true, ...result });
       return;

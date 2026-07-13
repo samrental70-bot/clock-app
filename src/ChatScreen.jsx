@@ -99,6 +99,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const [groupName, setGroupName] = useState("");
   const [groupMemberIds, setGroupMemberIds] = useState([]);
   const [creatingChat, setCreatingChat] = useState(false);
+  // Adding people to an existing group (any member can add; removal is manager-only).
+  const [groupAddOpen, setGroupAddOpen] = useState(false);
+  const [groupAddIds, setGroupAddIds] = useState([]);
   const [chatUploading, setChatUploading] = useState(false);
   const [chatLists, setChatLists] = useState([]);
   const [selectedChatListId, setSelectedChatListId] = useState("");
@@ -229,6 +232,14 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     [conversationMembers, memberById, selectedConversation]
   );
   const selectedCanManage = Boolean(selectedConversation?.can_manage);
+  const isRealGroupConversation =
+    selectedConversation?.type === "group" && !selectedConversation?.is_default && !selectedConversation?.pendingSetup;
+  // Company members not already in the current group — the candidates any group
+  // member can add.
+  const addableGroupMembers = useMemo(() => {
+    const inGroup = new Set(selectedConversationMembers.map((m) => String(m.user_id)));
+    return availableMembers.filter((m) => !inGroup.has(String(m.user_id)));
+  }, [availableMembers, selectedConversationMembers]);
   const selectedCanLeave = Boolean(selectedConversation?.can_leave);
   const selectedCanArchive = Boolean(selectedConversation?.can_archive);
   const selectedChatList = useMemo(
@@ -1543,6 +1554,30 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       await loadConversations({ silent: true });
     } catch (err) {
       setError(chatErrorMessage(err));
+    }
+  };
+
+  const addChatMembers = async () => {
+    if (!selectedConversationId || groupAddIds.length === 0 || creatingChat) return;
+    setError("");
+    setCreatingChat(true);
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "add_member",
+          company_id: companyId,
+          conversation_id: selectedConversationId,
+          member_user_ids: groupAddIds,
+        }),
+      });
+      setGroupAddOpen(false);
+      setGroupAddIds([]);
+      await loadConversations({ silent: true });
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setCreatingChat(false);
     }
   };
 
@@ -2873,9 +2908,23 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       </button>
                     ) : null}
                   </div>
-                  {selectedCanManage && selectedConversation.type === "group" ? (
+                  {isRealGroupConversation ? (
                     <div className="mt-2 border-t border-[#E2E8F0] pt-2">
-                      <p className="px-3 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Members</p>
+                      <div className="flex items-center justify-between gap-2 px-3 pb-1">
+                        <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">
+                          Members ({selectedConversationMembers.length})
+                        </p>
+                        <button
+                          type="button"
+                          className="h-8 rounded-full bg-[#061426] px-3 text-[11px] font-black text-white active:bg-[#0B1F33]"
+                          onClick={() => {
+                            setGroupAddIds([]);
+                            setGroupAddOpen(true);
+                          }}
+                        >
+                          + Add members
+                        </button>
+                      </div>
                       <div className="max-h-56 space-y-1 overflow-y-auto">
                         {selectedConversationMembers.map((member) => (
                           <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-[12px] px-2 py-2">
@@ -2883,7 +2932,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                               <span className="block truncate">{member.name || member.email || "User"}</span>
                               <span className="block truncate text-[10px] text-[#64748B]">{member.email || member.role || ""}</span>
                             </span>
-                            {String(member.user_id) !== String(currentUserId) ? (
+                            {selectedCanManage && String(member.user_id) !== String(currentUserId) ? (
                               <button
                                 type="button"
                                 className="h-8 rounded-full bg-[#FEF2F2] px-3 text-[11px] font-black text-[#DC2626]"
@@ -2895,6 +2944,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           </div>
                         ))}
                       </div>
+                      {!selectedCanManage ? (
+                        <p className="px-3 pt-1 text-[10px] font-semibold text-[#94A3B8]">
+                          Anyone can add members. Only a manager can remove them.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -3436,7 +3490,35 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               </label>
             ) : null}
 
+            {composerOpen === "direct" ? (
+              <button
+                type="button"
+                className="mt-4 flex w-full items-center gap-3 rounded-[16px] border border-[#061426] bg-[#061426] px-3 py-2.5 text-left text-white"
+                onClick={() => {
+                  setGroupName("");
+                  setGroupMemberIds([]);
+                  setComposerOpen("group");
+                }}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-white/15 text-white">
+                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
+                  </svg>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-black">Create group</span>
+                  <span className="block text-[12px] font-semibold text-white/70">Name it, then pick people</span>
+                </span>
+                <span className="text-[18px] font-black text-white/80">&rsaquo;</span>
+              </button>
+            ) : null}
+
             <div className="mt-4 max-h-[45dvh] space-y-2 overflow-y-auto">
+              {composerOpen === "direct" ? (
+                <p className="px-1 pb-1 text-[10px] font-black uppercase tracking-[0.12em] text-[#64748B]">Start a direct chat</p>
+              ) : null}
               {availableMembers.length === 0 ? (
                 <EmptyState title="No team members" body="Add employees before starting a chat." />
               ) : (
@@ -3495,6 +3577,88 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 </button>
               </div>
             ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {groupAddOpen ? (
+        <div className="fixed inset-0 z-[91] flex items-end justify-center bg-[#0B1F33]/55 px-3 pb-3 pt-10" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm rounded-t-[28px] rounded-b-[22px] border border-[#E2E8F0] bg-white p-4 shadow-[0_24px_70px_rgba(6,20,38,0.28)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.12em] text-[#163B5C]">Group</p>
+                <h3 className="mt-1 text-[22px] font-black text-[#061426]">Add members</h3>
+              </div>
+              <button
+                type="button"
+                className="h-9 w-9 rounded-full border border-[#E2E8F0] bg-white text-[18px] font-black text-[#061426]"
+                onClick={() => {
+                  setGroupAddOpen(false);
+                  setGroupAddIds([]);
+                }}
+                aria-label="Close add members"
+              >
+                x
+              </button>
+            </div>
+            <div className="mt-4 max-h-[45dvh] space-y-2 overflow-y-auto">
+              {addableGroupMembers.length === 0 ? (
+                <EmptyState title="Everyone's in" body="All active team members are already in this group." />
+              ) : (
+                addableGroupMembers.map((member) => {
+                  const selected = groupAddIds.includes(member.user_id);
+                  return (
+                    <button
+                      key={member.user_id}
+                      type="button"
+                      className={`flex w-full items-center gap-3 rounded-[16px] border px-3 py-2.5 text-left ${
+                        selected ? "border-[#061426] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-white"
+                      }`}
+                      onClick={() =>
+                        setGroupAddIds((prev) =>
+                          prev.includes(member.user_id) ? prev.filter((id) => id !== member.user_id) : [...prev, member.user_id]
+                        )
+                      }
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[13px] bg-[#061426] text-[12px] font-black text-white">
+                        {member.name.slice(0, 2).toUpperCase()}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px] font-black text-[#061426]">{member.name}</span>
+                        <span className="block truncate text-[12px] font-semibold text-[#64748B]">{member.email || member.role}</span>
+                      </span>
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                          selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#CBD5E1]"
+                        }`}
+                      >
+                        {selected ? "OK" : ""}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className="h-12 rounded-[14px] border border-[#CBD5E1] bg-white text-[15px] font-black text-[#061426]"
+                onClick={() => {
+                  setGroupAddOpen(false);
+                  setGroupAddIds([]);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
+                disabled={groupAddIds.length === 0 || creatingChat}
+                onClick={() => void addChatMembers()}
+              >
+                {creatingChat ? "Adding..." : `Add${groupAddIds.length ? ` (${groupAddIds.length})` : ""}`}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
