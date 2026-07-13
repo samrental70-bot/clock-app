@@ -201,6 +201,14 @@ async function callOpenAi({ action, mediaRow, context }) {
   }
 
   const model = aiConfig.model || "gpt-4.1-mini";
+  // Receipt OCR uses ChatGPT's flagship vision model (gpt-4o) by default so it
+  // can accurately read supplier, totals, tax and dates off the photo. An env
+  // override (OPENAI_RECEIPT_OCR_MODEL / OPENAI_MODEL) still wins when set.
+  const receiptOcrModel =
+    normalizeText(process.env.OPENAI_RECEIPT_OCR_MODEL) ||
+    normalizeText(process.env.OPENAI_MODEL) ||
+    "gpt-4o";
+  const activeModel = action === "receipt_ocr" ? receiptOcrModel : model;
   const baseInstructions = [
     "You are OPERA.AI's field documentation assistant for construction teams.",
     "Return concise, practical output for supervisors.",
@@ -259,7 +267,9 @@ async function callOpenAi({ action, mediaRow, context }) {
   const imageUrl = normalizeText(mediaRow?.public_url);
   const mediaType = normalizeMediaType(mediaRow?.media_type);
   if (imageUrl && ["photo", "receipt"].includes(mediaType) && (action === "receipt_ocr" || action === "photo_tags")) {
-    content.push({ type: "input_image", image_url: imageUrl, detail: "low" });
+    // Receipts need full-resolution ("high") so the vision model can read the
+    // fine print; photo tagging is fine at low detail (cheaper/faster).
+    content.push({ type: "input_image", image_url: imageUrl, detail: action === "receipt_ocr" ? "high" : "low" });
   } else if (action === "receipt_ocr") {
     return {
       ok: false,
@@ -282,7 +292,7 @@ async function callOpenAi({ action, mediaRow, context }) {
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model,
+        model: activeModel,
         instructions: wantsJson ? `${baseInstructions} Return only valid JSON.` : baseInstructions,
         input: [{ role: "user", content }],
         temperature: 0.2,
@@ -315,7 +325,7 @@ async function callOpenAi({ action, mediaRow, context }) {
     configured: true,
     code: "",
     action,
-    model,
+    model: activeModel,
     text,
     json,
     warning: wantsJson && !parsedJson ? "AI response was not valid JSON. Review and save receipt details manually." : "",
