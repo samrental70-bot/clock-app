@@ -1787,6 +1787,13 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
         method: "POST",
         body: JSON.stringify({ action: "classify", company_id: companyId, items: pending.map((i) => i.text) }),
       });
+      if (!data?.ok) {
+        // AI unavailable (e.g. OpenAI quota) — don't persist an "Other" guess;
+        // leave items unclassified so they get sorted for real once it's back.
+        if (data?.message) setError(`Auto-sort unavailable: ${data.message}`);
+        hdClassifyGuardRef.current = "";
+        return;
+      }
       const byText = new Map((data?.classifications || []).map((c) => [String(c.text).toLowerCase(), c.department]));
       let persisted = 0;
       for (const item of pending) {
