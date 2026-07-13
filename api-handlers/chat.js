@@ -715,7 +715,7 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
     try {
       const { data: items, error: itemError } = await supabase
         .from("chat_list_items")
-        .select("id, list_id, item_number, text, is_done, completed_at, completed_by, created_by, created_at, updated_at, deleted_at, parent_item_id, item_level, child_order, sort_order, assigned_user_id")
+        .select("id, list_id, item_number, text, is_done, completed_at, completed_by, created_by, created_at, updated_at, deleted_at, parent_item_id, item_level, child_order, sort_order, assigned_user_id, department, hd_aisle_no")
         .eq("company_id", companyId)
         .in("list_id", listIds)
         .is("deleted_at", null)
@@ -749,6 +749,8 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
       child_order: Number(item.child_order || 0),
       sort_order: Number(item.sort_order || item.item_number || 0),
       assigned_user_id: item.assigned_user_id || null,
+      department: item.department || null,
+      hd_aisle_no: item.hd_aisle_no || null,
     });
   }
   return listRows.map((list) => {

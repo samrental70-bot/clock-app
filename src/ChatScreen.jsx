@@ -76,6 +76,21 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
   }, [isImmersivePane]);
 }
 
+// Fallback ordering for Home Depot departments that don't yet have a confirmed
+// aisle — roughly the store walk order. Departments with a confirmed aisle sort
+// by aisle number first (ascending).
+const HD_DEPT_DEFAULT_ORDER = [
+  "Lumber", "Building Materials", "Millwork & Trim", "Drywall", "Insulation",
+  "Doors & Windows", "Kitchen & Bath", "Flooring", "Paint", "Plumbing",
+  "Electrical", "Hardware & Fasteners", "Tools", "Outdoor & Garden", "Cleaning", "Other",
+];
+
+function hdAisleNumber(aisleRaw) {
+  if (!aisleRaw) return null;
+  const n = parseInt(String(aisleRaw).replace(/[^0-9]/g, ""), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default function ChatScreen({ active, authUser, userCompany, companyTimeZone, setInAppNotifications, onViewModeChange, onBack }) {
   const chatEmptyStateIcon = (
     <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -113,6 +128,13 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // Inline store-name edit on an open Home Depot list.
   const [storeNameDraft, setStoreNameDraft] = useState(null);
   const [storeNameSaving, setStoreNameSaving] = useState(false);
+  // Home Depot store intelligence: department -> confirmed aisle for the list's store.
+  const [hdAisleByDept, setHdAisleByDept] = useState({});
+  const [hdClassifying, setHdClassifying] = useState(false);
+  const [hdAisleEditDept, setHdAisleEditDept] = useState(null); // department currently getting its aisle confirmed
+  const [hdAisleDraft, setHdAisleDraft] = useState("");
+  const [hdLearnBusy, setHdLearnBusy] = useState(false);
+  const hdClassifyGuardRef = useRef("");
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
   const [subItemDraft, setSubItemDraft] = useState("");
@@ -270,6 +292,26 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     () => buildChatListHierarchy(selectedChatListItems, { showCompleted: selectedChatListShowCompleted }),
     [selectedChatListItems, selectedChatListShowCompleted]
   );
+  // Home Depot lists: group by department and order by confirmed aisle
+  // (ascending), so the crew walks the store in order. Departments without a
+  // known aisle fall back to a sensible walk order and sit after known aisles.
+  const hdDisplayHierarchy = useMemo(() => {
+    if (selectedChatListResolved?.list_type !== "home_depot") return selectedChatListHierarchy;
+    const rank = (dept) => {
+      const aisle = hdAisleNumber(hdAisleByDept[dept]);
+      const order = HD_DEPT_DEFAULT_ORDER.indexOf(dept || "Other");
+      return { aisle, order: order < 0 ? 99 : order };
+    };
+    return [...selectedChatListHierarchy].sort((a, b) => {
+      const ra = rank(a.department || "Other");
+      const rb = rank(b.department || "Other");
+      if (ra.aisle != null && rb.aisle != null && ra.aisle !== rb.aisle) return ra.aisle - rb.aisle;
+      if (ra.aisle != null && rb.aisle == null) return -1;
+      if (ra.aisle == null && rb.aisle != null) return 1;
+      if ((a.department || "Other") !== (b.department || "Other")) return ra.order - rb.order;
+      return Number(a.item_number || 0) - Number(b.item_number || 0);
+    });
+  }, [selectedChatListHierarchy, selectedChatListResolved, hdAisleByDept]);
   const selectedChatAssignableMembers = useMemo(
     () =>
       (selectedConversationMembers.length ? selectedConversationMembers : members)
@@ -1112,6 +1154,15 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     });
   }, [chatPane, selectedChatListId]);
 
+  // Open a Home Depot list → load its store's confirmed aisles and classify
+  // any un-classified items into departments.
+  useEffect(() => {
+    const list = selectedChatListResolved;
+    if (!list || list.list_type !== "home_depot" || chatPane !== "list-detail") return;
+    void loadHdAisleMap(list.store_name);
+    void classifyHdList(list);
+  }, [selectedChatListResolved, chatPane, loadHdAisleMap, classifyHdList]);
+
   useEffect(() => {
     if (!selectedChatListId || chatPane !== "list-detail" || chatListFocusRestoreTick <= 0 || typeof window === "undefined") {
       return;
@@ -1707,6 +1758,128 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     await loadConversations({ silent: true });
   };
 
+  const hdStoreKey = (name) => String(name || "").trim().toLowerCase();
+
+  const loadHdAisleMap = useCallback(async (storeName) => {
+    const store = hdStoreKey(storeName);
+    if (!store || !companyId) {
+      setHdAisleByDept({});
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from("hd_aisle_map")
+        .select("department, aisle_no")
+        .eq("company_id", companyId)
+        .eq("normalized_store", store);
+      const map = {};
+      for (const row of data || []) map[row.department] = row.aisle_no;
+      setHdAisleByDept(map);
+    } catch {
+      setHdAisleByDept({});
+    }
+  }, [companyId]);
+
+  // Classify a Home Depot list's un-classified items into departments and
+  // persist them, so items group by department.
+  const classifyHdList = useCallback(async (list) => {
+    if (!list?.id || list.list_type !== "home_depot" || !companyId) return;
+    const pending = (list.items || []).filter((item) => item?.text && !item.department && !item.is_done);
+    if (!pending.length) return;
+    const guardKey = `${list.id}:${pending.map((i) => i.id).join(",")}`;
+    if (hdClassifyGuardRef.current === guardKey) return;
+    hdClassifyGuardRef.current = guardKey;
+    setHdClassifying(true);
+    try {
+      const data = await chatFetch("/api/hd-intelligence", {
+        method: "POST",
+        body: JSON.stringify({ action: "classify", company_id: companyId, items: pending.map((i) => i.text) }),
+      });
+      const byText = new Map((data?.classifications || []).map((c) => [String(c.text).toLowerCase(), c.department]));
+      let persisted = 0;
+      for (const item of pending) {
+        const dept = byText.get(String(item.text).toLowerCase());
+        if (!dept) continue;
+        const { error } = await supabase.from("chat_list_items").update({ department: dept }).eq("id", item.id);
+        if (!error) persisted += 1;
+      }
+      if (persisted > 0) await refreshSelectedChatLists();
+    } catch (err) {
+      console.warn("[HD] classify failed", err);
+    } finally {
+      setHdClassifying(false);
+    }
+  }, [chatFetch, companyId, refreshSelectedChatLists]);
+
+  const confirmHdAisle = useCallback(async (department) => {
+    const list = selectedChatListResolved;
+    const aisle = String(hdAisleDraft || "").trim();
+    if (!list?.store_name || !department || !aisle || !companyId || !authUser?.id) return;
+    const store = list.store_name.trim();
+    try {
+      await supabase.from("hd_aisle_map").upsert(
+        {
+          company_id: companyId,
+          store_name: store,
+          normalized_store: hdStoreKey(store),
+          department,
+          aisle_no: aisle,
+          source: "manual",
+          confirmed_by: authUser.id,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "company_id,normalized_store,department" }
+      );
+      setHdAisleByDept((prev) => ({ ...prev, [department]: aisle }));
+      setHdAisleEditDept(null);
+      setHdAisleDraft("");
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  }, [authUser?.id, chatErrorMessage, companyId, hdAisleDraft, selectedChatListResolved]);
+
+  // "Learning picture": photograph an aisle in-store; ChatGPT reads the aisle
+  // number + departments and saves them to the shared aisle map.
+  const handleHdAisleScan = useCallback(async (file) => {
+    const list = selectedChatListResolved;
+    if (!file || !list?.store_name || !companyId || !authUser?.id || hdLearnBusy) return;
+    setHdLearnBusy(true);
+    setError("");
+    try {
+      const path = `hd-aisle/${companyId}/${authUser.id}-${Date.now()}.jpg`;
+      const up = await supabase.storage.from("project-photos").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+      if (up.error) throw up.error;
+      const publicUrl = supabase.storage.from("project-photos").getPublicUrl(path)?.data?.publicUrl || "";
+      const data = await chatFetch("/api/hd-intelligence", {
+        method: "POST",
+        body: JSON.stringify({ action: "read_aisle_scan", company_id: companyId, photo_url: publicUrl }),
+      });
+      const store = list.store_name.trim();
+      const aisle = String(data?.aisle_no || "").trim();
+      const departments = Array.isArray(data?.departments) ? data.departments : [];
+      await supabase.from("hd_item_photos").insert([{
+        company_id: companyId, kind: "aisle_scan", store_name: store, department: departments[0] || null,
+        aisle_no: aisle || null, photo_url: publicUrl, storage_path: path, captured_by: authUser.id,
+      }]);
+      if (aisle && departments.length) {
+        for (const dept of departments) {
+          await supabase.from("hd_aisle_map").upsert(
+            { company_id: companyId, store_name: store, normalized_store: hdStoreKey(store), department: dept, aisle_no: aisle, source: "aisle_scan", confirmed_by: authUser.id, updated_at: new Date().toISOString() },
+            { onConflict: "company_id,normalized_store,department" }
+          );
+        }
+        await loadHdAisleMap(store);
+        setError(`Saved: aisle ${aisle} — ${departments.join(", ")}.`);
+      } else {
+        setError(aisle ? `Read aisle ${aisle} but no department; try again closer to the sign.` : "Couldn't read the aisle number. Get the overhead aisle sign in frame.");
+      }
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setHdLearnBusy(false);
+    }
+  }, [authUser?.id, chatErrorMessage, chatFetch, companyId, hdLearnBusy, loadHdAisleMap, selectedChatListResolved]);
+
   // Open Home Depot's site with the item pre-searched. The store the browser
   // last set as "My Store" on homedepot.ca drives the in-store aisle/bay shown.
   const openHomeDepotSearch = (itemText) => {
@@ -2248,7 +2421,8 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
 
   /* eslint-disable react-hooks/refs */
   const renderChatListDetailView = (list) => {
-    const hierarchy = selectedChatListHierarchy;
+    const hierarchy = list.list_type === "home_depot" ? hdDisplayHierarchy : selectedChatListHierarchy;
+    const isHd = list.list_type === "home_depot";
     const assignableMembers = selectedChatAssignableMembers;
     const handleMainInputPointer = () => {
       chatListInputPointerAtRef.current = Date.now();
@@ -2392,6 +2566,27 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 </button>
               )}
             </div>
+          ) : null}
+          {list.list_type === "home_depot" && list.store_name ? (
+            <label className={`mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-[12px] border border-[#DDEAFE] bg-[#EEF4FF] px-3 py-2 text-[12px] font-black text-[#2563EB] ${hdLearnBusy ? "opacity-60" : "active:bg-[#DDEAFE]"}`}>
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+              {hdLearnBusy ? "Reading aisle…" : "Learning picture — scan an aisle sign"}
+              <input
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                disabled={hdLearnBusy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void handleHdAisleScan(file);
+                }}
+              />
+            </label>
           ) : null}
         </div>
 
@@ -2567,18 +2762,55 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           Completed
                         </p>
                       ) : null}
-                      {list.list_type === "home_depot" && !editingThis && !item.is_done ? (
-                        <button
-                          type="button"
-                          className="mt-1.5 inline-flex items-center gap-1.5 rounded-full border border-[#FDE6C8] bg-[#FFF7EC] px-2.5 py-1 text-[11px] font-black text-[#9A6B12] active:bg-[#FDEBD5]"
-                          onClick={() => openHomeDepotSearch(item.text)}
-                        >
-                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                            <path d="M20 20l-3.5-3.5" />
-                            <circle cx="11" cy="11" r="6" />
-                          </svg>
-                          Find in store · aisle &amp; bay
-                        </button>
+                      {isHd && !editingThis && !item.is_done ? (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {item.department ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[#EEF4FF] px-2 py-0.5 text-[10px] font-black text-[#2563EB]">
+                              {item.department}
+                            </span>
+                          ) : hdClassifying ? (
+                            <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-400">Sorting…</span>
+                          ) : null}
+                          {item.department && hdAisleByDept[item.department] ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-black text-[#15803D]">
+                              Aisle {hdAisleByDept[item.department]}
+                            </span>
+                          ) : item.department ? (
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#CBD5E1] bg-white px-2 py-0.5 text-[10px] font-black text-[#64748B]"
+                              onClick={() => { setHdAisleEditDept(item.department); setHdAisleDraft(""); }}
+                            >
+                              Set aisle
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1.5 rounded-full border border-[#FDE6C8] bg-[#FFF7EC] px-2.5 py-1 text-[11px] font-black text-[#9A6B12] active:bg-[#FDEBD5]"
+                            onClick={() => openHomeDepotSearch(item.text)}
+                          >
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M20 20l-3.5-3.5" />
+                              <circle cx="11" cy="11" r="6" />
+                            </svg>
+                            Find in store
+                          </button>
+                          {hdAisleEditDept === item.department ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input
+                                inputMode="numeric"
+                                className="chat-mobile-safe-input h-8 w-16 rounded-[10px] border border-[#CBD5E1] bg-white px-2 text-[15px] font-black text-[#061426] outline-none"
+                                style={{ fontSize: 16 }}
+                                value={hdAisleDraft}
+                                onChange={(e) => setHdAisleDraft(e.target.value)}
+                                placeholder="Aisle"
+                                autoFocus
+                              />
+                              <button type="button" className="h-8 rounded-[10px] bg-[#061426] px-2 text-[11px] font-black text-white" onClick={() => void confirmHdAisle(item.department)}>Save</button>
+                              <button type="button" className="h-8 rounded-[10px] border border-[#CBD5E1] bg-white px-2 text-[11px] font-black text-[#64748B]" onClick={() => setHdAisleEditDept(null)}>✕</button>
+                            </span>
+                          ) : null}
+                        </div>
                       ) : null}
                       {legacySubitems.length ? (
                         <div className="mt-2 space-y-2 pl-3">
