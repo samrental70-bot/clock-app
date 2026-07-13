@@ -1154,14 +1154,6 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     });
   }, [chatPane, selectedChatListId]);
 
-  // Open a Home Depot list → load its store's confirmed aisles and classify
-  // any un-classified items into departments.
-  useEffect(() => {
-    const list = selectedChatListResolved;
-    if (!list || list.list_type !== "home_depot" || chatPane !== "list-detail") return;
-    void loadHdAisleMap(list.store_name);
-    void classifyHdList(list);
-  }, [selectedChatListResolved, chatPane, loadHdAisleMap, classifyHdList]);
 
   useEffect(() => {
     if (!selectedChatListId || chatPane !== "list-detail" || chatListFocusRestoreTick <= 0 || typeof window === "undefined") {
@@ -1879,6 +1871,16 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       setHdLearnBusy(false);
     }
   }, [authUser?.id, chatErrorMessage, chatFetch, companyId, hdLearnBusy, loadHdAisleMap, selectedChatListResolved]);
+
+  // Open a Home Depot list → load its store's confirmed aisles and classify
+  // any un-classified items into departments. (Placed after the HD callbacks
+  // above so their const bindings are initialized before this effect's deps.)
+  useEffect(() => {
+    const list = selectedChatListResolved;
+    if (!list || list.list_type !== "home_depot" || chatPane !== "list-detail") return;
+    void loadHdAisleMap(list.store_name);
+    void classifyHdList(list);
+  }, [selectedChatListResolved, chatPane, loadHdAisleMap, classifyHdList]);
 
   // Open Home Depot's site with the item pre-searched. The store the browser
   // last set as "My Store" on homedepot.ca drives the in-store aisle/bay shown.
