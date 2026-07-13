@@ -4415,6 +4415,24 @@ export default function EmployeeClockApp() {
   // On-device photo cache (Settings toggle, default on). Keeps a local copy of
   // photos so the Photos/Receipts grids reopen instantly and work offline.
   const [photoCacheOn, setPhotoCacheOn] = useState(() => isPhotoCacheEnabled());
+  // Default city for Home Depot lists (informational default; the store name is
+  // still typed per list). Persisted locally.
+  const [hdDefaultCity, setHdDefaultCity] = useState(() => {
+    try {
+      return (typeof window !== "undefined" && window.localStorage?.getItem("opera.hdDefaultCity")) || "Ottawa, Ontario";
+    } catch {
+      return "Ottawa, Ontario";
+    }
+  });
+  const saveHdDefaultCity = useCallback((value) => {
+    const next = String(value || "").trim() || "Ottawa, Ontario";
+    setHdDefaultCity(value);
+    try {
+      window.localStorage?.setItem("opera.hdDefaultCity", next);
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [photoCacheClearing, setPhotoCacheClearing] = useState(false);
   const handleTogglePhotoCache = useCallback(async () => {
     const next = !photoCacheOn;
@@ -32653,6 +32671,21 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   ) : !photoCacheOn ? (
                     <p className="mt-2 text-[12px] font-semibold text-slate-500">Photos will load from the network each time and won’t be kept on this device.</p>
                   ) : null}
+                </div>
+
+                <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Home Depot lists</p>
+                <div className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm">
+                  <p className="text-[16px] font-black text-slate-900">Default city</p>
+                  <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-500">
+                    Used as the default area for Home Depot lists. You still type the specific store (e.g. Nepean) at the top of each list.
+                  </p>
+                  <input
+                    className="mt-3 h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-[15px] font-semibold text-slate-900 outline-none focus:border-slate-400"
+                    value={hdDefaultCity}
+                    maxLength={80}
+                    onChange={(event) => saveHdDefaultCity(event.target.value)}
+                    placeholder="Ottawa, Ontario"
+                  />
                 </div>
 
                 <p className="px-1 pt-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">Your account</p>

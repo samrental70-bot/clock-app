@@ -137,6 +137,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const hdClassifyGuardRef = useRef("");
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
+  // Photo attach/capture on list items ("" idle, "new" while creating a photo
+  // item, or an item id while attaching to that item).
+  const [listPhotoBusy, setListPhotoBusy] = useState("");
   const [subItemDraft, setSubItemDraft] = useState("");
   const [addingSubItemParentId, setAddingSubItemParentId] = useState("");
   const [editingListItemId, setEditingListItemId] = useState("");
@@ -2003,6 +2006,55 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     }
   };
 
+  // Photos on list items (all list types): capture with the camera or pick from
+  // the gallery, attached to an item.
+  const uploadListItemPhoto = async (file) => {
+    const path = `list-item/${companyId}/${authUser?.id || "user"}-${Date.now()}.jpg`;
+    const up = await supabase.storage.from("project-photos").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+    if (up.error) throw up.error;
+    const publicUrl = supabase.storage.from("project-photos").getPublicUrl(path)?.data?.publicUrl || "";
+    return { publicUrl, path };
+  };
+
+  const attachPhotoToListItem = async (item, file) => {
+    if (!item?.id || !file || listPhotoBusy) return;
+    setListPhotoBusy(String(item.id));
+    setError("");
+    try {
+      const { publicUrl, path } = await uploadListItemPhoto(file);
+      await supabase.from("chat_list_items").update({ photo_url: publicUrl, photo_storage_path: path }).eq("id", item.id);
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setListPhotoBusy("");
+    }
+  };
+
+  const addPhotoListItem = async (file) => {
+    if (!file || !selectedChatListResolved?.id || listPhotoBusy) return;
+    setListPhotoBusy("new");
+    setError("");
+    try {
+      const { publicUrl, path } = await uploadListItemPhoto(file);
+      const text = normalizeChatListItemDraftText(listItemDraft) || "Photo";
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "add_list_item", company_id: companyId, list_id: selectedChatListResolved.id, text }),
+      });
+      const newId = data?.item?.id;
+      if (newId) {
+        await supabase.from("chat_list_items").update({ photo_url: publicUrl, photo_storage_path: path }).eq("id", newId);
+      }
+      setListItemDraft("");
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setListPhotoBusy("");
+    }
+  };
+
   const toggleChatListItem = async (item) => {
     if (!item?.id) return;
     setError("");
@@ -2750,6 +2802,35 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
                         </button>
                       )}
+                      {!editingThis ? (
+                        <div className="mt-1.5 flex items-center gap-2">
+                          {item.photo_url ? (
+                            <a href={item.photo_url} target="_blank" rel="noopener noreferrer" className="block">
+                              <img src={item.photo_url} alt="Item" className="h-14 w-14 rounded-[10px] border border-[#E2E8F0] object-cover" loading="lazy" />
+                            </a>
+                          ) : null}
+                          <label
+                            className={`inline-flex cursor-pointer items-center gap-1 rounded-full border border-[#CBD5E1] bg-white px-2 py-1 text-[11px] font-black text-[#64748B] ${listPhotoBusy === String(item.id) ? "opacity-60" : "active:bg-[#F8FAFC]"}`}
+                          >
+                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                              <circle cx="12" cy="13" r="4" />
+                            </svg>
+                            {listPhotoBusy === String(item.id) ? "Saving…" : item.photo_url ? "Replace photo" : "Photo"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={Boolean(listPhotoBusy)}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                event.target.value = "";
+                                if (file) void attachPhotoToListItem(item, file);
+                              }}
+                            />
+                          </label>
+                        </div>
+                      ) : null}
                       {assigningThis && !editingThis && list.list_type !== "home_depot" ? (
                         <div className="mt-2">
                           <select
@@ -2980,6 +3061,31 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               }}
               onBlur={handleMainInputBlur}
             />
+            <label
+              className={`flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-[14px] border border-[#CBD5E1] bg-white text-[#061426] ${listPhotoBusy === "new" ? "opacity-60" : "active:bg-[#F8FAFC]"}`}
+              aria-label="Add photo item (camera or gallery)"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              {listPhotoBusy === "new" ? (
+                <svg viewBox="0 0 24 24" className="h-5 w-5 animate-spin text-[#94A3B8]" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                  <circle cx="12" cy="13" r="4" />
+                </svg>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={Boolean(listPhotoBusy)}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void addPhotoListItem(file);
+                }}
+              />
+            </label>
             <button
               type="button"
               className="h-11 rounded-[14px] bg-[#061426] px-4 text-[13px] font-black text-white disabled:bg-[#CBD5E1]"
