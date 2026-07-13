@@ -5,6 +5,7 @@ import chatHandler from "../api-handlers/chat.js";
 import createEmployeeHandler from "../api-handlers/create-employee.js";
 import createProjectTaskHandler from "../api-handlers/create-project-task.js";
 import dailySupervisorReportCronHandler from "../api-handlers/daily-supervisor-report-cron.js";
+import hdIntelligenceHandler from "../api-handlers/hd-intelligence.js";
 import payrollBalanceReminderHandler from "../api-handlers/payroll-balance-reminder.js";
 import projectMediaHandler from "../api-handlers/project-media.js";
 import sendDailyTimesheetReportHandler from "../api-handlers/send-daily-timesheet-report.js";
@@ -21,6 +22,7 @@ const ROUTE_HANDLERS = {
   "create-employee": createEmployeeHandler,
   "create-project-task": createProjectTaskHandler,
   "daily-supervisor-report-cron": dailySupervisorReportCronHandler,
+  "hd-intelligence": hdIntelligenceHandler,
   "payroll-balance-reminder": payrollBalanceReminderHandler,
   "project-media": projectMediaHandler,
   "send-daily-timesheet-report": sendDailyTimesheetReportHandler,
