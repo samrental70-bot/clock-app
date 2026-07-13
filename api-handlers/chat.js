@@ -758,6 +758,8 @@ async function listChatLists(supabase, { companyId, conversationId, callerId, ca
       id: list.id,
       conversation_id: list.conversation_id,
       title: list.title,
+      list_type: list.list_type || "other",
+      store_name: list.store_name || null,
       created_by: list.created_by,
       pinned: Boolean(list.pinned),
       created_at: list.created_at,
