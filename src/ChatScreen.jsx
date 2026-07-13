@@ -2434,27 +2434,29 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         </svg>
                       ) : null}
                     </button>
-                    <button
-                      type="button"
-                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
-                        assignee ? "border-[#E7D9B0] bg-[#FBF6EA] text-[#9A6B12]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
-                      }`}
-                      onClick={() => {
-                        setAssigningListItemId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
-                        setEditingListItemId("");
-                        setEditingListItemText("");
-                      }}
-                      aria-label={assignee ? `Assigned to ${assignee.name}` : `Assign employee to item ${item.item_number}`}
-                    >
-                      {assignee ? (
-                        assignee.initial
-                      ) : (
-                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
-                          <path d="M4 20a8 8 0 0 1 16 0" />
-                        </svg>
-                      )}
-                    </button>
+                    {list.list_type !== "home_depot" ? (
+                      <button
+                        type="button"
+                        className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
+                          assignee ? "border-[#E7D9B0] bg-[#FBF6EA] text-[#9A6B12]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                        }`}
+                        onClick={() => {
+                          setAssigningListItemId((current) => (String(current) === String(item.id) ? "" : String(item.id)));
+                          setEditingListItemId("");
+                          setEditingListItemText("");
+                        }}
+                        aria-label={assignee ? `Assigned to ${assignee.name}` : `Assign employee to item ${item.item_number}`}
+                      >
+                        {assignee ? (
+                          assignee.initial
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" />
+                            <path d="M4 20a8 8 0 0 1 16 0" />
+                          </svg>
+                        )}
+                      </button>
+                    ) : null}
                     <div className="min-w-0 flex-1">
                       {editingThis ? (
                         <div className="space-y-2">
@@ -2488,18 +2490,20 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                               void saveChatListItemEdit(item);
                             }}
                           />
-                          <select
-                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
-                            value={String(item?.assigned_user_id || "")}
-                            onChange={(event) => void assignChatListItem(item, event.target.value)}
-                          >
-                            <option value="">Unassigned</option>
-                            {assignableMembers.map((member) => (
-                              <option key={`assign-${item.id}-${member.user_id}`} value={member.user_id}>
-                                {member.name}
-                              </option>
-                            ))}
-                          </select>
+                          {list.list_type !== "home_depot" ? (
+                            <select
+                              className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                              value={String(item?.assigned_user_id || "")}
+                              onChange={(event) => void assignChatListItem(item, event.target.value)}
+                            >
+                              <option value="">Unassigned</option>
+                              {assignableMembers.map((member) => (
+                                <option key={`assign-${item.id}-${member.user_id}`} value={member.user_id}>
+                                  {member.name}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
@@ -2542,7 +2546,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
                         </button>
                       )}
-                      {assigningThis && !editingThis ? (
+                      {assigningThis && !editingThis && list.list_type !== "home_depot" ? (
                         <div className="mt-2">
                           <select
                             className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
