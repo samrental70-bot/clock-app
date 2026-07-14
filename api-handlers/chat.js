@@ -1824,6 +1824,27 @@ export default async function handler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && action === "set_list_title") {
+      const list = await getChatListForMember(supabase, {
+        companyId,
+        listId: body.list_id || body.listId,
+        callerId: user.id,
+      });
+      const title = cleanText(body.title).slice(0, 120);
+      if (!title) {
+        res.status(400).json({ error: "Title is required" });
+        return;
+      }
+      const { error: titleError } = await supabase
+        .from("chat_lists")
+        .update({ title, updated_at: new Date().toISOString(), updated_by: user.id })
+        .eq("company_id", companyId)
+        .eq("id", list.id);
+      if (titleError) throw titleError;
+      res.status(200).json({ ok: true, title });
+      return;
+    }
+
     if (req.method === "POST" && action === "create_list") {
       const result = await createChatList(supabase, {
         companyId,

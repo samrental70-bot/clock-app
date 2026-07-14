@@ -131,6 +131,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // Inline store-name edit on an open Home Depot list.
   const [storeNameDraft, setStoreNameDraft] = useState(null);
   const [storeNameSaving, setStoreNameSaving] = useState(false);
+  // Inline rename of an open list (null = not editing).
+  const [listTitleDraft, setListTitleDraft] = useState(null);
+  const [listTitleSaving, setListTitleSaving] = useState(false);
   // Home Depot store intelligence: department -> confirmed aisle for the list's store.
   const [hdAisleByDept, setHdAisleByDept] = useState({});
   const [hdClassifying, setHdClassifying] = useState(false);
@@ -2121,6 +2124,34 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     }
   };
 
+  const saveListTitle = async (list) => {
+    if (!list?.id || listTitleSaving) return;
+    const nextTitle = String(listTitleDraft ?? "").trim();
+    if (!nextTitle || nextTitle === String(list.title || "").trim()) {
+      setListTitleDraft(null);
+      return;
+    }
+    setListTitleSaving(true);
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({
+          action: "set_list_title",
+          company_id: companyId,
+          list_id: list.id,
+          title: nextTitle,
+        }),
+      });
+      setListTitleDraft(null);
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    } finally {
+      setListTitleSaving(false);
+    }
+  };
+
   const addChatListItem = async (parentItem = null) => {
     const parentId = String(parentItem?.id || addingSubItemParentId || "");
     const usingSubItemDraft = Boolean(parentId);
@@ -2742,9 +2773,53 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               </svg>
             </span>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
-                <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
-              </div>
+              {listTitleDraft !== null ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    autoFocus
+                    className="chat-mobile-safe-input h-9 min-w-0 flex-1 rounded-[10px] border border-[#CBD5E1] bg-white px-2.5 text-[16px] font-black text-[#061426] outline-none focus:border-[#061426]"
+                    style={{ fontSize: 16 }}
+                    value={listTitleDraft}
+                    maxLength={120}
+                    onChange={(event) => setListTitleDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void saveListTitle(list);
+                      }
+                      if (event.key === "Escape") setListTitleDraft(null);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="h-9 shrink-0 rounded-[10px] bg-[#061426] px-2.5 text-[12px] font-black text-white disabled:opacity-60"
+                    disabled={listTitleSaving}
+                    onClick={() => void saveListTitle(list)}
+                  >
+                    {listTitleSaving ? "…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    className="h-9 w-9 shrink-0 rounded-[10px] border border-[#CBD5E1] bg-white text-[12px] font-black text-[#64748B]"
+                    onClick={() => setListTitleDraft(null)}
+                    aria-label="Cancel rename"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="flex max-w-full items-center gap-1.5 text-left"
+                  onClick={() => setListTitleDraft(String(list.title || ""))}
+                  aria-label="Rename list"
+                >
+                  <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
+                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+              )}
               <p className="truncate text-[11px] font-semibold text-[#64748B]">
                 {list.open_count} open / {list.total_count} total
               </p>
