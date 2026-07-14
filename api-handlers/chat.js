@@ -1835,13 +1835,19 @@ export default async function handler(req, res) {
         res.status(400).json({ error: "Title is required" });
         return;
       }
+      const update = { title, updated_at: new Date().toISOString(), updated_by: user.id };
+      const rawType = cleanText(body.list_type || body.listType).toLowerCase();
+      if (["home_depot", "pending_job", "other"].includes(rawType)) {
+        update.list_type = rawType;
+        if (rawType !== "home_depot") update.store_name = null;
+      }
       const { error: titleError } = await supabase
         .from("chat_lists")
-        .update({ title, updated_at: new Date().toISOString(), updated_by: user.id })
+        .update(update)
         .eq("company_id", companyId)
         .eq("id", list.id);
       if (titleError) throw titleError;
-      res.status(200).json({ ok: true, title });
+      res.status(200).json({ ok: true, title, list_type: update.list_type });
       return;
     }
 

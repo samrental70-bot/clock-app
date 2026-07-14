@@ -131,8 +131,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // Inline store-name edit on an open Home Depot list.
   const [storeNameDraft, setStoreNameDraft] = useState(null);
   const [storeNameSaving, setStoreNameSaving] = useState(false);
-  // Inline rename of an open list (null = not editing).
+  // Inline rename of an open list (null = not editing) + its type.
   const [listTitleDraft, setListTitleDraft] = useState(null);
+  const [listTypeDraft, setListTypeDraft] = useState("other");
   const [listTitleSaving, setListTitleSaving] = useState(false);
   // Home Depot store intelligence: department -> confirmed aisle for the list's store.
   const [hdAisleByDept, setHdAisleByDept] = useState({});
@@ -2127,7 +2128,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const saveListTitle = async (list) => {
     if (!list?.id || listTitleSaving) return;
     const nextTitle = String(listTitleDraft ?? "").trim();
-    if (!nextTitle || nextTitle === String(list.title || "").trim()) {
+    const nextType = listTypeDraft || "other";
+    const titleUnchanged = !nextTitle || nextTitle === String(list.title || "").trim();
+    const typeUnchanged = nextType === String(list.list_type || "other");
+    if (!nextTitle || (titleUnchanged && typeUnchanged)) {
       setListTitleDraft(null);
       return;
     }
@@ -2141,6 +2145,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
           company_id: companyId,
           list_id: list.id,
           title: nextTitle,
+          list_type: nextType,
         }),
       });
       setListTitleDraft(null);
@@ -2774,44 +2779,67 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             </span>
             <div className="min-w-0 flex-1">
               {listTitleDraft !== null ? (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    autoFocus
-                    className="chat-mobile-safe-input h-9 min-w-0 flex-1 rounded-[10px] border border-[#CBD5E1] bg-white px-2.5 text-[16px] font-black text-[#061426] outline-none focus:border-[#061426]"
-                    style={{ fontSize: 16 }}
-                    value={listTitleDraft}
-                    maxLength={120}
-                    onChange={(event) => setListTitleDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void saveListTitle(list);
-                      }
-                      if (event.key === "Escape") setListTitleDraft(null);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="h-9 shrink-0 rounded-[10px] bg-[#061426] px-2.5 text-[12px] font-black text-white disabled:opacity-60"
-                    disabled={listTitleSaving}
-                    onClick={() => void saveListTitle(list)}
-                  >
-                    {listTitleSaving ? "…" : "Save"}
-                  </button>
-                  <button
-                    type="button"
-                    className="h-9 w-9 shrink-0 rounded-[10px] border border-[#CBD5E1] bg-white text-[12px] font-black text-[#64748B]"
-                    onClick={() => setListTitleDraft(null)}
-                    aria-label="Cancel rename"
-                  >
-                    ✕
-                  </button>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      className="chat-mobile-safe-input h-9 min-w-0 flex-1 rounded-[10px] border border-[#CBD5E1] bg-white px-2.5 text-[16px] font-black text-[#061426] outline-none focus:border-[#061426]"
+                      style={{ fontSize: 16 }}
+                      value={listTitleDraft}
+                      maxLength={120}
+                      onChange={(event) => setListTitleDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void saveListTitle(list);
+                        }
+                        if (event.key === "Escape") setListTitleDraft(null);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="h-9 shrink-0 rounded-[10px] bg-[#061426] px-2.5 text-[12px] font-black text-white disabled:opacity-60"
+                      disabled={listTitleSaving}
+                      onClick={() => void saveListTitle(list)}
+                    >
+                      {listTitleSaving ? "…" : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="h-9 w-9 shrink-0 rounded-[10px] border border-[#CBD5E1] bg-white text-[12px] font-black text-[#64748B]"
+                      onClick={() => setListTitleDraft(null)}
+                      aria-label="Cancel rename"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="flex gap-1">
+                    {[
+                      { id: "home_depot", label: "Home Depot" },
+                      { id: "pending_job", label: "Pending job" },
+                      { id: "other", label: "Other" },
+                    ].map((opt) => (
+                      <button
+                        key={`type-${opt.id}`}
+                        type="button"
+                        className={`h-8 flex-1 rounded-[9px] border px-1 text-[11px] font-black ${
+                          listTypeDraft === opt.id ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
+                        }`}
+                        onClick={() => setListTypeDraft(opt.id)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <button
                   type="button"
                   className="flex max-w-full items-center gap-1.5 text-left"
-                  onClick={() => setListTitleDraft(String(list.title || ""))}
+                  onClick={() => {
+                    setListTitleDraft(String(list.title || ""));
+                    setListTypeDraft(String(list.list_type || "other"));
+                  }}
                   aria-label="Rename list"
                 >
                   <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
@@ -2938,7 +2966,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
           ) : null}
         </div>
 
-        <div className="flex-1 space-y-3 overflow-y-auto bg-white px-3 py-3 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
+        <div className="flex-1 space-y-3 overflow-y-auto bg-white px-3 py-3 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))]">
           {hierarchy.length === 0 ? (
             <EmptyState
               title={list.total_count > 0 ? "Completed items hidden" : "No list items"}
@@ -2969,9 +2997,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       onClick={() => {
                         const willComplete = !item.is_done;
                         void toggleChatListItem(item);
-                        // Auto-open the camera when marking complete (only when
-                        // completing, not un-ticking) so the crew can snap a photo.
-                        if (willComplete && tickCaptureInputRef.current) {
+                        // Auto-open the camera when marking complete — only on
+                        // Home Depot lists (proof-of-purchase photo), not other
+                        // list types.
+                        if (willComplete && list.list_type === "home_depot" && tickCaptureInputRef.current) {
                           tickCaptureItemRef.current = item;
                           try {
                             tickCaptureInputRef.current.click();
