@@ -1467,14 +1467,18 @@ function resolveTimesheetEmployeeTitle(record, { profileFullName, authUser, team
     if (pf && !looksLikeEmail(pf) && !looksLikeUuidOrIdLike(pf)) return pf;
   }
 
+  // Prefer the person's CURRENT team-profile name (resolved from user_id) over
+  // the name stamped onto the row at clock-in. Otherwise a later rename leaves
+  // old rows showing the stale name — e.g. rows created while the account was
+  // "Sam" kept showing "Sam" after it was renamed to "Anm".
+  const fromTeam = (teamProfileFullNameByUserId[uid] || "").trim();
+  if (fromTeam && !looksLikeEmail(fromTeam) && !looksLikeUuidOrIdLike(fromTeam)) return fromTeam;
+
   const good = pickGoodFreeformEmployeeName(record);
   if (good) return good;
 
   const fromRecordProfile = (record.profileDisplayName || "").trim();
   if (fromRecordProfile) return fromRecordProfile;
-
-  const fromTeam = teamProfileFullNameByUserId[uid];
-  if (fromTeam && String(fromTeam).trim()) return String(fromTeam).trim();
 
   const mail =
     (record.employeeEmail || "").trim() ||
