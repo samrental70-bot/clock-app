@@ -19688,6 +19688,33 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           </div>
         </div>
       </div>
+      {timesheetSanityFilter && isAdmin && allowEdit && editingRecordId !== record.id ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#F1F5F9] pt-3">
+          <span className="text-[11px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">Resolve</span>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#CBD5E1] bg-white px-3 text-[12px] font-black text-[#061426] active:bg-[#F8FAFC] disabled:opacity-50"
+            disabled={busyDelete || Boolean(pendingEditRequest)}
+            onClick={() => startEditRecord(record)}
+          >
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+            Edit times
+          </button>
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[#FECACA] bg-[#FEF2F2] px-3 text-[12px] font-black text-[#DC2626] active:bg-[#FEE2E2] disabled:opacity-50"
+            disabled={busyDelete}
+            onClick={() => void handleDeleteTimesheetRecord(record)}
+          >
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M3 6h18" /><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            </svg>
+            {busyDelete ? "Deleting…" : "Delete this entry"}
+          </button>
+        </div>
+      ) : null}
       {editingRecordId === record.id ? (
         <div className="mt-3 border-t pt-2 space-y-2">
           <p className="text-[13px] text-slate-500 leading-tight">
