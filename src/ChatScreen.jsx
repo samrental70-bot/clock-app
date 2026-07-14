@@ -2859,6 +2859,33 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         )}
                       </button>
                     ) : null}
+                    <label
+                      className={`mt-0.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border ${
+                        item.photo_url ? "border-[#15803D] bg-[#ECFDF5] text-[#15803D]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                      } ${listPhotoBusy === String(item.id) ? "opacity-60" : "active:bg-[#F1F5F9]"}`}
+                      aria-label={item.photo_url ? `Replace photo on item ${item.item_number}` : `Add photo to item ${item.item_number}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {listPhotoBusy === String(item.id) ? (
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" /></svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                          <circle cx="12" cy="13" r="4" />
+                        </svg>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        disabled={Boolean(listPhotoBusy)}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          event.target.value = "";
+                          if (file) void attachPhotoToListItem(item, file);
+                        }}
+                      />
+                    </label>
                     <div className="min-w-0 flex-1">
                       {editingThis ? (
                         <div className="space-y-2">
@@ -2948,34 +2975,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
                         </button>
                       )}
-                      {!editingThis ? (
-                        <div className="mt-1.5 flex items-center gap-2">
-                          {item.photo_url ? (
-                            <a href={item.photo_url} target="_blank" rel="noopener noreferrer" className="block">
-                              <img src={item.photo_url} alt="Item" className="h-14 w-14 rounded-[10px] border border-[#E2E8F0] object-cover" loading="lazy" />
-                            </a>
-                          ) : null}
-                          <label
-                            className={`inline-flex cursor-pointer items-center gap-1 rounded-full border border-[#CBD5E1] bg-white px-2 py-1 text-[11px] font-black text-[#64748B] ${listPhotoBusy === String(item.id) ? "opacity-60" : "active:bg-[#F8FAFC]"}`}
-                          >
-                            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
-                              <circle cx="12" cy="13" r="4" />
-                            </svg>
-                            {listPhotoBusy === String(item.id) ? "Saving…" : item.photo_url ? "Replace photo" : "Photo"}
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              disabled={Boolean(listPhotoBusy)}
-                              onChange={(event) => {
-                                const file = event.target.files?.[0];
-                                event.target.value = "";
-                                if (file) void attachPhotoToListItem(item, file);
-                              }}
-                            />
-                          </label>
-                        </div>
+                      {item.photo_url && !editingThis ? (
+                        <a href={item.photo_url} target="_blank" rel="noopener noreferrer" className="mt-1.5 block w-fit">
+                          <img src={item.photo_url} alt="Item" className="h-14 w-14 rounded-[10px] border border-[#E2E8F0] object-cover" loading="lazy" />
+                        </a>
                       ) : null}
                       {assigningThis && !editingThis && list.list_type !== "home_depot" ? (
                         <div className="mt-2">
