@@ -2957,22 +2957,25 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 <path d="m15 18-6-6 6-6" />
               </svg>
             </button>
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M8 6h13M8 12h13M8 18h13" />
-                <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
-              </svg>
-            </span>
+            {listTitleDraft === null ? (
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FBF8F1] text-[#9A6B12]">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M8 6h13M8 12h13M8 18h13" />
+                  <path d="m3 6 1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2" />
+                </svg>
+              </span>
+            ) : null}
             <div className="min-w-0 flex-1">
               {listTitleDraft !== null ? (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
                     <input
                       autoFocus
-                      className="chat-mobile-safe-input h-9 min-w-0 flex-1 rounded-[10px] border border-[#CBD5E1] bg-white px-2.5 text-[16px] font-black text-[#061426] outline-none focus:border-[#061426]"
+                      className="chat-mobile-safe-input h-10 min-w-0 flex-1 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-black text-[#061426] outline-none focus:border-[#061426]"
                       style={{ fontSize: 16 }}
                       value={listTitleDraft}
                       maxLength={120}
+                      placeholder="List name"
                       onChange={(event) => setListTitleDraft(event.target.value)}
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
@@ -2984,7 +2987,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                     />
                     <button
                       type="button"
-                      className="h-9 shrink-0 rounded-[10px] bg-[#061426] px-2.5 text-[12px] font-black text-white disabled:opacity-60"
+                      className="h-10 shrink-0 rounded-[12px] bg-[#061426] px-3.5 text-[13px] font-black text-white disabled:opacity-60"
                       disabled={listTitleSaving}
                       onClick={() => void saveListTitle(list)}
                     >
@@ -2992,53 +2995,60 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                     </button>
                     <button
                       type="button"
-                      className="h-9 w-9 shrink-0 rounded-[10px] border border-[#CBD5E1] bg-white text-[12px] font-black text-[#64748B]"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border border-[#CBD5E1] bg-white text-[#64748B]"
                       onClick={() => setListTitleDraft(null)}
                       aria-label="Cancel rename"
                     >
-                      ✕
+                      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M6 6 18 18" /><path d="M18 6 6 18" />
+                      </svg>
                     </button>
                   </div>
-                  <div className="flex gap-1">
-                    {[
-                      { id: "home_depot", label: "Home Depot" },
-                      { id: "pending_job", label: "Pending job" },
-                      { id: "other", label: "Other" },
-                    ].map((opt) => (
-                      <button
-                        key={`type-${opt.id}`}
-                        type="button"
-                        className={`h-8 flex-1 rounded-[9px] border px-1 text-[11px] font-black ${
-                          listTypeDraft === opt.id ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
-                        }`}
-                        onClick={() => setListTypeDraft(opt.id)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                  <div>
+                    <p className="mb-1 text-[10px] font-black uppercase tracking-[0.1em] text-[#94A3B8]">List type</p>
+                    <div className="flex gap-1.5">
+                      {[
+                        { id: "home_depot", label: "Home Depot" },
+                        { id: "pending_job", label: "Pending job" },
+                        { id: "other", label: "Other" },
+                      ].map((opt) => (
+                        <button
+                          key={`type-${opt.id}`}
+                          type="button"
+                          className={`h-9 flex-1 rounded-[10px] border px-1 text-[11px] font-black leading-tight ${
+                            listTypeDraft === opt.id ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
+                          }`}
+                          onClick={() => setListTypeDraft(opt.id)}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : (
-                <button
-                  type="button"
-                  className="flex max-w-full items-center gap-1.5 text-left"
-                  onClick={() => {
-                    setListTitleDraft(String(list.title || ""));
-                    setListTypeDraft(String(list.list_type || "other"));
-                  }}
-                  aria-label="Rename list"
-                >
-                  <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
-                  <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="flex max-w-full items-center gap-1.5 text-left"
+                    onClick={() => {
+                      setListTitleDraft(String(list.title || ""));
+                      setListTypeDraft(String(list.list_type || "other"));
+                    }}
+                    aria-label="Rename list"
+                  >
+                    <h2 className="truncate text-[17px] font-black text-[#061426]">{list.title}</h2>
+                    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 shrink-0 text-[#94A3B8]" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                  <p className="truncate text-[11px] font-semibold text-[#64748B]">
+                    {list.open_count} open / {list.total_count} total
+                  </p>
+                </>
               )}
-              <p className="truncate text-[11px] font-semibold text-[#64748B]">
-                {list.open_count} open / {list.total_count} total
-              </p>
             </div>
-            <div className="flex shrink-0 items-center gap-1">
+            <div className={`${listTitleDraft === null ? "flex" : "hidden"} shrink-0 items-center gap-1`}>
               <button
                 type="button"
                 className={`flex h-9 w-9 items-center justify-center rounded-full border ${

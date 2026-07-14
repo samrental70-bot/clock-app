@@ -17896,13 +17896,61 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       throw new Error("Background push is not supported on this device/browser.");
     }
 
+    const desiredKeyBytes = urlBase64ToUint8Array(vapid.trim());
     const subAtStart = await registration.pushManager.getSubscription();
     let sub = subAtStart;
+
+    // A subscription made with a DIFFERENT VAPID key can never receive our
+    // pushes (the push service silently drops them), yet getSubscription()
+    // still returns it — so reusing it blindly means "permission granted but
+    // no notifications", exactly the reported symptom. Detect a key mismatch
+    // and re-subscribe with the current key.
+    const existingKeyMatches = (subscription) => {
+      try {
+        const existing = subscription?.options?.applicationServerKey;
+        if (!existing) return false;
+        const a = new Uint8Array(existing);
+        if (a.length !== desiredKeyBytes.length) return false;
+        for (let i = 0; i < a.length; i += 1) {
+          if (a[i] !== desiredKeyBytes[i]) return false;
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (sub && !existingKeyMatches(sub)) {
+      try {
+        await sub.unsubscribe();
+      } catch (err) {
+        console.warn("[PUSH SUB] unsubscribe stale failed", err?.message || err);
+      }
+      sub = null;
+    }
+
     if (!sub) {
-      sub = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid.trim()),
-      });
+      try {
+        sub = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: desiredKeyBytes,
+        });
+      } catch (err) {
+        // iOS/Chrome throw InvalidStateError if a subscription with another key
+        // still lingers — clear it and try once more before giving up.
+        const lingering = await registration.pushManager.getSubscription();
+        if (lingering) {
+          try {
+            await lingering.unsubscribe();
+          } catch {
+            /* ignore */
+          }
+        }
+        sub = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: desiredKeyBytes,
+        });
+      }
     }
 
     const subJson = sub.toJSON();
@@ -18066,6 +18114,41 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
       setBackgroundPushError(getErrorMessage(e));
     }
   };
+
+  const [testPushBusy, setTestPushBusy] = useState(false);
+  const [testPushMessage, setTestPushMessage] = useState("");
+  const handleSendTestPush = useCallback(async () => {
+    setTestPushMessage("");
+    setTestPushBusy(true);
+    try {
+      // Ensure THIS device has a live subscription before testing delivery.
+      try {
+        await ensurePushSubscription();
+      } catch (e) {
+        setTestPushMessage(getErrorMessage(e) || "Turn on notifications first.");
+        return;
+      }
+      const { data: sess } = await supabase.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) {
+        setTestPushMessage("Sign in first.");
+        return;
+      }
+      const res = await fetch("/api/send-push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ test: true }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.detail) setTestPushMessage(data.detail);
+      else if (Number(data?.sent) > 0) setTestPushMessage("Test sent — lock your phone and watch for it.");
+      else setTestPushMessage(data?.error || "Could not send a test notification.");
+    } catch (e) {
+      setTestPushMessage(getErrorMessage(e));
+    } finally {
+      setTestPushBusy(false);
+    }
+  }, [ensurePushSubscription]);
 
   const handleMarkNotificationRead = async (n) => {
     if (!isAdmin || !authUser?.id || !n?.id) return;
@@ -26931,6 +27014,17 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   <p className="text-[10px] text-slate-500 leading-snug">
                     Uses Web Push when the app or PWA is closed (requires deploy with push API and env keys).
                   </p>
+                  <button
+                    type="button"
+                    className="w-full rounded-xl h-10 text-xs font-black border border-slate-300 bg-white text-slate-800 disabled:opacity-60"
+                    disabled={testPushBusy}
+                    onClick={() => void handleSendTestPush()}
+                  >
+                    {testPushBusy ? "Sending test…" : "Send test notification to this device"}
+                  </button>
+                  {testPushMessage && (
+                    <p className="text-[11px] font-semibold text-slate-700 leading-snug break-words">{testPushMessage}</p>
+                  )}
                 </div>
                 {inAppNotifError && (
                   <div className="rounded-xl bg-amber-50 border border-amber-100 p-2 text-xs text-amber-900">{inAppNotifError}</div>
@@ -29021,6 +29115,19 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     >
                       Enable phone notifications
                     </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="w-full rounded-2xl border border-slate-200 bg-white py-2 px-3 text-[13px] font-bold text-slate-900 shadow-sm relative z-[1] pointer-events-auto disabled:opacity-60"
+                    disabled={testPushBusy}
+                    onClick={() => void handleSendTestPush()}
+                  >
+                    {testPushBusy ? "Sending test…" : "Send test notification"}
+                  </button>
+                  {testPushMessage ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-[12px] font-semibold text-slate-700">
+                      {testPushMessage}
+                    </div>
                   ) : null}
                   {employeeNotifPermMessage ? (
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-[12px] font-semibold text-slate-700">
