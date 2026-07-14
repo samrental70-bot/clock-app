@@ -797,9 +797,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
         setError(chatErrorMessage(err));
       }
     },
-    // refreshSelectedChatLists is stable enough for this handler.
+    // chatFetch/refreshSelectedChatLists are defined later in the component and
+    // are stateless wrappers — referencing them in the body is fine, but keeping
+    // them out of the dep array avoids a temporal-dead-zone crash at render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [patchChatListItemEverywhere, currentUserId, chatFetch, companyId, chatErrorMessage]
+    [patchChatListItemEverywhere, currentUserId, companyId, chatErrorMessage]
   );
 
   // Live smart lists: all H/T/O-tagged subtasks across this chat's pending-work
