@@ -18549,6 +18549,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
 
   const handleSavePayrollSettings = async (event) => {
     event.preventDefault();
+    if (!isAdmin) return;
     if (!isAdmin || !userCompany?.id || !authUser?.id) return;
     const frequency = String(payrollSettingsDraft.frequency || "alternate_friday").trim().toLowerCase();
     const anchorDate = String(payrollSettingsDraft.anchorDate || "").trim();
@@ -18682,6 +18683,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   };
 
   const openPayrollPaymentForm = (row = null, defaults = {}) => {
+    if (!isAdmin) return;
     const rowTransactionType = String(row?.transaction_type || "").trim().toLowerCase();
     const paymentKind =
       String(defaults.paymentKind || row?.payment_kind || row?.paymentKind || (rowTransactionType ? "loan" : "salary") || "salary").trim().toLowerCase() === "loan"
@@ -18720,6 +18722,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   };
 
   const openPayrollPaymentMenu = (context = {}) => {
+    if (!isAdmin) return;
     const employeeId = String(context.employeeId || "").trim();
     if (!employeeId) return;
     setPayrollAddPaymentMenuContext({
@@ -18735,6 +18738,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
 
   const handleSavePayrollPayment = async (event) => {
     event.preventDefault();
+    if (!isAdmin) return;
     if (!isAdmin || !userCompany?.id || !authUser?.id) return;
     const paymentKind = String(payrollPaymentDraft.paymentKind || "salary").trim().toLowerCase() === "loan" ? "loan" : "salary";
     const employeeId = String(payrollPaymentDraft.employeeId || "").trim();
@@ -18905,6 +18909,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
 
   // --- Contract work (manager-managed fixed-amount earnings) ---
   const openPayrollContractSheet = (period) => {
+    if (!isAdmin) return;
     if (!period) return;
     setPayrollContractDraft(null);
     setPayrollContractSheet({ period });
@@ -18931,6 +18936,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   };
 
   const savePayrollContract = async () => {
+    if (!isAdmin) return;
     const draft = payrollContractDraft;
     const period = payrollContractSheet?.period;
     const employeeId = period?.employeeId;
@@ -19022,6 +19028,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   };
 
   const handleVoidPayrollPaymentFromModal = async () => {
+    if (!isAdmin) return;
     if (!payrollPaymentDraft?.id || String(payrollPaymentDraft.paymentKind || "salary") !== "salary") return;
     await handleVoidPayrollPayment({ id: payrollPaymentDraft.id });
     setPayrollPaymentFormOpen(false);
@@ -19901,7 +19908,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   };
 
   const renderPayrollPanel = () => {
-    if (!payrollPanelOpen || !isAdmin) return null;
+    if (!payrollPanelOpen) return null;
     const currentPayrollPeriodLabel = payrollCurrentPeriod
       ? formatPayrollPeriodLabelCompact(payrollCurrentPeriod.startKey, payrollCurrentPeriod.endKey, companyTimeZone)
       : "-";
@@ -19925,7 +19932,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
     const payrollBackLabel = payrollShowEmployeeList ? "Close" : isAdmin ? "All employees" : "Close";
     const payrollDetailEmployeeId = payrollShowEmployeeList
       ? ""
-      : String(payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : payrollEmployeeOptions[0]?.id || "").trim();
+      : !isAdmin
+        ? String(authUser?.id || "").trim()
+        : String(payrollEmployeeFilter !== "all" ? payrollEmployeeFilter : payrollEmployeeOptions[0]?.id || "").trim();
     const payrollDetailEmployeeName = payrollDetailEmployeeId
       ? payrollEmployeeLabelById?.[payrollDetailEmployeeId] || "Selected employee"
       : "";
@@ -20114,7 +20123,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               value: formatMoney(period.contractAmount || 0),
               colorClass: "bg-[#F5F3FF] text-[#7C3AED]",
               icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
-              onClick: () => openPayrollContractSheet({ ...period, employeeId: period.employeeId || payrollDetailEmployeeGroup?.employeeId }),
+              onClick: isAdmin
+                ? () => openPayrollContractSheet({ ...period, employeeId: period.employeeId || payrollDetailEmployeeGroup?.employeeId })
+                : undefined,
             })}
             {renderPayrollMetricTile({
               label: "Paid Cash",
@@ -25097,6 +25108,20 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     >
                       <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
                       Share report
+                    </button>
+                    <button
+                      type="button"
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-4 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
+                      onClick={() => {
+                        setPayrollDetailRow(null);
+                        setPayrollPanelOpen(true);
+                      }}
+                    >
+                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
+                      <span>My payroll</span>
+                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m9 6 6 6-6 6" />
+                      </svg>
                     </button>
                     <div className="grid grid-cols-2 gap-2">
                       <button
