@@ -1075,8 +1075,161 @@ async function toggleChatListItem(supabase, { companyId, callerId, itemId, done 
       .is("deleted_at", null);
     if (childError) throw childError;
   }
+  // Keep an H-tagged subtask and its Home Depot twin in sync. Wrapped so a DB
+  // that hasn't applied the linked_item_id column yet never breaks toggling.
+  try {
+    const { data: linkRow } = await supabase
+      .from("chat_list_items")
+      .select("linked_item_id")
+      .eq("company_id", companyId)
+      .eq("id", item.id)
+      .maybeSingle();
+    const twinId = linkRow?.linked_item_id;
+    if (twinId) {
+      await supabase
+        .from("chat_list_items")
+        .update({
+          is_done: nextDone,
+          completed_at: nextDone ? now : null,
+          completed_by: nextDone ? callerId : null,
+          updated_at: now,
+          updated_by: callerId,
+        })
+        .eq("company_id", companyId)
+        .eq("id", twinId);
+    }
+  } catch {
+    /* linked_item_id column not present yet — ignore */
+  }
   await supabase.from("chat_lists").update({ updated_at: now, updated_by: callerId }).eq("company_id", companyId).eq("id", item.list_id);
   return { id: item.id, is_done: nextDone };
+}
+
+// Tag / untag a pending-work subtask as "H" (Home Depot). Tagging creates (or
+// reuses) a real Home Depot list in the conversation and copies the item into
+// it as a true HD item, linking the two so ticking either keeps both in sync.
+// Untagging removes the HD twin. Requires the chat_list_items.linked_item_id
+// column (see MIGRATION_chat_list_linked_item.sql).
+async function setPendingItemHdTag(supabase, { companyId, callerId, itemId, on }) {
+  const item = await getChatListItemForMember(supabase, { companyId, itemId, callerId });
+  const now = new Date().toISOString();
+
+  let currentTwinId = null;
+  try {
+    const { data: linkRow } = await supabase
+      .from("chat_list_items")
+      .select("linked_item_id")
+      .eq("company_id", companyId)
+      .eq("id", item.id)
+      .maybeSingle();
+    currentTwinId = linkRow?.linked_item_id || null;
+  } catch {
+    const err = new Error("This feature needs a quick database update. Run MIGRATION_chat_list_linked_item.sql.");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!on) {
+    if (currentTwinId) {
+      await supabase
+        .from("chat_list_items")
+        .update({ deleted_at: now, deleted_by: callerId, updated_at: now, updated_by: callerId })
+        .eq("company_id", companyId)
+        .eq("id", currentTwinId);
+    }
+    await supabase
+      .from("chat_list_items")
+      .update({ department: null, linked_item_id: null, updated_at: now, updated_by: callerId })
+      .eq("company_id", companyId)
+      .eq("id", item.id);
+    await touchConversation(supabase, { companyId, conversationId: item.conversation_id });
+    return { tagged: false };
+  }
+
+  // Find or create the conversation's Home Depot list.
+  let hdListId = null;
+  const { data: hdLists } = await supabase
+    .from("chat_lists")
+    .select("id")
+    .eq("company_id", companyId)
+    .eq("conversation_id", item.conversation_id)
+    .eq("list_type", "home_depot")
+    .is("archived_at", null)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (hdLists && hdLists.length) {
+    hdListId = hdLists[0].id;
+  } else {
+    const created = await createChatList(supabase, {
+      companyId,
+      conversationId: item.conversation_id,
+      callerId,
+      title: "Home Depot",
+      items: [],
+      listType: "home_depot",
+      storeName: "",
+    });
+    hdListId = created.id;
+  }
+
+  // Already linked to a live twin? Just make sure the tag marker is set.
+  if (currentTwinId) {
+    const { data: twin } = await supabase
+      .from("chat_list_items")
+      .select("id, deleted_at")
+      .eq("company_id", companyId)
+      .eq("id", currentTwinId)
+      .maybeSingle();
+    if (twin?.id && !twin.deleted_at) {
+      await supabase
+        .from("chat_list_items")
+        .update({ department: "Home Depot", updated_at: now, updated_by: callerId })
+        .eq("company_id", companyId)
+        .eq("id", item.id);
+      return { tagged: true, hd_list_id: hdListId, twin_id: currentTwinId };
+    }
+  }
+
+  const { data: maxRow } = await supabase
+    .from("chat_list_items")
+    .select("item_number")
+    .eq("company_id", companyId)
+    .eq("list_id", hdListId)
+    .is("deleted_at", null)
+    .order("item_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const nextNumber = Number(maxRow?.item_number || 0) + 1;
+
+  const { data: twinInsert, error: twinErr } = await supabase
+    .from("chat_list_items")
+    .insert({
+      company_id: companyId,
+      conversation_id: item.conversation_id,
+      list_id: hdListId,
+      item_number: nextNumber,
+      text: item.text,
+      created_by: callerId,
+      updated_by: callerId,
+      parent_item_id: null,
+      item_level: 0,
+      child_order: 0,
+      sort_order: nextNumber,
+      is_done: Boolean(item.is_done),
+      linked_item_id: item.id,
+    })
+    .select("id")
+    .single();
+  if (twinErr) throw twinErr;
+
+  await supabase
+    .from("chat_list_items")
+    .update({ department: "Home Depot", linked_item_id: twinInsert.id, updated_at: now, updated_by: callerId })
+    .eq("company_id", companyId)
+    .eq("id", item.id);
+
+  await touchConversation(supabase, { companyId, conversationId: item.conversation_id });
+  return { tagged: true, hd_list_id: hdListId, twin_id: twinInsert.id };
 }
 
 async function deleteChatListItem(supabase, { companyId, callerId, itemId }) {
@@ -1950,6 +2103,17 @@ export default async function handler(req, res) {
         done: body.done,
       });
       res.status(200).json({ ok: true, item: result });
+      return;
+    }
+
+    if (req.method === "POST" && action === "set_hd_tag") {
+      const result = await setPendingItemHdTag(supabase, {
+        companyId,
+        callerId: user.id,
+        itemId: body.item_id || body.itemId,
+        on: body.on !== false,
+      });
+      res.status(200).json({ ok: true, ...result });
       return;
     }
 

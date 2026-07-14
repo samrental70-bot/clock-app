@@ -776,6 +776,29 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     [patchChatListItemEverywhere, chatErrorMessage]
   );
 
+  // Tag / untag a pending-work subtask as "H" (Home Depot). Unlike T (a plain
+  // tag), H mirrors the item into a real Home Depot list with full HD features
+  // and keeps the two in sync — handled server-side by the set_hd_tag action.
+  const setChatSubtaskHomeDepot = useCallback(
+    async (item, on) => {
+      if (!item?.id) return;
+      patchChatListItemEverywhere(item.id, { department: on ? "Home Depot" : null });
+      try {
+        await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({ action: "set_hd_tag", company_id: companyId, item_id: item.id, on }),
+        });
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      }
+      void refreshSelectedChatLists();
+    },
+    // chatFetch/refreshSelectedChatLists are defined later — kept out of deps to
+    // avoid a temporal-dead-zone crash at render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patchChatListItemEverywhere, companyId, chatErrorMessage]
+  );
+
   // Toggle any list item done from anywhere (used by the smart-list overlay,
   // where the item may live in a different list than the selected one).
   const toggleChatListItemAnywhere = useCallback(
@@ -3598,7 +3621,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                         <button
                                           key={cat.key}
                                           type="button"
-                                          onClick={() => void setChatSubtaskCategory(child, cat.value)}
+                                          onClick={() =>
+                                            cat.key === "H"
+                                              ? void setChatSubtaskHomeDepot(child, !activeCat)
+                                              : void setChatSubtaskCategory(child, cat.value)
+                                          }
                                           aria-pressed={activeCat}
                                           aria-label={`Tag as ${cat.title}`}
                                           title={cat.title}
