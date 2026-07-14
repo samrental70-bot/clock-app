@@ -4504,6 +4504,8 @@ export default function EmployeeClockApp() {
   const [materialSupplierDraft, setMaterialSupplierDraft] = useState("");
   const [materialAmountDraft, setMaterialAmountDraft] = useState("");
   const [payrollPanelOpen, setPayrollPanelOpen] = useState(false);
+  // Timesheets footer: collapse Share/Manual/Vacation into one "+" menu.
+  const [timesheetActionsMenuOpen, setTimesheetActionsMenuOpen] = useState(false);
   const [payrollDetailRow, setPayrollDetailRow] = useState(null);
   const [payrollDetailScrollTop, setPayrollDetailScrollTop] = useState(0);
   const [payrollRangePreset, setPayrollRangePreset] = useState("last_3_months");
@@ -19595,10 +19597,14 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             {editingRecordId !== record.id && allowEdit && canEditTimesheetRecord(record) && (
               <button
                 type="button"
-                className="h-6 rounded-[8px] bg-transparent px-1 text-[11px] font-black text-[#061426] active:text-[#0B1F33]"
+                className="inline-flex h-6 items-center gap-1 rounded-full border border-[#C9A227] bg-[#FBF6EA] px-2.5 text-[11px] font-black text-[#9A6B12] shadow-[0_2px_6px_rgba(6,20,38,0.06)] active:bg-[#F5EAD0] disabled:opacity-50"
                 disabled={busyDelete || Boolean(pendingEditRequest)}
                 onClick={() => startEditRecord(record)}
               >
+                <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
                 {isAdmin ? "Edit" : "Request edit"}
               </button>
             )}
@@ -20624,8 +20630,45 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     </div>
                   </div>
                 ) : payrollDetailEmployeeGroup ? (
-                  <div className="space-y-7">
-                    {normalizeArray(payrollDetailEmployeeGroup.periods).map(renderPayrollPeriodCard)}
+                  <div className="space-y-4">
+                    {(() => {
+                      const openingBal = Number(payrollDetailEmployeeMeta?.openingBalance || 0);
+                      const canEditOpening = isAdmin;
+                      const OpeningTag = canEditOpening ? "button" : "div";
+                      return (
+                        <OpeningTag
+                          type={canEditOpening ? "button" : undefined}
+                          className={`flex w-full items-center justify-between gap-3 rounded-[18px] border border-[#FFE3B0] bg-[#FFF7E6] px-4 py-3 text-left shadow-[0_8px_22px_rgba(6,20,38,0.05)] ${canEditOpening ? "active:bg-[#FDEFD3]" : ""}`}
+                          onClick={
+                            canEditOpening
+                              ? () => {
+                                  const teamRow = normalizeArray(teamRows).find(
+                                    (r) => String(r.userId) === String(payrollDetailEmployeeId)
+                                  );
+                                  setPayrollDetailRow(null);
+                                  setPayrollPanelOpen(false);
+                                  setActiveTab("team");
+                                  if (teamRow) beginTeamMemberEdit(teamRow);
+                                }
+                              : undefined
+                          }
+                        >
+                          <span className="min-w-0">
+                            <span className="block text-[9px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">Opening balance</span>
+                            <span className="mt-1 block text-[20px] font-black tabular-nums text-[#061426]">{formatPayrollAbsoluteMoney(openingBal)}</span>
+                            <span className="mt-0.5 block text-[11px] font-bold text-[#9A6B12]">
+                              {payrollOpeningBalanceMeaning(openingBal)}{canEditOpening ? " • Tap to edit in Team settings" : ""}
+                            </span>
+                          </span>
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-[#9A6B12]">
+                            {renderTimesheetUiIcon("rate", "h-5 w-5")}
+                          </span>
+                        </OpeningTag>
+                      );
+                    })()}
+                    <div className="space-y-7">
+                      {normalizeArray(payrollDetailEmployeeGroup.periods).map(renderPayrollPeriodCard)}
+                    </div>
                   </div>
                 ) : null}
               </div>
@@ -25064,87 +25107,66 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </div>
                 </div>
 
-                {isAdmin ? (
-                  <>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                        onClick={() => void handleShareTimesheetReport()}
-                      >
-                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
-                        Share report
-                      </button>
-                      <button
-                        type="button"
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                        onClick={openVacationForm}
-                      >
-                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
-                        <span className="truncate">Add vacation</span>
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="flex h-8 w-full items-center justify-center gap-1.5 rounded-[10px] px-3 text-[12px] font-black text-[#061426] active:text-[#0B1F33]"
-                      onClick={() => {
+                <div className="flex items-stretch gap-2">
+                  <button
+                    type="button"
+                    className="flex h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-[12px] bg-[#061426] px-4 text-[14px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
+                    onClick={() => {
+                      setTimesheetActionsMenuOpen(false);
+                      if (isAdmin) {
                         setPayrollEmployeeFilter("all");
-                        setPayrollPanelOpen(true);
-                      }}
-                    >
-                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
-                      <span>Open payroll</span>
-                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m9 6 6 6-6 6" />
-                      </svg>
-                    </button>
-                  </>
-                ) : (
-                  <>
+                      }
+                      setPayrollDetailRow(null);
+                      setPayrollPanelOpen(true);
+                    }}
+                  >
+                    <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-5 w-5")}</span>
+                    <span>{isAdmin ? "Payroll" : "My payroll"}</span>
+                  </button>
+                  <div className="relative shrink-0">
                     <button
                       type="button"
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] bg-[#061426] px-4 text-[13px] font-black text-white shadow-[0_8px_18px_rgba(6,20,38,0.16)] active:bg-[#0B1F33]"
-                      onClick={() => void handleShareTimesheetReport()}
+                      className="flex h-12 w-12 items-center justify-center rounded-[12px] border border-[#CBD5E1] bg-white text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.06)] active:bg-[#F8FAFC]"
+                      onClick={() => setTimesheetActionsMenuOpen((v) => !v)}
+                      aria-expanded={timesheetActionsMenuOpen}
+                      aria-label="More timesheet actions"
                     >
-                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
-                      Share report
-                    </button>
-                    <button
-                      type="button"
-                      className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-4 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                      onClick={() => {
-                        setPayrollDetailRow(null);
-                        setPayrollPanelOpen(true);
-                      }}
-                    >
-                      <span className="text-[#C9A227]">{renderTimesheetUiIcon("wallet", "h-4 w-4")}</span>
-                      <span>My payroll</span>
-                      <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="m9 6 6 6-6 6" />
+                      <svg viewBox="0 0 24 24" className={`h-5 w-5 transition-transform ${timesheetActionsMenuOpen ? "rotate-45" : ""}`} fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M12 5v14M5 12h14" />
                       </svg>
                     </button>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                        onClick={manualTimeOpen ? () => setManualTimeOpen(false) : openManualTimeForm}
-                      >
-                        <span className="text-[#C9A227]">
-                          {renderTimesheetUiIcon("plus", "h-4 w-4")}
-                        </span>
-                        <span className="truncate">{manualTimeOpen ? "Close manual time" : "Add manual time"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-[#C9A227] bg-white px-3 text-[13px] font-black text-[#9A6B12] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#FBF8F1]"
-                        onClick={openVacationForm}
-                      >
-                        <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
-                        <span className="truncate">Add vacation</span>
-                      </button>
-                    </div>
-                  </>
-                )}
+                    {timesheetActionsMenuOpen ? (
+                      <div className="absolute bottom-full right-0 z-30 mb-2 w-56 overflow-hidden rounded-[14px] border border-[#E2E8F0] bg-white shadow-[0_16px_40px_rgba(6,20,38,0.18)]">
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 border-b border-[#F1F5F9] px-4 py-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                          onClick={() => { setTimesheetActionsMenuOpen(false); void handleShareTimesheetReport(); }}
+                        >
+                          <span className="text-[#C9A227]">{renderTimesheetUiIcon("share", "h-4 w-4")}</span>
+                          Share report
+                        </button>
+                        {!isAdmin ? (
+                          <button
+                            type="button"
+                            className="flex w-full items-center gap-2.5 border-b border-[#F1F5F9] px-4 py-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                            onClick={() => { setTimesheetActionsMenuOpen(false); if (manualTimeOpen) setManualTimeOpen(false); else openManualTimeForm(); }}
+                          >
+                            <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                            {manualTimeOpen ? "Close manual time" : "Add manual time"}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                          onClick={() => { setTimesheetActionsMenuOpen(false); openVacationForm(); }}
+                        >
+                          <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
+                          Add vacation
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
                 {manualTimeOpen && !isAdmin ? (
                   <form onSubmit={(event) => void submitManualTimeRequest(event)} className="rounded-[24px] border border-slate-200 bg-white p-3 shadow-sm space-y-3">
                     <p className="text-[15px] font-black text-slate-950">Manual time request</p>
