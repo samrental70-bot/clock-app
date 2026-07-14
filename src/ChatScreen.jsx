@@ -107,18 +107,37 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       if (!isImmersiveRef.current) return;
       applyImmersiveStyles();
     };
+    // iOS (especially an installed PWA) often fires the visualViewport resize
+    // late or not at all when the keyboard opens, so the container stays at its
+    // full height and the composer ends up behind the keyboard. Focus events
+    // always fire — re-measure on them with staggered delays so we catch the
+    // reduced height once the keyboard finishes animating.
+    const reapply = () => {
+      apply();
+      window.setTimeout(apply, 100);
+      window.setTimeout(apply, 250);
+      window.setTimeout(apply, 500);
+    };
     apply();
     const viewport = window.visualViewport;
     if (viewport) {
       viewport.addEventListener("resize", apply);
       viewport.addEventListener("scroll", apply);
-      return () => {
+    } else {
+      window.addEventListener("resize", apply);
+    }
+    window.addEventListener("focusin", reapply);
+    window.addEventListener("focusout", reapply);
+    return () => {
+      if (viewport) {
         viewport.removeEventListener("resize", apply);
         viewport.removeEventListener("scroll", apply);
-      };
-    }
-    window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
+      } else {
+        window.removeEventListener("resize", apply);
+      }
+      window.removeEventListener("focusin", reapply);
+      window.removeEventListener("focusout", reapply);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -4532,9 +4551,12 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       onChange={(event) => setMessageDraft(event.target.value)}
                       onFocus={() => {
                         // When the keyboard opens, keep the newest message pinned
-                        // just above the composer instead of hidden behind it.
+                        // just above the composer. Retry across the keyboard's
+                        // open animation since the viewport resizes late on iOS.
                         requestAnimationFrame(() => scrollChatThreadToBottom("auto"));
-                        window.setTimeout(() => scrollChatThreadToBottom("auto"), 300);
+                        [120, 280, 520].forEach((delay) =>
+                          window.setTimeout(() => scrollChatThreadToBottom("auto"), delay)
+                        );
                       }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {
