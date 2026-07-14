@@ -31,46 +31,104 @@ import {
   synthesizeQueuedChatMessage,
 } from "./EmployeeClockApp.jsx";
 
+// Matches the app shell's max-w-sm column so the pinned chat keeps the same
+// centered width instead of stretching edge-to-edge on wider screens.
+const IMMERSIVE_CHAT_MAX_WIDTH = "24rem";
+
+/**
+ * Keep the immersive chat pinned to the *visual* viewport. The app shell is
+ * locked to 100dvh (the keyboard-hidden height), so when the mobile keyboard
+ * opens the shell is taller than what's visible and iOS scrolls the whole
+ * document up to reveal the focused composer — dragging the chat header off the
+ * top. Fixing the outer container to the visual viewport (top = offsetTop,
+ * height = visualViewport.height) keeps the header + composer locked in the
+ * visible area; only the message list (flex-1 overflow-y-auto) shrinks.
+ *
+ * The first ref is the "anchor" (outer container) that gets fixed + centered;
+ * any remaining refs just track the height so nested flex children fill it.
+ */
 function useImmersiveViewportHeight(refs, isImmersivePane) {
   const isImmersiveRef = useRef(isImmersivePane);
 
+  const clearImmersiveStyles = () => {
+    const [anchor, ...rest] = refs;
+    if (anchor?.current) {
+      const s = anchor.current.style;
+      s.position = "";
+      s.top = "";
+      s.left = "";
+      s.right = "";
+      s.transform = "";
+      s.width = "";
+      s.maxWidth = "";
+      s.height = "";
+      s.maxHeight = "";
+      s.zIndex = "";
+    }
+    for (const ref of rest) {
+      if (ref?.current) {
+        ref.current.style.height = "";
+        ref.current.style.maxHeight = "";
+      }
+    }
+  };
+
+  const applyImmersiveStyles = () => {
+    const viewport = window.visualViewport;
+    const height = viewport?.height || window.innerHeight;
+    const top = viewport?.offsetTop || 0;
+    const px = `${height}px`;
+    const [anchor, ...rest] = refs;
+    if (anchor?.current) {
+      const s = anchor.current.style;
+      // Pin to the visible viewport, centered like the app's max-w-sm column.
+      s.position = "fixed";
+      s.top = `${top}px`;
+      s.left = "50%";
+      s.right = "auto";
+      s.transform = "translateX(-50%)";
+      s.width = "100%";
+      s.maxWidth = IMMERSIVE_CHAT_MAX_WIDTH;
+      s.height = px;
+      s.maxHeight = px;
+      s.zIndex = "40";
+    }
+    for (const ref of rest) {
+      if (ref?.current) {
+        ref.current.style.height = px;
+        ref.current.style.maxHeight = px;
+      }
+    }
+  };
+
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
-    const applyHeight = () => {
+    const apply = () => {
       if (!isImmersiveRef.current) return;
-      const height = window.visualViewport?.height || window.innerHeight;
-      const px = `${height}px`;
-      for (const ref of refs) {
-        if (ref.current) {
-          ref.current.style.height = px;
-          ref.current.style.maxHeight = px;
-        }
-      }
+      applyImmersiveStyles();
     };
-    applyHeight();
+    apply();
     const viewport = window.visualViewport;
     if (viewport) {
-      viewport.addEventListener("resize", applyHeight);
-      viewport.addEventListener("scroll", applyHeight);
+      viewport.addEventListener("resize", apply);
+      viewport.addEventListener("scroll", apply);
       return () => {
-        viewport.removeEventListener("resize", applyHeight);
-        viewport.removeEventListener("scroll", applyHeight);
+        viewport.removeEventListener("resize", apply);
+        viewport.removeEventListener("scroll", apply);
       };
     }
-    window.addEventListener("resize", applyHeight);
-    return () => window.removeEventListener("resize", applyHeight);
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     isImmersiveRef.current = isImmersivePane;
     if (typeof window === "undefined") return;
-    const px = isImmersivePane ? `${window.visualViewport?.height || window.innerHeight}px` : "";
-    for (const ref of refs) {
-      if (ref.current) {
-        ref.current.style.height = px;
-        ref.current.style.maxHeight = px;
-      }
+    if (isImmersivePane) {
+      applyImmersiveStyles();
+    } else {
+      clearImmersiveStyles();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isImmersivePane]);
@@ -4106,7 +4164,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 )}
               </div>
 
-              <div className="border-t border-[#E6EAF1] bg-white/96 px-2.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
+              <div className="shrink-0 border-t border-[#E6EAF1] bg-white/96 px-2.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
                 <input
                   ref={chatImageInputRef}
                   type="file"
