@@ -1803,7 +1803,17 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     await loadConversations({ silent: true });
   };
 
-  const hdStoreKey = (name) => String(name || "").trim().toLowerCase();
+  // Canonical key for a store so the per-location aisle map doesn't fragment on
+  // trivial spelling differences ("Barrhaven" vs "Barrhaven " vs "barrhaven,").
+  // Different physical stores still stay distinct — this only collapses
+  // whitespace/case/trailing punctuation, it does not merge different names.
+  const hdStoreKey = (name) =>
+    String(name || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .replace(/[.,;]+$/g, "")
+      .trim();
 
   const loadHdAisleMap = useCallback(async (storeName) => {
     const store = hdStoreKey(storeName);
