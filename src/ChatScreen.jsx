@@ -624,6 +624,15 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
           const localList = localById.get(listId) || null;
           const baseList = remoteList || localList;
           if (!baseList) return null;
+          // A real (persisted) list the server no longer returns has been
+          // archived or deleted — drop it instead of resurrecting it from the
+          // local cache into the ribbon. Only keep local-only lists that are
+          // still optimistic (a freshly-created list awaiting its server id).
+          if (!remoteList) {
+            const localId = String(localList?.id || "");
+            const isOptimistic = Boolean(localList?.__optimistic) || localId.startsWith("temp-");
+            if (!isOptimistic) return null;
+          }
           const remoteItems = Array.isArray(remoteList?.items) ? remoteList.items : [];
           const localItems = Array.isArray(localList?.items) ? localList.items : [];
           const mergedItems = [...remoteItems];
