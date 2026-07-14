@@ -804,18 +804,20 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     [patchChatListItemEverywhere, currentUserId, companyId, chatErrorMessage]
   );
 
-  // Live smart lists: all H/T/O-tagged subtasks across this chat's pending-work
-  // lists, grouped by tag. Same underlying rows as the lists themselves.
+  // Live smart lists: all subtasks across this chat's pending-work lists,
+  // grouped by tag. Only H and T are user-applied; anything untagged counts as
+  // "Other". Same underlying rows as the lists themselves, so ticking stays in
+  // sync everywhere.
   const chatSmartCategoryItems = useMemo(() => {
     const byCat = { "Home Depot": [], Tool: [], Other: [] };
     for (const list of Array.isArray(chatLists) ? chatLists : []) {
       if (String(list?.list_type || "") !== "pending_job") continue;
       for (const it of Array.isArray(list.items) ? list.items : []) {
         const isSub = Boolean(it?.parent_item_id) || Number(it?.item_level || 0) >= 1;
+        if (!isSub) continue;
         const cat = String(it?.department || "");
-        if (isSub && CHAT_SUBTASK_CATEGORY_VALUES.has(cat)) {
-          byCat[cat].push({ ...it, __listId: list.id, __listTitle: list.title || "List" });
-        }
+        const bucket = cat === "Home Depot" ? "Home Depot" : cat === "Tool" ? "Tool" : "Other";
+        byCat[bucket].push({ ...it, __listId: list.id, __listTitle: list.title || "List" });
       }
     }
     return byCat;
@@ -3373,33 +3375,6 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         )}
                       </button>
                     ) : null}
-                    <label
-                      className={`mt-0.5 flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-full border ${
-                        item.photo_url ? "border-[#15803D] bg-[#ECFDF5] text-[#15803D]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
-                      } ${listPhotoBusy === String(item.id) ? "opacity-60" : "active:bg-[#F1F5F9]"}`}
-                      aria-label={item.photo_url ? `Replace photo on item ${item.item_number}` : `Add photo to item ${item.item_number}`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      {listPhotoBusy === String(item.id) ? (
-                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 animate-spin" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" /></svg>
-                      ) : (
-                        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
-                          <circle cx="12" cy="13" r="4" />
-                        </svg>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        disabled={Boolean(listPhotoBusy)}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) void attachPhotoToListItem(item, file);
-                        }}
-                      />
-                    </label>
                     <div className="min-w-0 flex-1">
                       {editingThis ? (
                         <div className="space-y-2">
@@ -3615,24 +3590,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                 onTouchStart={(event) => beginChatListSwipe(child.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
                                 onTouchEnd={(event) => endChatListSwipe(child, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
                               >
-                                <button
-                                  type="button"
-                                  role="checkbox"
-                                  aria-checked={Boolean(child.is_done)}
-                                  onClick={() => void toggleChatListItem(child)}
-                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
-                                    child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
-                                  }`}
-                                >
-                                  {child.is_done ? (
-                                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                      <path d="m3.2 8.3 3 3 6.5-6.6" />
-                                    </svg>
-                                  ) : null}
-                                </button>
                                 {isPendingList ? (
-                                  <div className="mt-0.5 flex shrink-0 items-center gap-0.5" role="group" aria-label="Category">
-                                    {CHAT_SUBTASK_CATEGORIES.map((cat) => {
+                                  <div className="mt-0.5 flex shrink-0 items-center gap-0.5" role="group" aria-label="Category (H = Home Depot, T = Tool)">
+                                    {CHAT_SUBTASK_CATEGORIES.filter((cat) => cat.key !== "O").map((cat) => {
                                       const activeCat = String(child.department || "") === cat.value;
                                       return (
                                         <button
@@ -3654,6 +3614,21 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                     })}
                                   </div>
                                 ) : null}
+                                <button
+                                  type="button"
+                                  role="checkbox"
+                                  aria-checked={Boolean(child.is_done)}
+                                  onClick={() => void toggleChatListItem(child)}
+                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                                    child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
+                                  }`}
+                                >
+                                  {child.is_done ? (
+                                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                      <path d="m3.2 8.3 3 3 6.5-6.6" />
+                                    </svg>
+                                  ) : null}
+                                </button>
                                 <div className="min-w-0 flex-1">
                                   {editingChild ? (
                                     <div className="space-y-2">
@@ -3734,6 +3709,33 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       ) : null}
                     </div>
                     <div className="mt-0.5 flex shrink-0 items-center gap-1">
+                      <label
+                        className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border ${
+                          item.photo_url ? "border-[#15803D] bg-[#ECFDF5] text-[#15803D]" : "border-[#E2E8F0] bg-white text-[#94A3B8]"
+                        } ${listPhotoBusy === String(item.id) ? "opacity-60" : "active:bg-[#F1F5F9]"}`}
+                        aria-label={item.photo_url ? `Replace photo on item ${item.item_number}` : `Add photo to item ${item.item_number}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {listPhotoBusy === String(item.id) ? (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4 animate-spin" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.2-8.5" strokeLinecap="round" /></svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z" />
+                            <circle cx="12" cy="13" r="4" />
+                          </svg>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={Boolean(listPhotoBusy)}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (file) void attachPhotoToListItem(item, file);
+                          }}
+                        />
+                      </label>
                       <button
                         type="button"
                         className="flex h-9 w-9 items-center justify-center rounded-full border border-[#E2E8F0] bg-white text-[20px] font-black leading-none text-[#061426] shadow-[0_4px_12px_rgba(6,20,38,0.08)] active:bg-[#F8FAFC]"
@@ -4747,7 +4749,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             <div className="min-h-0 flex-1 overflow-y-auto bg-[#F6F8FB] px-3 py-3 space-y-2">
               {ordered.length === 0 ? (
                 <p className="pt-10 text-center text-[13px] font-semibold text-[#64748B]">
-                  No {meta?.title || ""} items yet. Tag a subtask with “{meta?.short || ""}” to add it here.
+                  {smartCategoryView === "Other"
+                    ? "No untagged subtasks. Items you don't tag H or T show up here."
+                    : `No ${meta?.title || ""} items yet. Tag a subtask with “${meta?.short || ""}” to add it here.`}
                 </p>
               ) : (
                 ordered.map((it) => (
