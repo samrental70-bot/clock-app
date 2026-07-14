@@ -5043,6 +5043,9 @@ export default function EmployeeClockApp() {
   const [timesheetRenderLimit, setTimesheetRenderLimit] = useState(TIMESHEET_RENDER_BATCH);
   const [timesheetSanityHighlightedIssueId, setTimesheetSanityHighlightedIssueId] = useState("");
   const [timesheetHighlightedRecordId, setTimesheetHighlightedRecordId] = useState("");
+  // Clicking a sanity issue filters the timesheet list down to only the rows
+  // that issue flags, so the user can fix them and then tap Back to all.
+  const [timesheetSanityFilter, setTimesheetSanityFilter] = useState(null); // { title, recordIds }
   const [timesheetDatePickerMode, setTimesheetDatePickerMode] = useState("today");
   const [timesheetDraftDateFrom, setTimesheetDraftDateFrom] = useState("");
   const [timesheetDraftDateTo, setTimesheetDraftDateTo] = useState("");
@@ -8732,6 +8735,25 @@ export default function EmployeeClockApp() {
   const visibleTimesheetSanityIssues = useMemo(() => {
     return getVisibleTimesheetSanityIssues(timesheetSanityChecks, timesheetSanityExpanded);
   }, [timesheetSanityChecks, timesheetSanityExpanded]);
+
+  // When a sanity issue is tapped, narrow the rendered list to just the flagged
+  // rows so the user can fix them; clearing the filter restores the full list.
+  const displayedTimesheetRecords = useMemo(() => {
+    const ids = timesheetSanityFilter?.recordIds;
+    if (!Array.isArray(ids) || ids.length === 0) return visibleTimesheetRecords;
+    const idSet = new Set(ids.map((id) => String(id)));
+    return visibleTimesheetRecords.filter(
+      (r) => idSet.has(String(r?.supabaseTimesheetId ?? "")) || idSet.has(String(r?.id ?? ""))
+    );
+  }, [visibleTimesheetRecords, timesheetSanityFilter]);
+
+  // If the underlying data changed and the filtered rows are all fixed/gone,
+  // drop the filter so the user isn't stuck on an empty list.
+  useEffect(() => {
+    if (timesheetSanityFilter && displayedTimesheetRecords.length === 0) {
+      setTimesheetSanityFilter(null);
+    }
+  }, [timesheetSanityFilter, displayedTimesheetRecords.length]);
 
   const focusTimesheetRecord = useCallback(
     (recordId, issueId = "") => {
@@ -25325,12 +25347,15 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       <div className="mt-3 space-y-2">
                         {visibleTimesheetSanityIssues.map((issue) => {
                           const targetRecordId = issue.recordId || (Array.isArray(issue.recordIds) ? issue.recordIds[0] : "");
+                          const issueRecordIds = Array.isArray(issue.recordIds) && issue.recordIds.length
+                            ? issue.recordIds
+                            : [targetRecordId].filter(Boolean);
                           return (
                             <button
                               key={issue.id}
                               type="button"
                               className={`w-full rounded-[14px] border border-l-[3px] px-3 py-2 text-left transition active:scale-[0.99] ${
-                                timesheetSanityHighlightedIssueId === issue.id
+                                timesheetSanityFilter && timesheetSanityHighlightedIssueId === issue.id
                                   ? "ring-2 ring-[#C9A227] ring-offset-2 ring-offset-[#F4F7FB]"
                                   : ""
                               } ${
@@ -25340,7 +25365,14 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                     ? "border-[#FDE68A] border-l-[#D97706] bg-[#FFF7E6]"
                                     : "border-[#BFDBFE] border-l-[#2563EB] bg-[#EFF6FF]"
                               }`}
-                              onClick={() => focusTimesheetRecord(targetRecordId, issue.id)}
+                              onClick={() => {
+                                setTimesheetSanityFilter({ title: issue.title, recordIds: issueRecordIds });
+                                setTimesheetSanityHighlightedIssueId(issue.id);
+                                setTimesheetRenderLimit(TIMESHEET_RENDER_BATCH);
+                                if (typeof window !== "undefined") {
+                                  window.requestAnimationFrame?.(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+                                }
+                              }}
                             >
                               <p
                                 className={`text-[13px] font-black leading-tight ${
@@ -25391,7 +25423,30 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </div>
                 ) : null}
                 <div className="space-y-3">
-                  {!timesheetsLoading && visibleTimesheetRecords.length === 0 && (
+                  {timesheetSanityFilter ? (
+                    <div className="flex items-center justify-between gap-2 rounded-[14px] border border-[#FDE68A] bg-[#FFF7E6] px-3 py-2.5 shadow-sm">
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-black uppercase tracking-[0.08em] text-[#9A6B12]">Fixing: {timesheetSanityFilter.title}</p>
+                        <p className="mt-0.5 truncate text-[12px] font-semibold text-[#475569]">
+                          {displayedTimesheetRecords.length} {displayedTimesheetRecords.length === 1 ? "entry" : "entries"} to correct
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-[#CBD5E1] bg-white px-3 text-[12px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                        onClick={() => {
+                          setTimesheetSanityFilter(null);
+                          setTimesheetSanityHighlightedIssueId("");
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m15 18-6-6 6-6" />
+                        </svg>
+                        Back to all
+                      </button>
+                    </div>
+                  ) : null}
+                  {!timesheetsLoading && displayedTimesheetRecords.length === 0 && (
                     <div className="rounded-[20px] border border-[#E2E8F0] bg-white px-6 py-10 text-center shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
                       <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#F1F5F9] text-[#94A3B8]">
                         {renderTimesheetUiIcon("empty-timesheet", "h-12 w-12")}
@@ -25400,14 +25455,14 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       <p className="mx-auto mt-2 max-w-[230px] text-[14px] font-semibold leading-snug text-[#64748B]">Change filters or date range to review more records.</p>
                     </div>
                   )}
-                  {visibleTimesheetRecords.slice(0, timesheetRenderLimit).map((record) => renderTimesheetCard(record, true))}
-                  {visibleTimesheetRecords.length > timesheetRenderLimit ? (
+                  {displayedTimesheetRecords.slice(0, timesheetRenderLimit).map((record) => renderTimesheetCard(record, true))}
+                  {displayedTimesheetRecords.length > timesheetRenderLimit ? (
                     <button
                       type="button"
                       className="flex h-12 w-full items-center justify-center gap-2 rounded-[14px] border border-[#CBD5E1] bg-white text-[13px] font-black text-[#061426] shadow-[0_6px_18px_rgba(6,20,38,0.04)] active:bg-[#F8FAFC]"
                       onClick={() => setTimesheetRenderLimit((current) => current + TIMESHEET_RENDER_BATCH)}
                     >
-                      Show more ({visibleTimesheetRecords.length - timesheetRenderLimit} remaining)
+                      Show more ({displayedTimesheetRecords.length - timesheetRenderLimit} remaining)
                     </button>
                   ) : null}
                 </div>
