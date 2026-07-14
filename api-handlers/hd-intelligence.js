@@ -207,6 +207,41 @@ export default async function handler(req, res) {
       return;
     }
 
+    if (action === "stores") {
+      // List Home Depot store locations in/near a city so the app can offer a
+      // dropdown instead of free text. Knowledge-based; the user can still type
+      // their own if a store is missing.
+      const city = normalizeText(body.city);
+      if (!city) {
+        sendJson(res, 400, { ok: false, error: "city is required" });
+        return;
+      }
+      const prompt = [
+        `List the Home Depot store locations in or near "${city}".`,
+        "Use only real, well-known Home Depot locations. Identify each by its area/neighbourhood or nearby street so a local resident recognizes it.",
+        'Return JSON: {"stores":[{"name":"<short area name, e.g. Nepean>","address":"<street or area, optional>"}]}.',
+        "Do not invent exact street numbers you are unsure of; a recognizable area name is enough. Return an empty list if you do not know any.",
+      ].join("\n");
+      const result = await callOpenAi({ prompt, model: "gpt-4o" });
+      const rows = Array.isArray(result?.json?.stores) ? result.json.stores : [];
+      const seen = new Set();
+      const stores = [];
+      for (const r of rows) {
+        const name = normalizeText(r?.name);
+        if (!name || seen.has(name.toLowerCase())) continue;
+        seen.add(name.toLowerCase());
+        stores.push({ name, address: normalizeText(r?.address) });
+        if (stores.length >= 20) break;
+      }
+      sendJson(res, 200, {
+        ok: Boolean(result?.ok),
+        configured: Boolean(result?.configured),
+        stores,
+        message: result?.ok ? "" : result?.message || "",
+      });
+      return;
+    }
+
     if (action === "read_item_photo") {
       // Read exact product name + price from a picked-item photo.
       const imageUrl = normalizeText(body.photo_url || body.photoUrl);

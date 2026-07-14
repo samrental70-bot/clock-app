@@ -125,6 +125,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // List type + Home Depot store name for the composer.
   const [listType, setListType] = useState("other"); // "home_depot" | "pending_job" | "other"
   const [listStoreName, setListStoreName] = useState("");
+  // AI-suggested Home Depot store locations for the company's city (dropdown).
+  const [hdStoreOptions, setHdStoreOptions] = useState([]);
+  const [hdStoresLoading, setHdStoresLoading] = useState(false);
   // Inline store-name edit on an open Home Depot list.
   const [storeNameDraft, setStoreNameDraft] = useState(null);
   const [storeNameSaving, setStoreNameSaving] = useState(false);
@@ -148,6 +151,12 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // Photo attach/capture on list items ("" idle, "new" while creating a photo
   // item, or an item id while attaching to that item).
   const [listPhotoBusy, setListPhotoBusy] = useState("");
+  // Auto-open the camera when an item is ticked complete so the crew can snap an
+  // instant photo. A single hidden capture input is triggered synchronously from
+  // the checkbox tap (preserving the user gesture) and the photo attaches to the
+  // item that was just completed.
+  const tickCaptureInputRef = useRef(null);
+  const tickCaptureItemRef = useRef(null);
   const [subItemDraft, setSubItemDraft] = useState("");
   const [addingSubItemParentId, setAddingSubItemParentId] = useState("");
   const [editingListItemId, setEditingListItemId] = useState("");
@@ -1200,6 +1209,39 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       chatListTitleInputRef.current?.select?.();
     });
   }, [listComposerOpen]);
+
+  // When the composer is open on a Home Depot list, load AI-suggested store
+  // locations for the company's default city so the store field becomes a
+  // pick-list (with free text still allowed).
+  useEffect(() => {
+    if (!listComposerOpen || listType !== "home_depot" || !companyId) return;
+    if (hdStoreOptions.length || hdStoresLoading) return;
+    let city = "Ottawa, Ontario";
+    try {
+      city = (typeof window !== "undefined" && window.localStorage?.getItem("opera.hdDefaultCity")) || city;
+    } catch {
+      /* ignore */
+    }
+    let cancelled = false;
+    setHdStoresLoading(true);
+    (async () => {
+      try {
+        const data = await chatFetch("/api/hd-intelligence", {
+          method: "POST",
+          body: JSON.stringify({ action: "stores", company_id: companyId, city }),
+        });
+        if (!cancelled && Array.isArray(data?.stores)) setHdStoreOptions(data.stores);
+      } catch {
+        /* ignore — free text still works */
+      } finally {
+        if (!cancelled) setHdStoresLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listComposerOpen, listType, companyId]);
 
   useEffect(() => {
     if (!editingListItemId) return;
@@ -2651,6 +2693,20 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     };
     return (
       <div className="relative flex h-full min-h-0 flex-1 flex-col bg-white overflow-hidden">
+        <input
+          ref={tickCaptureInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            const item = tickCaptureItemRef.current;
+            tickCaptureItemRef.current = null;
+            if (file && item) void attachPhotoToListItem(item, file);
+          }}
+        />
         <div className="sticky top-0 z-20 border-b border-[#E2E8F0] bg-white px-3 py-3">
           <div className="flex items-center gap-2">
             <button
@@ -2825,7 +2881,20 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       role="checkbox"
                       aria-checked={Boolean(item.is_done)}
                       aria-label={`${item.is_done ? "Mark open" : "Mark complete"}: ${item.text}`}
-                      onClick={() => void toggleChatListItem(item)}
+                      onClick={() => {
+                        const willComplete = !item.is_done;
+                        void toggleChatListItem(item);
+                        // Auto-open the camera when marking complete (only when
+                        // completing, not un-ticking) so the crew can snap a photo.
+                        if (willComplete && tickCaptureInputRef.current) {
+                          tickCaptureItemRef.current = item;
+                          try {
+                            tickCaptureInputRef.current.click();
+                          } catch {
+                            /* ignore — some browsers block programmatic file inputs */
+                          }
+                        }
+                      }}
                       className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-white transition ${
                         item.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#CBD5E1] bg-white"
                       }`}
@@ -4167,15 +4236,37 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             {listType === "home_depot" ? (
               <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
                 Home Depot store
+                {hdStoresLoading ? (
+                  <span className="block text-[11px] font-semibold normal-case tracking-normal text-[#94A3B8]">Finding stores near you…</span>
+                ) : hdStoreOptions.length ? (
+                  <span className="flex flex-wrap gap-1.5">
+                    {hdStoreOptions.map((store) => {
+                      const selected = listStoreName.trim().toLowerCase() === store.name.trim().toLowerCase();
+                      return (
+                        <button
+                          key={`hdstore-${store.name}`}
+                          type="button"
+                          title={store.address || store.name}
+                          className={`rounded-full border px-2.5 py-1 text-[12px] font-black normal-case tracking-normal ${
+                            selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
+                          }`}
+                          onClick={() => setListStoreName(store.name)}
+                        >
+                          {store.name}
+                        </button>
+                      );
+                    })}
+                  </span>
+                ) : null}
                 <input
                   inputMode="text"
                   autoComplete="off"
-                  className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C]"
+                  className="chat-mobile-safe-input mt-1 h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C]"
                   style={{ fontSize: 16 }}
                   value={listStoreName}
                   maxLength={80}
                   onChange={(event) => setListStoreName(event.target.value)}
-                  placeholder="e.g. Nepean, Barrhaven"
+                  placeholder={hdStoreOptions.length ? "Pick above or type a store" : "e.g. Nepean, Barrhaven"}
                 />
               </label>
             ) : null}
