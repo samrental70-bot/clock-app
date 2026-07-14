@@ -135,6 +135,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const [listTitleDraft, setListTitleDraft] = useState(null);
   const [listTypeDraft, setListTypeDraft] = useState("other");
   const [listTitleSaving, setListTitleSaving] = useState(false);
+  // Show/hide archived lists (toggled from the chat's "…" menu).
+  const [showArchivedLists, setShowArchivedLists] = useState(false);
+  const [archivedLists, setArchivedLists] = useState([]);
   // Home Depot store intelligence: department -> confirmed aisle for the list's store.
   const [hdAisleByDept, setHdAisleByDept] = useState({});
   const [hdClassifying, setHdClassifying] = useState(false);
@@ -2612,19 +2615,60 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     if (!selectedChatListResolved?.id || !selectedChatListResolved.can_archive) return;
     const ok = window.confirm("Archive this list?");
     if (!ok) return;
+    const archivedId = String(selectedChatListResolved.id);
     setError("");
     try {
       await chatFetch("/api/chat", {
         method: "POST",
-        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: selectedChatListResolved.id }),
+        body: JSON.stringify({ action: "archive_list", company_id: companyId, list_id: archivedId }),
       });
       setSelectedChatListId("");
       setSelectedChatListSnapshot(null);
+      // Drop it from local state now so the merge with cached/remote lists can't
+      // re-add it (the archived list is filtered out of the server response).
+      setChatLists((prev) => (Array.isArray(prev) ? prev : []).filter((l) => String(l?.id) !== archivedId));
       await refreshSelectedChatLists();
     } catch (err) {
       setError(chatErrorMessage(err));
     }
   };
+
+  const loadArchivedLists = async () => {
+    if (!companyId || !selectedConversationId) {
+      setArchivedLists([]);
+      return;
+    }
+    try {
+      const data = await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "list_archived", company_id: companyId, conversation_id: selectedConversationId }),
+      });
+      setArchivedLists(Array.isArray(data?.lists) ? data.lists : []);
+    } catch {
+      setArchivedLists([]);
+    }
+  };
+
+  const unarchiveChatList = async (listId) => {
+    if (!listId) return;
+    setError("");
+    try {
+      await chatFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ action: "unarchive_list", company_id: companyId, list_id: String(listId) }),
+      });
+      setArchivedLists((prev) => (Array.isArray(prev) ? prev : []).filter((l) => String(l?.id) !== String(listId)));
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
+  useEffect(() => {
+    if (showArchivedLists && selectedConversationId) void loadArchivedLists();
+    if (!showArchivedLists) setArchivedLists([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showArchivedLists, selectedConversationId]);
 
   const hasDraftMessage = Boolean(messageDraft.trim());
 
@@ -3924,6 +3968,16 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         Leave group
                       </button>
                     ) : null}
+                    <button
+                      type="button"
+                      className="flex h-10 w-full items-center rounded-[12px] px-3 text-left text-[13px] font-black text-[#061426] active:bg-[#F8FAFC]"
+                      onClick={() => {
+                        setShowArchivedLists((v) => !v);
+                        setManageOpen(false);
+                      }}
+                    >
+                      {showArchivedLists ? "Hide archived lists" : "Show archived lists"}
+                    </button>
                     {selectedCanArchive ? (
                       <button
                         type="button"
@@ -3984,9 +4038,31 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 renderChatListDetailView(selectedChatListResolved)
               ) : (
                 <>
-              {chatLists.length > 0 && !selectedConversation.pendingSetup ? (
+              {(chatLists.length > 0 || (showArchivedLists && archivedLists.length > 0)) && !selectedConversation.pendingSetup ? (
                 <div className="opera-hide-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#E6EAF1] bg-white px-3 py-2.5">
                   {chatLists.map((list) => renderChatListRibbonChip(list))}
+                  {showArchivedLists
+                    ? archivedLists.map((al) => (
+                        <button
+                          key={`arch-${al.id}`}
+                          type="button"
+                          className="flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-[#CBD5E1] bg-[#F8FAFC] px-2.5 py-1.5 text-[12px] font-black text-[#94A3B8] active:bg-[#EEF2F7]"
+                          title="Archived — tap to unarchive"
+                          onClick={() => {
+                            if (window.confirm(`Unarchive "${al.title || "list"}"?`)) void unarchiveChatList(al.id);
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                            <path d="M21 8v13H3V8" /><path d="M1 3h22v5H1z" /><path d="M10 12h4" />
+                          </svg>
+                          <span className="max-w-[110px] truncate line-through">{al.title || "List"}</span>
+                          <span className="text-[10px] font-black uppercase tracking-[0.06em] text-[#2563EB]">Unarchive</span>
+                        </button>
+                      ))
+                    : null}
+                  {showArchivedLists && archivedLists.length === 0 ? (
+                    <span className="shrink-0 text-[11px] font-semibold text-[#94A3B8]">No archived lists</span>
+                  ) : null}
                 </div>
               ) : null}
               <div

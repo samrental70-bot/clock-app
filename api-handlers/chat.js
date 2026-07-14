@@ -1851,6 +1851,59 @@ export default async function handler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && action === "list_archived") {
+      const conversationId = cleanText(body.conversation_id || body.conversationId);
+      await assertConversationMembership(supabase, { companyId, conversationId, userId: user.id });
+      const { data, error: archErr } = await supabase
+        .from("chat_lists")
+        .select("id, conversation_id, title, list_type, archived_at")
+        .eq("company_id", companyId)
+        .eq("conversation_id", conversationId)
+        .not("archived_at", "is", null)
+        .order("archived_at", { ascending: false })
+        .limit(100);
+      if (archErr) throw archErr;
+      res.status(200).json({
+        ok: true,
+        lists: (data || []).map((l) => ({
+          id: l.id,
+          conversation_id: l.conversation_id,
+          title: l.title,
+          list_type: l.list_type,
+          archived_at: l.archived_at,
+        })),
+      });
+      return;
+    }
+
+    if (req.method === "POST" && action === "unarchive_list") {
+      const listId = cleanText(body.list_id || body.listId);
+      const { data: list, error: getErr } = await supabase
+        .from("chat_lists")
+        .select("id, conversation_id, created_by")
+        .eq("company_id", companyId)
+        .eq("id", listId)
+        .maybeSingle();
+      if (getErr) throw getErr;
+      if (!list?.id) {
+        res.status(404).json({ error: "List not found" });
+        return;
+      }
+      await assertConversationMembership(supabase, { companyId, conversationId: list.conversation_id, userId: user.id });
+      if (String(list.created_by) !== String(user.id) && !isAdminRole(callerRole)) {
+        res.status(403).json({ error: "Not allowed" });
+        return;
+      }
+      const { error: unErr } = await supabase
+        .from("chat_lists")
+        .update({ archived_at: null, archived_by: null, updated_at: new Date().toISOString(), updated_by: user.id })
+        .eq("company_id", companyId)
+        .eq("id", listId);
+      if (unErr) throw unErr;
+      res.status(200).json({ ok: true });
+      return;
+    }
+
     if (req.method === "POST" && action === "create_list") {
       const result = await createChatList(supabase, {
         companyId,
