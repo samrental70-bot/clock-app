@@ -134,6 +134,18 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
   }, [isImmersivePane]);
 }
 
+// Pending-work list subtasks can be tagged H / T / O. Each tag also surfaces
+// the item in a live "smart list" (Home Depot / Tool / Other) for the chat —
+// the SAME underlying item shown in two places, so ticking it anywhere keeps
+// both in sync. The tag value is stored on chat_list_items.department (unused
+// by pending_job lists otherwise), so no schema change is needed.
+const CHAT_SUBTASK_CATEGORIES = [
+  { key: "H", value: "Home Depot", short: "H", title: "Home Depot", emoji: "🏠" },
+  { key: "T", value: "Tool", short: "T", title: "Tool", emoji: "🔧" },
+  { key: "O", value: "Other", short: "O", title: "Other", emoji: "📦" },
+];
+const CHAT_SUBTASK_CATEGORY_VALUES = new Set(CHAT_SUBTASK_CATEGORIES.map((c) => c.value));
+
 // Fallback ordering for Home Depot departments that don't yet have a confirmed
 // aisle — roughly the store walk order. Departments with a confirmed aisle sort
 // by aisle number first (ascending).
@@ -196,6 +208,8 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // Show/hide archived lists (toggled from the chat's "…" menu).
   const [showArchivedLists, setShowArchivedLists] = useState(false);
   const [archivedLists, setArchivedLists] = useState([]);
+  // Open smart-list overlay: a category value ("Home Depot"/"Tool"/"Other") or null.
+  const [smartCategoryView, setSmartCategoryView] = useState(null);
   // Home Depot store intelligence: department -> confirmed aisle for the list's store.
   const [hdAisleByDept, setHdAisleByDept] = useState({});
   const [hdClassifying, setHdClassifying] = useState(false);
@@ -724,6 +738,86 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     },
     [selectedChatListId, summarizeChatListRow]
   );
+
+  // Patch a single list item wherever it lives across the conversation's lists.
+  // Both the pending-list detail and the smart-list overlay derive from
+  // chatLists, so one patch keeps them in sync automatically.
+  const patchChatListItemEverywhere = useCallback(
+    (itemId, patch) => {
+      setChatLists((previous) =>
+        (Array.isArray(previous) ? previous : []).map((list) => {
+          const items = Array.isArray(list.items) ? list.items : [];
+          if (!items.some((it) => String(it.id) === String(itemId))) return list;
+          const nextItems = items.map((it) => (String(it.id) === String(itemId) ? { ...it, ...patch } : it));
+          const nextList = summarizeChatListRow(list, nextItems);
+          if (String(list.id) === String(selectedChatListId)) setSelectedChatListSnapshot(nextList);
+          return nextList;
+        })
+      );
+    },
+    [selectedChatListId, summarizeChatListRow]
+  );
+
+  // Tag / re-tag a pending-work subtask (H/T/O). Stored on department.
+  const setChatSubtaskCategory = useCallback(
+    async (item, value) => {
+      if (!item?.id) return;
+      const next = String(item.department || "") === value ? null : value;
+      patchChatListItemEverywhere(item.id, { department: next });
+      try {
+        await supabase.from("chat_list_items").update({ department: next }).eq("id", item.id);
+        void refreshSelectedChatLists();
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      }
+    },
+    // refreshSelectedChatLists is stable enough for this handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patchChatListItemEverywhere, chatErrorMessage]
+  );
+
+  // Toggle any list item done from anywhere (used by the smart-list overlay,
+  // where the item may live in a different list than the selected one).
+  const toggleChatListItemAnywhere = useCallback(
+    async (item) => {
+      if (!item?.id) return;
+      const nextDone = !item.is_done;
+      patchChatListItemEverywhere(item.id, {
+        is_done: nextDone,
+        completed_at: nextDone ? new Date().toISOString() : null,
+        completed_by: nextDone ? currentUserId : null,
+      });
+      try {
+        await chatFetch("/api/chat", {
+          method: "POST",
+          body: JSON.stringify({ action: "toggle_list_item", company_id: companyId, item_id: item.id, done: nextDone }),
+        });
+        void refreshSelectedChatLists();
+      } catch (err) {
+        setError(chatErrorMessage(err));
+      }
+    },
+    // refreshSelectedChatLists is stable enough for this handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patchChatListItemEverywhere, currentUserId, chatFetch, companyId, chatErrorMessage]
+  );
+
+  // Live smart lists: all H/T/O-tagged subtasks across this chat's pending-work
+  // lists, grouped by tag. Same underlying rows as the lists themselves.
+  const chatSmartCategoryItems = useMemo(() => {
+    const byCat = { "Home Depot": [], Tool: [], Other: [] };
+    for (const list of Array.isArray(chatLists) ? chatLists : []) {
+      if (String(list?.list_type || "") !== "pending_job") continue;
+      for (const it of Array.isArray(list.items) ? list.items : []) {
+        const isSub = Boolean(it?.parent_item_id) || Number(it?.item_level || 0) >= 1;
+        const cat = String(it?.department || "");
+        if (isSub && CHAT_SUBTASK_CATEGORY_VALUES.has(cat)) {
+          byCat[cat].push({ ...it, __listId: list.id, __listTitle: list.title || "List" });
+        }
+      }
+    }
+    return byCat;
+  }, [chatLists]);
 
   const cacheChatConversationState = useCallback(
     (payload, meta = {}) => {
@@ -2910,6 +3004,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const renderChatListDetailView = (list) => {
     const hierarchy = list.list_type === "home_depot" ? hdDisplayHierarchy : selectedChatListHierarchy;
     const isHd = list.list_type === "home_depot";
+    const isPendingList = list.list_type === "pending_job";
     // Assigning an item to a person only makes sense with 3+ people. Hide it on
     // Home Depot lists and on direct (1:1) chats.
     const allowAssign = !isHd && selectedConversation?.type !== "direct";
@@ -3533,6 +3628,30 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                     </svg>
                                   ) : null}
                                 </button>
+                                {isPendingList ? (
+                                  <div className="mt-0.5 flex shrink-0 items-center gap-0.5" role="group" aria-label="Category">
+                                    {CHAT_SUBTASK_CATEGORIES.map((cat) => {
+                                      const activeCat = String(child.department || "") === cat.value;
+                                      return (
+                                        <button
+                                          key={cat.key}
+                                          type="button"
+                                          onClick={() => void setChatSubtaskCategory(child, cat.value)}
+                                          aria-pressed={activeCat}
+                                          aria-label={`Tag as ${cat.title}`}
+                                          title={cat.title}
+                                          className={`flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] font-black leading-none ${
+                                            activeCat
+                                              ? "border-[#061426] bg-[#061426] text-white"
+                                              : "border-[#D3DCEA] bg-white text-[#94A3B8]"
+                                          }`}
+                                        >
+                                          {cat.short}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
                                 <div className="min-w-0 flex-1">
                                   {editingChild ? (
                                     <div className="space-y-2">
@@ -4118,6 +4237,28 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               {(chatLists.length > 0 || (showArchivedLists && archivedLists.length > 0)) && !selectedConversation.pendingSetup ? (
                 <div className="opera-hide-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[#E6EAF1] bg-white px-3 py-2.5">
                   {chatLists.map((list) => renderChatListRibbonChip(list))}
+                  {CHAT_SUBTASK_CATEGORIES.map((cat) => {
+                    const items = chatSmartCategoryItems[cat.value] || [];
+                    if (!items.length) return null;
+                    const openCount = items.filter((it) => !it.is_done).length;
+                    return (
+                      <button
+                        key={`smart-${cat.key}`}
+                        type="button"
+                        onClick={() => setSmartCategoryView(cat.value)}
+                        title={`${cat.title} — auto list`}
+                        className="flex shrink-0 items-center gap-1.5 rounded-full border border-[#C7D8EE] bg-[#EEF4FC] px-2.5 py-1.5 text-[12px] font-black text-[#163B5C] active:bg-[#E1ECF9]"
+                      >
+                        <span aria-hidden="true">{cat.emoji}</span>
+                        <span className="max-w-[110px] truncate">{cat.title}</span>
+                        {openCount > 0 ? (
+                          <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-white px-1.5 text-[10px] font-black text-[#163B5C]">
+                            {openCount}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
                   {showArchivedLists
                     ? archivedLists.map((al) => (
                         <button
@@ -4571,6 +4712,80 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
           </div>
         </div>
       ) : null}
+
+      {smartCategoryView ? (() => {
+        const meta = CHAT_SUBTASK_CATEGORIES.find((c) => c.value === smartCategoryView) || null;
+        const items = chatSmartCategoryItems[smartCategoryView] || [];
+        const openItems = items.filter((it) => !it.is_done);
+        const doneItems = items.filter((it) => it.is_done);
+        const ordered = [...openItems, ...doneItems];
+        return (
+          <div className="fixed inset-0 z-[93] flex flex-col bg-white" role="dialog" aria-modal="true">
+            <div className="flex items-center gap-3 border-b border-[#E2E8F0] bg-white px-3 py-3">
+              <button
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E2E8F0] bg-[#F8FAFC] text-[#061426]"
+                onClick={() => setSmartCategoryView(null)}
+                aria-label="Close smart list"
+              >
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m15 18-6-6 6-6" />
+                </svg>
+              </button>
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#EEF4FC] text-[18px]" aria-hidden="true">
+                {meta?.emoji || "📋"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate text-[17px] font-black text-[#061426]">{meta?.title || "Smart list"}</h2>
+                <p className="truncate text-[11px] font-semibold text-[#64748B]">
+                  Auto list · {openItems.length} open / {items.length} total
+                </p>
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-[#F6F8FB] px-3 py-3 space-y-2">
+              {ordered.length === 0 ? (
+                <p className="pt-10 text-center text-[13px] font-semibold text-[#64748B]">
+                  No {meta?.title || ""} items yet. Tag a subtask with “{meta?.short || ""}” to add it here.
+                </p>
+              ) : (
+                ordered.map((it) => (
+                  <div
+                    key={`smart-item-${it.id}`}
+                    className={`flex items-start gap-2.5 rounded-[14px] border px-3 py-2.5 ${
+                      it.is_done ? "border-[#DDE7DD] bg-white" : "border-[#E2E8F0] bg-white"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      role="checkbox"
+                      aria-checked={Boolean(it.is_done)}
+                      onClick={() => void toggleChatListItemAnywhere(it)}
+                      className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                        it.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
+                      }`}
+                      aria-label={`${it.is_done ? "Mark open" : "Mark complete"}: ${it.text}`}
+                    >
+                      {it.is_done ? (
+                        <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="m3.2 8.3 3 3 6.5-6.6" />
+                        </svg>
+                      ) : null}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <p className={`text-[14px] font-semibold text-[#061426] ${it.is_done ? "line-through opacity-60" : ""}`}>
+                        {normalizeChatListItemDraftText(it.text)}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11px] font-semibold text-[#94A3B8]">
+                        from {it.__listTitle}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        );
+      })() : null}
 
       {listComposerOpen && selectedConversation && !selectedConversation.pendingSetup ? (
         <div className="fixed inset-0 z-[92] flex items-end justify-center bg-[#0B1F33]/55 px-2 pb-2 pt-10" role="dialog" aria-modal="true">
