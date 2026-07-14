@@ -198,6 +198,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   // AI-suggested Home Depot store locations for the company's city (dropdown).
   const [hdStoreOptions, setHdStoreOptions] = useState([]);
   const [hdStoresLoading, setHdStoresLoading] = useState(false);
+  const [hdStoreSuggestLoading, setHdStoreSuggestLoading] = useState(false);
   // Inline store-name edit on an open Home Depot list.
   const [storeNameDraft, setStoreNameDraft] = useState(null);
   const [storeNameSaving, setStoreNameSaving] = useState(false);
@@ -1370,6 +1371,22 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     return () => window.clearTimeout(timer);
   }, [chatPane, selectedConversationId, scrollChatThreadToBottom]);
 
+  // When the mobile keyboard opens/closes the visible viewport resizes. While
+  // the user is typing (composer focused), keep the newest message pinned just
+  // above the composer so it never ends up hidden behind the keyboard.
+  useEffect(() => {
+    if (chatPane !== "thread") return undefined;
+    if (typeof window === "undefined" || !window.visualViewport) return undefined;
+    const viewport = window.visualViewport;
+    const handleViewportResize = () => {
+      if (document.activeElement === chatMessageInputRef.current) {
+        requestAnimationFrame(() => scrollChatThreadToBottom("auto"));
+      }
+    };
+    viewport.addEventListener("resize", handleViewportResize);
+    return () => viewport.removeEventListener("resize", handleViewportResize);
+  }, [chatPane, scrollChatThreadToBottom]);
+
   useEffect(() => {
     if (!selectedChatListId || chatPane !== "list-detail") return;
     requestAnimationFrame(() => {
@@ -1445,6 +1462,53 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listComposerOpen, listType, companyId]);
+
+  // Store typeahead: as the user types an area we don't already have, ask the
+  // AI for Home Depot stores near it and merge them into the suggestions. The
+  // default-city list already covers the common case; this covers other areas.
+  useEffect(() => {
+    if (!listComposerOpen || listType !== "home_depot" || !companyId) return undefined;
+    const q = listStoreName.trim();
+    if (q.length < 2) return undefined;
+    const ql = q.toLowerCase();
+    const alreadyHave = hdStoreOptions.some(
+      (s) => String(s.name || "").toLowerCase().includes(ql) || String(s.address || "").toLowerCase().includes(ql)
+    );
+    if (alreadyHave) return undefined;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setHdStoreSuggestLoading(true);
+      try {
+        const data = await chatFetch("/api/hd-intelligence", {
+          method: "POST",
+          body: JSON.stringify({ action: "stores", company_id: companyId, city: q }),
+        });
+        if (!cancelled && Array.isArray(data?.stores) && data.stores.length) {
+          setHdStoreOptions((prev) => {
+            const seen = new Set((Array.isArray(prev) ? prev : []).map((s) => String(s.name || "").toLowerCase()));
+            const merged = [...(Array.isArray(prev) ? prev : [])];
+            for (const s of data.stores) {
+              const key = String(s?.name || "").toLowerCase();
+              if (key && !seen.has(key)) {
+                seen.add(key);
+                merged.push(s);
+              }
+            }
+            return merged;
+          });
+        }
+      } catch {
+        /* ignore — free text still works */
+      } finally {
+        if (!cancelled) setHdStoreSuggestLoading(false);
+      }
+    }, 600);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listStoreName, listComposerOpen, listType, companyId]);
 
   useEffect(() => {
     if (!editingListItemId) return;
@@ -1967,7 +2031,14 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
 
   const createChatList = async () => {
     const items = parseChatListComposerItems(listItemsText);
-    const title = listTitle.trim();
+    let title = listTitle.trim();
+    // Home Depot lists don't need a name — auto-number them "Home Depot 1/2/…".
+    if (!title && listType === "home_depot") {
+      const hdCount = (Array.isArray(chatLists) ? chatLists : []).filter(
+        (l) => String(l?.list_type || "") === "home_depot"
+      ).length;
+      title = `Home Depot ${hdCount + 1}`;
+    }
     if (!selectedConversationId || selectedConversation?.pendingSetup || listBusy || !title) return;
     setListBusy(true);
     setError("");
@@ -4459,6 +4530,12 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       placeholder={selectedConversation.pendingSetup ? "Company chat is loading" : "Message"}
                       disabled={selectedConversation.pendingSetup}
                       onChange={(event) => setMessageDraft(event.target.value)}
+                      onFocus={() => {
+                        // When the keyboard opens, keep the newest message pinned
+                        // just above the composer instead of hidden behind it.
+                        requestAnimationFrame(() => scrollChatThreadToBottom("auto"));
+                        window.setTimeout(() => scrollChatThreadToBottom("auto"), 300);
+                      }}
                       onKeyDown={(event) => {
                         if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent?.isComposing) {
                           event.preventDefault();
@@ -4864,28 +4941,40 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
             {listType === "home_depot" ? (
               <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
                 Home Depot store
-                {hdStoresLoading ? (
-                  <span className="block text-[11px] font-semibold normal-case tracking-normal text-[#94A3B8]">Finding stores near you…</span>
-                ) : hdStoreOptions.length ? (
-                  <span className="flex flex-wrap gap-1.5">
-                    {hdStoreOptions.map((store) => {
-                      const selected = listStoreName.trim().toLowerCase() === store.name.trim().toLowerCase();
-                      return (
-                        <button
-                          key={`hdstore-${store.name}`}
-                          type="button"
-                          title={store.address || store.name}
-                          className={`rounded-full border px-2.5 py-1 text-[12px] font-black normal-case tracking-normal ${
-                            selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
-                          }`}
-                          onClick={() => setListStoreName(store.name)}
-                        >
-                          {store.name}
-                        </button>
-                      );
-                    })}
-                  </span>
+                {hdStoresLoading || hdStoreSuggestLoading ? (
+                  <span className="block text-[11px] font-semibold normal-case tracking-normal text-[#94A3B8]">Finding stores…</span>
                 ) : null}
+                {(() => {
+                  const q = listStoreName.trim().toLowerCase();
+                  const matches = hdStoreOptions.filter(
+                    (store) =>
+                      !q ||
+                      String(store.name || "").toLowerCase().includes(q) ||
+                      String(store.address || "").toLowerCase().includes(q)
+                  );
+                  const exact = matches.length === 1 && matches[0].name.trim().toLowerCase() === q;
+                  if (!matches.length || exact) return null;
+                  return (
+                    <span className="flex flex-wrap gap-1.5">
+                      {matches.slice(0, 8).map((store) => {
+                        const selected = q === store.name.trim().toLowerCase();
+                        return (
+                          <button
+                            key={`hdstore-${store.name}`}
+                            type="button"
+                            title={store.address || store.name}
+                            className={`rounded-full border px-2.5 py-1 text-[12px] font-black normal-case tracking-normal ${
+                              selected ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
+                            }`}
+                            onClick={() => setListStoreName(store.name)}
+                          >
+                            {store.name}
+                          </button>
+                        );
+                      })}
+                    </span>
+                  );
+                })()}
                 <input
                   inputMode="text"
                   autoComplete="off"
@@ -4898,21 +4987,27 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 />
               </label>
             ) : null}
-            <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
-              Title
-              <input
-                ref={chatListTitleInputRef}
-                inputMode="text"
-                autoComplete="off"
-                enterKeyHint="next"
-                className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
-                style={{ fontSize: 16 }}
-                value={listTitle}
-                maxLength={120}
-                onChange={(event) => setListTitle(event.target.value)}
-                placeholder="List name"
-              />
-            </label>
+            {listType === "home_depot" ? (
+              <p className="mt-3 rounded-[12px] bg-[#F1F5F9] px-3 py-2 text-[12px] font-semibold text-[#64748B]">
+                Named automatically — “Home Depot {(Array.isArray(chatLists) ? chatLists : []).filter((l) => String(l?.list_type || "") === "home_depot").length + 1}”.
+              </p>
+            ) : (
+              <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
+                Title
+                <input
+                  ref={chatListTitleInputRef}
+                  inputMode="text"
+                  autoComplete="off"
+                  enterKeyHint="next"
+                  className="chat-mobile-safe-input h-11 w-full rounded-[14px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-medium normal-case tracking-normal text-[#061426] outline-none focus:border-[#163B5C] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#163B5C]/15"
+                  style={{ fontSize: 16 }}
+                  value={listTitle}
+                  maxLength={120}
+                  onChange={(event) => setListTitle(event.target.value)}
+                  placeholder="List name"
+                />
+              </label>
+            )}
             <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
               Items
               <textarea
@@ -4934,7 +5029,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               <button
                 type="button"
                 className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
-                disabled={!listTitle.trim() || listBusy}
+                disabled={listBusy || (listType !== "home_depot" && !listTitle.trim())}
                 onClick={() => void createChatList()}
               >
                 Create
