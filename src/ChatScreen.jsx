@@ -4446,6 +4446,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               <div
                 ref={chatThreadScrollRef}
                 className="opera-hide-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3"
+                // Tap the conversation to dismiss the keyboard, like WhatsApp.
+                onPointerDown={() => {
+                  const el = typeof document !== "undefined" ? document.activeElement : null;
+                  if (el && typeof el.blur === "function") el.blur();
+                }}
                     style={{
                       backgroundColor: "#EFF3F8",
                       backgroundImage:
@@ -4484,7 +4489,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 )}
               </div>
 
-              <div className="shrink-0 border-t border-[#E6EAF1] bg-white/96 px-2.5 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
+              <div className="shrink-0 border-t border-[#E6EAF1] bg-white/96 px-2.5 py-1.5 pb-[max(0.4rem,env(safe-area-inset-bottom,0px))] backdrop-blur">
                 <input
                   ref={chatImageInputRef}
                   type="file"
@@ -4567,7 +4572,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                   ) : null}
                   <button
                     type="button"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.08)] disabled:text-[#94A3B8]"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#E6EAF1] bg-white text-[#061426] shadow-[0_6px_16px_rgba(6,20,38,0.08)] disabled:text-[#94A3B8]"
                     disabled={selectedConversation.pendingSetup}
                     onClick={() => setChatUtilityMenuOpen((value) => !value)}
                     aria-label="Attach"
@@ -4578,7 +4583,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       <path d="M5 12h14" />
                     </svg>
                   </button>
-                  <div className="flex min-h-11 flex-1 items-center rounded-[24px] border border-[#E6EAF1] bg-white px-4 py-2 shadow-[0_6px_16px_rgba(6,20,38,0.06)]">
+                  <div className="flex min-h-9 flex-1 items-center rounded-[22px] border border-[#E6EAF1] bg-white px-3.5 py-1 shadow-[0_6px_16px_rgba(6,20,38,0.06)]">
                     <textarea
                       ref={chatMessageInputRef}
                       rows={1}
@@ -4607,7 +4612,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                   </div>
                   <button
                     type="button"
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.24)] active:bg-[#0B1F33] disabled:bg-[#CBD5E1]"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#061426] text-white shadow-[0_10px_22px_rgba(6,20,38,0.24)] active:bg-[#0B1F33] disabled:bg-[#CBD5E1]"
                     disabled={selectedConversation.pendingSetup || !hasDraftMessage}
                     // Prevent the tap from blurring the message box: on mobile,
                     // losing focus dismisses the keyboard. Keeping focus here
