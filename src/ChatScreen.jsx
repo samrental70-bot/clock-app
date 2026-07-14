@@ -152,6 +152,14 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const [hdSuggestOpen, setHdSuggestOpen] = useState(false);
   const [listItemsText, setListItemsText] = useState("");
   const [listItemDraft, setListItemDraft] = useState("");
+  // Press-and-hold drag to reorder top-level list items. dragOrder is the live
+  // array of item ids while dragging (null when not). dragReorderRef holds the
+  // transient gesture state; chatRowElsRef maps item id -> its DOM row so we can
+  // find which row the finger is over.
+  const [dragItemId, setDragItemId] = useState(null);
+  const [dragOrder, setDragOrder] = useState(null);
+  const dragReorderRef = useRef({ id: null, pointerId: null, order: [], timer: null, startY: 0 });
+  const chatRowElsRef = useRef({});
   // Photo attach/capture on list items ("" idle, "new" while creating a photo
   // item, or an item id while attaching to that item).
   const [listPhotoBusy, setListPhotoBusy] = useState("");
@@ -2157,6 +2165,79 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
     }
   };
 
+  // ---- Press-and-hold drag to reorder top-level list items ----
+  const topLevelOrderIds = () =>
+    (Array.isArray(selectedChatListHierarchy) ? selectedChatListHierarchy : []).map((i) => String(i.id));
+
+  const beginListItemPress = (item, event) => {
+    // Reorder is only for plain lists (HD is aisle-sorted) and top-level items.
+    // Triggered from the grip handle, so start dragging immediately and capture
+    // the pointer so moves/release keep firing on the handle as the finger
+    // travels over other rows.
+    if (selectedChatListResolved?.list_type === "home_depot") return;
+    if (Number(item?.item_level || 0) !== 0) return;
+    event?.stopPropagation?.();
+    try { event?.currentTarget?.setPointerCapture?.(event.pointerId); } catch { /* unsupported */ }
+    const d = dragReorderRef.current;
+    d.id = String(item.id);
+    d.order = topLevelOrderIds();
+    d.pointerId = event?.pointerId;
+    setDragItemId(String(item.id));
+    setDragOrder(d.order.slice());
+    try { navigator.vibrate?.(15); } catch { /* no haptics */ }
+  };
+
+  const moveListItemPress = (event) => {
+    const d = dragReorderRef.current;
+    if (!d.id) return;
+    event?.preventDefault?.();
+    const y = event?.clientY ?? 0;
+    let targetId = null;
+    let after = false;
+    for (const id of d.order) {
+      const el = chatRowElsRef.current[id];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y >= r.top && y <= r.bottom) {
+        targetId = id;
+        after = y > r.top + r.height / 2;
+        break;
+      }
+    }
+    if (targetId && targetId !== d.id) {
+      const order = d.order.filter((x) => x !== d.id);
+      const idx = order.indexOf(targetId);
+      order.splice(after ? idx + 1 : idx, 0, d.id);
+      d.order = order;
+      setDragOrder(order.slice());
+    }
+  };
+
+  const endListItemPress = async () => {
+    const d = dragReorderRef.current;
+    if (d.timer) { clearTimeout(d.timer); d.timer = null; }
+    const wasDragging = Boolean(d.id);
+    const order = d.order.slice();
+    d.id = null;
+    d.order = [];
+    setDragItemId(null);
+    setDragOrder(null);
+    if (!wasDragging || order.length === 0) return;
+    try {
+      await Promise.all(
+        order.map((id, i) =>
+          supabase
+            .from("chat_list_items")
+            .update({ sort_order: i + 1, updated_at: new Date().toISOString() })
+            .eq("id", id)
+        )
+      );
+      await refreshSelectedChatLists();
+    } catch (err) {
+      setError(chatErrorMessage(err));
+    }
+  };
+
   const addChatListItem = async (parentItem = null) => {
     const parentId = String(parentItem?.id || addingSubItemParentId || "");
     const usingSubItemDraft = Boolean(parentId);
@@ -2976,22 +3057,51 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               body={list.total_count > 0 ? "Tap the eye to show completed items." : "Add the first item below."}
             />
           ) : (
-            hierarchy.map((item) => {
+            (dragOrder && !isHd
+              ? dragOrder.map((id) => hierarchy.find((i) => String(i.id) === id)).filter(Boolean)
+              : hierarchy
+            ).map((item, itemIndex) => {
               const editingThis = String(editingListItemId) === String(item.id);
               const assigningThis = String(assigningListItemId) === String(item.id);
               const assignee = getChatListAssigneeMeta(item);
               const legacySubitems = item.legacySubitems || [];
+              const isDraggingThis = dragItemId != null && String(dragItemId) === String(item.id);
+              const canReorder = !isHd && Number(item?.item_level || 0) === 0;
               return (
                 <div
                   key={item.id}
-                  className={`rounded-[18px] border px-3 py-3 shadow-sm ${
+                  ref={(el) => {
+                    if (el) chatRowElsRef.current[String(item.id)] = el;
+                    else delete chatRowElsRef.current[String(item.id)];
+                  }}
+                  className={`rounded-[18px] border px-3 py-3 shadow-sm transition-[transform,box-shadow] ${
                     item.is_done ? "border-[#DDE7DD] bg-[#F8FAFC]" : "border-[#E2E8F0] bg-[#F8FAFC]"
-                  }`}
-                  style={{ touchAction: "pan-y" }}
+                  } ${isDraggingThis ? "scale-[1.02] border-[#061426] bg-white shadow-[0_16px_40px_rgba(6,20,38,0.22)]" : dragItemId ? "opacity-90" : ""}`}
+                  style={{ touchAction: dragItemId ? "none" : "pan-y" }}
                   onTouchStart={(event) => beginChatListSwipe(item.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
                   onTouchEnd={(event) => endChatListSwipe(item, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
                 >
                   <div className="flex items-start gap-2">
+                    {canReorder ? (
+                      <button
+                        type="button"
+                        aria-label={`Drag to reorder item ${itemIndex + 1}`}
+                        title="Hold and drag to reorder"
+                        className={`mt-0.5 flex h-6 w-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-[6px] text-[#94A3B8] active:cursor-grabbing ${isDraggingThis ? "text-[#061426]" : ""}`}
+                        style={{ touchAction: "none" }}
+                        onPointerDown={(event) => beginListItemPress(item, event)}
+                        onPointerMove={(event) => moveListItemPress(event)}
+                        onPointerUp={() => void endListItemPress()}
+                        onPointerCancel={() => void endListItemPress()}
+                        onClick={(event) => event.preventDefault()}
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+                          <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+                          <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+                          <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+                        </svg>
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       role="checkbox"
@@ -3157,7 +3267,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           }}
                           aria-label={`Edit item ${item.item_number}`}
                         >
-                          <span className="mr-1 text-[#64748B]">{item.item_number}.</span>
+                          <span className="mr-1 text-[#64748B]">{isHd ? item.item_number : itemIndex + 1}.</span>
                           <span className={item.is_done ? "line-through" : ""}>{normalizeChatListItemDraftText(item.text)}</span>
                         </button>
                       )}
