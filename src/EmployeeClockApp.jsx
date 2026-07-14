@@ -20207,20 +20207,15 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               icon: renderTimesheetUiIcon("wallet", "h-5 w-5"),
               onClick: isAdmin
                 ? () => {
-                    const payments = normalizeArray(period.payments);
-                    if (payments.length === 1) {
-                      handleEditPayrollPayment(payments[0]);
-                    } else if (payments.length > 1) {
-                      setPayrollTilePicker({ kind: "payment", period });
-                    } else {
-                      openPayrollPaymentForm(null, {
-                        paymentKind: "salary",
-                        employeeId: payrollDetailEmployeeGroup?.employeeId,
-                        periodStart: period.periodStart,
-                        periodEnd: period.periodEnd,
-                        paidDate: period.payDate || calendarDateKeyInTimeZone(new Date(), companyTimeZone),
-                      });
-                    }
+                    // Always start a NEW payment. Existing payments are edited by
+                    // tapping them in Recent Activity below.
+                    openPayrollPaymentForm(null, {
+                      paymentKind: "salary",
+                      employeeId: payrollDetailEmployeeGroup?.employeeId,
+                      periodStart: period.periodStart,
+                      periodEnd: period.periodEnd,
+                      paidDate: period.payDate || calendarDateKeyInTimeZone(new Date(), companyTimeZone),
+                    });
                   }
                 : undefined,
             })}
@@ -20231,34 +20226,25 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               icon: renderTimesheetUiIcon("rate", "h-5 w-5"),
               onClick: isAdmin
                 ? () => {
-                    const loans = normalizeArray(period.loans);
-                    if (loans.length === 1) {
-                      handleEditPayrollPayment({ ...loans[0], paymentKind: "loan" });
-                    } else if (loans.length > 1) {
-                      setPayrollTilePicker({ kind: "loan", period });
-                    } else {
-                      // Loans are bucketed into a payroll period by their
-                      // transaction date (not an explicit period like salary),
-                      // so default the date INTO the tapped period — clamp
-                      // today into [periodStart, periodEnd] — otherwise a loan
-                      // added from an older period card would land in today's
-                      // period and never show in this period's total.
-                      const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
-                      const loanDefaultDate =
-                        period.periodEnd && todayKey > period.periodEnd
-                          ? period.periodEnd
-                          : period.periodStart && todayKey < period.periodStart
-                            ? period.periodStart
-                            : todayKey;
-                      openPayrollPaymentForm(null, {
-                        paymentKind: "loan",
-                        employeeId: payrollDetailEmployeeGroup?.employeeId,
-                        periodStart: period.periodStart,
-                        periodEnd: period.periodEnd,
-                        paidDate: loanDefaultDate,
-                        loanDirection: "loan_given",
-                      });
-                    }
+                    // Always start a NEW loan entry. Existing loans are edited by
+                    // tapping them in Recent Activity below.
+                    // Loans bucket into a period by transaction date, so default
+                    // the date INTO the tapped period (clamp today into range).
+                    const todayKey = calendarDateKeyInTimeZone(new Date(), companyTimeZone);
+                    const loanDefaultDate =
+                      period.periodEnd && todayKey > period.periodEnd
+                        ? period.periodEnd
+                        : period.periodStart && todayKey < period.periodStart
+                          ? period.periodStart
+                          : todayKey;
+                    openPayrollPaymentForm(null, {
+                      paymentKind: "loan",
+                      employeeId: payrollDetailEmployeeGroup?.employeeId,
+                      periodStart: period.periodStart,
+                      periodEnd: period.periodEnd,
+                      paidDate: loanDefaultDate,
+                      loanDirection: "loan_given",
+                    });
                   }
                 : undefined,
             })}
