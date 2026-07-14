@@ -94,12 +94,14 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       s.width = "";
       s.maxWidth = "";
       s.height = "";
+      s.minHeight = "";
       s.maxHeight = "";
       s.zIndex = "";
     }
     for (const ref of rest) {
       if (ref?.current) {
         ref.current.style.height = "";
+        ref.current.style.minHeight = "";
         ref.current.style.maxHeight = "";
       }
     }
@@ -121,13 +123,18 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       s.transform = "translateX(-50%)";
       s.width = "100%";
       s.maxWidth = IMMERSIVE_CHAT_MAX_WIDTH;
+      // min-height must be set too — the container has a `min-h-full` class
+      // (min-height:100%) that would otherwise override the reduced height and
+      // keep it full-screen, leaving the composer behind the keyboard.
       s.height = px;
+      s.minHeight = px;
       s.maxHeight = px;
       s.zIndex = "40";
     }
     for (const ref of rest) {
       if (ref?.current) {
         ref.current.style.height = px;
+        ref.current.style.minHeight = px;
         ref.current.style.maxHeight = px;
       }
     }
