@@ -2718,6 +2718,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const renderChatListDetailView = (list) => {
     const hierarchy = list.list_type === "home_depot" ? hdDisplayHierarchy : selectedChatListHierarchy;
     const isHd = list.list_type === "home_depot";
+    // Assigning an item to a person only makes sense with 3+ people. Hide it on
+    // Home Depot lists and on direct (1:1) chats.
+    const allowAssign = !isHd && selectedConversation?.type !== "direct";
     const assignableMembers = selectedChatAssignableMembers;
     const handleMainInputPointer = () => {
       chatListInputPointerAtRef.current = Date.now();
@@ -3019,7 +3022,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         </svg>
                       ) : null}
                     </button>
-                    {list.list_type !== "home_depot" ? (
+                    {allowAssign ? (
                       <button
                         type="button"
                         className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px] font-black ${
@@ -3102,9 +3105,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                               void saveChatListItemEdit(item);
                             }}
                           />
-                          {list.list_type !== "home_depot" ? (
+                          {allowAssign ? (
                             <select
-                              className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                              className="chat-mobile-safe-input h-11 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold leading-normal text-[#061426] outline-none focus:border-[#163B5C]"
                               value={String(item?.assigned_user_id || "")}
                               onChange={(event) => void assignChatListItem(item, event.target.value)}
                             >
@@ -3163,10 +3166,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           <img src={item.photo_url} alt="Item" className="h-14 w-14 rounded-[10px] border border-[#E2E8F0] object-cover" loading="lazy" />
                         </a>
                       ) : null}
-                      {assigningThis && !editingThis && list.list_type !== "home_depot" ? (
+                      {assigningThis && !editingThis && allowAssign ? (
                         <div className="mt-2">
                           <select
-                            className="chat-mobile-safe-input h-10 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                            className="chat-mobile-safe-input h-11 w-full rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold leading-normal text-[#061426] outline-none focus:border-[#163B5C]"
                             value={String(item?.assigned_user_id || "")}
                             onChange={(event) => void assignChatListItem(item, event.target.value)}
                           >
