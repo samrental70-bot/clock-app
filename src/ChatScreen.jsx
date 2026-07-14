@@ -49,6 +49,38 @@ const IMMERSIVE_CHAT_MAX_WIDTH = "24rem";
  */
 function useImmersiveViewportHeight(refs, isImmersivePane) {
   const isImmersiveRef = useRef(isImmersivePane);
+  // Largest visible height seen (the no-keyboard height) — used to estimate the
+  // keyboard's size on devices (iOS installed PWAs) that never shrink
+  // visualViewport/innerHeight when the keyboard opens.
+  const maxSeenHeightRef = useRef(0);
+
+  // Best available "visible height above the keyboard". Uses the smaller of
+  // innerHeight and visualViewport.height (either may reflect the keyboard),
+  // and falls back to an estimate when a text field is focused but neither
+  // shrank — so the composer is never left stranded behind the keyboard.
+  const measureVisibleHeight = () => {
+    const vv = window.visualViewport;
+    const inner = window.innerHeight || 0;
+    const candidates = [inner, vv?.height || 0].filter((n) => n > 0);
+    const measured = candidates.length ? Math.min(...candidates) : inner;
+    maxSeenHeightRef.current = Math.max(maxSeenHeightRef.current, measured, inner);
+    const full = maxSeenHeightRef.current || measured;
+    const el = typeof document !== "undefined" ? document.activeElement : null;
+    const typing = el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "button"));
+    // Only estimate on touch devices — a focused field on desktop has no
+    // overlay keyboard, so shrinking there would wrongly cut the view.
+    const coarsePointer =
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia("(pointer: coarse)").matches
+        : false;
+    if (typing && coarsePointer && measured >= full - 40) {
+      // Keyboard is up but the viewport didn't report it — estimate its height
+      // (iPhone keyboard + accessory/suggestions ≈ 336px) so the composer and
+      // last message sit above it. A slight gap is fine; being hidden is not.
+      return Math.max(240, full - 336);
+    }
+    return measured;
+  };
 
   const clearImmersiveStyles = () => {
     const [anchor, ...rest] = refs;
@@ -75,7 +107,7 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
 
   const applyImmersiveStyles = () => {
     const viewport = window.visualViewport;
-    const height = viewport?.height || window.innerHeight;
+    const height = measureVisibleHeight();
     const top = viewport?.offsetTop || 0;
     const px = `${height}px`;
     const [anchor, ...rest] = refs;
