@@ -4557,6 +4557,7 @@ export default function EmployeeClockApp() {
   const payrollReminderLastFetchKeyRef = useRef("");
   const timesheetHighlightTimerRef = useRef(null);
   const timesheetSanityHighlightTimerRef = useRef(null);
+  const timesheetListSectionRef = useRef(null);
   const payrollPanelScrollRef = useRef(null);
   const photoDraftsRef = useRef([]);
   const photoCameraStreamRef = useRef(null);
@@ -8747,13 +8748,21 @@ export default function EmployeeClockApp() {
     );
   }, [visibleTimesheetRecords, timesheetSanityFilter]);
 
-  // If the underlying data changed and the filtered rows are all fixed/gone,
-  // drop the filter so the user isn't stuck on an empty list.
+  // Clear the sanity filter when the user changes the range/filters or leaves
+  // the tab, but never silently while it's actively showing rows (that caused a
+  // tap to appear to do nothing).
   useEffect(() => {
-    if (timesheetSanityFilter && displayedTimesheetRecords.length === 0) {
-      setTimesheetSanityFilter(null);
-    }
-  }, [timesheetSanityFilter, displayedTimesheetRecords.length]);
+    setTimesheetSanityFilter(null);
+  }, [
+    activeTab,
+    timesheetRangePreset,
+    timesheetRangeBounds.from,
+    timesheetRangeBounds.to,
+    timesheetEmployeeFilter,
+    timesheetProjectFilter,
+    timesheetTaskFilter,
+    timesheetCompletedOnly,
+  ]);
 
   const focusTimesheetRecord = useCallback(
     (recordId, issueId = "") => {
@@ -25370,7 +25379,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                                 setTimesheetSanityHighlightedIssueId(issue.id);
                                 setTimesheetRenderLimit(TIMESHEET_RENDER_BATCH);
                                 if (typeof window !== "undefined") {
-                                  window.requestAnimationFrame?.(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+                                  window.requestAnimationFrame?.(() =>
+                                    timesheetListSectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" })
+                                  );
                                 }
                               }}
                             >
@@ -25422,7 +25433,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     )}
                   </div>
                 ) : null}
-                <div className="space-y-3">
+                <div className="space-y-3" ref={timesheetListSectionRef}>
                   {timesheetSanityFilter ? (
                     <div className="flex items-center justify-between gap-2 rounded-[14px] border border-[#FDE68A] bg-[#FFF7E6] px-3 py-2.5 shadow-sm">
                       <div className="min-w-0">
@@ -25446,7 +25457,13 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       </button>
                     </div>
                   ) : null}
-                  {!timesheetsLoading && displayedTimesheetRecords.length === 0 && (
+                  {!timesheetsLoading && displayedTimesheetRecords.length === 0 && timesheetSanityFilter && (
+                    <div className="rounded-[20px] border border-[#BBF7D0] bg-[#ECFDF5] px-6 py-10 text-center shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
+                      <p className="text-[17px] font-black leading-tight text-[#15803D]">These entries look sorted</p>
+                      <p className="mx-auto mt-2 max-w-[240px] text-[14px] font-semibold leading-snug text-[#64748B]">No matching rows here for this issue — tap “Back to all” to see the full list.</p>
+                    </div>
+                  )}
+                  {!timesheetsLoading && displayedTimesheetRecords.length === 0 && !timesheetSanityFilter && (
                     <div className="rounded-[20px] border border-[#E2E8F0] bg-white px-6 py-10 text-center shadow-[0_10px_26px_rgba(6,20,38,0.07)]">
                       <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-[#F1F5F9] text-[#94A3B8]">
                         {renderTimesheetUiIcon("empty-timesheet", "h-12 w-12")}
