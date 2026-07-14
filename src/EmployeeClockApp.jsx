@@ -4040,6 +4040,64 @@ function tryShowClockBrowserNotification(notificationRow, shownIdsRef) {
   }
 }
 
+/**
+ * Short two-tone "ding" for a new chat message, like a messaging app.
+ * Uses a shared, lazily-unlocked WebAudio context so it survives the browser
+ * autoplay policy (the context is resumed on the first user gesture). Never
+ * throws; silently no-ops if audio is unavailable or still locked.
+ */
+let sharedNotifyAudioCtx = null;
+function getNotifyAudioCtx() {
+  if (typeof window === "undefined") return null;
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!sharedNotifyAudioCtx) {
+    try {
+      sharedNotifyAudioCtx = new Ctx();
+    } catch {
+      sharedNotifyAudioCtx = null;
+    }
+  }
+  return sharedNotifyAudioCtx;
+}
+/** Resume the audio context on a user gesture so later pings can play. */
+function unlockNotifyAudio() {
+  const ctx = getNotifyAudioCtx();
+  if (ctx && ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+}
+function playChatNotificationSound() {
+  try {
+    const ctx = getNotifyAudioCtx();
+    if (!ctx) return;
+    if (ctx.state === "suspended") {
+      // Not yet unlocked by a gesture — try to resume, but don't block.
+      ctx.resume().catch(() => {});
+    }
+    const now = ctx.currentTime;
+    const gain = ctx.createGain();
+    gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.25, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.45);
+    const tones = [
+      { freq: 880, start: 0, stop: 0.16 },
+      { freq: 1174.66, start: 0.13, stop: 0.42 },
+    ];
+    for (const tone of tones) {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(tone.freq, now + tone.start);
+      osc.connect(gain);
+      osc.start(now + tone.start);
+      osc.stop(now + tone.stop);
+    }
+  } catch (e) {
+    console.warn("[NOTIFY] chat sound failed", e);
+  }
+}
+
 /** Insert one in-app row per recipient. Failures are logged only — never throws. */
 function scheduleAssignmentMessageSignature(row) {
   const title = String(row?.title ?? "").trim();
@@ -4684,6 +4742,29 @@ export default function EmployeeClockApp() {
   const notifPollBootstrappedRef = useRef(false);
   const notifLastUnreadIdsRef = useRef(new Set());
   const systemNotifShownIdsRef = useRef(new Set());
+
+  // Unlock the notification-sound audio context on the first user gesture so
+  // the message "ding" can play later (browsers block audio until a gesture).
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    let done = false;
+    const unlock = () => {
+      if (done) return;
+      done = true;
+      unlockNotifyAudio();
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+    window.addEventListener("pointerdown", unlock, { passive: true });
+    window.addEventListener("keydown", unlock, { passive: true });
+    window.addEventListener("touchstart", unlock, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+      window.removeEventListener("touchstart", unlock);
+    };
+  }, []);
 
   // Employee assignment notification pop-up (confirm/OK)
   const [activeAssignNotif, setActiveAssignNotif] = useState(null);
@@ -9940,6 +10021,19 @@ export default function EmployeeClockApp() {
             title: firstToastRow.title,
             message: firstToastRow.message,
           });
+          // Audible ping for a new message, like a messaging app. Only fires
+          // when a genuinely new unread arrives (not on the first poll).
+          const hasChatPopup = popupRows.some(
+            (row) => String(row?.type || "").trim().toLowerCase() === "chat_message"
+          );
+          if (hasChatPopup) {
+            playChatNotificationSound();
+            try {
+              window.navigator?.vibrate?.([120, 60, 120]);
+            } catch {
+              /* vibrate unsupported — ignore */
+            }
+          }
         }
         notifLastUnreadIdsRef.current = unreadIds;
       }
@@ -33892,7 +33986,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
           );
         })()}
 
-        {liveToast && isAdmin && (
+        {liveToast && (
           <div
             role="status"
             className="pointer-events-auto absolute left-2 right-2 z-[55] rounded-2xl border border-slate-200 bg-white shadow-lg p-3"
