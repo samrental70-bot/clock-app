@@ -6658,16 +6658,17 @@ export default function EmployeeClockApp() {
     }
   }, [authUser?.id, isEmployeeRole, supabase, userCompany?.id, userCompanyRole]);
 
-  const fetchTimesheetChangeRequests = useCallback(async () => {
+  const fetchTimesheetChangeRequests = useCallback(async ({ force = false } = {}) => {
     if (!authUser?.id || !userCompany?.id || !userCompanyRole) return;
     const requestCacheKey = makeAppCacheKey("timesheets", "requests", userCompany.id, authUser.id, isAdmin ? "admin" : "employee");
     const cachedRequests = readLocalFirstCacheEnvelope(requestCacheKey, null);
     if (cachedRequests?.value?.records) {
       const cachedRows = normalizeArray(cachedRequests.value.records);
       setTimesheetRequests(cachedRows);
-      if (!cachedRequests.savedAt || isLocalFirstCacheStale(cachedRequests.savedAt, 5 * 60 * 1000)) {
-        // refresh below
-      } else {
+      // `force` skips the fresh-cache short-circuit so a refetch right after an
+      // approve/reject reads the new status from the DB instead of re-showing
+      // the stale cached "pending" copy (which made approved requests linger).
+      if (!force && cachedRequests.savedAt && !isLocalFirstCacheStale(cachedRequests.savedAt, 5 * 60 * 1000)) {
         return;
       }
     }
@@ -15921,7 +15922,12 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         .eq("id", request.id);
       if (reqErr) throw reqErr;
 
-      await fetchTimesheetChangeRequests();
+      // Optimistically drop it from the pending list immediately, then force a
+      // DB-backed refetch so the cache and UI reflect the approved status.
+      setTimesheetRequests((prev) =>
+        normalizeArray(prev).map((r) => (String(r.id) === String(request.id) ? { ...r, status: "approved" } : r))
+      );
+      await fetchTimesheetChangeRequests({ force: true });
       await fetchTimesheetsFromSupabase();
     } catch (err) {
       alert(getErrorMessage(err));
@@ -15944,7 +15950,10 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
         })
         .eq("id", request.id);
       if (error) throw error;
-      await fetchTimesheetChangeRequests();
+      setTimesheetRequests((prev) =>
+        normalizeArray(prev).map((r) => (String(r.id) === String(request.id) ? { ...r, status: "rejected" } : r))
+      );
+      await fetchTimesheetChangeRequests({ force: true });
     } catch (err) {
       alert(getErrorMessage(err));
     } finally {
