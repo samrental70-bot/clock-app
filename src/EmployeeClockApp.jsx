@@ -23743,13 +23743,8 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
               onClick: () => openMenuTab("team"),
             }
           : null,
-        {
-          label: "Chat",
-          subtitle: "Team messages",
-          icon: "chat",
-          color: "navy",
-          onClick: () => openMenuTab("chat"),
-        },
+        // Chat is a permanent bottom-nav tab — listing it here too is a second
+        // route to the same place and just pads the menu.
         {
           label: "Photos",
           subtitle: "Field media",
