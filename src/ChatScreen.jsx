@@ -221,6 +221,17 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
 // the SAME underlying item shown in two places, so ticking it anywhere keeps
 // both in sync. The tag value is stored on chat_list_items.department (unused
 // by pending_job lists otherwise), so no schema change is needed.
+// A member with no display name should not surface their raw address in the UI
+// ("…@gmail.com" reads as noise beside real names, and in the member list it
+// showed twice). Fall back to the email's local part instead.
+function friendlyMemberName(member, fallback = "User") {
+  const name = String(member?.name || "").trim();
+  if (name) return name;
+  const email = String(member?.email || "").trim();
+  if (email) return email.split("@")[0] || fallback;
+  return fallback;
+}
+
 const CHAT_SUBTASK_CATEGORIES = [
   { key: "H", value: "Home Depot", short: "H", title: "Home Depot", emoji: "🏠" },
   { key: "T", value: "Tool", short: "T", title: "Tool", emoji: "🔧" },
@@ -508,7 +519,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
         .filter((member) => member?.user_id)
         .map((member) => ({
           user_id: String(member.user_id),
-          name: String(member.name || member.email || "User").trim() || "User",
+          name: friendlyMemberName(member),
           email: String(member.email || "").trim(),
         })),
     [members, selectedConversationMembers]
@@ -523,7 +534,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       if (!assignedUserId) return null;
       const member = chatAssigneeById[assignedUserId] || memberById[assignedUserId] || null;
       if (!member) return { user_id: assignedUserId, name: "Assigned", initial: "A" };
-      const label = String(member.name || member.email || "Assigned").trim() || "Assigned";
+      const label = friendlyMemberName(member, "Assigned");
       return {
         user_id: assignedUserId,
         name: label,
@@ -567,7 +578,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
       .map((member) => {
         if (!member?.user_id) return "";
         if (String(member.user_id) === String(currentUserId)) return "You";
-        return member.name || member.email || "User";
+        return friendlyMemberName(member);
       })
       .filter(Boolean);
     if (selectedConversation.type === "direct") {
@@ -4389,7 +4400,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         {selectedConversationMembers.map((member) => (
                           <div key={member.user_id} className="flex items-center justify-between gap-2 rounded-[12px] px-2 py-2">
                             <span className="min-w-0 text-[12px] font-bold text-[#061426]">
-                              <span className="block truncate">{member.name || member.email || "User"}</span>
+                              <span className="block truncate">{friendlyMemberName(member)}</span>
                               <span className="block truncate text-[10px] text-[#64748B]">{member.email || member.role || ""}</span>
                             </span>
                             {selectedCanManage && String(member.user_id) !== String(currentUserId) ? (

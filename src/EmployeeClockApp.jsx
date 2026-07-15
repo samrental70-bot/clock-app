@@ -23654,7 +23654,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
   const appHeaderBuildLabel = IS_OPERA_DEVELOPMENT_APP && OPERA_APP_BUILD_CODE ? OPERA_APP_BUILD_CODE : "";
   const isHomeTab = isAdmin ? activeTab === "dashboard" : activeTab === "activities";
   const isChatImmersiveView = activeTab === "chat" && chatViewMode !== "list";
-  const showFullScreenShellHeader = ["clock", "timesheet"].includes(activeTab) || (activeTab === "chat" && !isChatImmersiveView);
+  // Chat draws its own "Chats" header with its own actions, so the shell header
+  // would just be a second, redundant title bar above it.
+  const showFullScreenShellHeader = ["clock", "timesheet"].includes(activeTab);
   const fullScreenShellTitle =
     activeTab === "chat" ? "Chat" : activeTab === "timesheet" ? "Timesheets" : "Clock";
   const homeTabForRole = isAdmin ? "dashboard" : "clock";
