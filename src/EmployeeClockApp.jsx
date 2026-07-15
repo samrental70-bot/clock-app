@@ -25531,9 +25531,9 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   <div className="rounded-[18px] border border-[#E2E8F0] bg-white p-4 shadow-[0_8px_22px_rgba(6,20,38,0.06)]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[15px] font-black leading-tight text-[#061426]">Timesheet sanity check</p>
-                        <p className="mt-1 text-[12px] font-semibold leading-snug text-[#64748B]">
-                          Read-only review for payroll issues.
+                        <p className="text-[15px] font-semibold leading-tight text-[#061426]">Timesheet sanity check</p>
+                        <p className="mt-1 text-[12px] font-medium leading-snug text-[#64748B]">
+                          Tap an issue to fix it before payroll.
                         </p>
                       </div>
                       <span
