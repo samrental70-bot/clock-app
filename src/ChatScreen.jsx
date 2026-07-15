@@ -3521,15 +3521,24 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       onClick={() => {
                         const willComplete = !item.is_done;
                         void toggleChatListItem(item);
-                        // Auto-open the camera when marking complete — only on
-                        // Home Depot lists (proof-of-purchase photo), not other
-                        // list types.
-                        if (willComplete && list.list_type === "home_depot" && tickCaptureInputRef.current) {
-                          tickCaptureItemRef.current = item;
-                          try {
-                            tickCaptureInputRef.current.click();
-                          } catch {
-                            /* ignore — some browsers block programmatic file inputs */
+                        if (willComplete && list.list_type === "home_depot") {
+                          // Ask for a product photo only when we don't already
+                          // have one — re-prompting for an item that's already
+                          // been photographed is just noise.
+                          if (!item.photo_url && tickCaptureInputRef.current) {
+                            tickCaptureItemRef.current = item;
+                            try {
+                              tickCaptureInputRef.current.click();
+                            } catch {
+                              /* ignore — some browsers block programmatic file inputs */
+                            }
+                          }
+                          // Ask for the aisle only when this store's map doesn't
+                          // know it yet, so the next trip already has it.
+                          const dept = String(item.department || "");
+                          if (dept && !hdAisleByDept[dept]) {
+                            setHdAisleEditDept(dept);
+                            setHdAisleDraft("");
                           }
                         }
                       }}
