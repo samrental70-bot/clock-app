@@ -3756,149 +3756,6 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           ) : null}
                         </div>
                       ) : null}
-                      {legacySubitems.length ? (
-                        <div className="mt-2 space-y-2 pl-3">
-                          {legacySubitems.map((subitem, legacyIndex) => (
-                            <div key={`${item.id}-legacy-${legacyIndex}`} className="flex items-center gap-2 border-t border-[#EEF2F7] pt-2 first:border-t-0 first:pt-0">
-                              <span className="h-4 w-4 rounded-full border border-[#C4D2E3]" />
-                              <span className="text-[13px] font-medium text-[#64748B]">{subitem}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      {(item.children || []).length ? (
-                        <div className="mt-2 space-y-2 pl-3">
-                          {item.children.map((child) => {
-                            const editingChild = String(editingListItemId) === String(child.id);
-                            return (
-                              <div
-                                key={child.id}
-                                className="flex items-start gap-2 rounded-[14px] border border-[#ECE8FF] bg-white px-2.5 py-2"
-                                style={{ touchAction: "pan-y" }}
-                                onTouchStart={(event) => beginChatListSwipe(child.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
-                                onTouchEnd={(event) => endChatListSwipe(child, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
-                              >
-                                {isPendingList ? (
-                                  <div className="mt-0.5 flex shrink-0 items-center gap-0.5" role="group" aria-label="Category (H = Home Depot, T = Tool)">
-                                    {CHAT_SUBTASK_CATEGORIES.filter((cat) => cat.key !== "O").map((cat) => {
-                                      const activeCat = String(child.department || "") === cat.value;
-                                      return (
-                                        <button
-                                          key={cat.key}
-                                          type="button"
-                                          onClick={() =>
-                                            cat.key === "H"
-                                              ? void setChatSubtaskHomeDepot(child, !activeCat)
-                                              : void setChatSubtaskCategory(child, cat.value)
-                                          }
-                                          aria-pressed={activeCat}
-                                          aria-label={`Tag as ${cat.title}`}
-                                          title={cat.title}
-                                          className={`flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] font-black leading-none ${
-                                            activeCat
-                                              ? "border-[#061426] bg-[#061426] text-white"
-                                              : "border-[#D3DCEA] bg-white text-[#94A3B8]"
-                                          }`}
-                                        >
-                                          {cat.short}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                ) : null}
-                                <button
-                                  type="button"
-                                  role="checkbox"
-                                  aria-checked={Boolean(child.is_done)}
-                                  onClick={() => void toggleChatListItem(child)}
-                                  className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
-                                    child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
-                                  }`}
-                                >
-                                  {child.is_done ? (
-                                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                      <path d="m3.2 8.3 3 3 6.5-6.6" />
-                                    </svg>
-                                  ) : null}
-                                </button>
-                                <div className="min-w-0 flex-1">
-                                  {editingChild ? (
-                                    <div className="space-y-2">
-                                      <input
-                                        ref={chatListEditInputRef}
-                                        className="h-9 w-full rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
-                                        value={editingListItemText}
-                                        onChange={(event) => setEditingListItemText(event.target.value)}
-                                        autoFocus
-                                        onKeyDown={(event) => {
-                                          if (event.key === "Enter") {
-                                            event.preventDefault();
-                                            void saveChatListItemEdit(child);
-                                          }
-                                          if (event.key === "Escape") {
-                                            setEditingListItemId("");
-                                            setEditingListItemText("");
-                                          }
-                                        }}
-                                        onBlur={() => void saveChatListItemEdit(child)}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="block w-full text-left text-[13px] font-medium text-[#475569]"
-                                      onClick={() => {
-                                        setAssigningListItemId("");
-                                        setEditingListItemId(child.id);
-                                        setEditingListItemText(normalizeChatListItemDraftText(child.text || ""));
-                                      }}
-                                    >
-                                      {normalizeChatListItemDraftText(child.text)}
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                      {String(addingSubItemParentId) === String(item.id) ? (
-                        <div className="mt-2 flex gap-2 pl-3">
-                          <input
-                            ref={chatSubItemInputRef}
-                            className="chat-mobile-safe-input h-10 min-w-0 flex-1 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
-                            value={subItemDraft}
-                            autoComplete="off"
-                            inputMode="text"
-                            enterKeyHint="done"
-                            onPointerDown={handleSubInputPointer}
-                            onMouseDown={handleSubInputPointer}
-                            onTouchStart={handleSubInputPointer}
-                            onChange={(event) => setSubItemDraft(event.target.value)}
-                            placeholder="Add sub-item"
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") {
-                                event.preventDefault();
-                                void addChatListItem(item);
-                              }
-                              if (event.key === "Escape") {
-                                setAddingSubItemParentId("");
-                                setSubItemDraft("");
-                              }
-                            }}
-                            onBlur={handleSubInputBlur}
-                          />
-                          <button
-                            type="button"
-                            className="h-10 rounded-[12px] bg-[#061426] px-3 text-[12px] font-black text-white disabled:bg-[#CBD5E1]"
-                            disabled={!subItemDraft.trim() || listBusy}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => void addChatListItem(item)}
-                          >
-                            Add
-                          </button>
-                        </div>
-                      ) : null}
                     </div>
                     <div className="mt-0.5 flex shrink-0 items-center gap-1">
                       <label
@@ -3942,6 +3799,149 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                       </button>
                     </div>
                   </div>
+                    {legacySubitems.length ? (
+                      <div className="mt-2 space-y-2 pl-3">
+                        {legacySubitems.map((subitem, legacyIndex) => (
+                          <div key={`${item.id}-legacy-${legacyIndex}`} className="flex items-center gap-2 border-t border-[#EEF2F7] pt-2 first:border-t-0 first:pt-0">
+                            <span className="h-4 w-4 rounded-full border border-[#C4D2E3]" />
+                            <span className="text-[13px] font-medium text-[#64748B]">{subitem}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {(item.children || []).length ? (
+                      <div className="mt-2 space-y-2 pl-3">
+                        {item.children.map((child) => {
+                          const editingChild = String(editingListItemId) === String(child.id);
+                          return (
+                            <div
+                              key={child.id}
+                              className="flex items-start gap-2 rounded-[14px] border border-[#ECE8FF] bg-white px-2.5 py-2"
+                              style={{ touchAction: "pan-y" }}
+                              onTouchStart={(event) => beginChatListSwipe(child.id, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                              onTouchEnd={(event) => endChatListSwipe(child, event.changedTouches?.[0]?.clientX, event.changedTouches?.[0]?.clientY)}
+                            >
+                              {isPendingList ? (
+                                <div className="mt-0.5 flex shrink-0 items-center gap-0.5" role="group" aria-label="Category (H = Home Depot, T = Tool)">
+                                  {CHAT_SUBTASK_CATEGORIES.filter((cat) => cat.key !== "O").map((cat) => {
+                                    const activeCat = String(child.department || "") === cat.value;
+                                    return (
+                                      <button
+                                        key={cat.key}
+                                        type="button"
+                                        onClick={() =>
+                                          cat.key === "H"
+                                            ? void setChatSubtaskHomeDepot(child, !activeCat)
+                                            : void setChatSubtaskCategory(child, cat.value)
+                                        }
+                                        aria-pressed={activeCat}
+                                        aria-label={`Tag as ${cat.title}`}
+                                        title={cat.title}
+                                        className={`flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] font-black leading-none ${
+                                          activeCat
+                                            ? "border-[#061426] bg-[#061426] text-white"
+                                            : "border-[#D3DCEA] bg-white text-[#94A3B8]"
+                                        }`}
+                                      >
+                                        {cat.short}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              ) : null}
+                              <button
+                                type="button"
+                                role="checkbox"
+                                aria-checked={Boolean(child.is_done)}
+                                onClick={() => void toggleChatListItem(child)}
+                                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                                  child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
+                                }`}
+                              >
+                                {child.is_done ? (
+                                  <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                    <path d="m3.2 8.3 3 3 6.5-6.6" />
+                                  </svg>
+                                ) : null}
+                              </button>
+                              <div className="min-w-0 flex-1">
+                                {editingChild ? (
+                                  <div className="space-y-2">
+                                    <input
+                                      ref={chatListEditInputRef}
+                                      className="h-9 w-full rounded-[10px] border border-[#CBD5E1] bg-white px-3 text-[15px] font-semibold text-[#061426] outline-none focus:border-[#061426]"
+                                      value={editingListItemText}
+                                      onChange={(event) => setEditingListItemText(event.target.value)}
+                                      autoFocus
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault();
+                                          void saveChatListItemEdit(child);
+                                        }
+                                        if (event.key === "Escape") {
+                                          setEditingListItemId("");
+                                          setEditingListItemText("");
+                                        }
+                                      }}
+                                      onBlur={() => void saveChatListItemEdit(child)}
+                                    />
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="block w-full text-left text-[13px] font-medium text-[#475569]"
+                                    onClick={() => {
+                                      setAssigningListItemId("");
+                                      setEditingListItemId(child.id);
+                                      setEditingListItemText(normalizeChatListItemDraftText(child.text || ""));
+                                    }}
+                                  >
+                                    {normalizeChatListItemDraftText(child.text)}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    {String(addingSubItemParentId) === String(item.id) ? (
+                      <div className="mt-2 flex gap-2 pl-3">
+                        <input
+                          ref={chatSubItemInputRef}
+                          className="chat-mobile-safe-input h-10 min-w-0 flex-1 rounded-[12px] border border-[#CBD5E1] bg-white px-3 text-[16px] font-semibold text-[#061426] outline-none focus:border-[#163B5C]"
+                          value={subItemDraft}
+                          autoComplete="off"
+                          inputMode="text"
+                          enterKeyHint="done"
+                          onPointerDown={handleSubInputPointer}
+                          onMouseDown={handleSubInputPointer}
+                          onTouchStart={handleSubInputPointer}
+                          onChange={(event) => setSubItemDraft(event.target.value)}
+                          placeholder="Add sub-item"
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              void addChatListItem(item);
+                            }
+                            if (event.key === "Escape") {
+                              setAddingSubItemParentId("");
+                              setSubItemDraft("");
+                            }
+                          }}
+                          onBlur={handleSubInputBlur}
+                        />
+                        <button
+                          type="button"
+                          className="h-10 rounded-[12px] bg-[#061426] px-3 text-[12px] font-black text-white disabled:bg-[#CBD5E1]"
+                          disabled={!subItemDraft.trim() || listBusy}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => void addChatListItem(item)}
+                        >
+                          Add
+                        </button>
+                      </div>
+                    ) : null}
                 </div>
               );
             })
