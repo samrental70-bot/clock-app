@@ -3311,7 +3311,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                         <button
                           key={`type-${opt.id}`}
                           type="button"
-                          className={`h-9 flex-1 rounded-[10px] border px-1 text-[11px] font-black leading-tight ${
+                          // min-w-0 + nowrap: without them flex-1 can't shrink
+                          // past each label's min-content, so "Home Depot" broke
+                          // onto two lines and the row went ragged.
+                          className={`h-9 min-w-0 flex-1 whitespace-nowrap rounded-[10px] border px-1 text-[11px] font-black leading-none ${
                             listTypeDraft === opt.id ? "border-[#061426] bg-[#061426] text-white" : "border-[#CBD5E1] bg-white text-[#061426]"
                           }`}
                           onClick={() => setListTypeDraft(opt.id)}
@@ -5036,7 +5039,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                   <button
                     key={option.id}
                     type="button"
-                    className={`h-11 rounded-[12px] border px-1 text-[12px] font-black transition ${
+                    className={`h-11 min-w-0 whitespace-nowrap rounded-[12px] border px-1 text-[12px] font-black transition ${
                       listType === option.id
                         ? "border-[#061426] bg-[#061426] text-white"
                         : "border-[#CBD5E1] bg-white text-[#061426]"
