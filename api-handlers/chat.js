@@ -816,26 +816,69 @@ async function createChatList(supabase, { companyId, conversationId, callerId, t
     throw error;
   }
   await assertConversationMembership(supabase, { companyId, conversationId: convId, userId: callerId });
-  const insertRow = {
-    company_id: companyId,
-    conversation_id: convId,
-    title: cleanTitle,
-    list_type: normalizedType,
-    store_name: cleanStoreName,
-    created_by: callerId,
-    updated_by: callerId,
-    pinned: false,
-  };
-  let { data: list, error } = await supabase.from("chat_lists").insert(insertRow).select("id").single();
-  if (error && /list_type|store_name|column/i.test(String(error.message || ""))) {
-    // Tolerate a DB that hasn't applied the list-type columns yet.
-    const { list_type, store_name, ...fallbackRow } = insertRow;
-    ({ data: list, error } = await supabase.from("chat_lists").insert(fallbackRow).select("id").single());
+
+  // A chat gets ONE Home Depot list and ONE Pending job list — they represent
+  // the project's single shopping run / single open-work list, so a second one
+  // just splits the same information in two. ("Other" lists stay unlimited.)
+  // Enforced here so the composer, a list-type change, and the H-tag flow all
+  // land on the same list. Any items being created are appended to it.
+  let list = null;
+  let reusedExisting = false;
+  if (normalizedType === "home_depot" || normalizedType === "pending_job") {
+    const { data: existingRows } = await supabase
+      .from("chat_lists")
+      .select("id")
+      .eq("company_id", companyId)
+      .eq("conversation_id", convId)
+      .eq("list_type", normalizedType)
+      .is("archived_at", null)
+      .order("created_at", { ascending: true })
+      .limit(1);
+    if (existingRows && existingRows.length) {
+      list = existingRows[0];
+      reusedExisting = true;
+    }
   }
-  if (error) throw error;
+
+  if (!list) {
+    const insertRow = {
+      company_id: companyId,
+      conversation_id: convId,
+      title: cleanTitle,
+      list_type: normalizedType,
+      store_name: cleanStoreName,
+      created_by: callerId,
+      updated_by: callerId,
+      pinned: false,
+    };
+    let error;
+    ({ data: list, error } = await supabase.from("chat_lists").insert(insertRow).select("id").single());
+    if (error && /list_type|store_name|column/i.test(String(error.message || ""))) {
+      // Tolerate a DB that hasn't applied the list-type columns yet.
+      const { list_type, store_name, ...fallbackRow } = insertRow;
+      ({ data: list, error } = await supabase.from("chat_lists").insert(fallbackRow).select("id").single());
+    }
+    if (error) throw error;
+  }
+
   if (cleanItems.length) {
+    // When appending to an existing list, continue its numbering instead of
+    // restarting at 1.
     let mainNumber = 0;
     let sortOrder = 0;
+    if (reusedExisting) {
+      const { data: maxRow } = await supabase
+        .from("chat_list_items")
+        .select("item_number, sort_order")
+        .eq("company_id", companyId)
+        .eq("list_id", list.id)
+        .is("deleted_at", null)
+        .order("item_number", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      mainNumber = Number(maxRow?.item_number || 0);
+      sortOrder = Number(maxRow?.sort_order || maxRow?.item_number || 0);
+    }
     const mainIdByTempKey = new Map();
     const childCountByParentId = new Map();
     for (const item of cleanItems) {

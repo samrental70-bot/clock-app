@@ -2126,13 +2126,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
   const createChatList = async () => {
     const items = parseChatListComposerItems(listItemsText);
     let title = listTitle.trim();
-    // Home Depot lists don't need a name — auto-number them "Home Depot 1/2/…".
-    if (!title && listType === "home_depot") {
-      const hdCount = (Array.isArray(chatLists) ? chatLists : []).filter(
-        (l) => String(l?.list_type || "") === "home_depot"
-      ).length;
-      title = `Home Depot ${hdCount + 1}`;
-    }
+    // A chat has exactly one Home Depot list, so it needs no name (and no
+    // number — the server reuses the existing one and appends to it).
+    if (!title && listType === "home_depot") title = "Home Depot";
+    if (!title && listType === "pending_job") title = "Pending job";
     if (!selectedConversationId || selectedConversation?.pendingSetup || listBusy || !title) return;
     setListBusy(true);
     setError("");
@@ -5109,9 +5106,11 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                 />
               </label>
             ) : null}
-            {listType === "home_depot" ? (
+            {listType === "home_depot" || listType === "pending_job" ? (
               <p className="mt-3 rounded-[12px] bg-[#F1F5F9] px-3 py-2 text-[12px] font-semibold text-[#64748B]">
-                Named automatically — “Home Depot {(Array.isArray(chatLists) ? chatLists : []).filter((l) => String(l?.list_type || "") === "home_depot").length + 1}”.
+                {(Array.isArray(chatLists) ? chatLists : []).some((l) => String(l?.list_type || "") === listType)
+                  ? `This chat already has a ${listType === "home_depot" ? "Home Depot" : "Pending job"} list — these items are added to it.`
+                  : `Named automatically — one ${listType === "home_depot" ? "Home Depot" : "Pending job"} list per chat.`}
               </p>
             ) : (
               <label className="mt-3 block space-y-1 text-[11px] font-black uppercase tracking-[0.08em] text-[#475569]">
@@ -5151,7 +5150,7 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
               <button
                 type="button"
                 className="h-12 rounded-[14px] bg-[#061426] text-[15px] font-black text-white disabled:bg-[#CBD5E1]"
-                disabled={listBusy || (listType !== "home_depot" && !listTitle.trim())}
+                disabled={listBusy || (listType === "other" && !listTitle.trim())}
                 onClick={() => void createChatList()}
               >
                 Create
