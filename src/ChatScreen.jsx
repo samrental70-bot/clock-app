@@ -3530,7 +3530,9 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                           }
                         }
                       }}
-                      className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                      // Primary action on a list item — same tap-area treatment
+                      // as the subtask tick, without enlarging the dot.
+                      className={`relative mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-white transition before:absolute before:-inset-[10px] before:content-[''] ${
                         item.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#CBD5E1] bg-white"
                       }`}
                     >
