@@ -24113,23 +24113,22 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
             </Card>
           )}
 
-          {!isChatImmersiveView && !isInstalled && !installHelpDismissed && (
-            <Card className="rounded-[20px] border border-blue-100 bg-white shadow-sm">
-              <CardContent className="p-3">
-                <div className="flex items-center gap-2.5">
-                  <div className="min-w-0 flex-1">
-                    <h2 className="font-black text-[15px] leading-tight text-slate-950">Install Clock App</h2>
-                    <p className="mt-0.5 text-[12px] font-semibold text-slate-500 leading-snug">
-                      Add it to this phone for faster access.
-                    </p>
-                  </div>
-                  <Button onClick={handleInstallApp} className="h-9 shrink-0 rounded-[12px] px-3 text-[12px] font-black">
+          {/* Install prompt belongs on Home only — it used to render on every
+              tab, costing a full card of prime space on each one. */}
+          {isHomeTab && !isChatImmersiveView && !isInstalled && !installHelpDismissed && (
+            <Card className="rounded-[16px] border border-slate-200 bg-white shadow-sm">
+              <CardContent className="px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <p className="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-700">
+                    Install the app for faster access
+                  </p>
+                  <Button onClick={handleInstallApp} className="h-8 shrink-0 rounded-[10px] px-2.5 text-[12px] font-black">
                     Install
                   </Button>
                   <button
                     type="button"
                     onClick={dismissInstallHelp}
-                    className="h-8 w-8 shrink-0 rounded-[12px] border border-slate-200 bg-slate-50 text-[14px] font-black text-slate-500"
+                    className="h-8 w-8 shrink-0 rounded-[10px] border border-slate-200 bg-slate-50 text-[14px] font-black text-slate-500"
                     aria-label="Hide install help"
                   >
                     x
@@ -24261,7 +24260,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                   </span>
                   <h2 className="text-[20px] font-semibold leading-tight text-slate-950">Start shift</h2>
                   </div>
-                  <p className="text-[12px] font-medium text-slate-500">Select your job site and task to begin.</p>
                 </div>
                 {!useProjectFallback && !projectsLoading && effectiveProjects.length === 0 && (
                   <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-3 space-y-1.5">
@@ -24386,11 +24384,13 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     <span className="text-[#C9A227]">{renderTimesheetUiIcon("plus", "h-4 w-4")}</span>
                     <span className="truncate">{manualTimeOpen ? "Close manual clock-in/out" : "Manual Clock In / Out"}</span>
                   </button>
-                  <p className="px-1 text-[12px] font-semibold leading-snug text-slate-500">
-                    {isAdmin
-                      ? "Managers can choose an employee and save manual clock-in/out directly from here."
-                      : "Manual clock-in goes to your manager for approval before it appears in Timesheets."}
-                  </p>
+                  {/* Managers already know what the button does; employees need
+                      to know it goes for approval, so only they get the note. */}
+                  {!isAdmin ? (
+                    <p className="px-1 text-[12px] font-medium leading-snug text-slate-500">
+                      Manual clock-in goes to your manager for approval before it appears in Timesheets.
+                    </p>
+                  ) : null}
                 </div>
 
                 {manualTimeOpen ? (
