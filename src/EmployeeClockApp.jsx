@@ -27337,67 +27337,62 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                 <div className="flex flex-col gap-3">
                   <section className="order-1 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-semibold text-slate-950">Team coverage</h3>
-                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
-                        {(dashboardLiveWorkingCards || []).length
-                          ? `Today - ${(dashboardLiveWorkingCards || []).length} now`
-                          : "Today"}
+                      <h3 className="text-[18px] font-semibold text-slate-950">Today</h3>
+                      <button
+                        type="button"
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:scale-[0.98]"
+                        onClick={openDashboardTodayTimesheets}
+                      >
+                        View timesheets
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      className="mt-3 grid w-full grid-cols-4 gap-1.5 text-left"
+                      onClick={openDashboardTodayTimesheets}
+                      aria-label="Open today's timesheet details"
+                    >
+                      <span className="rounded-[14px] bg-[#0B1F33] px-2 py-2.5 text-white shadow-sm">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-300">Working</span>
+                        <span className="mt-1 block text-[20px] font-semibold tabular-nums leading-none">
+                          {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
+                        </span>
                       </span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2">
-                      <div className="rounded-[16px] bg-slate-50 p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">In</p>
-                          <p className="text-[24px] font-semibold tabular-nums text-slate-950">
-                            {dashboardLoading ? "-" : (dashboardLiveWorkingCards || []).length}
-                          </p>
-                        </div>
-                        {(dashboardLiveWorkingCards || []).length > 0 ? (
-                          <div className="mt-1.5 flex -space-x-1.5">
-                            {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
-                              <span
-                                key={`pulse-in-${card.uid}`}
-                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#0B1F33] text-[10px] font-black text-white"
-                                style={{ zIndex: 10 - index }}
-                              >
-                                {String(card.displayName || "?").slice(0, 1).toUpperCase()}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="rounded-[16px] bg-slate-50 p-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Out</p>
-                          <p className="text-[24px] font-semibold tabular-nums text-slate-950">
-                            {dashboardLoading ? "-" : dashboardFinishedTodayCards.length}
-                          </p>
-                        </div>
-                        {(dashboardFinishedTodayCards || []).length > 0 ? (
-                          <div className="mt-1.5 flex -space-x-1.5">
-                            {(dashboardFinishedTodayCards || []).slice(0, 5).map((card, index) => (
-                              <span
-                                key={`pulse-out-${card.uid}`}
-                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-black text-slate-600"
-                                style={{ zIndex: 10 - index }}
-                              >
-                                {String(card.displayName || "?").slice(0, 1).toUpperCase()}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    </div>
+                      <span className="rounded-[14px] border border-slate-200 bg-slate-50 px-2 py-2.5">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Done</span>
+                        <span className="mt-1 block text-[20px] font-semibold tabular-nums leading-none text-slate-950">
+                          {dashboardLoading ? "-" : dashboardFinishedTodayCards.length}
+                        </span>
+                      </span>
+                      <span className="rounded-[14px] border border-slate-200 bg-slate-50 px-2 py-2.5">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hours</span>
+                        <span className="mt-1 block text-[clamp(14px,4vw,18px)] font-semibold tabular-nums leading-none text-slate-950">
+                          {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
+                        </span>
+                      </span>
+                      <span
+                        className={`rounded-[14px] border px-2 py-2.5 ${
+                          Number(dashboardWorkedTodaySummary.totalCost || 0) > 0
+                            ? "border-emerald-100 bg-emerald-50"
+                            : "border-slate-200 bg-slate-50"
+                        }`}
+                      >
+                        <span
+                          className={`block text-[10px] font-semibold uppercase tracking-wide ${
+                            Number(dashboardWorkedTodaySummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
+                          }`}
+                        >
+                          Labour
+                        </span>
+                        <span className="mt-1 block text-[clamp(14px,4vw,18px)] font-semibold tabular-nums leading-none text-slate-950">
+                          {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
+                        </span>
+                      </span>
+                    </button>
                     {(() => {
                       const bars = Array.isArray(dashboardCoverageBars) ? dashboardCoverageBars : [];
                       const hasData = bars.some((bar) => Number(bar.count || 0) > 0);
-                      if (!hasData) {
-                        return (
-                          <div className="mt-3 flex h-16 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-4 text-center text-[13px] font-medium text-slate-500">
-                            No login activity yet.
-                          </div>
-                        );
-                      }
+                      if (!hasData) return null;
                       const maxCount = Math.max(1, ...bars.map((bar) => Number(bar.count || 0)));
                       const isSmallCrew = maxCount <= 3;
                       const width = 320;
@@ -27462,6 +27457,157 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                         </div>
                       );
                     })()}
+                    {dashboardLoading ? (
+                      <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-semibold text-slate-600">Loading today...</p>
+                    ) : null}
+                    {!dashboardLoading && (dashboardLiveWorkingCards || []).length > 0 ? (
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Live now</p>
+                        <p className="text-[11px] font-semibold tabular-nums text-slate-500">
+                          {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)} - {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
+                        </p>
+                      </div>
+                    ) : null}
+                    <div className="mt-3 space-y-2">
+                      {!dashboardLoading &&
+                        (dashboardLiveWorkingCards || []).map((card) => {
+                          const { row, rep, uid, displayName } = card || {};
+                          if (!rep || !uid) return null;
+                          const liveMinutes = getWorkedMinutes(rep);
+                          const liveCost = getLabourCost(rep);
+                          const breakStatus = liveBreakStatusForShift(rep, now instanceof Date ? now.getTime() : Date.now());
+                          const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" / ");
+                          const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
+                          const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
+                          const fallbackLoc = rep?.clockInLocation || null;
+                          const latRaw = liveLoc?.latitude ?? liveLoc?.lat ?? fallbackLoc?.latitude;
+                          const lngRaw = liveLoc?.longitude ?? liveLoc?.lng ?? fallbackLoc?.longitude;
+                          const hasLiveGps =
+                            latRaw != null &&
+                            lngRaw != null &&
+                            Number.isFinite(Number(latRaw)) &&
+                            Number.isFinite(Number(lngRaw));
+                          return (
+                            <div
+                              key={`premium-live-${String(uid)}`}
+                              className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-sm"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[16px] font-semibold leading-tight text-slate-950" title={displayName || "Employee"}>
+                                    {displayName || "Employee"}
+                                  </p>
+                                  <p className="mt-1 text-[12px] font-medium text-slate-500 tabular-nums">
+                                    Clocked in {clockInDisp}
+                                  </p>
+                                  {breakStatus.onBreak ? (
+                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 tabular-nums">
+                                      On break · {formatDuration(breakStatus.currentBreakMinutes)}
+                                    </span>
+                                  ) : breakStatus.completedMinutes > 0 ? (
+                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 tabular-nums">
+                                      Break {formatDuration(breakStatus.completedMinutes)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className={`rounded-full px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm ${breakStatus.onBreak ? "bg-amber-500" : "bg-[#0B1F33]"}`}>
+                                    {formatDuration(liveMinutes)}
+                                  </p>
+                                  <p className="mt-1 text-[11px] font-semibold leading-none tabular-nums text-slate-500">
+                                    {formatMoney(liveCost)}
+                                  </p>
+                                </div>
+                              </div>
+                              <p
+                                className="mt-2 truncate text-[13px] font-medium leading-snug text-slate-600"
+                                title={projectTaskLine}
+                              >
+                                {projectTaskLine}
+                              </p>
+                              <div className="mt-3 grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  className="flex h-10 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-semibold text-slate-800 disabled:opacity-50"
+                                  disabled={!hasLiveGps}
+                                  onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
+                                >
+                                  Location
+                                </button>
+                                <Button
+                                  type="button"
+                                  className="flex h-10 items-center justify-center rounded-[14px] px-3 text-[12px] font-semibold !bg-[#0B1F33] !text-white"
+                                  disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
+                                  onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
+                                >
+                                  {dashboardSavingUserId === String(uid) ? "..." : "Clock out"}
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    {!dashboardLoading && dashboardTodayWorkedCards.length > 0 ? (
+                      <p className="mt-3 mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Worked today</p>
+                    ) : null}
+                    {dashboardTodayWorkedCards.length > 0 ? (
+                      <div className="space-y-2.5">
+                        {(dashboardWorkedTodayShowAll ? dashboardTodayWorkedCards : dashboardTodayWorkedCards.slice(0, 3)).map((card) => {
+                          const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
+                            .filter(Boolean)
+                            .join(" / ");
+                          return (
+                            <button
+                              key={`premium-worked-${card.uid}`}
+                              type="button"
+                              className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
+                              onClick={openDashboardTodayTimesheets}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-[15px] font-semibold text-slate-950" title={card.displayName}>
+                                    {card.displayName}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-[12px] font-medium text-slate-500" title={projectTaskLine}>
+                                    {projectTaskLine}
+                                  </p>
+                                </div>
+                                <p className="shrink-0 text-right text-[13px] font-semibold tabular-nums text-slate-950">
+                                  {card.metrics.totalDisp}
+                                </p>
+                              </div>
+                              <div className="mt-2 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-600">
+                                <span className="min-w-0 truncate tabular-nums">
+                                  {card.metrics.inDisp} - {card.metrics.outDisp}
+                                </span>
+                                <span className="shrink-0 text-right font-semibold tabular-nums text-slate-950">
+                                  {card.metrics.labourDisp}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                        {dashboardTodayWorkedCards.length > 3 ? (
+                          <button
+                            type="button"
+                            className="w-full rounded-[14px] border border-slate-200 bg-slate-50 py-2.5 text-[13px] font-black text-slate-700 active:scale-[0.99]"
+                            onClick={() => setDashboardWorkedTodayShowAll((v) => !v)}
+                          >
+                            {dashboardWorkedTodayShowAll
+                              ? "Show less"
+                              : `View all worked today (${dashboardTodayWorkedCards.length})`}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {!dashboardLoading &&
+                    (dashboardLiveWorkingCards || []).length === 0 &&
+                    dashboardTodayWorkedCards.length === 0 ? (
+                      <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
+                        <p className="text-[14px] font-semibold text-slate-600">Nothing logged today yet</p>
+                        <p className="mt-0.5 text-[12px] font-medium text-slate-500">Crew activity appears here once they clock in.</p>
+                      </div>
+                    ) : null}
                   </section>
 
                   <section className="order-5 rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
@@ -27570,244 +27716,6 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     )}
                   </section>
 
-                  <section className="order-2 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-                    <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-semibold text-slate-950">Live team</h3>
-                      <p className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                        {(dashboardLiveWorkingCards || []).length} working
-                      </p>
-                    </div>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      <div className="rounded-[16px] border border-[#0B1F33] bg-[#0B1F33] px-3 py-3 text-white">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-300">Active</p>
-                        <p className="mt-1 text-[28px] font-semibold leading-none tabular-nums">
-                          {dashboardLoading ? "-" : dashboardActiveTeamSummary.employeeCount}
-                        </p>
-                      </div>
-                      <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hours</p>
-                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
-                        </p>
-                      </div>
-                      <div
-                        className={`rounded-[16px] border px-3 py-3 ${
-                          Number(dashboardActiveTeamSummary.totalCost || 0) > 0
-                            ? "border-emerald-100 bg-emerald-50"
-                            : "border-slate-200 bg-white"
-                        }`}
-                      >
-                        <p
-                          className={`text-[10px] font-semibold uppercase tracking-wide ${
-                            Number(dashboardActiveTeamSummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
-                          }`}
-                        >
-                          Labour
-                        </p>
-                        <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
-                          {formatMoneyWhole(dashboardActiveTeamSummary.totalCost)}
-                        </p>
-                      </div>
-                    </div>
-                    {dashboardLoading ? (
-                      <p className="mt-3 rounded-2xl bg-slate-50 p-3 text-[14px] font-bold text-slate-600">Loading active employees...</p>
-                    ) : null}
-                    {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
-                      <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
-                        <p className="text-[14px] font-semibold text-slate-600">No crew clocked in</p>
-                        <p className="mt-0.5 text-[12px] font-medium text-slate-500">Clock in from the Clock tab.</p>
-                      </div>
-                    ) : null}
-                    <div className="mt-3 space-y-2">
-                      {!dashboardLoading &&
-                        (dashboardLiveWorkingCards || []).map((card) => {
-                          const { row, rep, uid, displayName } = card || {};
-                          if (!rep || !uid) return null;
-                          const liveMinutes = getWorkedMinutes(rep);
-                          const liveCost = getLabourCost(rep);
-                          const breakStatus = liveBreakStatusForShift(rep, now instanceof Date ? now.getTime() : Date.now());
-                          const projectTaskLine = [rep?.project || "No project", rep?.costCenter || "No task"].join(" / ");
-                          const clockInDisp = rep?.clockIn ? formatTime(rep.clockIn, companyTimeZone) : "-";
-                          const liveLoc = dashboardLiveLocationByUserId?.[String(uid)];
-                          const fallbackLoc = rep?.clockInLocation || null;
-                          const latRaw = liveLoc?.latitude ?? liveLoc?.lat ?? fallbackLoc?.latitude;
-                          const lngRaw = liveLoc?.longitude ?? liveLoc?.lng ?? fallbackLoc?.longitude;
-                          const hasLiveGps =
-                            latRaw != null &&
-                            lngRaw != null &&
-                            Number.isFinite(Number(latRaw)) &&
-                            Number.isFinite(Number(lngRaw));
-                          return (
-                            <div
-                              key={`premium-live-${String(uid)}`}
-                              className="rounded-[16px] border border-slate-200 bg-white p-3 shadow-sm"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[16px] font-semibold leading-tight text-slate-950" title={displayName || "Employee"}>
-                                    {displayName || "Employee"}
-                                  </p>
-                                  <p className="mt-1 text-[12px] font-medium text-slate-500 tabular-nums">
-                                    Clocked in {clockInDisp}
-                                  </p>
-                                  {breakStatus.onBreak ? (
-                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 tabular-nums">
-                                      On break · {formatDuration(breakStatus.currentBreakMinutes)}
-                                    </span>
-                                  ) : breakStatus.completedMinutes > 0 ? (
-                                    <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600 tabular-nums">
-                                      Break {formatDuration(breakStatus.completedMinutes)}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="shrink-0 text-right">
-                                  <p className={`rounded-full px-2.5 py-1.5 text-[12px] font-semibold leading-none tabular-nums text-white shadow-sm ${breakStatus.onBreak ? "bg-amber-500" : "bg-[#0B1F33]"}`}>
-                                    {formatDuration(liveMinutes)}
-                                  </p>
-                                  <p className="mt-1 text-[11px] font-semibold leading-none tabular-nums text-slate-500">
-                                    {formatMoney(liveCost)}
-                                  </p>
-                                </div>
-                              </div>
-                              <p
-                                className="mt-2 truncate text-[13px] font-medium leading-snug text-slate-600"
-                                title={projectTaskLine}
-                              >
-                                {projectTaskLine}
-                              </p>
-                              <div className="mt-3 grid grid-cols-2 gap-2">
-                                <button
-                                  type="button"
-                                  className="flex h-10 items-center justify-center rounded-[14px] border border-slate-200 bg-slate-50 px-3 text-[12px] font-semibold text-slate-800 disabled:opacity-50"
-                                  disabled={!hasLiveGps}
-                                  onClick={() => openMap({ latitude: Number(latRaw), longitude: Number(lngRaw) })}
-                                >
-                                  Location
-                                </button>
-                                <Button
-                                  type="button"
-                                  className="flex h-10 items-center justify-center rounded-[14px] px-3 text-[12px] font-semibold !bg-[#0B1F33] !text-white"
-                                  disabled={dashboardSavingUserId === String(uid) || !rep?.supabaseTimesheetId || !row}
-                                  onClick={() => void handleDashboardEmployeeClockOutOrFix(row, rep, "clock_out")}
-                                >
-                                  {dashboardSavingUserId === String(uid) ? "..." : "Clock out"}
-                                </Button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  </section>
-
-                  <section className="order-3 rounded-[20px] border border-slate-200 bg-white p-3 shadow-[0_8px_24px_rgba(15,23,42,0.06)]">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <h3 className="text-[18px] font-semibold text-slate-950">Worked today</h3>
-                      <button
-                        type="button"
-                        className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 active:scale-[0.98]"
-                        onClick={openDashboardTodayTimesheets}
-                      >
-                        View timesheets
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="mb-3 grid w-full grid-cols-2 gap-2 text-left sm:grid-cols-4"
-                      onClick={openDashboardTodayTimesheets}
-                      aria-label="Open today's timesheet details"
-                    >
-                      <span className="rounded-[16px] bg-[#0B1F33] px-3 py-2.5 text-white shadow-sm">
-                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-300">Employees</span>
-                        <span className="mt-1 block text-[22px] font-semibold tabular-nums leading-none">
-                          {dashboardWorkedTodaySummary.employeeCount}
-                        </span>
-                      </span>
-                      <span className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Entries</span>
-                        <span className="mt-1 block text-[22px] font-semibold tabular-nums leading-none text-slate-950">
-                          {dashboardWorkedTodaySummary.shiftCount}
-                        </span>
-                      </span>
-                      <span className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hours</span>
-                        <span className="mt-1 block text-[clamp(15px,4vw,20px)] font-semibold tabular-nums leading-none text-slate-950">
-                          {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
-                        </span>
-                      </span>
-                      <span
-                        className={`rounded-[16px] border px-3 py-2.5 ${
-                          Number(dashboardWorkedTodaySummary.totalCost || 0) > 0
-                            ? "border-emerald-100 bg-emerald-50"
-                            : "border-slate-200 bg-slate-50"
-                        }`}
-                      >
-                        <span
-                          className={`block text-[10px] font-semibold uppercase tracking-wide ${
-                            Number(dashboardWorkedTodaySummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
-                          }`}
-                        >
-                          Labour
-                        </span>
-                        <span className="mt-1 block text-[clamp(15px,4vw,20px)] font-semibold tabular-nums leading-none text-slate-950">
-                          {formatMoneyWhole(dashboardWorkedTodaySummary.totalCost)}
-                        </span>
-                      </span>
-                    </button>
-                    {dashboardTodayWorkedCards.length === 0 ? (
-                      <p className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[14px] font-semibold text-slate-600">
-                        No timesheets for today yet.
-                      </p>
-                    ) : (
-                      <div className="space-y-2.5">
-                        {(dashboardWorkedTodayShowAll ? dashboardTodayWorkedCards : dashboardTodayWorkedCards.slice(0, 3)).map((card) => {
-                          const projectTaskLine = [card.metrics.projectDisp, card.metrics.costDisp]
-                            .filter(Boolean)
-                            .join(" / ");
-                          return (
-                            <button
-                              key={`premium-worked-${card.uid}`}
-                              type="button"
-                              className="w-full rounded-[16px] border border-slate-200 bg-white px-3 py-2.5 text-left shadow-sm active:scale-[0.99]"
-                              onClick={openDashboardTodayTimesheets}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-[15px] font-semibold text-slate-950" title={card.displayName}>
-                                    {card.displayName}
-                                  </p>
-                                  <p className="mt-0.5 truncate text-[12px] font-medium text-slate-500" title={projectTaskLine}>
-                                    {projectTaskLine}
-                                  </p>
-                                </div>
-                                <p className="shrink-0 text-right text-[13px] font-semibold tabular-nums text-slate-950">
-                                  {card.metrics.totalDisp}
-                                </p>
-                              </div>
-                              <div className="mt-2 flex items-center justify-between gap-3 text-[12px] font-medium text-slate-600">
-                                <span className="min-w-0 truncate tabular-nums">
-                                  {card.metrics.inDisp} - {card.metrics.outDisp}
-                                </span>
-                                <span className="shrink-0 text-right font-semibold tabular-nums text-slate-950">
-                                  {card.metrics.labourDisp}
-                                </span>
-                              </div>
-                            </button>
-                          );
-                        })}
-                        {dashboardTodayWorkedCards.length > 3 ? (
-                          <button
-                            type="button"
-                            className="w-full rounded-[14px] border border-slate-200 bg-slate-50 py-2.5 text-[13px] font-black text-slate-700 active:scale-[0.99]"
-                            onClick={() => setDashboardWorkedTodayShowAll((v) => !v)}
-                          >
-                            {dashboardWorkedTodayShowAll
-                              ? "Show less"
-                              : `View all worked today (${dashboardTodayWorkedCards.length})`}
-                          </button>
-                        ) : null}
-                      </div>
-                    )}
-                  </section>
                 </div>
               ) : null}
             </div>
