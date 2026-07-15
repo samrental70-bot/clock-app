@@ -23876,7 +23876,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                 ) : null}
               </button>
             </div>
-          ) : !isChatImmersiveView ? (
+          ) : !isChatImmersiveView && activeTab !== "chat" ? (
             <AppHeader
               companyName={userCompany?.name || "Company"}
               metaLabel={appHeaderMetaLabel}

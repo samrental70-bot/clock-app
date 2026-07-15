@@ -225,11 +225,12 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
 // ("…@gmail.com" reads as noise beside real names, and in the member list it
 // showed twice). Fall back to the email's local part instead.
 function friendlyMemberName(member, fallback = "User") {
-  const name = String(member?.name || "").trim();
-  if (name) return name;
-  const email = String(member?.email || "").trim();
-  if (email) return email.split("@")[0] || fallback;
-  return fallback;
+  const raw = String(member?.name || "").trim() || String(member?.email || "").trim();
+  if (!raw) return fallback;
+  // Upstream already falls back to the email for `name`, so checking `name`
+  // first isn't enough — an address can arrive in either field.
+  if (raw.includes("@")) return raw.split("@")[0] || fallback;
+  return raw;
 }
 
 const CHAT_SUBTASK_CATEGORIES = [
