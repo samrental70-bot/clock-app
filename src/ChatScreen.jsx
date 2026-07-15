@@ -53,6 +53,11 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
   // keyboard's size on devices (iOS installed PWAs) that never shrink
   // visualViewport/innerHeight when the keyboard opens.
   const maxSeenHeightRef = useRef(0);
+  // True only once the user has actually TAPPED a text field. A programmatic
+  // focus (the composer is auto-focused when a chat opens) does not raise the
+  // keyboard on mobile, so estimating one there would wrongly shrink the chat
+  // to half-screen before the user has typed anything.
+  const userTappedInputRef = useRef(false);
 
   // Best available "visible height above the keyboard". Uses the smaller of
   // innerHeight and visualViewport.height (either may reflect the keyboard),
@@ -73,7 +78,7 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       typeof window !== "undefined" && window.matchMedia
         ? window.matchMedia("(pointer: coarse)").matches
         : false;
-    if (typing && coarsePointer && measured >= full - 40) {
+    if (typing && coarsePointer && userTappedInputRef.current && measured >= full - 40) {
       // Keyboard is up but the viewport didn't report it — estimate its height
       // (iPhone keyboard + accessory/suggestions ≈ 336px) so the composer and
       // last message sit above it. A slight gap is fine; being hidden is not.
@@ -158,6 +163,23 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       window.setTimeout(apply, 500);
     };
     apply();
+    // Only a real tap on a text field raises the keyboard. Track that so an
+    // auto-focus (when a chat opens) never makes us reserve keyboard space.
+    const isTextField = (node) =>
+      node &&
+      (node.tagName === "TEXTAREA" ||
+        (node.tagName === "INPUT" && node.type !== "checkbox" && node.type !== "button" && node.type !== "file"));
+    // Only ever SET the flag here — never clear it. Tapping Send keeps the
+    // composer focused (and the keyboard up) on purpose, so clearing on a
+    // non-field tap would expand the container and re-hide the composer.
+    // focusout is what clears it, when the field genuinely loses focus.
+    const onPointerDown = (event) => {
+      if (isTextField(event.target)) userTappedInputRef.current = true;
+    };
+    const onFocusOut = () => {
+      userTappedInputRef.current = false;
+      reapply();
+    };
     const viewport = window.visualViewport;
     if (viewport) {
       viewport.addEventListener("resize", apply);
@@ -165,8 +187,9 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
     } else {
       window.addEventListener("resize", apply);
     }
+    window.addEventListener("pointerdown", onPointerDown, true);
     window.addEventListener("focusin", reapply);
-    window.addEventListener("focusout", reapply);
+    window.addEventListener("focusout", onFocusOut);
     return () => {
       if (viewport) {
         viewport.removeEventListener("resize", apply);
@@ -174,8 +197,9 @@ function useImmersiveViewportHeight(refs, isImmersivePane) {
       } else {
         window.removeEventListener("resize", apply);
       }
+      window.removeEventListener("pointerdown", onPointerDown, true);
       window.removeEventListener("focusin", reapply);
-      window.removeEventListener("focusout", reapply);
+      window.removeEventListener("focusout", onFocusOut);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
