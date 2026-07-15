@@ -3837,7 +3837,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                         aria-pressed={activeCat}
                                         aria-label={`Tag as ${cat.title}`}
                                         title={cat.title}
-                                        className={`flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] font-black leading-none ${
+                                        // 24px is well under the ~44px touch
+                                        // guidance. The ::before expands the tap
+                                        // area without taking width from the text.
+                                        className={`relative flex h-6 w-6 items-center justify-center rounded-[7px] border text-[11px] font-black leading-none before:absolute before:-inset-[10px] before:content-[''] ${
                                           activeCat
                                             ? "border-[#061426] bg-[#061426] text-white"
                                             : "border-[#D3DCEA] bg-white text-[#94A3B8]"
@@ -3854,7 +3857,10 @@ export default function ChatScreen({ active, authUser, userCompany, companyTimeZ
                                 role="checkbox"
                                 aria-checked={Boolean(child.is_done)}
                                 onClick={() => void toggleChatListItem(child)}
-                                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition ${
+                                // Ticking is the most-used action on a subtask —
+                                // give it a full-size tap area without growing
+                                // the dot itself.
+                                className={`relative mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-white transition before:absolute before:-inset-3 before:content-[''] ${
                                   child.is_done ? "border-[#15803D] bg-[#15803D]" : "border-[#C4D2E3] bg-white"
                                 }`}
                               >
