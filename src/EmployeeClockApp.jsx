@@ -27347,47 +27347,45 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <div className="rounded-[16px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">In</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">In</p>
                           <p className="text-[24px] font-semibold tabular-nums text-slate-950">
                             {dashboardLoading ? "-" : (dashboardLiveWorkingCards || []).length}
                           </p>
                         </div>
-                        <div className="mt-1.5 flex -space-x-1.5">
-                          {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
-                            <span
-                              key={`pulse-in-${card.uid}`}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#0B1F33] text-[10px] font-black text-white"
-                              style={{ zIndex: 10 - index }}
-                            >
-                              {String(card.displayName || "?").slice(0, 1).toUpperCase()}
-                            </span>
-                          ))}
-                          {(!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) && (
-                            <span className="h-7 w-7 rounded-full bg-slate-200" />
-                          )}
-                        </div>
+                        {(dashboardLiveWorkingCards || []).length > 0 ? (
+                          <div className="mt-1.5 flex -space-x-1.5">
+                            {(dashboardLiveWorkingCards || []).slice(0, 5).map((card, index) => (
+                              <span
+                                key={`pulse-in-${card.uid}`}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-[#0B1F33] text-[10px] font-black text-white"
+                                style={{ zIndex: 10 - index }}
+                              >
+                                {String(card.displayName || "?").slice(0, 1).toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="rounded-[16px] bg-slate-50 p-3">
                         <div className="flex items-center justify-between">
-                          <p className="text-[12px] font-semibold uppercase tracking-wide text-slate-500">Out</p>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Out</p>
                           <p className="text-[24px] font-semibold tabular-nums text-slate-950">
                             {dashboardLoading ? "-" : dashboardFinishedTodayCards.length}
                           </p>
                         </div>
-                        <div className="mt-1.5 flex -space-x-1.5">
-                          {(dashboardFinishedTodayCards || []).slice(0, 5).map((card, index) => (
-                            <span
-                              key={`pulse-out-${card.uid}`}
-                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-black text-slate-600"
-                              style={{ zIndex: 10 - index }}
-                            >
-                              {String(card.displayName || "?").slice(0, 1).toUpperCase()}
-                            </span>
-                          ))}
-                          {(!dashboardFinishedTodayCards || dashboardFinishedTodayCards.length === 0) && (
-                            <span className="h-7 w-7 rounded-full bg-slate-200" />
-                          )}
-                        </div>
+                        {(dashboardFinishedTodayCards || []).length > 0 ? (
+                          <div className="mt-1.5 flex -space-x-1.5">
+                            {(dashboardFinishedTodayCards || []).slice(0, 5).map((card, index) => (
+                              <span
+                                key={`pulse-out-${card.uid}`}
+                                className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-[10px] font-black text-slate-600"
+                                style={{ zIndex: 10 - index }}
+                              >
+                                {String(card.displayName || "?").slice(0, 1).toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     {(() => {
@@ -27566,8 +27564,8 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       </div>
                     ) : (
                       <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
-                        <p className="text-[15px] font-black text-slate-700">No active locations</p>
-                        <p className="mt-0.5 text-[12px] font-bold text-slate-500">GPS pins appear here once crew clock in.</p>
+                        <p className="text-[14px] font-semibold text-slate-600">No active locations</p>
+                        <p className="mt-0.5 text-[12px] font-medium text-slate-500">GPS pins appear here once crew clock in.</p>
                       </div>
                     )}
                   </section>
@@ -27587,7 +27585,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                         </p>
                       </div>
                       <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-3">
-                        <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-700">Hours</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hours</p>
                         <p className="mt-1 text-[clamp(17px,5vw,24px)] font-semibold leading-none tabular-nums text-slate-950">
                           {formatHoursMinutes(dashboardActiveTeamSummary.totalMinutes)}
                         </p>
@@ -27616,8 +27614,8 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                     ) : null}
                     {!dashboardLoading && (!dashboardLiveWorkingCards || dashboardLiveWorkingCards.length === 0) ? (
                       <div className="mt-3 rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center">
-                        <p className="text-[15px] font-black text-slate-700">No crew clocked in</p>
-                        <p className="mt-0.5 text-[12px] font-bold text-slate-500">Clock in from the Clock tab.</p>
+                        <p className="text-[14px] font-semibold text-slate-600">No crew clocked in</p>
+                        <p className="mt-0.5 text-[12px] font-medium text-slate-500">Clock in from the Clock tab.</p>
                       </div>
                     ) : null}
                     <div className="mt-3 space-y-2">
@@ -27719,19 +27717,19 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       aria-label="Open today's timesheet details"
                     >
                       <span className="rounded-[16px] bg-[#0B1F33] px-3 py-2.5 text-white shadow-sm">
-                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-300">Employees</span>
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-300">Employees</span>
                         <span className="mt-1 block text-[22px] font-semibold tabular-nums leading-none">
                           {dashboardWorkedTodaySummary.employeeCount}
                         </span>
                       </span>
                       <span className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-500">Entries</span>
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Entries</span>
                         <span className="mt-1 block text-[22px] font-semibold tabular-nums leading-none text-slate-950">
                           {dashboardWorkedTodaySummary.shiftCount}
                         </span>
                       </span>
                       <span className="rounded-[16px] border border-slate-200 bg-slate-50 px-3 py-2.5">
-                        <span className="block text-[9px] font-semibold uppercase tracking-wide text-slate-500">Hours</span>
+                        <span className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500">Hours</span>
                         <span className="mt-1 block text-[clamp(15px,4vw,20px)] font-semibold tabular-nums leading-none text-slate-950">
                           {formatHoursMinutes(dashboardWorkedTodaySummary.totalMinutes)}
                         </span>
@@ -27744,7 +27742,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                         }`}
                       >
                         <span
-                          className={`block text-[9px] font-semibold uppercase tracking-wide ${
+                          className={`block text-[10px] font-semibold uppercase tracking-wide ${
                             Number(dashboardWorkedTodaySummary.totalCost || 0) > 0 ? "text-emerald-700" : "text-slate-500"
                           }`}
                         >
@@ -27756,7 +27754,7 @@ const compressImage = (file, maxWidth = 1000, quality = 0.6) => {
                       </span>
                     </button>
                     {dashboardTodayWorkedCards.length === 0 ? (
-                      <p className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[15px] font-bold text-slate-600">
+                      <p className="rounded-[16px] border border-slate-200 bg-slate-50 px-4 py-3 text-center text-[14px] font-semibold text-slate-600">
                         No timesheets for today yet.
                       </p>
                     ) : (
